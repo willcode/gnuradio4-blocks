@@ -4,6 +4,9 @@
 
 #include <cassert>
 #include <print>
+#include <string>
+
+using namespace std::literals;
 
 // This tests automatic loading of .so files that are not
 // plugins, but ordinary dynamic block libraries -- they
