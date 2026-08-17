@@ -673,7 +673,7 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
         }
 
         // rotate in multi mode
-        if (mode.value == Mode::multi && max_bytes_per_file.value != 0U && _fileSamplesWritten * sizeof(T) >= max_bytes_per_file.value) {
+        if (remainingSamplesInFile() == 0UZ) {
             closeFile();
             openNextFile();
             if (!_file.is_open()) {
@@ -684,16 +684,10 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
             _headerWritten = true;
         }
 
-        std::size_t n = inSpan.size();
+        std::size_t n = std::min(inSpan.size(), remainingSamplesInFile());
         if (n == 0U) {
             std::ignore = inSpan.consume(0U);
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
-        }
-
-        // cap to max_bytes_per_file in multi mode
-        if (mode.value == Mode::multi && max_bytes_per_file.value != 0U) {
-            const std::size_t remaining = (max_bytes_per_file.value - _fileSamplesWritten * sizeof(T)) / sizeof(T);
-            n                           = std::min(n, remaining);
         }
 
         _file.write(reinterpret_cast<const char*>(inSpan.data()), static_cast<std::streamsize>(n * sizeof(T)));
@@ -705,6 +699,18 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
     }
 
 private:
+    // the cap counts the header; a freshly opened file takes at least one sample, so a cap too small
+    // to hold the header plus one sample still makes progress instead of rotating on every call
+    [[nodiscard]] std::size_t remainingSamplesInFile() const {
+        if (mode.value != Mode::multi || max_bytes_per_file.value == 0U) {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        const std::size_t cap  = static_cast<std::size_t>(max_bytes_per_file.value);
+        const std::size_t used = kHeaderSize + _fileSamplesWritten * sizeof(T);
+        const std::size_t room = used >= cap ? 0UZ : (cap - used) / sizeof(T);
+        return _fileSamplesWritten == 0UZ ? std::max(room, 1UZ) : room;
+    }
+
     void openNextFile() {
         _headerWritten      = false;
         _fileSamplesWritten = 0U;
