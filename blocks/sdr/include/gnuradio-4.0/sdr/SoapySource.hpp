@@ -106,6 +106,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     std::atomic<bool>                      _ioThreadStarted{false};
     std::atomic<bool>                      _dcFilterDirty{false};
     std::atomic<bool>                      _rateEstimatorDirty{false};
+    soapy::detail::DeviceRegistry::Registration _activation;
 
     struct IoThreadGuard {
         bool& done;
@@ -181,9 +182,10 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         rebuildRateEstimator();
         reinitDevice();
         if (!_device.get() || !_rxStream.get()) {
+            _activation.reset(); // release the slot so the other users of this device can still activate
             return;
         }
-        soapy::detail::DeviceRegistry::registerActivation(_devKwargs, [this] {
+        _activation.activate([this] {
             if (auto r = _rxStream.activate(); !r) {
                 this->emitErrorMessage("start()", r.error());
                 this->requestStop();
@@ -196,6 +198,7 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
     }
 
     void stop() {
+        _activation.reset();
         if (_ioThreadStarted.load(std::memory_order_acquire)) {
             gr::atomic_ref(_ioThreadDone).wait(false);
         }
@@ -516,6 +519,8 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         if (!device_parameter->empty()) {
             _devKwargs.merge(soapy::parseKwargsString(device_parameter.value));
         }
+        _activation = soapy::detail::DeviceRegistry::Registration(_devKwargs);
+
         auto devResult = soapy::Device::make(_devKwargs);
         if (!devResult) {
             this->emitErrorMessage("reinitDevice()", devResult.error());

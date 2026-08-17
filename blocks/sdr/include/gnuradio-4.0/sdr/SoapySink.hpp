@@ -76,6 +76,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     std::vector<StagingBuffer>             _stagingBuffers;
     std::vector<StagingWriter>             _stagingWriters;
     std::vector<StagingReader>             _stagingReaders;
+    soapy::detail::DeviceRegistry::Registration _activation;
 
     struct IoThreadGuard {
         bool& done;
@@ -89,6 +90,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
         configureTaper();
         reinitDevice();
         if (!_txStream.get()) {
+            _activation.reset(); // release the slot so the other users of this device can still activate
             return;
         }
 
@@ -106,7 +108,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
             _stagingReaders.push_back(_stagingBuffers.back().new_reader());
         }
 
-        soapy::detail::DeviceRegistry::registerActivation(_devKwargs, [this] {
+        _activation.activate([this] {
             if (auto r = _txStream.activate(); !r) {
                 this->emitErrorMessage("start()", r.error());
                 this->requestStop();
@@ -119,6 +121,7 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
     }
 
     void stop() {
+        _activation.reset();
         if (_ioThreadStarted.load(std::memory_order_acquire)) {
             gr::atomic_ref(_ioThreadDone).wait(false);
         }
@@ -511,6 +514,8 @@ the same driver string, enabling full-duplex TX/RX operation.)">;
         if (!device_parameter->empty()) {
             _devKwargs.merge(soapy::parseKwargsString(device_parameter.value));
         }
+        _activation = soapy::detail::DeviceRegistry::Registration(_devKwargs);
+
         auto devResult = soapy::Device::make(_devKwargs);
         if (!devResult) {
             this->emitErrorMessage("reinitDevice()", devResult.error());
