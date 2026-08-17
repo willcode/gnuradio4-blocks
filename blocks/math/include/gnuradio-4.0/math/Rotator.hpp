@@ -1,6 +1,7 @@
 #ifndef GNURADIO_ROTATOR_HPP
 #define GNURADIO_ROTATOR_HPP
 
+#include <cassert>
 #include <cmath>
 #include <complex>
 #include <gnuradio-4.0/Block.hpp>
@@ -58,16 +59,33 @@ given 'sample_rate' in Hz (N.B sample_rate is normalised to '1' by default).
         }
     }
 
-    [[nodiscard]] constexpr T processOne(const T& inSample) noexcept {
-        _accumulated_phase += phase_increment;
-        // optional: wrap angle if too large
-        if (_accumulated_phase > value_type(2) * std::numbers::pi_v<value_type>) {
-            _accumulated_phase -= value_type(2) * std::numbers::pi_v<value_type>;
-        } else if (_accumulated_phase < value_type(0)) {
-            _accumulated_phase += value_type(2) * std::numbers::pi_v<value_type>;
+    [[nodiscard]] constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
+        assert(output.size() >= input.size());
+
+        // e^{j(phi + k*dphi)} == e^{j*phi} * (e^{j*dphi})^k
+        const std::complex<value_type> increment = std::polar(value_type(1), static_cast<value_type>(phase_increment));
+        std::complex<value_type>       phasor    = std::polar(value_type(1), _accumulated_phase);
+
+        constexpr std::size_t kRenormalisationInterval = 4096UZ;
+        std::size_t           sinceRenormalisation     = 0UZ;
+        for (std::size_t i = 0UZ; i < input.size(); ++i) {
+            phasor *= increment;
+            if (++sinceRenormalisation == kRenormalisationInterval) {
+                phasor *= (value_type(3) - std::norm(phasor)) / value_type(2); // Newton step towards |phasor| == 1
+                sinceRenormalisation = 0UZ;
+            }
+            output[i] = input[i] * phasor;
         }
 
-        return inSample * std::complex<value_type>(std::cos(_accumulated_phase), std::sin(_accumulated_phase));
+        // accumulated in double: single precision loses several 1e-3 rad over a large chunk
+        constexpr double twoPi = 2. * std::numbers::pi_v<double>;
+        double           phase = std::fmod(static_cast<double>(_accumulated_phase) + static_cast<double>(input.size()) * static_cast<double>(phase_increment), twoPi);
+        if (phase < 0.) {
+            phase += twoPi;
+        }
+        _accumulated_phase = static_cast<value_type>(phase);
+
+        return work::Status::OK;
     }
 };
 

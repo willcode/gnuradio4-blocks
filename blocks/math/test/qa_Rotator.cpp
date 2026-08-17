@@ -17,9 +17,7 @@ std::vector<std::complex<T>> execRotator(const std::vector<std::complex<T>>& inp
     std::ignore = rot.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
 
     std::vector<std::complex<T>> output(input.size());
-    for (std::size_t i = 0; i < input.size(); i++) {
-        output[i] = rot.processOne(input[i]);
-    }
+    std::ignore = rot.processBulk(std::span<const std::complex<T>>(input), std::span<std::complex<T>>(output));
     return output;
 }
 
@@ -76,10 +74,9 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         expect(approx(rot.frequency_shift, 0.25f, 1e-3f));
         expect(approx(rot.initial_phase, value_t(0), value_t(1e-3f)));
 
-        std::vector<T> output(8UZ);
-        for (std::size_t i = 0; i < 8; i++) {
-            output[i] = rot.processOne(std::complex<value_t>(1, 0));
-        }
+        const std::vector<T> input(8UZ, std::complex<value_t>(1, 0));
+        std::vector<T>       output(8UZ);
+        std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(output));
 
         for (std::size_t i = 0; i < 8; i++) {
             value_t wantAngle = value_t(i + 1) * phase_shift;
@@ -113,18 +110,15 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         rot.settings().init();
         std::ignore = rot.settings().applyStagedParameters();
 
-        std::vector<T> first(32UZ);
-        for (std::size_t i = 0; i < first.size(); i++) {
-            first[i] = rot.processOne(T(1.0, 0.0));
-        }
+        const std::vector<T> input(32UZ, T(1.0, 0.0));
+        std::vector<T>       first(32UZ);
+        std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(first));
 
         std::ignore = rot.settings().setStaged({{"frequency_shift", 1.f}});
         std::ignore = rot.settings().applyStagedParameters();
 
         std::vector<T> second(32UZ);
-        for (std::size_t i = 0; i < second.size(); i++) {
-            second[i] = rot.processOne(T(1.0, 0.0));
-        }
+        std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(second));
 
         const T continued = first.back() * std::polar(1.0, static_cast<double>(rot.phase_increment));
         expect(approx(second.front().real(), continued.real(), 1e-9)) << "phase must not reset on a settings change that omits initial_phase";
@@ -137,17 +131,15 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         rot.settings().init();
         std::ignore = rot.settings().applyStagedParameters();
 
-        for (std::size_t i = 0; i < 32UZ; i++) {
-            std::ignore = rot.processOne(T(1.0, 0.0));
-        }
+        const std::vector<T> input(32UZ, T(1.0, 0.0));
+        std::vector<T>       discard(32UZ);
+        std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(discard));
 
         std::ignore = rot.settings().setStaged({{"initial_phase", 0.0}});
         std::ignore = rot.settings().applyStagedParameters();
 
         std::vector<T> restarted(32UZ);
-        for (std::size_t i = 0; i < restarted.size(); i++) {
-            restarted[i] = rot.processOne(T(1.0, 0.0));
-        }
+        std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(restarted));
 
         const double increment = static_cast<double>(rot.phase_increment);
         expect(approx(restarted.front().real(), std::cos(increment), 1e-9));
