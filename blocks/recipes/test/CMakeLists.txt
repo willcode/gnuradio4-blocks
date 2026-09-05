@@ -6,6 +6,7 @@ target_link_libraries(
   PRIVATE gnuradio-core
           gnuradio4::gr-testing
           gnuradio4::GrAnalogBlocksShared
+          gnuradio4::GrBasicBlocksShared
           gnuradio4::GrDigitalBlocksShared
           gnuradio4::GrFilterBlocksShared
           gnuradio4::GrMathBlocksShared

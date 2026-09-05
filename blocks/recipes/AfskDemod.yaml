@@ -1,0 +1,148 @@
+# gr::recipes::AfskDemod — audio frequency-shift keying from a real audio stream to soft symbols.
+#
+# The modulation of the largest population of amateur satellites, and the one a soundcard hands you: two audio tones,
+# one per bit, on a REAL stream. Everything else in the tree starts from complex baseband, so the first thing this
+# recipe does is build an analytic signal — the Hilbert branch and the matching delay — and from there it is an
+# ordinary FSK receiver.
+#
+# The derivations this recipe saves:
+#
+#   band center     = (mark_hz + space_hz) / 2, which the rotator translates to zero
+#   signed deviation = (mark_hz - space_hz) / 2
+#   discriminator gain = (sample_rate / decimation) / (2*pi*deviation)
+#                      = sample_rate / (decimation * pi * (mark_hz - space_hz))
+#   group delay of the real branch = (hilbert_taps - 1) / 2, exactly the Hilbert design's own
+#   samples per symbol = sample_rate / (decimation * symbol_rate)
+#
+# THE SIGN IS THE POLARITY RULE. This tree's convention is that a positive soft decision is a one. A deviation taken
+# as (mark_hz - space_hz)/2 is NEGATIVE whenever the tone carrying a one is the lower of the two — which is Bell 202's
+# case — and the discriminator gain is negative with it, so the soft symbol carries the right sign without a separate
+# setting and without an inverting block. A chain that takes the magnitude instead receives every bit inverted and
+# nothing but a CRC downstream can tell.
+#
+# Bell 202, the AX.25 tone pair, worked through as documentation and NOT as defaults: mark (a one) 1200 Hz, space
+# (a zero) 2200 Hz, 1200 Bd, band center 1700 Hz, signed deviation -500 Hz, modulation index h = 2*500/1200 = 0.8333.
+# Carson's rule gives 2*(500 + 600) = 2200 Hz occupied, so the complex-baseband cutoff is 1100 Hz = 0.9167 symbol
+# rates, which is `channel_bandwidth`'s default (in general (|h|/2 + 0.5), and h = 0.8333 gives 0.9167). At 48 kHz
+# with decimation 5 the discriminator gain is 48000 / (5*pi*(1200 - 2200)) = -3.055775 and the timing loop sees eight
+# samples per symbol. `mark_hz` and `space_hz` are required: a link's tone pair is an interoperability fact and a
+# default here would be a silent one.
+#
+# Bell 202's tones are not orthogonal. At h = 0.8333 their correlation is |sin(pi*h)/(pi*h)| = 0.190986, so the
+# noncoherent bit error rate is 0.5*exp(-(Eb/N0)*(1-0.190986)/2) rather than the orthogonal 0.5*exp(-(Eb/N0)/2) — a
+# 0.92 dB penalty that grows as a ratio with Eb/N0, from 1.27x at 4 dB to 4.54x at 12. A gate quoting the orthogonal
+# reference would fail this chain for the modulation's reasons and not for its own.
+#
+# `split` exists because a subgraph exports an input port to exactly ONE interior port while an output port fans out
+# freely: it is the node whose single output feeds both branches. It is a SampleDelay of zero, which is a copy.
+#
+# Real audio at sample_rate in; one soft symbol per symbol out, positive for a mark.
+definition_metadata:
+  block_type: gr::recipes::AfskDemod
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: afsk_demod
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "input audio sample rate in hertz; required"
+      - name: symbol_rate
+        type: float32
+        doc: "symbol rate in hertz; required"
+      - name: mark_hz
+        type: float64
+        doc: "the tone that carries a ONE, in hertz; required, and there is no default tone pair"
+      - name: space_hz
+        type: float64
+        doc: "the tone that carries a ZERO, in hertz; required. Its position relative to mark_hz is the output polarity"
+      - name: decimation
+        type: uint32
+        default: !!uint32 1
+        doc: "decimation in the channel filter; pick it for about eight samples per symbol after it"
+      - name: hilbert_taps
+        type: uint32
+        default: !!uint32 127
+        doc: "length of the Hilbert transformer, odd; 127 keeps the band from 0.0125 to 0.4875 of the rate within 2 percent of unity"
+      - name: channel_bandwidth
+        type: float64
+        default: !!float64 0.9167
+        doc: "cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate; half of Carson's bandwidth, |h|/2 + 0.5"
+      - name: lowpass_bandwidth
+        type: float64
+        default: !!float64 0.5
+        doc: "cutoff of the post-discriminator lowpass, as a multiple of the symbol rate"
+      - name: noise_bandwidth
+        type: float64
+        default: !!float64 0.002
+        doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
+      - name: detector
+        type: string
+        default: "gardner"
+        doc: "timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"
+    graph:
+      blocks:
+        - id: "gr::blocks::basic::SampleDelay<float32>"
+          parameters:
+            name: split
+            delay: !!uint32 0
+        - id: "gr::blocks::filter::DesignedFilter<float32, float32>"
+          parameters:
+            name: hilbert
+            profile: "hilbert"
+            sample_rate: "=sample_rate"
+            taps: "=hilbert_taps"
+        - id: "gr::blocks::basic::SampleDelay<float32>"
+          parameters:
+            name: delay
+            delay: "=(hilbert_taps - 1) / 2"
+        - id: "gr::blocks::basic::RealImagToComplex<float32>"
+          parameters:
+            name: analytic
+        - id: "gr::blocks::math::Rotator<complex<float32>>"
+          parameters:
+            name: translate
+            sample_rate: "=sample_rate"
+            frequency_shift: "=-(mark_hz + space_hz) / 2"
+        - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"
+          parameters:
+            name: channel
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=channel_bandwidth * symbol_rate"
+            transition_width: "=0.5 * channel_bandwidth * symbol_rate"
+            decimation: "=decimation"
+        - id: "gr::blocks::analog::QuadratureDemod<float32>"
+          parameters:
+            name: discriminator
+            gain: "=sample_rate / (decimation * pi * (mark_hz - space_hz))"
+        - id: "gr::blocks::filter::DesignedFilter<float32, float32>"
+          parameters:
+            name: lowpass
+            profile: "lowpass"
+            sample_rate: "=sample_rate / decimation"
+            cutoff: "=lowpass_bandwidth * symbol_rate"
+            transition_width: "=0.5 * lowpass_bandwidth * symbol_rate"
+        - id: "gr::blocks::sync::SymbolSync<float32>"
+          parameters:
+            name: timing
+            samples_per_symbol: "=sample_rate / (decimation * symbol_rate)"
+            noise_bandwidth: "=noise_bandwidth"
+            detector: "=detector"
+      connections:
+        - [split, 0, hilbert, 0]
+        - [split, 0, delay, 0]
+        - [delay, 0, analytic, 0]
+        - [hilbert, 0, analytic, 1]
+        - [analytic, 0, translate, 0]
+        - [translate, 0, channel, 0]
+        - [channel, 0, discriminator, 0]
+        - [discriminator, 0, lowpass, 0]
+        - [lowpass, 0, timing, 0]
+      exported_ports:
+        - [split, INPUT, in, in]
+        - [timing, OUTPUT, out, out]

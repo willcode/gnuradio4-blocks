@@ -1,0 +1,148 @@
+# gr::recipes::BpskFrontEnd — the five stages every BPSK receiver runs before it decides anything.
+#
+# Tuning, channel filtering with decimation, automatic gain control, frequency-locked loop, timing recovery. It ends
+# at one complex sample per symbol, and what happens to that sample is the difference between the coherent and the
+# differential detector — which is why these five stages are a recipe of their own. BpskDemod and DbpskDemod should
+# name it as an interior block and currently write it out instead, because the graph importer does not forward an
+# interior block's parameters; each of them says so in its own header. This recipe is usable on its own, and it is the
+# one place the five numbers below are derived.
+#
+# The derivations this recipe saves:
+#
+#   samples per symbol = sample_rate / (decimation * symbol_rate), at both loops
+#   channel cutoff     = channel_bandwidth * symbol_rate; a root-raised-cosine signal at excess bandwidth `rolloff`
+#                        occupies (1 + rolloff) symbol rates two-sided, so half of that is (1 + rolloff)/2 = 0.675 at
+#                        the default rolloff, and 0.75 leaves the filter's own transition band outside the signal
+#   agc rate           = sample_rate / decimation, the rate the AGC's time constants are measured against
+#
+# THE GAIN CONTROL'S TIME CONSTANTS ARE SYMBOL PERIODS, NOT SECONDS. The Agc block takes seconds, and the seconds a
+# link wants are its own: the gain loop reads the INSTANTANEOUS magnitude, and a linearly modulated carrier passes
+# through zero at every symbol transition, so a constant of a few symbols follows the modulation's envelope and writes
+# it back onto the stream as a multiplicative error no detector downstream can remove. What is invariant across links
+# is the count of symbol periods, so that is what this recipe exports and it divides by `symbol_rate` itself. 256 and
+# 512 hold the level of every link measured through these recipes -- 400 baud Manchester off the air through 12.5
+# kilobaud synthetic -- where one figure in seconds holds none of them: 5 ms is 62 symbols at 12.5 kBd and four chips
+# at 800 chips a second.
+#
+# THE AGC IS A PRECONDITION, NOT AN OPTION. FllBandEdge's band-edge discriminant and CostasLoop's phase detector both
+# have gains proportional to input power, and both blocks state their detector gains at unit amplitude. That is why
+# `agc_reference_db` is 0 here and not the AGC block's own -6: the loops downstream are specified against an amplitude
+# of one, so the front end delivers one.
+#
+# THE TIMING DETECTOR MUST BE NON-DATA-AIDED. Timing recovery runs here BEFORE any carrier recovery, so the symbol it
+# is handed still carries the carrier phase and a decision-directed detector — SymbolSync's own default, Mueller &
+# Muller — would be slicing a constellation it cannot see yet. At a carrier phase of 90 degrees that detector loses
+# the loop entirely. `timing_detector` therefore defaults to Gardner, which is non-data-aided and works at any phase,
+# and the three legal choices are the three that need no decision.
+#
+# SymbolSync designs its own root-raised-cosine matched filter from `samples_per_symbol` and `rolloff` when no taps
+# are given, so the recipe passes a rolloff and never a tap vector.
+#
+# Complex baseband at sample_rate in; one complex sample per symbol out, at unit amplitude and with the residual
+# carrier frequency taken out but NOT the carrier phase — that is the detector's job and this recipe has none.
+definition_metadata:
+  block_type: gr::recipes::BpskFrontEnd
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: bpsk_front_end
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "input sample rate in hertz; required"
+      - name: symbol_rate
+        type: float32
+        doc: "symbol rate in hertz; required"
+      - name: frequency_offset
+        type: float64
+        default: !!float64 0.0
+        doc: "where the carrier sits relative to the front end's center, in hertz; 0 leaves the tuner inert"
+      - name: decimation
+        type: uint32
+        default: !!uint32 1
+        doc: "decimation in the channel filter; pick it for about four samples per symbol after it"
+      - name: channel_bandwidth
+        type: float64
+        default: !!float64 0.75
+        doc: "cutoff of the channel filter as a multiple of the symbol rate; (1 + rolloff)/2 plus room for the transition band"
+      - name: rolloff
+        type: float64
+        default: !!float64 0.35
+        doc: "excess bandwidth of the transmit shaping filter, in [0, 1]; the matched filter and the band-edge filter are both designed from it"
+      - name: fll_noise_bandwidth
+        type: float64
+        default: !!float64 0.01
+        doc: "closed-loop noise bandwidth of the frequency-locked loop, normalized: Bn*T per sample"
+      - name: fll_filter_length
+        type: uint32
+        default: !!uint32 45
+        doc: "taps in each band-edge filter; 30 to 70 is the useful range"
+      - name: timing_detector
+        type: string
+        default: "gardner"
+        doc: "timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: gardner, zero_crossing or early_late"
+      - name: timing_noise_bandwidth
+        type: float64
+        default: !!float64 0.002
+        doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
+      - name: agc_reference_db
+        type: float64
+        default: !!float64 0.0
+        doc: "target output level; 0 dB because the loops downstream state their detector gains at unit amplitude"
+      - name: agc_attack_symbols
+        type: float64
+        default: !!float64 256.0
+        doc: "gain-control time constant when the gain must decrease, in SYMBOL PERIODS; the recipe divides by symbol_rate, because a gain loop reading the instantaneous magnitude follows the modulation's own envelope unless its constant is long against a symbol"
+      - name: agc_decay_symbols
+        type: float64
+        default: !!float64 512.0
+        doc: "gain-control time constant when the gain must increase, in SYMBOL PERIODS; twice the attack, so a level that rises is followed half as fast as one that falls"
+    graph:
+      blocks:
+        - id: "gr::blocks::math::Rotator<complex<float32>>"
+          parameters:
+            name: translate
+            sample_rate: "=sample_rate"
+            frequency_shift: "=-frequency_offset"
+        - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"
+          parameters:
+            name: channel
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=channel_bandwidth * symbol_rate"
+            transition_width: "=0.5 * channel_bandwidth * symbol_rate"
+            decimation: "=decimation"
+        - id: "gr::blocks::analog::Agc<complex<float32>>"
+          parameters:
+            name: agc
+            sample_rate: "=sample_rate / decimation"
+            reference_db: "=agc_reference_db"
+            attack_s: "=agc_attack_symbols / symbol_rate"
+            decay_s: "=agc_decay_symbols / symbol_rate"
+        - id: "gr::blocks::sync::FllBandEdge"
+          parameters:
+            name: fll
+            samples_per_symbol: "=sample_rate / (decimation * symbol_rate)"
+            rolloff: "=rolloff"
+            filter_length: "=fll_filter_length"
+            noise_bandwidth: "=fll_noise_bandwidth"
+        - id: "gr::blocks::sync::SymbolSync<complex<float32>>"
+          parameters:
+            name: timing
+            samples_per_symbol: "=sample_rate / (decimation * symbol_rate)"
+            rolloff: "=rolloff"
+            noise_bandwidth: "=timing_noise_bandwidth"
+            detector: "=timing_detector"
+            constellation: "bpsk"
+      connections:
+        - [translate, 0, channel, 0]
+        - [channel, 0, agc, 0]
+        - [agc, 0, fll, 0]
+        - [fll, 0, timing, 0]
+      exported_ports:
+        - [translate, INPUT, in, in]
+        - [timing, OUTPUT, out, out]
