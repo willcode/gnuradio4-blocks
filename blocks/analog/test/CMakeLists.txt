@@ -14,3 +14,6 @@ add_ut_test(qa_PowerMeter)
 target_link_libraries(qa_PowerMeter PRIVATE gr-analog gr-testing)
 add_ut_test(qa_NoiseBlanker)
 target_link_libraries(qa_NoiseBlanker PRIVATE gr-analog gr-testing)
+
+add_ut_test(qa_HardLimiter)
+target_link_libraries(qa_HardLimiter PRIVATE gr-analog gr-testing)
