@@ -8,6 +8,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/FunctionGenerator.hpp
     include/gnuradio-4.0/basic/GraphBridge.hpp
     include/gnuradio-4.0/basic/IqCorrection.hpp
+    include/gnuradio-4.0/basic/IqTap.hpp
     include/gnuradio-4.0/basic/MovingAverage.hpp
     include/gnuradio-4.0/basic/PacketToDataSet.hpp
     include/gnuradio-4.0/basic/RecordUtils.hpp
