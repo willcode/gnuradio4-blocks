@@ -9,4 +9,5 @@ endfunction()
 
 gr_add_analog_benchmark(bm_Agc)
 gr_add_analog_benchmark(bm_FmEmphasis)
+gr_add_analog_benchmark(bm_NoiseBlanker)
 gr_add_analog_benchmark(bm_QuadratureDemod)
