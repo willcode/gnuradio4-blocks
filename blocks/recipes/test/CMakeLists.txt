@@ -8,6 +8,7 @@ target_link_libraries(
           gnuradio4::GrAnalogBlocksShared
           gnuradio4::GrBasicBlocksShared
           gnuradio4::GrDigitalBlocksShared
+          gnuradio4::GrFecBlocksShared
           gnuradio4::GrFilterBlocksShared
           gnuradio4::GrMathBlocksShared
           gnuradio4::GrSyncBlocksShared)
