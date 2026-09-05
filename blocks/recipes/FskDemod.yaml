@@ -6,12 +6,15 @@
 # grid the slicer and the level tracker already speak. In FM terms the same number is sample_rate / (2*pi*deviation),
 # the deviation of a two-level signal being h * symbol_rate / 2.
 #
-# The chain is a channel filter, the discriminator, a post-detection lowpass, timing recovery and the slicer. The
-# channel filter is what keeps the receiver above the FM click threshold: a discriminator's noise is the noise in the
-# band it is handed, so at eight samples per symbol an unfiltered front end sees nine decibels more of it than the
-# signal band carries, and the bit error rate then follows a different exponent from the noncoherent bound rather
-# than sitting a fixed distance from it. With the channel filter at 0.6 symbol rates the chain measures between 0.32
-# and 1.11 times the noncoherent orthogonal reference exp(-EbN0/2)/2 over 6 to 12 dB Es/N0.
+# The chain is a channel filter, the discriminator, a post-detection lowpass, the burst timing preset, timing recovery
+# and the slicer. The preset stage is a wire at the default preamble_symbols of 0, which is what a continuous link
+# wants; a burst link states the alternating symbols its preamble carries and the stage measures the burst's symbol
+# phase from the tone they leave and hands it to the loop as a tag, which removes an acquisition a burst is too short
+# to afford. The channel filter is what keeps the receiver above the FM click threshold: a discriminator's noise is the
+# noise in the band it is handed, so at eight samples per symbol an unfiltered front end sees nine decibels more of it
+# than the signal band carries, and the bit error rate then follows a different exponent from the noncoherent bound
+# rather than sitting a fixed distance from it. With the channel filter at 0.6 symbol rates the chain measures between
+# 0.32 and 1.11 times the noncoherent orthogonal reference exp(-EbN0/2)/2 over 6 to 12 dB Es/N0.
 #
 # The discriminator itself is an arctangent of the product of consecutive samples with the earlier one conjugated, so
 # its output depends on the phase advance alone and the chain takes the signal at whatever amplitude it arrives.
@@ -66,6 +69,10 @@ blocks:
         type: string
         default: "mueller_muller"
         doc: "timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"
+      - name: preamble_symbols
+        type: uint32
+        default: !!uint32 0
+        doc: "alternating training symbols a burst opens with, which the timing preset is measured over; 0 disables the preset and the stream passes the stage through"
     graph:
       blocks:
         - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"
@@ -86,6 +93,12 @@ blocks:
             sample_rate: "=sample_rate"
             cutoff: "=lowpass_bandwidth * symbol_rate"
             transition_width: "=0.5 * lowpass_bandwidth * symbol_rate"
+        - id: "gr::blocks::sync::PreambleTiming<float32>"
+          parameters:
+            name: preamble
+            sample_rate: "=sample_rate"
+            symbol_rate: "=symbol_rate"
+            preamble_symbols: "=preamble_symbols"
         - id: "gr::blocks::sync::SymbolSync<float32>"
           parameters:
             name: timing
@@ -99,7 +112,8 @@ blocks:
       connections:
         - [channel, 0, discriminator, 0]
         - [discriminator, 0, lowpass, 0]
-        - [lowpass, 0, timing, 0]
+        - [lowpass, 0, preamble, 0]
+        - [preamble, 0, timing, 0]
         - [timing, 0, slicer, 0]
       exported_ports:
         - [channel, INPUT, in, in]
