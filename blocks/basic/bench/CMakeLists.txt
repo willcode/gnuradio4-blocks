@@ -4,5 +4,6 @@ function(gr_add_basic_benchmark BM_NAME)
   target_include_directories(${BM_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
+gr_add_basic_benchmark(bm_DataSetToStream)
 gr_add_basic_benchmark(bm_IqCorrection)
 gr_add_basic_benchmark(bm_SampleDelay)
