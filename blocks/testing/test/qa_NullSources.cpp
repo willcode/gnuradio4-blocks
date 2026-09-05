@@ -1,8 +1,7 @@
 #include <boost/ut.hpp>
 
 #include <gnuradio-4.0/Block.hpp>
-#include <gnuradio-4.0/Graph.hpp>
-#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/RuntimeTest.hpp>
 
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
@@ -16,17 +15,12 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
     "NullSource->CountingSink"_test = []<typename T>(const T&) {
         constexpr gr::Size_t N = 12;
 
-        Graph g;
-        auto& src  = g.emplaceBlock<NullSource<T>>();
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
+        gr::test::RuntimeTest test;
+        auto&                 src  = test.emplace<NullSource<T>>();
+        auto&                 sink = test.emplace<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(g.connect<"out", "in">(src, sink).has_value());
-
-        gr::scheduler::Simple sch;
-        if (auto ret = sch.exchange(std::move(g)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sch.runAndWait().has_value());
+        expect(test.connect(src, "out", sink, "in").has_value());
+        expect(test.run().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
 
@@ -34,49 +28,34 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr gr::Size_t N_total     = 7;
         constexpr T          start_value = T(3);
 
-        Graph g;
-        auto& src  = g.emplaceBlock<CountingSource<T>>(property_map{{"default_value", start_value}, {"n_samples_max", N_total}});
-        auto& sink = g.emplaceBlock<NullSink<T>>();
+        gr::test::RuntimeTest test;
+        auto&                 src  = test.emplace<CountingSource<T>>(property_map{{"default_value", start_value}, {"n_samples_max", N_total}});
+        auto&                 sink = test.emplace<NullSink<T>>();
 
-        expect(g.connect<"out", "in">(src, sink).has_value());
-
-        gr::scheduler::Simple sch;
-        if (auto ret = sch.exchange(std::move(g)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sch.runAndWait().has_value());
+        expect(test.connect(src, "out", sink, "in").has_value());
+        expect(test.run().has_value());
     } | kTestTypes;
 
     "ConstantSource->NullSink"_test = []<typename T>(const T&) {
         constexpr gr::Size_t N = 5;
 
-        Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<T>>(property_map{{"default_value", typename ConstantSource<T>::value_t(99)}, {"n_samples_max", N}});
-        auto& sink = g.emplaceBlock<NullSink<T>>();
+        gr::test::RuntimeTest test;
+        auto&                 src  = test.emplace<ConstantSource<T>>(property_map{{"default_value", typename ConstantSource<T>::value_t(99)}, {"n_samples_max", N}});
+        auto&                 sink = test.emplace<NullSink<T>>();
 
-        expect(g.connect<"out", "in">(src, sink).has_value());
-
-        gr::scheduler::Simple sch;
-        if (auto ret = sch.exchange(std::move(g)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sch.runAndWait().has_value());
+        expect(test.connect(src, "out", sink, "in").has_value());
+        expect(test.run().has_value());
     } | kTestTypes;
 
     "SlowSource->CountingSink"_test = []<typename T>(const T&) {
         constexpr gr::Size_t N = 3;
 
-        Graph g;
-        auto& src  = g.emplaceBlock<SlowSource<T>>(property_map{{"default_value", typename SlowSource<T>::value_t(77)}, {"delay", 10U}});
-        auto& sink = g.emplaceBlock<CountingSink<T>>(property_map{{"n_samples_max", N}});
+        gr::test::RuntimeTest test;
+        auto&                 src  = test.emplace<SlowSource<T>>(property_map{{"default_value", typename SlowSource<T>::value_t(77)}, {"delay", 10U}});
+        auto&                 sink = test.emplace<CountingSink<T>>(property_map{{"n_samples_max", N}});
 
-        expect(g.connect<"out", "in">(src, sink).has_value());
-
-        gr::scheduler::Simple sch;
-        if (auto ret = sch.exchange(std::move(g)); !ret) {
-            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
-        }
-        expect(sch.runAndWait().has_value());
+        expect(test.connect(src, "out", sink, "in").has_value());
+        expect(test.run().has_value());
         expect(eq(sink.count, N));
     } | kTestTypes;
 
