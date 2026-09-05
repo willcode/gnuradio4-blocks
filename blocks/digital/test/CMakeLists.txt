@@ -53,6 +53,9 @@ target_link_libraries(qa_SignalQuality PRIVATE gr-digital gr-channel gr-testing)
 add_ut_test(qa_Scrambler)
 target_link_libraries(qa_Scrambler PRIVATE gr-digital gr-testing)
 
+add_ut_test(qa_OffsetWordFraming)
+target_link_libraries(qa_OffsetWordFraming PRIVATE gr-digital gr-testing)
+
 add_ut_test(qa_PamSymbols)
 target_link_libraries(qa_PamSymbols PRIVATE gr-digital gr-testing)
 
