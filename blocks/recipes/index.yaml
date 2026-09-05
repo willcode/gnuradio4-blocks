@@ -19,3 +19,7 @@ assets:
     created: "2026-08-31-00:00:00"
     modified: "2026-08-31-00:00:00"
     block_type: gr::recipes::SampleClockOffset
+  - file: WbfmMonoDemod.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::WbfmMonoDemod
