@@ -1,4 +1,5 @@
 set(GrBasicBlocks_HDRS
+    include/gnuradio-4.0/basic/ClockedDataSetToStream.hpp
     include/gnuradio-4.0/basic/ClockSource.hpp
     include/gnuradio-4.0/basic/ConverterBlocks.hpp
     include/gnuradio-4.0/basic/DataSetToPacket.hpp
