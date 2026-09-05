@@ -10,6 +10,7 @@ add_basic_test(qa_DataSink)
 add_basic_test(qa_TriggerBlocks)
 add_basic_test(qa_Decimators)
 add_basic_test(qa_MovingAverage)
+add_basic_test(qa_SampleDelay)
 add_basic_test(qa_Throttle)
 set_property(TEST qa_Throttle PROPERTY RESOURCE_LOCK rt)
 
