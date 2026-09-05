@@ -5,6 +5,8 @@ install(
   FILES index.yaml
         AfskDemod.yaml
         BpskDemod.yaml
+        CcsdsConcatenatedFrames.yaml
+        CcsdsRsFrames.yaml
         BpskFrontEnd.yaml
         DbpskDemod.yaml
         FskDemod.yaml

@@ -1,0 +1,130 @@
+# gr::recipes::CcsdsConcatenatedFrames — the CCSDS concatenated receive chain: soft channel symbols in,
+# transfer frames out.
+#
+# The concatenated chain is the Reed-Solomon chain with the inner convolutional code in front of it, and the one
+# structural decision that shapes everything here is WHERE the marker is found: in the channel-symbol domain,
+# before any decoding. This tree's Viterbi is record-native — it decodes a bounded record, not a running stream —
+# so the record boundary must be known before the trellis runs, and the only thing in the symbol stream that can
+# mark it is the encoded marker itself.
+#
+# An encoded marker is not a constant: its first symbols depend on whatever data preceded it, because the inner
+# encoder's register still holds that data. From marker bit K-1 onward the register holds only the marker's own
+# bits, so its last 2*(32-6) = 52 encoded symbols are the same whatever came before — a genuine constant of the
+# channel, and the word the correlator searches for. `encoded_marker` carries that word and is required: it is a
+# function of the convention, derived — not transcribed — by gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional),
+# which a caller invokes with the same name it passes as `convolutional`. A definition cannot call a function,
+# which is why the derived word crosses this boundary as a parameter.
+#
+# THE RECORD'S GEOMETRY, symbol by symbol. The correlator tags at the word's first symbol (tag_at code_start),
+# which sits 12 symbols into the encoded marker. From there the record carries:
+#     52                                  the marker's state-independent symbols — the trellis's run-up
+#   + (frame_length + 2*E*I) * 8 * 2      the codeblock's bits at the rate-1/2 expansion
+#   + 12                                  2*(K-1) symbols beyond the codeblock
+# The 12-symbol margin exists because an open decode's last K-1 information bits lack the future that would
+# resolve them; extracting the margin puts those unreliable bits outside the codeblock, where the trim drops
+# them. After the open decode the record is bits: 26 marker bits at the head (the run-up, spent), 6 margin bits
+# at the tail, and the codeblock between them — RecordTrim takes 26 and 6 off, the derandomizer takes 10.4.3's
+# sequence off the codeblock, and the rest is the Reed-Solomon chain unchanged.
+#
+# The rate-1/2 stream's pairing ambiguity — which symbol opens a (G1, G2) pair — needs no arm at all here:
+# the correlator searches every stream offset and the record is cut where the marker actually sits, so the
+# pairing is recovered from the marker's own position and a one-symbol shift of the input moves the tag by one
+# and changes nothing downstream. A chain whose framer anchored to stream parity would need two instances;
+# this one is self-aligning, and the qa asserts it decodes at either input offset.
+#
+# The differential-precoding arm and the randomizer-off exception change the block set and are therefore
+# sibling-recipe territory, exactly as in CcsdsRsFrames.
+#
+# Soft channel symbols at one value per symbol in; one DataSet<uint8> record per transfer frame, bytes, out.
+definition_metadata:
+  block_type: gr::recipes::CcsdsConcatenatedFrames
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: ccsds_concatenated_frames
+    exported_parameters:
+      - name: frame_length
+        type: uint32
+        doc: "transfer frame octets, the standard's kI - Q; required, and a multiple of interleave"
+      - name: error_capability
+        type: uint32
+        doc: "E, the symbol-correction capability per codeword: 16 or 8; must agree with code"
+      - name: code
+        type: string
+        doc: "the Reed-Solomon profile: ccsds_255_223 for E = 16, ccsds_255_239 for E = 8"
+      - name: basis
+        type: string
+        doc: "conventional or dual; there is no default, because a wrong choice decodes nothing"
+      - name: convolutional
+        type: string
+        doc: "the inner convention: ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted; four live conventions, no default"
+      - name: encoded_marker
+        type: string
+        doc: "the marker's 52 state-independent encoded symbols, gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional); a definition cannot call the derivation, so its result is required here"
+      - name: sync_errors
+        type: uint32
+        doc: "the correlator's max_errors, in raw channel symbols of the 52-symbol word; an operating point, so required"
+      - name: interleave
+        type: uint32
+        default: !!uint32 1
+        doc: "I, the codewords of one codeblock: 1, 2, 3, 4, 5 or 8"
+    graph:
+      blocks:
+        - id: "gr::blocks::digital::AccessCodeCorrelator<float32>"
+          parameters:
+            name: marker
+            access_code: "=encoded_marker"
+            max_errors: "=sync_errors"
+            trigger_label: "ccsds_asm_symbols"
+            tag_at: "code_start"
+        - id: "gr::blocks::digital::PacketFramer<float32>"
+          parameters:
+            name: symbol_record
+            header_format: "fixed_length"
+            fixed_payload_items: "=52 + (frame_length + 2 * error_capability * interleave) * 16 + 12"
+            max_payload_items: "=52 + (frame_length + 2 * error_capability * interleave) * 16 + 12"
+            trigger: "ccsds_asm_symbols"
+        - id: "gr::blocks::fec::ViterbiDecodeSoft"
+          parameters:
+            name: inner
+            code: "=convolutional"
+            termination: "open"
+        - id: "gr::blocks::basic::RecordTrim"
+          parameters:
+            name: trim
+            drop_head: !!uint32 26
+            drop_tail: !!uint32 6
+        - id: "gr::blocks::digital::AdditiveScrambler<gr::DataSet<uint8>>"
+          parameters:
+            name: derandomizer
+            taps: "1,3,5,8"
+            seed: "11111111"
+            bits_per_item: !!uint32 1
+        - id: "gr::blocks::digital::RecordRepackBits"
+          parameters:
+            name: packer
+            bits_in: !!uint32 1
+            bits_out: !!uint32 8
+            output_bit_order: "msb_first"
+        - id: "gr::blocks::fec::RsDecode"
+          parameters:
+            name: rs
+            code: "=code"
+            basis: "=basis"
+            roots: "=2 * error_capability"
+            interleave: "=interleave"
+            pad: "=(255 - 2 * error_capability) - frame_length / interleave"
+      connections:
+        - [marker, 0, symbol_record, 0]
+        - [symbol_record, 0, inner, 0]
+        - [inner, 0, trim, 0]
+        - [trim, 0, derandomizer, 0]
+        - [derandomizer, 0, packer, 0]
+        - [packer, 0, rs, 0]
+      exported_ports:
+        - [marker, INPUT, in, in]
+        - [rs, OUTPUT, out, out]
