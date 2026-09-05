@@ -6,6 +6,16 @@ for the compositions a user would otherwise have to re-derive — a discriminato
 a rate and a deviation, a de-emphasis constant, a matched filter's construction — and the
 scheduler's chain fusion makes the composed form cost what a hand-fused block would.
 
+## What ships
+
+| Recipe | What it composes | Required parameters |
+|---|---|---|
+| `gr::recipes::NbfmDemod` | discriminator and de-emphasis, general form | `sample_rate`, `deviation` |
+| `gr::recipes::SampleClockOffset` | a resampling by `1 + ppm*1e-6`, tags re-originated | none |
+| `gr::recipes::WbfmMonoDemod` | tuner, decimating channel filter, discriminator, audio resampler, de-emphasis | `sample_rate` |
+
+A recipe with no required parameter instantiates bare; the rest name what they are missing.
+
 ## The dialect
 
 Each recipe is one file in the core's YAML-definitions form: a `definition_metadata`

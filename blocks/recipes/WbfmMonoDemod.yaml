@@ -1,0 +1,106 @@
+# gr::recipes::WbfmMonoDemod — broadcast FM, mono, from a wideband front end to audio.
+#
+# Unlike NbfmDemod this is a recipe for ONE service, so the numbers the service defines are
+# defaults: 75 kHz deviation, a 75 us de-emphasis (50 us outside the Americas and South Korea),
+# and 48 kHz audio. Only `sample_rate` is the user's own fact and is required; a defaulted rate
+# would be wrong for every front end but one.
+#
+# The chain is a tuner, a decimating channel filter, the discriminator, the audio resampler and
+# de-emphasis, in the order a receiver runs them.
+#
+# The derivations this recipe saves:
+#
+#   channel_rate = sample_rate / channel_decimation, the rate the discriminator works at
+#   discriminator gain = channel_rate / (2*pi*deviation), so full deviation reaches +-1.0
+#   audio resampling ratio = audio_rate / channel_rate
+#
+# `channel_decimation` is the one number the recipe cannot know: it depends on the front end's
+# rate. Pick it so the channel rate lands between about 200 and 400 kHz — 240 kHz is the usual
+# choice, and 1 (the default) says the input is already a channel at that rate. StagedDecimator's
+# passband is a fraction of its OUTPUT rate, not a frequency, so the channel filter follows
+# `channel_decimation` with no second setting to keep in step: at its default width of 0.8 it
+# keeps +-0.4*channel_rate, which at 240 kHz is +-96 kHz and passes Carson's 2*(75+15) = 180 kHz
+# for mono. At `channel_decimation` = 1 the block designs no taps and is a bit-exact pass-through:
+# an input already at the channel rate has nothing left to filter.
+#
+# A recipe has no conditionals, so the tuner is always in the chain. `offset_hz` defaults to 0,
+# where the rotator's phase increment is zero and it copies its input; a listener tuned off the
+# station's center states the offset instead of retuning the radio.
+#
+# The audio stage is ArbitraryResampler rather than RationalResampler because the ratio depends on
+# the front end: the dialect has no gcd and no integer division, so a rational form could only be
+# written by exporting L and M already reduced and asking the user to keep them consistent with
+# three rates. One real ratio is the honest form here. A user whose ratio really is a fraction of
+# small terms — 240 kHz to 48 kHz is 1/5 — buys half the arithmetic by substituting
+# RationalResampler in a copy of this file.
+#
+# De-emphasis is last, at the audio rate, which is the order a broadcast receiver runs it and the
+# rate the block's own response figures are quoted at. `tau` = 0 bypasses it.
+#
+# Complex baseband at sample_rate in; mono float audio at audio_rate out.
+definition_metadata:
+  block_type: gr::recipes::WbfmMonoDemod
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: wbfm_mono_demod
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "front-end sample rate in hertz; required"
+      - name: channel_decimation
+        type: uint32
+        default: !!uint32 1
+        doc: "input samples per channel sample; pick it so sample_rate / channel_decimation is 200 to 400 kHz. 1 is a pass-through"
+      - name: offset_hz
+        type: float64
+        default: !!float64 0.0
+        doc: "where the station sits relative to the front end's center, in hertz; 0 leaves the tuner inert"
+      - name: deviation
+        type: float32
+        default: !!float32 75000.0
+        doc: "peak FM deviation in hertz; 75 kHz is the broadcast figure"
+      - name: tau
+        type: float64
+        default: !!float64 7.5e-05
+        doc: "de-emphasis time constant in seconds; 75 us in the Americas and South Korea, 50 us elsewhere, 0 bypasses"
+      - name: audio_rate
+        type: float32
+        default: !!float32 48000.0
+        doc: "output audio sample rate in hertz"
+    graph:
+      blocks:
+        - id: "gr::blocks::math::Rotator<complex<float32>>"
+          parameters:
+            name: tuner
+            sample_rate: "=sample_rate"
+            frequency_shift: "=-offset_hz"
+        - id: "gr::blocks::filter::StagedDecimator<complex<float32>>"
+          parameters:
+            name: channel
+            decimation: "=channel_decimation"
+        - id: "gr::blocks::analog::QuadratureDemod<float32>"
+          parameters:
+            name: discriminator
+            gain: "=sample_rate / (channel_decimation * 2 * pi * deviation)"
+        - id: "gr::blocks::filter::ArbitraryResampler<float32>"
+          parameters:
+            name: audio
+            rate: "=audio_rate * channel_decimation / sample_rate"
+        - id: "gr::blocks::analog::FmDeemphasis<float32>"
+          parameters:
+            name: deemphasis
+            sample_rate: "=audio_rate"
+            tau: "=tau"
+      connections:
+        - [tuner, 0, channel, 0]
+        - [channel, 0, discriminator, 0]
+        - [discriminator, 0, audio, 0]
+        - [audio, 0, deemphasis, 0]
+      exported_ports:
+        - [tuner, INPUT, in, in]
+        - [deemphasis, OUTPUT, out, out]
