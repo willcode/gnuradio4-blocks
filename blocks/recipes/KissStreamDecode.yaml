@@ -1,0 +1,72 @@
+# gr::recipes::KissStreamDecode — a KISS byte stream, from any source, reassembled and decoded: RecordTrim →
+# DataSetToStream<u8> → DelimiterExtractor<u8>(slip) → KissDecode.
+#
+# Reassembles a KISS byte stream split across message boundaries by a transport upstream, carrying its escape
+# state across them. In this tree a byte stream is a stream — `DataSetToStream` flattens whatever record-shaped
+# fragments arrived, and `DelimiterExtractor` runs over the flattened result with no record boundary to carry
+# state across, so a frame split mid-byte or mid-escape by the transport's own chunking reassembles correctly
+# regardless. Two settings keep a fragment boundary from resetting that state, and both are needed: an empty
+# `boundary_label` stops `DataSetToStream` labeling every fragment with a trigger of its own, and
+# `trigger_resets: false` stops the extractor resynchronizing on a trigger a fragment already carried in its
+# metadata — which `DataSetToStream` re-emits in preference to the label. The only frame boundary in a KISS stream
+# is the SLIP delimiter, so the machine takes its boundaries from the bytes and from nothing else. `RecordTrim`'s
+# `drop_head` strips a link header ahead of the KISS stream, present with its own default of 0 so this recipe is
+# the plain case unless the caller states one.
+#
+# The SLIP profile is spelled out exactly as the other three recipes': end delimiter 0xC0 ("11000000", MSB first),
+# byte escaping, introducer 0xDB (219), map {0xDC (220) -> 0xC0 (192), 0xDD (221) -> 0xDB (219)}, eight bits per
+# item. `max_payload_items` is `DelimiterExtractor`'s own required bound, forwarded with no default, exactly as in
+# `KissFileRead`.
+definition_metadata:
+  block_type: gr::recipes::KissStreamDecode
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: kiss_stream_decode
+    exported_parameters:
+      - name: drop_head
+        type: uint32
+        default: !!uint32 0
+        doc: "items removed from the start of every input record before the KISS stream begins; RecordTrim's own default"
+      - name: max_payload_items
+        type: uint32
+        doc: "DelimiterExtractor's own bound on a decoded frame's items; required, there is no default"
+      - name: read_timestamp
+        type: bool
+        default: !!bool false
+        doc: "interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default"
+    graph:
+      blocks:
+        - id: "gr::blocks::basic::RecordTrim"
+          parameters:
+            name: trim
+            drop_head: "=drop_head"
+        - id: "gr::blocks::basic::DataSetToStream<uint8>"
+          parameters:
+            name: flatten
+            boundary_label: "" # a fragment boundary is not a KISS frame boundary; empty suppresses the trigger tag
+        - id: "gr::blocks::digital::DelimiterExtractor<uint8>"
+          parameters:
+            name: extractor
+            end_delimiter: "11000000"
+            transparency: "byte_escape"
+            escape_item: !!uint32 219
+            escape_map: !!uint32 [220, 192, 221, 219]
+            bits_per_item: !!uint32 8
+            max_payload_items: "=max_payload_items"
+            trigger_resets: !!bool false # a fragment's own trigger is not a frame boundary; only the SLIP delimiter is
+        - id: "gr::blocks::ax25::KissDecode"
+          parameters:
+            name: kiss
+            read_timestamp: "=read_timestamp"
+      connections:
+        - [trim, 0, flatten, 0]
+        - [flatten, 0, extractor, 0]
+        - [extractor, 0, kiss, 0]
+      exported_ports:
+        - [trim, INPUT, in, in]
+        - [kiss, OUTPUT, out, out]
