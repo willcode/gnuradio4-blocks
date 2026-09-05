@@ -9,3 +9,4 @@ endfunction()
 
 gr_add_filter_benchmark(bm_ArbitraryResampler)
 gr_add_filter_benchmark(bm_FirFilter)
+gr_add_filter_benchmark(bm_Channelizer)
