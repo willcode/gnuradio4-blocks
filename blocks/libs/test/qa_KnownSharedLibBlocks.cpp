@@ -200,6 +200,8 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::network::MessagePacketSink"sv));
         expect(registry.contains("gr::blocks::network::MessagePacketSource"sv));
 #endif
+        expect(registry.contains("gr::blocks::basic::RecordTrim"sv));
+        expect(registry.contains("gr::blocks::basic::RecordLengthFilter"sv));
     };
 
     "CheckBlockInstantiations"_test = [&] {
