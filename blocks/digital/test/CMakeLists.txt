@@ -60,3 +60,11 @@ add_ut_test(qa_Scrambler)
 target_link_libraries(qa_Scrambler PRIVATE gr-digital gr-testing)
 add_ut_test(qa_PamSymbols)
 target_link_libraries(qa_PamSymbols PRIVATE gr-digital gr-testing)
+add_ut_test(qa_TeachingModem)
+target_link_libraries(
+  qa_TeachingModem
+  PRIVATE gr-digital
+          gr-channel
+          gr-filter
+          gr-sync
+          gr-testing)
