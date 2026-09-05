@@ -9,8 +9,12 @@ endfunction()
 
 gr_add_measurement_benchmark(bm_Detectors)
 
+gr_add_measurement_benchmark(bm_Kurtosis)
 
+gr_add_measurement_benchmark(bm_PhaseUnwrap)
 
+gr_add_measurement_benchmark(bm_PolarizationCombiner)
 
 gr_add_measurement_benchmark(bm_SpectralEstimate)
 
+gr_add_measurement_benchmark(bm_SpectralKurtosis)
