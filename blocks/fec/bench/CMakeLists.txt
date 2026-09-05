@@ -6,6 +6,7 @@ function(gr_add_fec_benchmark BM_NAME)
   target_include_directories(${BM_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
+gr_add_fec_benchmark(bm_CcsdsRs)
 gr_add_fec_benchmark(bm_InterleaveBlocks)
 
 if(GR4_FEC_HAVE_AFF3CT)

@@ -1,0 +1,112 @@
+# gr::recipes::CcsdsRsFrames — the CCSDS Reed-Solomon receive chain: soft bits in, transfer frames out.
+#
+# The standard's own chain for a Reed-Solomon-coded telemetry link, 131.0-B-5 section 4 with the attached sync
+# marker of section 9: find the ASM in the bit stream, cut the codeblock behind it, take the randomizer off, pack
+# the bits into symbols and decode. One record is one codeblock end to end, so the derandomizer's epoch is the
+# record itself — 10.4.3's rule that the generator initializes at the start of each codeblock — and no reset tag
+# can land on the wrong detector.
+#
+# The input is one soft value per channel bit, positive meaning one. Reed-Solomon is a hard-decision code, so the
+# soft values are sliced before anything reads them: the correlator's comparison slices at zero either way, and
+# slicing first keeps the whole chain on the byte carrier. The slice costs nothing a soft consumer would miss,
+# because there is no soft consumer behind it.
+#
+# THE DERIVED BINDINGS, and where each number comes from. Write n = 255, E = error_capability, I = interleave,
+# and let frame_length be the transfer frame's octets, the standard's kI - Q:
+#   - the codeblock on the wire is (frame_length + 2*E*I) octets — 4.3.8.1 c — and the correlator's bit stream
+#     carries it as 8 times that many items, which is the framer's fixed length;
+#   - the shortening per codeword is pad = (255 - 2E) - frame_length/I, the standard's Q/I; a frame_length that
+#     is not a multiple of I mis-sizes it, surfaces as counted refusals at the decoder, and is 4.3.7.3's "Q is a
+#     multiple of I" restated as the arithmetic it is;
+#   - the decoder's parity count is 2E, and its own agreement check refuses a code/error_capability pair that
+#     disagrees — the two parameters answer one question, and the block is where the answer is checked.
+#
+# `code` and `error_capability` are BOTH exported because a definition has no way to spell one from the other:
+# the dialect's expressions are arithmetic, and the profile is a name. `basis` is required for the same reason it
+# is required on the block — a wrong choice decodes nothing and neither end can guess. `sync_errors` is required
+# because the marker's budget is an operating point, not a property of the chain.
+#
+# The differential-precoding arm and the randomizer-off exception are sibling-recipe territory: either changes
+# the block set, and an arm that changes the block set is a sibling recipe, not a parameter. This definition is
+# the standard's norm — 4.2.1 makes the randomizer the norm — with precoding resolved upstream where a link needs
+# it.
+#
+# Soft bits at one value per channel bit in; one DataSet<uint8> record per transfer frame, bytes, out.
+definition_metadata:
+  block_type: gr::recipes::CcsdsRsFrames
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: ccsds_rs_frames
+    exported_parameters:
+      - name: frame_length
+        type: uint32
+        doc: "transfer frame octets, the standard's kI - Q; required, and a multiple of interleave"
+      - name: error_capability
+        type: uint32
+        doc: "E, the symbol-correction capability per codeword: 16 or 8; must agree with code"
+      - name: code
+        type: string
+        doc: "the Reed-Solomon profile: ccsds_255_223 for E = 16, ccsds_255_239 for E = 8"
+      - name: basis
+        type: string
+        doc: "conventional or dual; 4.3.9.1 mandates dual and part of the flown population uses conventional, so there is no default"
+      - name: sync_errors
+        type: uint32
+        doc: "the marker correlator's max_errors, in bits of the 32-bit ASM; an operating point, so required"
+      - name: interleave
+        type: uint32
+        default: !!uint32 1
+        doc: "I, the codewords of one codeblock: 1, 2, 3, 4, 5 or 8"
+    graph:
+      blocks:
+        - id: "gr::blocks::digital::PamSlicer<float32>"
+          parameters:
+            name: slicer
+            n_levels: !!uint32 2
+        - id: "gr::blocks::digital::AccessCodeCorrelator<uint8>"
+          parameters:
+            name: asm_correlator
+            access_code: "00011010110011111111110000011101"
+            max_errors: "=sync_errors"
+            trigger_label: "ccsds_asm"
+        - id: "gr::blocks::digital::PacketFramer<uint8>"
+          parameters:
+            name: codeblock
+            header_format: "fixed_length"
+            fixed_payload_items: "=(frame_length + 2 * error_capability * interleave) * 8"
+            max_payload_items: "=(frame_length + 2 * error_capability * interleave) * 8"
+            trigger: "ccsds_asm"
+        - id: "gr::blocks::digital::AdditiveScrambler<gr::DataSet<uint8>>"
+          parameters:
+            name: derandomizer
+            taps: "1,3,5,8"
+            seed: "11111111"
+            bits_per_item: !!uint32 1
+        - id: "gr::blocks::digital::RecordRepackBits"
+          parameters:
+            name: packer
+            bits_in: !!uint32 1
+            bits_out: !!uint32 8
+            output_bit_order: "msb_first"
+        - id: "gr::blocks::fec::RsDecode"
+          parameters:
+            name: rs
+            code: "=code"
+            basis: "=basis"
+            roots: "=2 * error_capability"
+            interleave: "=interleave"
+            pad: "=(255 - 2 * error_capability) - frame_length / interleave"
+      connections:
+        - [slicer, 0, asm_correlator, 0]
+        - [asm_correlator, 0, codeblock, 0]
+        - [codeblock, 0, derandomizer, 0]
+        - [derandomizer, 0, packer, 0]
+        - [packer, 0, rs, 0]
+      exported_ports:
+        - [slicer, INPUT, in, in]
+        - [rs, OUTPUT, out, out]
