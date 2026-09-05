@@ -13,6 +13,10 @@ install(
         FskDemodAudio.yaml
         FskDemodDcBlock.yaml
         HdlcDeframe.yaml
+        KissFileWrite.yaml
+        KissFileRead.yaml
+        KissServe.yaml
+        KissStreamDecode.yaml
         NbfmDemod.yaml
         OfdmDemodulator.yaml
         OfdmModulator.yaml

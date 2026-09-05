@@ -1,0 +1,58 @@
+# gr::recipes::KissFileRead — a KISS file read back to records: BasicFileSource<u8> → DelimiterExtractor<u8>(slip)
+# → KissDecode.
+#
+# `KissFileWrite`'s exact counterpart: a byte stream has no record boundary of its own, so `DelimiterExtractor`
+# reconstructs one from the SLIP framing a KISS writer put on; `KissDecode` then strips the command byte and, with
+# `read_timestamp`, reads a command-9 frame into the next data record's `DataSet::timestamp`.
+#
+# The SLIP profile is the same one `KissFileWrite` spells, because the two recipes are read against each other:
+# end delimiter 0xC0 ("11000000", MSB first), byte escaping, introducer 0xDB (219), map {0xDC (220) -> 0xC0 (192),
+# 0xDD (221) -> 0xDB (219)}, eight bits per item.
+#
+# `max_payload_items` is `DelimiterExtractor`'s own required bound and carries no default here either: a peer's
+# frame length is not this recipe's to assume. `file_name` is required for the same reason `KissFileWrite`'s is.
+definition_metadata:
+  block_type: gr::recipes::KissFileRead
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: kiss_file_read
+    exported_parameters:
+      - name: file_name
+        type: string
+        doc: "the KISS file's path; required, there is no default"
+      - name: max_payload_items
+        type: uint32
+        doc: "DelimiterExtractor's own bound on a decoded frame's items; required, there is no default"
+      - name: read_timestamp
+        type: bool
+        default: !!bool false
+        doc: "interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default"
+    graph:
+      blocks:
+        - id: "gr::blocks::fileio::BasicFileSource<uint8>"
+          parameters:
+            name: file
+            file_name: "=file_name"
+        - id: "gr::blocks::digital::DelimiterExtractor<uint8>"
+          parameters:
+            name: extractor
+            end_delimiter: "11000000"
+            transparency: "byte_escape"
+            escape_item: !!uint32 219
+            escape_map: !!uint32 [220, 192, 221, 219]
+            bits_per_item: !!uint32 8
+            max_payload_items: "=max_payload_items"
+        - id: "gr::blocks::ax25::KissDecode"
+          parameters:
+            name: kiss
+            read_timestamp: "=read_timestamp"
+      connections:
+        - [file, 0, extractor, 0]
+        - [extractor, 0, kiss, 0]
+      exported_ports:
+        - [kiss, OUTPUT, out, out]
