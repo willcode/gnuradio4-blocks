@@ -9,6 +9,8 @@ add_subdirectory(basic)
 add_subdirectory(analog)
 add_subdirectory(channel)
 add_subdirectory(digital)
+# after digital, whose targets the AX.25 module's QA chains link against
+add_subdirectory(ax25)
 add_subdirectory(ccsds)
 add_subdirectory(p25)
 add_subdirectory(electrical)
