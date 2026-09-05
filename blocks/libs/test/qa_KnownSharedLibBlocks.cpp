@@ -102,6 +102,7 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::analog::QuadratureDemod<float32>"sv));
         expect(registry.contains("gr::blocks::analog::PowerSquelch<float32>"sv));
         expect(registry.contains("gr::blocks::analog::CtcssSquelch"sv));
+        expect(registry.contains("gr::blocks::basic::Throttle<float32>"sv));
         expect(registry.contains("gr::blocks::filter::fir_filter<float32>"sv));
         expect(registry.contains("gr::blocks::fourier::FFT<float32>"sv));
         // a stated name is the key a flowgraph file writes, and the block type it names binds every argument
