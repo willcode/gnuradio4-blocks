@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/RuntimeTest.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/algorithm/dataset/DataSetHelper.hpp>
@@ -201,6 +202,20 @@ template<typename T>
     return packet;
 }
 
+/// @brief A single-signal record of @p nSamples bytes, the length the acceptance pair's transmitter cuts.
+[[nodiscard]] Record<std::uint8_t> makeByteRecord(std::size_t nSamples, std::size_t offset) {
+    Record<std::uint8_t> record;
+    record.signal_values.resize(nSamples);
+    for (std::size_t j = 0UZ; j < nSamples; ++j) {
+        record.signal_values[j] = static_cast<std::uint8_t>((offset + j) & 0xFFUZ);
+    }
+    record.extents.push_back(static_cast<std::int32_t>(nSamples));
+    record.signal_names.emplace_back("payload");
+    record.meta_information.resize(1UZ);
+    record.timing_events.resize(1UZ);
+    return record;
+}
+
 // ─── readers ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 template<typename TValue>
@@ -250,6 +265,92 @@ template<typename T>
     std::ranges::sort(keys);
     return keys;
 }
+
+/// @brief The offsets at which a tag carrying @p key was published, in publication order.
+[[nodiscard]] std::vector<std::size_t> offsetsOf(std::span<const gr::Tag> tags, std::string_view key) {
+    std::vector<std::size_t> offsets;
+    for (const gr::Tag& tag : tags) {
+        if (hasKey(tag.map, key)) {
+            offsets.push_back(tag.index);
+        }
+    }
+    return offsets;
+}
+
+// ─── graph-side blocks, so that Packet<T> is exercised as a real port item and not only through a mock span ───────
+
+template<typename TItem>
+struct ItemSource : gr::Block<ItemSource<TItem>> {
+    gr::PortOut<TItem> out;
+    GR_MAKE_REFLECTABLE(ItemSource, out);
+
+    std::vector<TItem>   _items{};
+    std::vector<gr::Tag> _tags{}; ///< index is an absolute item index, ascending
+    std::size_t          _emitted = 0UZ;
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        const std::size_t nItems = std::min(outSpan.size(), _items.size() - _emitted);
+        for (std::size_t k = 0UZ; k < nItems; ++k) {
+            for (const gr::Tag& tag : _tags) {
+                if (tag.index == _emitted + k) {
+                    outSpan.publishTag(tag.map, k);
+                }
+            }
+            outSpan[k] = _items[_emitted + k];
+        }
+        _emitted += nItems;
+        outSpan.publish(nItems);
+        return _emitted >= _items.size() ? gr::work::Status::DONE : gr::work::Status::OK;
+    }
+};
+
+template<typename TItem>
+struct Collector : gr::Block<Collector<TItem>> {
+    gr::PortIn<TItem> in;
+    GR_MAKE_REFLECTABLE(Collector, in);
+
+    std::vector<TItem>   _items{};
+    std::vector<gr::Tag> _tags{};
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
+        for (const auto& [relIndex, tagMap] : inSpan.tags()) {
+            if (relIndex >= 0 && relIndex < static_cast<std::ptrdiff_t>(inSpan.size())) {
+                _tags.push_back(gr::Tag{_items.size() + static_cast<std::size_t>(relIndex), tagMap.get()});
+            }
+        }
+        for (std::size_t k = 0UZ; k < inSpan.size(); ++k) {
+            _items.push_back(inSpan[k]);
+        }
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
+
+/// @brief Flips one byte of one packet, which is what "corrupted in flight" is: the CRC field still states the
+/// original, so the damage is only visible to a receiver that recomputes.
+struct PacketCorrupter : gr::Block<PacketCorrupter> {
+    gr::PortIn<gr::Packet<std::uint8_t>>             in;
+    gr::PortOut<gr::Packet<std::uint8_t>, gr::Async> out;
+    GR_MAKE_REFLECTABLE(PacketCorrupter, in, out);
+
+    std::size_t _which = 0UZ; ///< the packet to damage, by arrival order
+    std::size_t _seen  = 0UZ;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
+        const std::size_t nItems = std::min(inSpan.size(), outSpan.size());
+        for (std::size_t k = 0UZ; k < nItems; ++k) {
+            gr::Packet<std::uint8_t> packet = inSpan[k];
+            if (_seen + k == _which && !packet.signal_values.empty()) {
+                packet.signal_values[0UZ] = static_cast<std::uint8_t>(packet.signal_values[0UZ] ^ 0xFFU);
+            }
+            outSpan[k] = std::move(packet);
+        }
+        _seen += nItems;
+        std::ignore = inSpan.consume(nItems);
+        outSpan.publish(nItems);
+        return gr::work::Status::OK;
+    }
+};
 
 } // namespace
 
@@ -707,6 +808,219 @@ const boost::ut::suite<"PacketToDataSet"> packetToDataSetTests = [] {
         check.template operator()<std::int32_t>();
         check.template operator()<float>();
         check.template operator()<std::complex<float>>();
+    };
+};
+
+// ─── under the scheduler: the round trip, the reject path and the gate's own chain ────────────────────────────────
+
+const boost::ut::suite<"PacketToDataSet under the scheduler"> schedulerTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::blocks::basic;
+
+    // criterion 4 — pinned for what survives, asserted as a difference for what does not, and a fixed point
+    "the round trip pins what survives and differs in what it cannot"_test = [] {
+        const auto roundTrip = []<typename T>() {
+            const std::string label = std::string(gr::meta::type_name<T>());
+
+            Record<T> original;
+            original.signal_values.resize(16UZ);
+            for (std::size_t j = 0UZ; j < 16UZ; ++j) {
+                original.signal_values[j] = sampleValue<T>(j + 1UZ);
+            }
+            original.extents.push_back(std::int32_t{16});
+            original.signal_names.emplace_back("payload");
+            original.signal_quantities.emplace_back("voltage");
+            original.signal_units.emplace_back("V");
+            original.signal_ranges.push_back(gr::Range<T>{sampleValue<T>(0UZ), sampleValue<T>(17UZ)});
+            original.timestamp     = 1724630400000000000LL;
+            original.default_value = sampleValue<T>(0UZ);
+            original.meta_information.resize(1UZ);
+            putMeta(original.meta_information[0UZ], "sample_rate", pmt::Value(48000.f));
+            putMeta(original.meta_information[0UZ], "sample_start", pmt::Value(std::uint64_t{4096ULL}));
+            putMeta(original.meta_information[0UZ], "n_pre", pmt::Value(gr::Size_t{3U}));
+            original.axis_names.emplace_back("time");
+            original.axis_units.emplace_back("s");
+            original.axis_values.resize(1UZ);
+            for (std::size_t j = 0UZ; j < 16UZ; ++j) {
+                original.axis_values[0UZ].push_back(sampleValue<T>(j));
+            }
+            original.timing_events.resize(1UZ);
+            for (std::size_t j = 0UZ; j < 3UZ; ++j) {
+                original.timing_events[0UZ].emplace_back(static_cast<std::ptrdiff_t>(j * 4UZ), property_map{});
+            }
+
+            Record<T> fourSignals;
+            fourSignals.signal_values.resize(4UZ * 8UZ);
+            for (std::size_t signal = 0UZ; signal < 4UZ; ++signal) {
+                fourSignals.signal_names.push_back(std::format("signal{}", signal));
+                fourSignals.meta_information.emplace_back();
+                fourSignals.timing_events.emplace_back();
+                for (std::size_t j = 0UZ; j < 8UZ; ++j) {
+                    fourSignals.signal_values[signal * 8UZ + j] = sampleValue<T>(100UZ * signal + j);
+                }
+            }
+            fourSignals.extents.push_back(std::int32_t{8});
+
+            gr::test::RuntimeTest test;
+            auto&                 source = test.emplace<ItemSource<gr::DataSet<T>>>();
+            source._items                = {original, fourSignals};
+            auto& forward                = test.emplace<DataSetToPacket<T>>();
+            auto& firstPacket            = test.emplace<Collector<gr::Packet<T>>>();
+            auto& back                   = test.emplace<PacketToDataSet<T>>();
+            auto& returned               = test.emplace<Collector<gr::DataSet<T>>>();
+            auto& again                  = test.emplace<DataSetToPacket<T>>();
+            auto& lastPacket             = test.emplace<Collector<gr::Packet<T>>>();
+
+            expect(test.connect(source, "out", forward, "in").has_value());
+            expect(test.connect(forward, "out", firstPacket, "in").has_value());
+            expect(test.connect(forward, "out", back, "in").has_value());
+            expect(test.connect(back, "out", returned, "in").has_value());
+            expect(test.connect(back, "out", again, "in").has_value());
+            expect(test.connect(again, "out", lastPacket, "in").has_value());
+
+            expect(test.run().has_value());
+
+            expect(eq(firstPacket._items.size(), 2UZ)) << label;
+            expect(eq(returned._items.size(), 2UZ)) << label;
+            expect(eq(lastPacket._items.size(), 2UZ)) << label;
+            if (returned._items.size() != 2UZ || firstPacket._items.size() != 2UZ || lastPacket._items.size() != 2UZ) {
+                return;
+            }
+
+            const gr::Packet<T>&  packet    = firstPacket._items.front();
+            const gr::DataSet<T>& reborn    = returned._items.front();
+            const property_map    packetMap = packet.meta_information.at(0UZ);
+            const property_map    rebornMap = reborn.meta_information.at(0UZ);
+
+            // ── pinned exactly ──
+            expect(std::ranges::equal(reborn.signal_values, original.signal_values)) << label << ": the payload, bit for bit";
+            expect(eq(reborn.timestamp, original.timestamp)) << label;
+            expect(eq(reborn.default_value, original.default_value)) << label;
+            expect(eq(reborn.extents.size(), 1UZ)) << label;
+            expect(eq(reborn.extents.front(), original.extents.front())) << label;
+            expect(eq(reborn.signal_names.front(), original.signal_names.front())) << label;
+            expect(eq(reborn.signal_quantities.size(), 1UZ)) << label;
+            expect(eq(reborn.signal_quantities.front(), original.signal_quantities.front())) << label;
+            expect(eq(reborn.signal_units.front(), original.signal_units.front())) << label;
+            expect(eq(reborn.signal_ranges.size(), 1UZ)) << label;
+            expect(eq(reborn.signal_ranges.front().min, original.signal_ranges.front().min)) << label;
+            expect(eq(reborn.signal_ranges.front().max, original.signal_ranges.front().max)) << label;
+            expect(std::ranges::equal(keysOf(rebornMap), keysOf(packetMap))) << label << ": every key the packet carried, and no other";
+            expect(eq(read<float>(rebornMap, "sample_rate").value_or(0.f), 48000.f)) << label;
+            expect(eq(read<std::uint64_t>(rebornMap, "sample_start").value_or(0ULL), std::uint64_t{4096ULL})) << label;
+            expect(eq(read<gr::Size_t>(rebornMap, "n_pre").value_or(0U), gr::Size_t{3U})) << label << ": a private key survives both crossings";
+
+            // ── asserted as a difference ──
+            expect(eq(reborn.timing_events.size(), 1UZ)) << label;
+            expect(reborn.timing_events.front().empty()) << label << ": the three annotations do not come back";
+            expect(eq(read<gr::Size_t>(rebornMap, "dropped_events").value_or(0U), gr::Size_t{3U})) << label << ": and the record says so, which is the whole point of the key";
+            expect(reborn.axis_names.empty()) << label << ": the axis is gone and is not rebuilt";
+            expect(reborn.axis_units.empty()) << label;
+            expect(reborn.axis_values.empty()) << label;
+            expect(eq(returned._items[1UZ].signal_names.size(), 1UZ)) << label << ": a four-signal record returns as one signal";
+            expect(eq(returned._items[1UZ].signal_values.size(), 8UZ)) << label;
+            for (std::size_t j = 0UZ; j < 8UZ; ++j) {
+                expect(eq(returned._items[1UZ].signal_values[j], sampleValue<T>(j))) << label << ": and it is signal 0, the other three appearing nowhere";
+            }
+
+            // ── the fixed point ──
+            expect(std::ranges::equal(keysOf(lastPacket._items.front().meta_information.at(0UZ)), keysOf(packetMap))) << label << ": packet to record to packet is the identity on the map";
+            expect(eq(read<float>(lastPacket._items.front().meta_information.at(0UZ), "sample_rate").value_or(0.f), 48000.f)) << label << ": route 1 again, never route 3";
+            expect(eq(again.nMetaKeysOverridden, 0ULL)) << label << ": nothing the second forward pass derived disagreed with what it copied";
+            expect(eq(back.nMetaKeysDropped, 0ULL)) << label;
+            expect(eq(back.nSignalNamesSynthesized, 0ULL)) << label << ": the record's own name came back";
+
+            // the produced record is admissible at both boundary blocks and by the framework's validator
+            expect(gr::dataset::checkConsistency(reborn).has_value()) << label << ": an axis-free record validates, which is the landed framing chain's shape too";
+        };
+        roundTrip.template operator()<std::uint8_t>();
+        roundTrip.template operator()<float>();
+    };
+
+    // criterion 10, runtime half
+    "a rejection reason reaches a sink on reject and does not survive one ordinary block"_test = [] {
+        const auto rejections = [](bool intervening) {
+            std::vector<gr::Packet<std::uint8_t>> packets;
+            gr::Packet<std::uint8_t>              noMap = makePacket<std::uint8_t>(4UZ);
+            noMap.meta_information.clear();
+            packets.push_back(std::move(noMap));
+            packets.push_back(makePacket<std::uint8_t>(4UZ));
+
+            gr::test::RuntimeTest test;
+            auto&                 source = test.emplace<ItemSource<gr::Packet<std::uint8_t>>>();
+            source._items                = packets;
+            auto& convert                = test.emplace<PacketToDataSet<std::uint8_t>>();
+            auto& records                = test.emplace<Collector<gr::DataSet<std::uint8_t>>>();
+            auto& refused                = test.emplace<Collector<gr::Packet<std::uint8_t>>>();
+
+            expect(test.connect(source, "out", convert, "in").has_value());
+            expect(test.connect(convert, "out", records, "in").has_value());
+            if (intervening) {
+                auto& hop = test.emplace<gr::blocks::testing::Copy<gr::Packet<std::uint8_t>>>();
+                expect(test.connect(convert, "reject", hop, "in").has_value());
+                expect(test.connect(hop, "out", refused, "in").has_value());
+            } else {
+                expect(test.connect(convert, "reject", refused, "in").has_value());
+            }
+
+            expect(test.run().has_value());
+            return std::pair<std::size_t, std::size_t>{refused._items.size(), offsetsOf(std::span<const Tag>(refused._tags), "discard_reason").size()};
+        };
+
+        const auto [directPackets, directReasons] = rejections(false);
+        expect(eq(directPackets, 1UZ)) << "the refused packet leaves by the reject port";
+        expect(eq(directReasons, 1UZ)) << "with its reason on a tag beside it";
+
+        const auto [hoppedPackets, hoppedReasons] = rejections(true);
+        expect(eq(hoppedPackets, 1UZ)) << "the packet itself survives the hop";
+        expect(eq(hoppedReasons, 0UZ)) << "discard_reason is not a reserved key, so the default forwarder drops it";
+    };
+
+    // criterion 11 — the acceptance gate's own chain, in one process, with the leg that could not be built before
+    "a payload corrupted in flight leaves by CrcCheck's fail port, exactly once"_test = [] {
+        constexpr std::size_t kRecords     = 4UZ;
+        constexpr std::size_t kRecordBytes = 250UZ;
+        constexpr std::size_t kPacketBytes = kRecordBytes + 4UZ;
+
+        std::vector<gr::DataSet<std::uint8_t>> records;
+        for (std::size_t k = 0UZ; k < kRecords; ++k) {
+            records.push_back(makeByteRecord(kRecordBytes, k * kRecordBytes));
+        }
+
+        gr::test::RuntimeTest test;
+        auto&                 source = test.emplace<ItemSource<gr::DataSet<std::uint8_t>>>();
+        source._items                = records;
+        auto& appender               = test.emplace<gr::blocks::digital::CrcAppend>({{"width", gr::Size_t{32U}}, {"crc_byte_order", std::string("big")}});
+        auto& forward                = test.emplace<DataSetToPacket<std::uint8_t>>({{"protocol_label", std::string("packet_link")}});
+        auto& damage                 = test.emplace<PacketCorrupter>();
+        damage._which                = kRecords - 1UZ;
+        auto& back                   = test.emplace<PacketToDataSet<std::uint8_t>>();
+        auto& checker                = test.emplace<gr::blocks::digital::CrcCheck>({{"width", gr::Size_t{32U}}, {"crc_byte_order", std::string("big")}});
+        auto& verified               = test.emplace<Collector<gr::DataSet<std::uint8_t>>>();
+        auto& failed                 = test.emplace<Collector<gr::DataSet<std::uint8_t>>>();
+
+        expect(test.connect(source, "out", appender, "in").has_value());
+        expect(test.connect(appender, "out", forward, "in").has_value());
+        expect(test.connect(forward, "out", damage, "in").has_value());
+        expect(test.connect(damage, "out", back, "in").has_value());
+        expect(test.connect(back, "out", checker, "in").has_value());
+        expect(test.connect(checker, "ok", verified, "in").has_value());
+        expect(test.connect(checker, "fail", failed, "in").has_value());
+
+        expect(test.run().has_value());
+
+        expect(eq(verified._items.size(), kRecords - 1UZ)) << "the intact records verify";
+        expect(eq(failed._items.size(), 1UZ)) << "and the corrupted one leaves by the fail port, counted once";
+        expect(eq(back.nRejectedPackets, 0ULL)) << "nothing about the damage makes the packet inconvertible";
+
+        for (const gr::DataSet<std::uint8_t>& record : verified._items) {
+            expect(eq(record.signal_values.size(), kPacketBytes));
+            expect(eq(read<bool>(record.meta_information.at(0UZ), "crc_ok").value_or(false), true));
+        }
+        expect(eq(failed._items.front().signal_values.size(), kPacketBytes));
+        expect(eq(read<bool>(failed._items.front().meta_information.at(0UZ), "crc_ok").value_or(true), false)) << "the record says why it failed";
+        expect(eq(failed._items.front().signal_values.front(), static_cast<std::uint8_t>(records.back().signal_values.front() ^ 0xFFU))) << "and it carries the damage rather than hiding it";
     };
 };
 

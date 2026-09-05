@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/RuntimeTest.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/algorithm/dataset/DataSetHelper.hpp>
@@ -916,6 +917,139 @@ const boost::ut::suite<"DataSetToStream"> dataSetToStreamTests = [] {
             expect(!hasKey(mapAt(capture.tags, 0UZ), "signal_min"));
             expect(!hasKey(mapAt(capture.tags, 0UZ), "signal_max"));
         }
+    };
+};
+
+// ─── scheduler-driven: criteria 2, 3 and 9 ────────────────────────────────────────────────────────────────────────
+// StreamToDataSet inspects only tags at relative index 0, its input_chunk_size being 1, so a hand-driven span that
+// hands it a tag mid-window tests nothing. These run under the scheduler for that reason.
+
+namespace {
+
+constexpr float       kRoundTripRate = 1'000.f;
+constexpr gr::Size_t  kRoundTripN    = 2048U;
+constexpr std::size_t kTrigger[]{200UZ, 1200UZ};
+
+[[nodiscard]] gr::Tag triggerTag(std::size_t index) {
+    return {index, {{gr::tag::TRIGGER_NAME.shortKey(), std::string("CAPTURE")}, //
+                       {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t{1ULL}}, //
+                       {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},               //
+                       {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}};
+}
+
+[[nodiscard]] gr::Tag plainTag(std::size_t index, std::string label) { return {index, {{"planted", std::move(label)}}}; }
+
+/// @brief `source -> StreamToDataSet -> DataSetToStream -> sink`, run to completion.
+template<typename T>
+struct RoundTrip {
+    std::vector<T>       samples{};
+    std::vector<gr::Tag> tags{};
+};
+
+template<typename T>
+[[nodiscard]] RoundTrip<T> roundTrip(gr::Size_t nPre, gr::Size_t nPost, std::span<const gr::Tag> plantedTags) {
+    using namespace boost::ut;
+    gr::test::RuntimeTest test;
+
+    auto& source = test.emplace<gr::blocks::testing::TagSource<T, gr::blocks::testing::ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", kRoundTripRate}, {"n_samples_max", kRoundTripN}, {"name", "source"}, {"mark_tag", false}, {"repeat_tags", false}, {"verbose_console", false}});
+    source._tags = std::vector<gr::Tag>(plantedTags.begin(), plantedTags.end());
+
+    auto& extractor = test.emplace<gr::blocks::basic::StreamToDataSet<T>>({{"filter", std::string("CAPTURE")}, {"n_pre", nPre}, {"n_post", nPost}, {"sample_rate", kRoundTripRate}});
+    auto& restream  = test.emplace<gr::blocks::basic::DataSetToStream<T>>({{"boundary_label", std::string("record")}});
+    auto& sink      = test.emplace<gr::blocks::testing::TagSink<T, gr::blocks::testing::ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
+
+    expect(test.connect(source, "out", extractor, "in").has_value());
+    expect(test.connect(extractor, "out", restream, "in").has_value());
+    expect(test.connect(restream, "out", sink, "in").has_value());
+
+    expect(test.run().has_value());
+
+    RoundTrip<T> result;
+    result.samples.assign(sink._samples.begin(), sink._samples.end());
+    result.tags = sink._tags;
+    return result;
+}
+
+} // namespace
+
+const boost::ut::suite<"DataSetToStream round trip"> roundTripTests = [] {
+    using namespace boost::ut;
+    using namespace gr;
+    using namespace gr::blocks::testing;
+
+    // criterion 2 — StreamToDataSet -> DataSetToStream, per record, as an integer identity
+    "a captured window comes back with its tags at o + (p - s)"_test = [] {
+        const auto check = []<typename T>(gr::Size_t nPre, gr::Size_t nPost) {
+            std::vector<Tag> planted{plainTag(kTrigger[0UZ] - 4UZ, "pre0"), triggerTag(kTrigger[0UZ]), plainTag(kTrigger[0UZ] + 3UZ, "in0"), //
+                plainTag(kTrigger[1UZ] - 4UZ, "pre1"), triggerTag(kTrigger[1UZ]), plainTag(kTrigger[1UZ] + 3UZ, "in1")};
+            std::ranges::sort(planted, {}, &Tag::index);
+
+            const RoundTrip<T> result = roundTrip<T>(nPre, nPost, std::span<const Tag>(planted));
+            const std::size_t  length = static_cast<std::size_t>(nPre) + static_cast<std::size_t>(nPost);
+            const std::string  label  = std::format("{} n_pre={} n_post={}", gr::meta::type_name<T>(), nPre, nPost);
+
+            expect(eq(result.samples.size(), 2UZ * length)) << label << ": two windows, concatenated";
+            for (std::size_t record = 0UZ; record < 2UZ; ++record) {
+                const std::size_t first  = kTrigger[record] - static_cast<std::size_t>(nPre); // s
+                const std::size_t origin = record * length;                                   // o
+                for (std::size_t j = 0UZ; j < length; ++j) {
+                    expect(eq(result.samples[origin + j], sampleValue<T>(first + j))) << label << std::format(": record {} sample {}", record, j);
+                }
+                const std::size_t              inside         = kTrigger[record] + 3UZ; // p, a planted non-trigger tag inside the window
+                const std::vector<std::size_t> plantedOffsets = offsetsOf(std::span<const Tag>(result.tags), "planted");
+                expect(that % (std::ranges::find(plantedOffsets, origin + (inside - first)) != plantedOffsets.end())) << label << std::format(": record {} tag at o + (p - s) = {}", record, origin + (inside - first));
+                // StreamToDataSet writes no trigger_name into meta_information, so this chain's records do not name
+                // their own detector and the boundary_label is what the boundary is called. A producer that does
+                // write the key keeps it, which is the case below in the metadata-collision test.
+                expect(eq(readString(mapAt(std::span<const Tag>(result.tags), origin), "trigger_name").value_or(""), std::string("record"))) << label;
+                expect(eq(read<gr::Size_t>(mapAt(std::span<const Tag>(result.tags), origin), "dataset_length").value_or(0U), static_cast<gr::Size_t>(length))) << label;
+            }
+        };
+        check.template operator()<float>(0U, 64U);
+        check.template operator()<float>(8U, 64U);
+        check.template operator()<float>(8U, 800U);
+        check.template operator()<std::uint8_t>(0U, 64U);
+        check.template operator()<std::uint8_t>(8U, 64U);
+    };
+
+    // criterion 3 — the round trip's limits, asserted as differences
+    "what is between two windows does not come back"_test = [] {
+        const std::size_t between = (kTrigger[0UZ] + kTrigger[1UZ]) / 2UZ;
+        std::vector<Tag>  planted{triggerTag(kTrigger[0UZ]), plainTag(between, "between"), triggerTag(kTrigger[1UZ])};
+        std::ranges::sort(planted, {}, &Tag::index);
+
+        const RoundTrip<float> result = roundTrip<float>(0U, 64U, std::span<const Tag>(planted));
+        expect(eq(result.samples.size(), 128UZ)) << "exactly the sum of the two windows";
+        expect(lt(result.samples.size(), static_cast<std::size_t>(kRoundTripN))) << "the concatenated output is not the input";
+        expect(that % (offsetsOf(std::span<const Tag>(result.tags), "between") == std::vector<std::size_t>{})) << "a tag between the windows has no sample to attach to";
+        expect(eq(result.samples.front(), sampleValue<float>(kTrigger[0UZ]))) << "and the output starts at 0, not at the input's absolute offset";
+    };
+
+    // criterion 9, runtime half — a reserved key survives one default forwarder and a non-reserved one does not
+    "one ordinary block downstream keeps the reserved keys only"_test = [] {
+        gr::test::RuntimeTest test;
+
+        auto& source = test.emplace<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", kRoundTripRate}, {"n_samples_max", kRoundTripN}, {"name", "source"}, {"mark_tag", false}, {"repeat_tags", false}});
+        source._tags = {triggerTag(kTrigger[0UZ])};
+
+        auto& extractor = test.emplace<gr::blocks::basic::StreamToDataSet<float>>({{"filter", std::string("CAPTURE")}, {"n_pre", gr::Size_t{0U}}, {"n_post", gr::Size_t{64U}}, {"sample_rate", kRoundTripRate}});
+        auto& restream  = test.emplace<gr::blocks::basic::DataSetToStream<float>>();
+        auto& passing   = test.emplace<builtin_multiply<float>>({{"factor", 1.f}});
+        auto& sink      = test.emplace<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "sink"}, {"log_tags", true}, {"log_samples", true}});
+
+        expect(test.connect(source, "out", extractor, "in").has_value());
+        expect(test.connect(extractor, "out", restream, "in").has_value());
+        expect(test.connect(restream, "out", passing, "in").has_value());
+        expect(test.connect(passing, "out", sink, "in").has_value());
+
+        expect(test.run().has_value());
+
+        expect(eq(sink._samples.size(), 64UZ));
+        expect(!sink._tags.empty());
+        const std::vector<std::size_t> rateOffsets   = offsetsOf(std::span<const Tag>(sink._tags), "sample_rate");
+        const std::vector<std::size_t> lengthOffsets = offsetsOf(std::span<const Tag>(sink._tags), "dataset_length");
+        expect(!rateOffsets.empty()) << "sample_rate is in kDefaultTags and survives the default forwarder";
+        expect(that % (lengthOffsets == std::vector<std::size_t>{})) << "dataset_length is not, and does not";
     };
 };
 
