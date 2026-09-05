@@ -1,4 +1,7 @@
 
+add_ut_test(qa_BitPacking)
+target_link_libraries(qa_BitPacking PRIVATE gr-digital gr-testing)
+
 add_ut_test(qa_ConstellationBlocks)
 target_link_libraries(qa_ConstellationBlocks PRIVATE gr-digital gr-testing)
 
