@@ -1,0 +1,96 @@
+# gr::recipes::FskDemodAudio — two-level FSK from a stream that is ALREADY a discriminator's output.
+#
+# The arm for audio: what a communications receiver's FM detector, or a soundcard recording of one, hands you is the
+# instantaneous frequency of the signal, which is the very stream `FskDemod`'s discriminator produces. Everything ahead
+# of that point has happened elsewhere, so this recipe is `FskDemod`'s tail — the post-detection lowpass, timing
+# recovery and the slicer — and nothing else. It is a sibling rather than a parameter because it drops two blocks, and
+# the recipe dialect has no conditionals.
+#
+# The derivations it saves are `FskDemod`'s own, minus the discriminator gain, which belongs to whatever detector
+# produced this stream:
+#
+#   post-detection cutoff = lowpass_bandwidth * symbol_rate, transition half of it
+#   samples per symbol    = sample_rate / symbol_rate
+#
+# There is therefore no `modulation_index` here, and no deviation. The gain that would have scaled the phase advance
+# onto the PAM grid was applied by whatever detector produced this stream, at a scale this recipe cannot know — so the
+# input arrives at an arbitrary amplitude. At two levels that costs nothing: `PamSlicer` puts the only threshold of a
+# two-level grid at zero, so the decision is the sign of the sample and any positive scaling of the input gives the
+# same labels. THE POLARITY IS THE SOURCE'S. A detector whose higher tone carries the zero delivers this stream
+# inverted, and a receiver of that link inverts it back downstream or reads a framing layer that resolves it; nothing
+# here can tell, because the tone pair is not visible in a stream that has already been detected.
+#
+# What this arm cannot do is remove a DC offset. A residual carrier offset at the detector becomes a constant added to
+# every sample, and past half a level every symbol decides wrong; `FskDemodDcBlock` is the arm that removes it, and it
+# needs the discriminator this one does not have. A link with a frequency error therefore blocks DC ahead of this
+# recipe or lives inside the margin.
+#
+# `lowpass_bandwidth` defaults to 0.5, which is the NOISE-optimal post-detection cutoff and not the timing-optimal one.
+# A Gardner or Mueller-and-Muller detector rides the spectral component at the symbol rate, whose amplitude is the
+# overlap of the received pulse's spectrum with itself shifted by Rs -- so it comes entirely from energy above Rs/2. A
+# cutoff at exactly Rs/2 with a transition of Rs/4 leaves the loop a narrow slice of transition band to steer by: for
+# this 65-tap design the overlap integral normalized by the filter's energy is 0.000 at a cutoff of 0.40 Rs, 0.032 at
+# 0.50 and 0.347 at 0.75. A weak capture whose timing loop will not lock is therefore worth reading again at 0.75,
+# which costs noise and buys timing line; which trade a link wants is the link's, and the default takes neither side
+# beyond the conventional one.
+#
+# 9600-baud G3RUH packet radio, the largest population this arm serves, worked through as documentation and NOT as
+# defaults: 9600 Bd from a 48 kHz recording is exactly five samples per symbol, the post-detection cutoff sits at 4800
+# Hz, and the scrambler and the framing that follow are the caller's. `sample_rate` and `symbol_rate` are required, on
+# the family's rule that a general recipe demands what every link differs in.
+#
+# A detected real stream at sample_rate in, one label per symbol out.
+definition_metadata:
+  block_type: gr::recipes::FskDemodAudio
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: fsk_demod_audio
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "input sample rate in hertz; required"
+      - name: symbol_rate
+        type: float32
+        doc: "symbol rate in hertz; required"
+      - name: lowpass_bandwidth
+        type: float64
+        default: !!float64 0.5
+        doc: "cutoff of the post-detection lowpass, as a multiple of the symbol rate"
+      - name: noise_bandwidth
+        type: float64
+        default: !!float64 0.002
+        doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
+      - name: detector
+        type: string
+        default: "mueller_muller"
+        doc: "timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"
+    graph:
+      blocks:
+        - id: "gr::blocks::filter::DesignedFilter<float32, float32>"
+          parameters:
+            name: lowpass
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=lowpass_bandwidth * symbol_rate"
+            transition_width: "=0.5 * lowpass_bandwidth * symbol_rate"
+        - id: "gr::blocks::sync::SymbolSync<float32>"
+          parameters:
+            name: timing
+            samples_per_symbol: "=sample_rate / symbol_rate"
+            noise_bandwidth: "=noise_bandwidth"
+            detector: "=detector"
+        - id: "gr::blocks::digital::PamSlicer<float32>"
+          parameters:
+            name: slicer
+            n_levels: !!uint32 2
+      connections:
+        - [lowpass, 0, timing, 0]
+        - [timing, 0, slicer, 0]
+      exported_ports:
+        - [lowpass, INPUT, in, in]
+        - [slicer, OUTPUT, out, out]
