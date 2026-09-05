@@ -1,0 +1,47 @@
+# gr::recipes::SampleClockOffset — sampling-clock frequency error, stated in parts per million.
+#
+# Two radios never agree on the sample rate exactly. A receiver whose clock runs `ppm` parts
+# per million fast reads the transmitter's stream slightly compressed in time, which shows up
+# downstream as a symbol-timing drift the recovery loop has to track. The model is a
+# resampling by 1 + ppm*1e-6: positive ppm produces more output samples than input, the
+# receiver-runs-fast convention.
+#
+# The derivation this recipe saves is small but the machinery behind it is not. Rate changes
+# have to re-origin tags — a tag's sample offset means something different on either side of a
+# resampler — and ArbitraryResampler already carries that, along with the fixed-point phase
+# whose realized ratio is exact and does not drift. Expressing the impairment as a rate leaves
+# all of it in one place.
+#
+# Complex baseband in, complex baseband out. The realized ratio is what the resampler's
+# fixed-point step can represent, which for the small offsets this models is the requested one
+# to well past the precision a clock is specified to.
+definition_metadata:
+  block_type: gr::recipes::SampleClockOffset
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-08-31"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: sample_clock_offset
+    exported_parameters:
+      - name: ppm
+        type: float64
+        default: !!float64 0.0
+        doc: "clock error in parts per million; positive means this clock runs fast and emits more samples than it takes"
+      - name: attenuation_db
+        type: float32
+        default: !!float32 60.0
+        doc: "stopband target of the resampler's designed prototype, and what its polyphase bank is sized against"
+    graph:
+      blocks:
+        - id: "gr::blocks::filter::ArbitraryResampler<complex<float32>>"
+          parameters:
+            name: clock
+            rate: "=1 + ppm * 1e-6"
+            attenuation_db: "=attenuation_db"
+      connections: []
+      exported_ports:
+        - [clock, INPUT, in, in]
+        - [clock, OUTPUT, out, out]

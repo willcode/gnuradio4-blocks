@@ -6,3 +6,7 @@ assets:
     created: "2026-08-28-00:00:00"
     modified: "2026-08-29-00:00:00"
     block_type: gr::recipes::NbfmDemod
+  - file: SampleClockOffset.yaml
+    created: "2026-08-31-00:00:00"
+    modified: "2026-08-31-00:00:00"
+    block_type: gr::recipes::SampleClockOffset
