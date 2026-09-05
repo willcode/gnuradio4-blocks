@@ -180,6 +180,9 @@ if(GR4_ENABLE_SDR)
   find_package(SoapySDR CONFIG QUIET)
 endif()
 
+if(GR4_ENABLE_NETWORK)
+endif()
+
 if(GR4_ENABLE_AUDIO AND NOT EMSCRIPTEN)
   # the audio family's backend links gnuradio4::gr-libsoundio, which nothing else defines. libsoundio ships no
   # pkg-config file, so it is found by library and header and wrapped here; under Emscripten the family uses its own
@@ -202,6 +205,23 @@ if(ENABLE_TESTING)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/GnuRadioTestHelpers.cmake)
   add_test(NAME qa_BlockNamespaceConsistency COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR} -P
                                                      ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckBlockNamespaces.cmake)
+
+  # the sweep reads dynamic symbol tables, so it needs nm and a build that produces shared libraries
+  find_program(GR4_NM_EXECUTABLE NAMES nm)
+  set(_gr4_sweep_plugin_symbols ON)
+  if(NOT GR4_NM_EXECUTABLE OR EMSCRIPTEN)
+    set(_gr4_sweep_plugin_symbols OFF)
+  endif()
+  if(DEFINED GR_BLOCKLIB_BUILD_LIBS AND NOT GR_BLOCKLIB_BUILD_LIBS)
+    set(_gr4_sweep_plugin_symbols OFF)
+  endif()
+  if(_gr4_sweep_plugin_symbols)
+    add_test(
+      NAME qa_PluginInitSymbols
+      COMMAND
+        ${CMAKE_COMMAND} -DPLUGIN_ROOT=${CMAKE_BINARY_DIR}/blocks -DNM_EXECUTABLE=${GR4_NM_EXECUTABLE}
+        -DLIBRARY_SUFFIX=${CMAKE_SHARED_LIBRARY_SUFFIX} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPluginSymbols.cmake)
+  endif()
 endif()
 
 add_subdirectory(bench)
