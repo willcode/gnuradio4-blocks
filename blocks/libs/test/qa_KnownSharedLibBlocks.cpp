@@ -112,6 +112,8 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::sync::SymbolSync<float32>"sv));
         expect(registry.contains("gr::blocks::sync::PreambleTiming<float32>"sv));
         expect(registry.contains("gr::blocks::digital::PamSlicer<float32>"sv));
+        expect(registry.contains("gr::blocks::analog::PowerSquelch<float32>"sv));
+        expect(registry.contains("gr::blocks::analog::CtcssSquelch"sv));
         expect(registry.contains("gr::blocks::sync::PllCarrierTracking"sv));
         expect(registry.contains("gr::blocks::sync::PllFreqDet"sv));
         expect(registry.contains("gr::blocks::sync::PllRefOut"sv));
