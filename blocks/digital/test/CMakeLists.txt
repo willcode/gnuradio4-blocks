@@ -47,6 +47,17 @@ target_link_libraries(qa_PacketFramer PRIVATE gr-digital gr-testing)
 add_ut_test(qa_PpmFramer)
 target_link_libraries(qa_PpmFramer PRIVATE gr-digital gr-testing)
 
+# the recorded-air leg, in its own executable because exit 77 is a whole binary's status: folded into qa_PpmFramer an
+# absent capture would skip the synthetic gate with it
+add_ut_test(qa_PpmRecording)
+target_link_libraries(qa_PpmRecording PRIVATE gr-digital gr-testing)
+set_tests_properties(
+  qa_PpmRecording
+  PROPERTIES SKIP_RETURN_CODE
+             77
+             ENVIRONMENT
+             "GR4_RECORDINGS_DIR=${GR4_RECORDINGS_DIR}")
+
 add_ut_test(qa_PreambleCorrelator)
 target_link_libraries(qa_PreambleCorrelator PRIVATE gr-digital gr-testing)
 
