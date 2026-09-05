@@ -30,6 +30,7 @@ target_link_libraries(qa_DataSetToPacket PRIVATE gr-digital)
 add_basic_test(qa_PacketToDataSet)
 # the chain case runs the converted records into CrcCheck, so it needs the digital headers too
 target_link_libraries(qa_PacketToDataSet PRIVATE gr-digital)
+add_basic_test(qa_ChunkReassembler)
 add_basic_test(qa_RecordUtils)
 add_basic_test(qa_SyncBlock)
 
