@@ -11,6 +11,7 @@ target_link_libraries(
           gnuradio4::GrFecBlocksShared
           gnuradio4::GrFilterBlocksShared
           gnuradio4::GrMathBlocksShared
+          gnuradio4::GrOfdmBlocksShared
           gnuradio4::GrSyncBlocksShared)
 target_include_directories(qa_Recipes PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../tools"
                                               "${CMAKE_CURRENT_SOURCE_DIR}/../include")

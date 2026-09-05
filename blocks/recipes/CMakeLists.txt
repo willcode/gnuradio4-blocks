@@ -14,6 +14,8 @@ install(
         FskDemodDcBlock.yaml
         HdlcDeframe.yaml
         NbfmDemod.yaml
+        OfdmDemodulator.yaml
+        OfdmModulator.yaml
         SampleClockOffset.yaml
         WbfmMonoDemod.yaml
   DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio-4.0/recipes")
