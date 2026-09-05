@@ -17,6 +17,7 @@ gr_add_block_library(
   include/gnuradio-4.0/channel/Converter.hpp
   include/gnuradio-4.0/channel/DopplerShift.hpp
   include/gnuradio-4.0/channel/Multipath.hpp
+  include/gnuradio-4.0/channel/RangeDelay.hpp
   LINK_LIBRARIES
   gr-channel)
 
