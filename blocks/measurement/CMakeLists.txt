@@ -12,6 +12,8 @@ gr_add_block_library(
   MAKE_SHARED_LIBRARY
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
+  include/gnuradio-4.0/measurement/Detectors.hpp
+  include/gnuradio-4.0/measurement/OccupiedBandwidth.hpp
   include/gnuradio-4.0/measurement/SpectralEstimate.hpp
   LINK_LIBRARIES
   gr-measurement)
@@ -19,3 +21,5 @@ gr_add_block_library(
 if(ENABLE_TESTING)
   add_subdirectory(test)
 endif()
+
+add_subdirectory(bench)
