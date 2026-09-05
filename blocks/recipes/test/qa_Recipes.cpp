@@ -64,6 +64,8 @@ std::vector<std::string> exportedNames(const gr::property_map& portsMap) {
 
 [[nodiscard]] double numericOf(const gr::pmt::Value& value) { return gr::recipe::detail::doubleOf(value).value_or(0.0); }
 
+[[nodiscard]] std::string stringOf(const gr::pmt::Value& value) { return std::string(value.value_or(std::string_view{})); }
+
 } // namespace
 
 const boost::ut::suite<"recipes"> RecipeTests = [] {
@@ -183,6 +185,139 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         expect(rateIt != staged.end()) << "the re-derived rate is staged";
         if (rateIt != staged.end()) {
             expect(eq(numericOf(rateIt->second), 1.0 - 50.0e-6)) << "a slow clock resamples below unity";
+        }
+    };
+
+    "FskDemod demands the link's own numbers, derives the discriminator gain, and re-derives live"_test = [] {
+        auto loader = makeRecipeLoader();
+
+        auto bare = loader.instantiate("gr::recipes::FskDemod");
+        expect(bare == nullptr) << "the general recipe must not instantiate with hidden defaults";
+
+        constexpr double kSampleRate      = 48000.0;
+        constexpr double kSymbolRate      = 4800.0;
+        constexpr double kModulationIndex = 0.5;
+
+        gr::property_map parameters;
+        parameters["sample_rate"]      = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"]      = static_cast<float>(kSymbolRate);
+        parameters["modulation_index"] = kModulationIndex;
+        auto composite                 = loader.instantiate("gr::recipes::FskDemod", parameters);
+        expect(composite != nullptr) << "instantiate with the required parameters";
+        if (composite == nullptr) {
+            return;
+        }
+
+        const auto inputs  = exportedNames(composite->exportedInputPorts());
+        const auto outputs = exportedNames(composite->exportedOutputPorts());
+        expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ));
+        expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end());
+
+        const auto discriminator = interiorByName(composite, "discriminator");
+        expect(discriminator != nullptr);
+        if (discriminator != nullptr) {
+            const auto gain = discriminator->settings().get("gain");
+            expect(gain.has_value());
+            if (gain.has_value()) {
+                expect(eq(static_cast<float>(numericOf(*gain)), static_cast<float>(kSampleRate / (kSymbolRate * std::numbers::pi * kModulationIndex)))) << "the gain hands the transmitted PAM grid back";
+            }
+        }
+
+        const auto timing = interiorByName(composite, "timing");
+        expect(timing != nullptr);
+        if (timing != nullptr) {
+            const auto sps = timing->settings().get("samples_per_symbol");
+            expect(sps.has_value());
+            if (sps.has_value()) {
+                expect(eq(numericOf(*sps), kSampleRate / kSymbolRate)) << "timing recovery runs at the rate the link states";
+            }
+            const auto detector = timing->settings().get("detector");
+            expect(detector.has_value());
+            if (detector.has_value()) {
+                expect(eq(stringOf(*detector), std::string("mueller_muller"))) << "a string parameter left at its default is substituted like any other";
+            }
+        }
+
+        const auto channel = interiorByName(composite, "channel");
+        expect(channel != nullptr);
+        if (channel != nullptr) {
+            const auto cutoff = channel->settings().get("cutoff");
+            expect(cutoff.has_value());
+            if (cutoff.has_value()) {
+                expect(eq(numericOf(*cutoff), 0.6 * kSymbolRate)) << "the filter ahead of the discriminator is what keeps it above the click threshold";
+            }
+        }
+
+        const auto lowpass = interiorByName(composite, "lowpass");
+        expect(lowpass != nullptr);
+        if (lowpass != nullptr) {
+            const auto cutoff = lowpass->settings().get("cutoff");
+            expect(cutoff.has_value());
+            if (cutoff.has_value()) {
+                expect(eq(numericOf(*cutoff), 0.5 * kSymbolRate)) << "the post-detection lowpass passes half a symbol rate";
+            }
+        }
+
+        const auto slicer = interiorByName(composite, "slicer");
+        expect(slicer != nullptr);
+        if (slicer != nullptr) {
+            const auto levels = slicer->settings().get("n_levels");
+            expect(levels.has_value());
+            if (levels.has_value()) {
+                expect(eq(numericOf(*levels), 2.0)) << "two levels is the defaulted grid";
+            }
+        }
+
+        auto* wrapper = dynamic_cast<gr::GraphWrapper<gr::Graph>*>(composite.get());
+        expect(wrapper != nullptr);
+        if (wrapper == nullptr) {
+            return;
+        }
+        gr::property_map change;
+        change["modulation_index"] = 1.0;
+        change["detector"]         = std::pmr::string("gardner");
+        const auto applied         = wrapper->applyRecipeParameters(change);
+        expect(applied.has_value()) << (applied.has_value() ? "" : applied.error().message);
+        if (discriminator != nullptr) {
+            const auto staged = discriminator->settings().stagedParameters();
+            const auto gainIt = staged.find("gain");
+            expect(gainIt != staged.end()) << "the re-derived gain is staged";
+            if (gainIt != staged.end()) {
+                expect(eq(static_cast<float>(numericOf(gainIt->second)), static_cast<float>(kSampleRate / (kSymbolRate * std::numbers::pi * 1.0)))) << "doubling the index halves the gain, live";
+            }
+        }
+        if (timing != nullptr) {
+            const auto staged     = timing->settings().stagedParameters();
+            const auto detectorIt = staged.find("detector");
+            expect(detectorIt != staged.end()) << "the re-substituted detector is staged";
+            if (detectorIt != staged.end()) {
+                expect(eq(stringOf(detectorIt->second), std::string("gardner"))) << "a string parameter re-substitutes live, like a derived number";
+            }
+        }
+    };
+
+    "FskDemod takes the timing detector it is given, a string carried through by substitution"_test = [] {
+        auto loader = makeRecipeLoader();
+
+        gr::property_map parameters;
+        parameters["sample_rate"]      = 48000.f;
+        parameters["symbol_rate"]      = 4800.f;
+        parameters["modulation_index"] = 0.5;
+        parameters["detector"]         = std::pmr::string("zero_crossing");
+        auto composite                 = loader.instantiate("gr::recipes::FskDemod", parameters);
+        expect(composite != nullptr) << "a named detector must instantiate";
+        if (composite == nullptr) {
+            return;
+        }
+
+        const auto timing = interiorByName(composite, "timing");
+        expect(timing != nullptr);
+        if (timing != nullptr) {
+            const auto detector = timing->settings().get("detector");
+            expect(detector.has_value());
+            if (detector.has_value()) {
+                expect(eq(stringOf(*detector), std::string("zero_crossing"))) << "the interior block takes the spelling the caller gave";
+            }
         }
     };
 

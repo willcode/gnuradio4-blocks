@@ -1,7 +1,16 @@
 # The recipe index. The YAML-definitions loader reads this file to learn which recipe
 # definitions this directory ships; a recipe absent from the index does not exist to a
 # loader, however present its file is.
+#
+# The `modified` stamp records when a definition last changed. A loader reads a definition
+# that is on disk at every load, so an edit here reaches the generator, the tests and any
+# consumer immediately and the stamp gates nothing. Bump it with every edit even so: it is
+# what a remote catalog of these recipes is served against, and it is the only account of
+# the definition's age a reader has.
 assets:
+  - file: FskDemod.yaml
+    created: "2026-08-31-00:00:00"
+    block_type: gr::recipes::FskDemod
   - file: NbfmDemod.yaml
     created: "2026-08-28-00:00:00"
     modified: "2026-08-29-00:00:00"

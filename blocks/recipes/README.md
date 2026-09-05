@@ -12,6 +12,22 @@ Each recipe is one file in the core's YAML-definitions form: a `definition_metad
 header naming the `block_type`, and a single `SUBGRAPH` block whose `graph` lists the
 interior blocks by registry id, their `connections`, and the `exported_ports` that become
 the composite's own ports. `index.yaml` in this directory is the loader's catalog; a
+recipe ships by appearing there, and its `modified` stamp should be bumped with every
+edit so the catalog keeps an honest account of each definition's age. A loader reads a
+definition that is on disk at every load, so the edit itself reaches the generator and
+the tests immediately.
+
+A recipe may declare `exported_parameters` on its `SUBGRAPH`: named, typed values with a
+`doc` and an optional `default`, which become the composite's own settings. One without a
+default is required, and instantiating the recipe without it is refused by name. An
+interior setting written as `=...` is bound to them — a numeric parameter through an
+arithmetic expression, so a derivation is written where it can be read and re-derived
+whenever a parameter changes; a string- or vector-typed parameter by substitution alone,
+`=name` handing the value through as it stands, because there is no arithmetic to do on
+one. A literal beginning with `=` is written `\=`.
+
+The derivations themselves belong in the file's header comment: a recipe pins the numbers
+*and* shows where they came from, so a reader can build a variant instead of guessing.
 
 ## Reaching recipes from code
 
