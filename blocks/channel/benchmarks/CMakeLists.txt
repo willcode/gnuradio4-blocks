@@ -12,5 +12,6 @@ function(add_channel_benchmark BM_NAME)
 endfunction()
 
 add_channel_benchmark(bm_ChannelImpairments)
+add_channel_benchmark(bm_DopplerShift)
 add_channel_benchmark(bm_Fading)
 add_channel_benchmark(bm_FrequencyOffset)
