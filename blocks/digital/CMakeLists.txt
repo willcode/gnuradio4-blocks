@@ -15,6 +15,8 @@ gr_add_block_library(
   include/gnuradio-4.0/digital/ConstellationBlocks.hpp
   include/gnuradio-4.0/digital/CpmModulate.hpp
   include/gnuradio-4.0/digital/DifferentialCoding.hpp
+  include/gnuradio-4.0/digital/LinearEqualizer.hpp
+  include/gnuradio-4.0/digital/SignalQuality.hpp
   LINK_LIBRARIES
   gr-digital)
 
