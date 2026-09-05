@@ -14,6 +14,7 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/channel/Awgn.hpp
   include/gnuradio-4.0/channel/CarrierImpairments.hpp
+  include/gnuradio-4.0/channel/DopplerShift.hpp
   include/gnuradio-4.0/channel/Nonlinearity.hpp
   include/gnuradio-4.0/channel/Quantizer.hpp
   include/gnuradio-4.0/channel/Multipath.hpp
