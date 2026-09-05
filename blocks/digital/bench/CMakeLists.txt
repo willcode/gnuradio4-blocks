@@ -7,4 +7,5 @@ function(gr_add_digital_benchmark BM_NAME)
   target_include_directories(${BM_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../test)
 endfunction()
 
+gr_add_digital_benchmark(bm_ConstellationBlocks)
 gr_add_digital_benchmark(bm_DifferentialCoding)
