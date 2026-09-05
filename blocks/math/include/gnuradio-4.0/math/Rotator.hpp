@@ -2,13 +2,13 @@
 #define GNURADIO_ROTATOR_HPP
 
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <cmath>
 #include <complex>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/algorithm/signal/Phasor.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/math/NamespaceCompatibility.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -40,9 +40,9 @@ is attached to.
     Annotated<value_type, "phase_increment", Unit<"rad">, Doc<"how many radians to add per sample">> phase_increment{0};
     Annotated<value_type, "initial_phase", Unit<"rad">, Doc<"starting offset for each new chunk">>   initial_phase{0};
 
-    // kept in double regardless of T: a value_type accumulator rounds the re-seed phase once per call,
-    // which for 'complex<float>' is ~2.4e-7 rad and dominates every other error over a stream
-    double _accumulated_phase{0.};
+    // the phase state and the generation recurrence both live in the kernel, which keeps them in double
+    // regardless of T for the reason its Doc records
+    gr::signal::Phasor<value_type> _phasor{};
 
     GR_MAKE_REFLECTABLE(Rotator, in, out, sample_rate, frequency_shift, initial_phase, phase_increment);
 
@@ -55,14 +55,27 @@ is attached to.
             throw gr::exception(std::format("cannot set both 'frequency_shift' and 'phase_increment' in new setting (XOR): {}", newSettings));
         }
 
+        const double previousIncrement = _phasor.increment();
+
         if (haveIncrement) {
             frequency_shift = static_cast<float>(phase_increment / (value_type(2) * std::numbers::pi_v<value_type>)) * sample_rate;
         } else if (haveShift || newSettings.contains("sample_rate")) {
             phase_increment = value_type(2) * static_cast<value_type>(std::numbers::pi_v<float> * frequency_shift / sample_rate);
         }
+        const double newIncrement = static_cast<double>(phase_increment);
 
+        // This block advances then rotates — sample k carries the accumulated phase plus (k+1) increments —
+        // while the kernel rotates then advances, so the phasor is held one increment ahead throughout. Keeping
+        // the offset in the phase rather than stepping the phasor per call is what lets the kernel's lane state
+        // run unbroken across calls, which is where its bit-identical chunk independence comes from.
         if (newSettings.contains("initial_phase")) {
-            _accumulated_phase = static_cast<double>(initial_phase);
+            _phasor.setIncrement(newIncrement);
+            _phasor.setPhase(static_cast<double>(initial_phase) + newIncrement);
+        } else if (newIncrement != previousIncrement) {
+            // the pending advance takes the new increment, so a frequency change carries the phase forward
+            const double advanced = _phasor.phase() - previousIncrement + newIncrement;
+            _phasor.setIncrement(newIncrement);
+            _phasor.setPhase(advanced);
         }
     }
 
@@ -106,58 +119,7 @@ is attached to.
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         assert(output.size() >= input.size());
 
-        // e^{j(phi + k*dphi)} == e^{j*phi} * (e^{j*dphi})^k: kLanes phasors advanced by (e^{j*dphi})^kLanes cover
-        // kLanes consecutive samples with no dependency carried between them, so the sample loop vectorizes;
-        // re-seeding from an exact phase keeps phase and magnitude drift bounded however long the stream is
-        constexpr std::size_t kLanes          = 16UZ;
-        constexpr std::size_t kReseedInterval = 4096UZ;
-        constexpr double      twoPi           = 2. * std::numbers::pi_v<double>;
-
-        const double                   startPhase = _accumulated_phase;
-        const double                   phaseStep  = static_cast<double>(phase_increment);
-        const std::complex<value_type> increment  = std::polar(value_type(1), static_cast<value_type>(phase_increment));
-        const std::complex<double>     laneStep   = std::polar(1., static_cast<double>(kLanes) * phaseStep);
-        const value_type               stepRe     = static_cast<value_type>(laneStep.real());
-        const value_type               stepIm     = static_cast<value_type>(laneStep.imag());
-
-        std::array<value_type, kLanes> laneRe;
-        std::array<value_type, kLanes> laneIm;
-
-        const std::size_t nSamples = input.size();
-        for (std::size_t base = 0UZ; base < nSamples; base += kReseedInterval) {
-            const std::complex<double> seed = std::polar(1., std::fmod(startPhase + static_cast<double>(base + 1UZ) * phaseStep, twoPi));
-            laneRe[0UZ]                     = static_cast<value_type>(seed.real());
-            laneIm[0UZ]                     = static_cast<value_type>(seed.imag());
-            for (std::size_t w = 1UZ; w < kLanes; ++w) {
-                laneRe[w] = laneRe[w - 1UZ] * increment.real() - laneIm[w - 1UZ] * increment.imag();
-                laneIm[w] = laneRe[w - 1UZ] * increment.imag() + laneIm[w - 1UZ] * increment.real();
-            }
-
-            const std::size_t end = std::min(nSamples, base + kReseedInterval);
-            std::size_t       i   = base;
-            for (; i + kLanes <= end; i += kLanes) {
-                for (std::size_t w = 0UZ; w < kLanes; ++w) {
-                    const value_type re = input[i + w].real();
-                    const value_type im = input[i + w].imag();
-                    const value_type pr = laneRe[w];
-                    const value_type pi = laneIm[w];
-                    output[i + w]       = T(re * pr - im * pi, re * pi + im * pr);
-                    laneRe[w]           = pr * stepRe - pi * stepIm;
-                    laneIm[w]           = pr * stepIm + pi * stepRe;
-                }
-            }
-            for (std::size_t w = 0UZ; i + w < end; ++w) {
-                const value_type re = input[i + w].real();
-                const value_type im = input[i + w].imag();
-                output[i + w]       = T(re * laneRe[w] - im * laneIm[w], re * laneIm[w] + im * laneRe[w]);
-            }
-        }
-
-        double phase = std::fmod(startPhase + static_cast<double>(nSamples) * phaseStep, twoPi);
-        if (phase < 0.) {
-            phase += twoPi;
-        }
-        _accumulated_phase = phase;
+        _phasor.mix(input, output);
 
         return work::Status::OK;
     }
