@@ -5,4 +5,5 @@ function(gr_add_basic_benchmark BM_NAME)
 endfunction()
 
 gr_add_basic_benchmark(bm_DataSetToStream)
+gr_add_basic_benchmark(bm_IqCorrection)
 gr_add_basic_benchmark(bm_SampleDelay)
