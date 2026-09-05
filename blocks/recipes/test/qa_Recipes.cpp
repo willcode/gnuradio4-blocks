@@ -4,7 +4,11 @@
  * general recipe's required parameters are part of the contract: instantiating it bare
  * must refuse by name, and instantiating it with the parameters must derive the interior
  * settings and keep deriving them when a parameter changes live. */
+#include <cmath>
+#include <complex>
+#include <format>
 #include <numbers>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -16,7 +20,10 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/recipes/NbfmDemod.hpp>
+#include <gnuradio-4.0/recipes/WbfmMonoDemod.hpp>
 
 #include "RecipeHeaderEmitter.hpp"
 
@@ -65,6 +72,31 @@ std::vector<std::string> exportedNames(const gr::property_map& portsMap) {
 [[nodiscard]] double numericOf(const gr::pmt::Value& value) { return gr::recipe::detail::doubleOf(value).value_or(0.0); }
 
 [[nodiscard]] std::string stringOf(const gr::pmt::Value& value) { return std::string(value.value_or(std::string_view{})); }
+
+/// what one frequency accounts for in a real stream: its amplitude, and its share of the stream's mean square
+struct ToneReading {
+    double amplitude{};
+    double powerShare{};
+};
+
+/// A single-frequency DFT bin evaluated at an arbitrary frequency, so the reading does not depend on the
+/// window length landing on a transform grid.
+[[nodiscard]] ToneReading readTone(std::span<const float> samples, double frequency, double sampleRate) {
+    double real  = 0.0;
+    double imag  = 0.0;
+    double power = 0.0;
+    for (std::size_t i = 0UZ; i < samples.size(); ++i) {
+        const double angle = 2.0 * std::numbers::pi * frequency * static_cast<double>(i) / sampleRate;
+        const double value = static_cast<double>(samples[i]);
+        real += value * std::cos(angle);
+        imag -= value * std::sin(angle);
+        power += value * value;
+    }
+    const double count      = static_cast<double>(samples.size());
+    const double meanSquare = power / count;
+    const double amplitude  = 2.0 * std::hypot(real, imag) / count;
+    return {amplitude, meanSquare > 0.0 ? 0.5 * amplitude * amplitude / meanSquare : 0.0};
+}
 
 } // namespace
 
@@ -319,6 +351,169 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
                 expect(eq(stringOf(*detector), std::string("zero_crossing"))) << "the interior block takes the spelling the caller gave";
             }
         }
+    };
+
+    "WbfmMonoDemod defaults the service's numbers and demands only the front end's rate"_test = [] {
+        auto loader = makeRecipeLoader();
+
+        auto bare = loader.instantiate("gr::recipes::WbfmMonoDemod");
+        expect(bare == nullptr) << "the front end's rate is the one number a service recipe still cannot default";
+
+        constexpr double kSampleRate  = 1920000.0;
+        constexpr double kDecimation  = 8.0;
+        constexpr double kChannelRate = kSampleRate / kDecimation;
+        constexpr double kAudioRate   = 48000.0;
+
+        gr::property_map parameters;
+        parameters["sample_rate"]        = static_cast<float>(kSampleRate);
+        parameters["channel_decimation"] = static_cast<std::uint32_t>(kDecimation);
+        auto composite                   = loader.instantiate("gr::recipes::WbfmMonoDemod", parameters);
+        expect(composite != nullptr) << "the rate and the decimation are all it needs";
+        if (composite == nullptr) {
+            return;
+        }
+
+        const auto inputs  = exportedNames(composite->exportedInputPorts());
+        const auto outputs = exportedNames(composite->exportedOutputPorts());
+        expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ));
+        expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end());
+
+        const auto tuner = interiorByName(composite, "tuner");
+        expect(tuner != nullptr);
+        if (tuner != nullptr) {
+            const auto shift = tuner->settings().get("frequency_shift");
+            expect(shift.has_value());
+            if (shift.has_value()) {
+                expect(eq(numericOf(*shift), 0.0)) << "the tuner is inert at the default offset";
+            }
+        }
+
+        const auto channel = interiorByName(composite, "channel");
+        expect(channel != nullptr);
+        if (channel != nullptr) {
+            const auto decimation = channel->settings().get("decimation");
+            expect(decimation.has_value());
+            if (decimation.has_value()) {
+                expect(eq(numericOf(*decimation), kDecimation)) << "an integral expression reaches an integral setting whole";
+            }
+        }
+
+        const auto discriminator = interiorByName(composite, "discriminator");
+        expect(discriminator != nullptr);
+        if (discriminator != nullptr) {
+            const auto gain = discriminator->settings().get("gain");
+            expect(gain.has_value());
+            if (gain.has_value()) {
+                expect(eq(static_cast<float>(numericOf(*gain)), static_cast<float>(kChannelRate / (2.0 * std::numbers::pi * 75000.0)))) << "the gain is derived at the channel rate, not the front end's";
+            }
+        }
+
+        const auto audio = interiorByName(composite, "audio");
+        expect(audio != nullptr);
+        if (audio != nullptr) {
+            const auto rate = audio->settings().get("rate");
+            expect(rate.has_value());
+            if (rate.has_value()) {
+                expect(eq(numericOf(*rate), kAudioRate * kDecimation / kSampleRate)) << "the audio ratio follows all three rates";
+            }
+        }
+
+        const auto deemphasis = interiorByName(composite, "deemphasis");
+        expect(deemphasis != nullptr);
+        if (deemphasis != nullptr) {
+            const auto rate = deemphasis->settings().get("sample_rate");
+            const auto tau  = deemphasis->settings().get("tau");
+            expect(rate.has_value() && tau.has_value());
+            if (rate.has_value() && tau.has_value()) {
+                expect(eq(numericOf(*rate), kAudioRate)) << "de-emphasis runs at the audio rate, last in the chain";
+                expect(eq(numericOf(*tau), 7.5e-05)) << "75 us is the service's own figure and is defaulted here";
+            }
+        }
+
+        auto* wrapper = dynamic_cast<gr::GraphWrapper<gr::Graph>*>(composite.get());
+        expect(wrapper != nullptr);
+        if (wrapper == nullptr) {
+            return;
+        }
+        gr::property_map change;
+        change["offset_hz"]  = 250000.0;
+        change["audio_rate"] = 32000.0f;
+        const auto applied   = wrapper->applyRecipeParameters(change);
+        expect(applied.has_value()) << (applied.has_value() ? "" : applied.error().message);
+        if (tuner != nullptr) {
+            expect(shiftIt != staged.end()) << "the re-derived shift is staged";
+            if (shiftIt != staged.end()) {
+                expect(eq(numericOf(shiftIt->second), -250000.0)) << "a station above the center is brought down to it";
+            }
+        }
+        if (audio != nullptr && deemphasis != nullptr) {
+            const auto stagedAudio = audio->settings().stagedParameters();
+            const auto rateIt      = stagedAudio.find("rate");
+            expect(rateIt != stagedAudio.end());
+            if (rateIt != stagedAudio.end()) {
+                expect(eq(numericOf(rateIt->second), 32000.0 * kDecimation / kSampleRate)) << "a new audio rate moves the resampler, live";
+            }
+            const auto stagedDeemphasis = deemphasis->settings().stagedParameters();
+            const auto deemphasisIt     = stagedDeemphasis.find("sample_rate");
+            expect(deemphasisIt != stagedDeemphasis.end());
+            if (deemphasisIt != stagedDeemphasis.end()) {
+                expect(eq(numericOf(deemphasisIt->second), 32000.0)) << "and retunes the de-emphasis with it";
+            }
+        }
+    };
+
+    "WbfmMonoDemod hands back the modulating tone at the deviation ratio"_test = [] {
+        // A recipe's numbers only mean something if the chain they configure demodulates. The signal is one
+        // audio tone at a stated peak deviation; the recipe's `deviation` is the reference full deviation, so
+        // the audio the chain hands back must be that tone at exactly the ratio of the two, and nothing else.
+        using CF = std::complex<float>;
+        using gr::blocks::testing::ProcessFunction;
+
+        constexpr double      kSampleRate = 240000.0; // already a channel, so channel_decimation stays at 1
+        constexpr double      kAudioRate  = 48000.0;
+        constexpr double      kTone       = 1000.0;
+        constexpr double      kDeviation  = 15000.0; // what the signal actually swings
+        constexpr double      kReference  = 75000.0; // what the recipe scales against
+        constexpr std::size_t kInput      = 60000UZ; // 250 ms at the channel rate
+
+        gr::Tensor<CF> values;
+        values.reserve(kInput);
+        double phase = 0.0;
+        for (std::size_t n = 0UZ; n < kInput; ++n) {
+            values.push_back(CF(static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase))));
+            phase += 2.0 * std::numbers::pi * (kDeviation / kSampleRate) * std::sin(2.0 * std::numbers::pi * kTone * static_cast<double>(n) / kSampleRate);
+        }
+
+        gr::Graph  graph;
+        auto&      source = graph.emplaceBlock<gr::blocks::testing::TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(kInput)}, {"values", values}, {"mark_tag", false}});
+        const auto demod  = gr::recipes::WbfmMonoDemod::emplace(graph, [] {
+            gr::recipes::WbfmMonoDemod::Parameters parameters(static_cast<float>(kSampleRate));
+            parameters.tau = 0.0; // bypassed, so the measured amplitude is the discriminator's alone
+            return parameters;
+        }());
+        expect(demod != nullptr) << boost::ut::fatal;
+        auto& sink = graph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "audio"}});
+
+        const auto sourceModel = gr::graph::findBlock(graph, source);
+        const auto sinkModel   = gr::graph::findBlock(graph, sink);
+        expect(sourceModel.has_value() && sinkModel.has_value()) << boost::ut::fatal;
+        expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, demod, gr::PortDefinition{"in"}).has_value());
+        expect(graph.connect(demod, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+        gr::scheduler::Simple scheduler;
+        expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+        const auto finished = scheduler.runAndWait();
+        expect(finished.has_value()) << (finished.has_value() ? std::string{} : finished.error().message);
+
+        // the resampler's filter is not compensated, so the first samples are its ramp-up rather than the tone
+        constexpr std::size_t kSkip   = 2000UZ;
+        constexpr std::size_t kWindow = 9600UZ; // 200 cycles of the tone at the audio rate
+        expect(ge(sink._samples.size(), kSkip + kWindow)) << std::format("audio samples produced: {}", sink._samples.size()) << boost::ut::fatal;
+
+        const auto reading = readTone(std::span<const float>(sink._samples.data() + kSkip, kWindow), kTone, kAudioRate);
+        const auto ratio   = kDeviation / kReference;
+        expect(lt(std::abs(reading.amplitude - ratio), 0.001 * ratio)) << std::format("tone amplitude {:.5f}, expected {:.5f}", reading.amplitude, ratio);
+        expect(gt(reading.powerShare, 0.9999)) << std::format("the tone accounts for {:.4f} of the audio's power", reading.powerShare);
     };
 
     "the committed typed headers match a fresh emission byte for byte"_test = [] {

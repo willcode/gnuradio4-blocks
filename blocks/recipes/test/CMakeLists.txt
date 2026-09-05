@@ -4,9 +4,11 @@ add_ut_test(qa_Recipes)
 target_link_libraries(
   qa_Recipes
   PRIVATE gnuradio-core
+          gnuradio4::gr-testing
           gnuradio4::GrAnalogBlocksShared
           gnuradio4::GrDigitalBlocksShared
           gnuradio4::GrFilterBlocksShared
+          gnuradio4::GrMathBlocksShared
           gnuradio4::GrSyncBlocksShared)
 target_include_directories(qa_Recipes PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../tools"
                                               "${CMAKE_CURRENT_SOURCE_DIR}/../include")
