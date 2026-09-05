@@ -8,6 +8,7 @@ install(
         BpskFrontEnd.yaml
         DbpskDemod.yaml
         FskDemod.yaml
+        FskDemodAudio.yaml
         FskDemodDcBlock.yaml
         NbfmDemod.yaml
         SampleClockOffset.yaml
