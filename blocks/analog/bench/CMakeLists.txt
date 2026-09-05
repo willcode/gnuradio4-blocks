@@ -7,5 +7,6 @@ function(gr_add_analog_benchmark BM_NAME)
   target_include_directories(${BM_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../test)
 endfunction()
 
+gr_add_analog_benchmark(bm_Agc)
 gr_add_analog_benchmark(bm_FmEmphasis)
 gr_add_analog_benchmark(bm_QuadratureDemod)
