@@ -21,7 +21,12 @@
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+
+#include <gnuradio-4.0/algorithm/digital/Scrambler.hpp>
+#include <gnuradio-4.0/algorithm/fec/Convolutional.hpp>
+#include <gnuradio-4.0/algorithm/fec/ReedSolomon.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
+#include <gnuradio-4.0/digital/AccessCodeCorrelator.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/recipes/NbfmDemod.hpp>
 #include <gnuradio-4.0/recipes/WbfmMonoDemod.hpp>
@@ -127,6 +132,20 @@ template<typename TIn, typename TOut>
     boost::ut::expect(finished.has_value()) << (finished.has_value() ? std::string{} : finished.error().message);
     return std::vector<TOut>(sink._samples.begin(), sink._samples.end());
 }
+
+/// @brief A sink for a record-typed recipe output, collecting what the chain publishes.
+struct CcsdsRecordSink : gr::Block<CcsdsRecordSink> {
+    gr::PortIn<gr::DataSet<std::uint8_t>, gr::Async> in;
+    GR_MAKE_REFLECTABLE(CcsdsRecordSink, in);
+    std::vector<gr::DataSet<std::uint8_t>> _records;
+    [[nodiscard]] gr::work::Status         processBulk(gr::InputSpanLike auto& inSpan) {
+        for (const auto& r : inSpan) {
+            _records.push_back(r);
+        }
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
 
 /// @brief A deterministic bit stream, so a failure is the chain's and never the draw's.
 [[nodiscard]] std::vector<int> sourceBits(std::size_t count, std::uint64_t seed = 0x9e3779b97f4a7c15ULL) {
@@ -1042,6 +1061,247 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const Agreement   withDc    = bestAgreement(std::span<const float>(fixed), std::span<const int>(bits), skip, 40UZ, true);
         expect(ge(withDc.fraction, 0.99)) << std::format("with the blocker: {:.4f} recovered", withDc.fraction);
         expect(gt(withDc.fraction, withoutDc.fraction + 0.05)) << std::format("without it: {:.4f}; the offset is {:.0f} Hz against a {:.0f} Hz deviation", withoutDc.fraction, kOffset, kDeviation);
+    };
+
+    "CcsdsRsFrames recovers the transfer frame, both bases, interleaved and not"_test = [] {
+        using Record = gr::DataSet<std::uint8_t>;
+
+        struct Arm {
+            const char*   basis;
+            std::uint32_t e;
+            std::uint32_t depth;
+            std::uint32_t frameLength;
+            const char*   codeName;
+        };
+        constexpr Arm kArms[] = {
+            {"conventional", 16U, 1U, 223U, "ccsds_255_223"},
+            {"dual", 16U, 5U, 1115U, "ccsds_255_223"},
+            {"dual", 8U, 1U, 239U, "ccsds_255_239"},
+        };
+
+        for (const Arm& arm : kArms) {
+            const std::size_t info = 255UZ - 2UZ * arm.e;
+            const std::size_t wire = 255UZ;
+            expect(eq(static_cast<std::size_t>(arm.frameLength), info * arm.depth)) << "the arm's frame is whole codewords at pad 0";
+
+            std::uint64_t lcg  = 0x9E3779B97F4A7C15ULL + arm.depth;
+            const auto    draw = [&lcg] {
+                lcg = lcg * 6364136223846793005ULL + 1442695040888963407ULL;
+                return static_cast<std::uint8_t>(lcg >> 56U);
+            };
+            std::vector<std::uint8_t> frame(arm.frameLength);
+            for (std::uint8_t& b : frame) {
+                b = draw();
+            }
+
+            // the transmit side, from the tree's own kernels: the frame's octets are wire-domain strings, so a
+            // dual link first maps them to field elements, encodes, and maps the whole codeblock back out
+            const bool                dual = std::string_view(arm.basis) == "dual";
+            std::vector<std::uint8_t> infoWords(frame);
+            if (dual) {
+                for (std::uint8_t& b : infoWords) {
+                    b = gr::fec::CcsdsDualBasis::fromDual(b);
+                }
+            }
+            std::vector<std::uint8_t> plainWords(infoWords.size());
+            gr::fec::deinterleaveCodewords(infoWords, plainWords, info, arm.depth);
+
+            std::vector<std::uint8_t> wireWords(wire * arm.depth);
+            for (std::size_t w = 0UZ; w < arm.depth; ++w) {
+                if (arm.e == 16U) {
+                    gr::fec::ReedSolomonCcsds255_223::Block block{};
+                    std::copy_n(plainWords.begin() + static_cast<std::ptrdiff_t>(w * info), info, block.begin());
+                    gr::fec::ReedSolomonCcsds255_223::encode(block, 0UZ);
+                    std::copy_n(block.begin(), wire, wireWords.begin() + static_cast<std::ptrdiff_t>(w * wire));
+                } else {
+                    gr::fec::ReedSolomonCcsds255_239::Block block{};
+                    std::copy_n(plainWords.begin() + static_cast<std::ptrdiff_t>(w * info), info, block.begin());
+                    gr::fec::ReedSolomonCcsds255_239::encode(block, 0UZ);
+                    std::copy_n(block.begin(), wire, wireWords.begin() + static_cast<std::ptrdiff_t>(w * wire));
+                }
+            }
+            std::vector<std::uint8_t> codeblock(wire * arm.depth);
+            gr::fec::interleaveCodewords(wireWords, codeblock, wire, arm.depth);
+            if (dual) {
+                for (std::uint8_t& b : codeblock) {
+                    b = gr::fec::CcsdsDualBasis::toDual(b);
+                }
+            }
+
+            // the randomizer, byte for byte: XORing the sequence's bytes MSB first is XORing its bits in order
+            gr::digital::ScramblerConfig randomizer{};
+            gr::digital::configure(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
+            std::vector<std::uint8_t> randomized(codeblock.size());
+            gr::digital::scramble(randomizer, std::span<const std::uint8_t>(codeblock), std::span<std::uint8_t>(randomized));
+
+            // the stream: garbage, the marker, the codeblock's bits, garbage — as soft values, with two of the
+            // marker's bits flipped to spend the stated error budget
+            constexpr std::string_view kAsm = "00011010110011111111110000011101";
+            std::vector<float>         soft;
+            for (std::size_t i = 0UZ; i < 41UZ; ++i) {
+                soft.push_back((draw() & 1U) != 0U ? 0.9f : -0.9f);
+            }
+            const std::size_t asmAt = soft.size();
+            for (const char bit : kAsm) {
+                soft.push_back(bit == '1' ? 0.9f : -0.9f);
+            }
+            for (const std::uint8_t byte : randomized) {
+                for (unsigned j = 8U; j-- > 0U;) {
+                    soft.push_back(((byte >> j) & 1U) != 0U ? 0.9f : -0.9f);
+                }
+            }
+            for (std::size_t i = 0UZ; i < 29UZ; ++i) {
+                soft.push_back((draw() & 1U) != 0U ? 0.9f : -0.9f);
+            }
+            soft[asmAt + 3UZ] *= -1.0f;
+            soft[asmAt + 20UZ] *= -1.0f;
+
+            const gr::property_map parameters{{"frame_length", arm.frameLength}, {"error_capability", arm.e}, {"code", std::string(arm.codeName)}, //
+                {"basis", std::string(arm.basis)}, {"sync_errors", gr::Size_t{2U}}, {"interleave", arm.depth}};
+
+            auto loader    = makeRecipeLoader();
+            auto composite = loader.instantiate("gr::recipes::CcsdsRsFrames", parameters);
+            expect(composite != nullptr) << boost::ut::fatal;
+
+            gr::Graph         graph;
+            gr::Tensor<float> values(soft.begin(), soft.end());
+            auto&             source = graph.emplaceBlock<gr::blocks::testing::TagSource<float, gr::blocks::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(soft.size())}, {"values", values}, {"mark_tag", false}});
+            auto&             sink   = graph.emplaceBlock<CcsdsRecordSink>();
+            const auto        chain  = graph.addBlock(std::move(composite));
+
+            const auto sourceModel = gr::graph::findBlock(graph, source);
+            const auto sinkModel   = gr::graph::findBlock(graph, sink);
+            expect(sourceModel.has_value() && sinkModel.has_value()) << boost::ut::fatal;
+            expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, chain, gr::PortDefinition{"in"}).has_value());
+            expect(graph.connect(chain, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+            gr::scheduler::Simple scheduler;
+            expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+            expect(scheduler.runAndWait().has_value());
+
+            expect(eq(sink._records.size(), 1UZ)) << std::format("{} E={} I={}: one marker, one frame", arm.basis, arm.e, arm.depth);
+            if (sink._records.size() != 1UZ) {
+                continue;
+            }
+            const Record& seen = sink._records[0UZ];
+            expect(std::ranges::equal(seen.signal_values, frame)) << std::format("{} E={} I={}: the transfer frame, byte for byte", arm.basis, arm.e, arm.depth);
+            const auto& map       = seen.meta_information[0UZ];
+            const auto  corrected = map.find(gr::property_map::key_type("corrected_errors"));
+            expect(that % (corrected != map.end() && corrected->second.value_or(gr::Size_t{1U}) == gr::Size_t{0U})) << "a clean codeblock costs the decoder nothing";
+            const auto uncorrectable = map.find(gr::property_map::key_type("uncorrectable_errors"));
+            expect(that % (uncorrectable != map.end() && uncorrectable->second.value_or(gr::Size_t{1U}) == gr::Size_t{0U}));
+        }
+    };
+
+    "CcsdsConcatenatedFrames self-aligns: either input offset decodes through one instance"_test = [] {
+        using Record = gr::DataSet<std::uint8_t>;
+
+        constexpr std::uint32_t kE           = 16U;
+        constexpr std::uint32_t kDepth       = 1U;
+        constexpr std::uint32_t kFrameLength = 223U;
+        const std::size_t       wireBytes    = 255UZ;
+
+        std::uint64_t lcg  = 0x2545F4914F6CDD1DULL;
+        const auto    draw = [&lcg] {
+            lcg = lcg * 6364136223846793005ULL + 1442695040888963407ULL;
+            return static_cast<std::uint8_t>(lcg >> 56U);
+        };
+
+        std::vector<std::uint8_t> frame(kFrameLength);
+        for (std::uint8_t& b : frame) {
+            b = draw();
+        }
+
+        // outer code, conventional basis, then the randomizer, byte for byte
+        gr::fec::ReedSolomonCcsds255_223::Block block{};
+        std::copy_n(frame.begin(), 223UZ, block.begin());
+        gr::fec::ReedSolomonCcsds255_223::encode(block, 0UZ);
+        gr::digital::ScramblerConfig randomizer{};
+        gr::digital::configure(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
+        std::vector<std::uint8_t> randomized(wireBytes);
+        gr::digital::scramble(randomizer, std::span<const std::uint8_t>(block.data(), wireBytes), std::span<std::uint8_t>(randomized));
+
+        // inner code over lead-in, marker, codeblock and margin, one terminated stretch of bits
+        std::vector<std::uint8_t> txBits;
+        for (std::size_t i = 0UZ; i < 23UZ; ++i) {
+            txBits.push_back(static_cast<std::uint8_t>(draw() & 1U));
+        }
+        const std::size_t asmBitAt = txBits.size();
+        for (const char bit : gr::blocks::digital::syncword::ccsds_asm) {
+            txBits.push_back(bit == '1' ? 1U : 0U);
+        }
+        for (const std::uint8_t byte : randomized) {
+            for (unsigned j = 8U; j-- > 0U;) {
+                txBits.push_back(static_cast<std::uint8_t>((byte >> j) & 1U));
+            }
+        }
+        for (std::size_t i = 0UZ; i < 20UZ; ++i) {
+            txBits.push_back(static_cast<std::uint8_t>(draw() & 1U));
+        }
+
+        gr::fec::ConvolutionalCode inner;
+        expect(gr::fec::configureConvention(inner, "ccsds"));
+        std::vector<std::uint8_t> coded(gr::fec::convolutionalEncodedBits(inner, txBits.size()));
+        expect(eq(gr::fec::convolutionalEncode(inner, txBits, coded), coded.size()));
+
+        std::vector<float> soft;
+        soft.reserve(coded.size() + 60UZ);
+        for (const std::uint8_t symbol : coded) {
+            soft.push_back((symbol & 1U) != 0U ? 0.9f : -0.9f);
+        }
+        for (std::size_t i = 0UZ; i < 60UZ; ++i) {
+            // the code-start correlator delays its output by the marker's own length, so the framer
+            // finishes the record 52 symbols after the stream's payload does — the tail feeds that
+            soft.push_back((draw() & 1U) != 0U ? 0.9f : -0.9f);
+        }
+
+        const std::string      marker = gr::blocks::digital::syncword::ccsdsEncodedAsm("ccsds");
+        const gr::property_map base{{"frame_length", kFrameLength}, {"error_capability", kE}, {"code", std::string("ccsds_255_223")}, {"basis", std::string("conventional")}, //
+            {"convolutional", std::string("ccsds")}, {"encoded_marker", marker}, {"sync_errors", gr::Size_t{2U}}, {"interleave", kDepth}};
+
+        // the pairing is recovered from the marker's own position: a one-symbol shift of the whole
+        // stream moves the tag by one and changes nothing downstream, so ONE instance decodes at
+        // either offset — the ambiguity a parity-anchored chain would need two instances for
+        std::ignore             = asmBitAt;
+        std::size_t cleanFrames = 0UZ;
+        for (const std::size_t offset : {0UZ, 1UZ}) {
+            std::vector<float> stream;
+            stream.reserve(soft.size() + offset);
+            for (std::size_t i = 0UZ; i < offset; ++i) {
+                stream.push_back(-0.9f);
+            }
+            stream.insert(stream.end(), soft.begin(), soft.end());
+
+            auto loader    = makeRecipeLoader();
+            auto composite = loader.instantiate("gr::recipes::CcsdsConcatenatedFrames", base);
+            expect(composite != nullptr) << boost::ut::fatal;
+
+            gr::Graph         graph;
+            gr::Tensor<float> values(stream.begin(), stream.end());
+            auto&             source = graph.emplaceBlock<gr::blocks::testing::TagSource<float, gr::blocks::testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(stream.size())}, {"values", values}, {"mark_tag", false}});
+            auto&             sink   = graph.emplaceBlock<CcsdsRecordSink>();
+            const auto        chain  = graph.addBlock(std::move(composite));
+
+            const auto sourceModel = gr::graph::findBlock(graph, source);
+            const auto sinkModel   = gr::graph::findBlock(graph, sink);
+            expect(sourceModel.has_value() && sinkModel.has_value()) << boost::ut::fatal;
+            expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, chain, gr::PortDefinition{"in"}).has_value());
+            expect(graph.connect(chain, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+            gr::scheduler::Simple scheduler;
+            expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+            expect(scheduler.runAndWait().has_value());
+
+            expect(eq(sink._records.size(), 1UZ)) << std::format("offset {}: one marker, one frame", offset);
+            for (const Record& seen : sink._records) {
+                const auto& map           = seen.meta_information[0UZ];
+                const auto  uncorrectable = map.find(gr::property_map::key_type("uncorrectable_errors"));
+                const bool  clean         = uncorrectable != map.end() && uncorrectable->second.value_or(gr::Size_t{1U}) == gr::Size_t{0U} && std::ranges::equal(seen.signal_values, frame);
+                expect(clean) << std::format("offset {}: the transfer frame, byte for byte, zero uncorrectable", offset);
+                cleanFrames += clean ? 1UZ : 0UZ;
+            }
+        }
+        expect(eq(cleanFrames, 2UZ)) << "one instance, both offsets: the marker's position is the pairing";
     };
 
     "the committed typed headers match a fresh emission byte for byte"_test = [] {
