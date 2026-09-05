@@ -287,6 +287,66 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         }
     };
 
+    "FskDemodAudio demands the rate and the symbol rate, names both when it refuses, and derives its three blocks"_test = [] {
+        auto loader = makeRecipeLoader();
+
+        expect(loader.instantiate("gr::recipes::FskDemodAudio") == nullptr) << "the general recipe must not instantiate with hidden defaults";
+
+        // the generic leg above only requires that a refusal carry the family's key; this one requires that THIS
+        // recipe refuse, and that the message name both parameters a link cannot be guessed at without
+        bool        indexed = false;
+        const auto& defs    = loader.definitionForBlockName();
+        for (const auto& [name, definition] : defs) {
+            if (name != "gr::recipes::FskDemodAudio") {
+                continue;
+            }
+            indexed         = true;
+            const auto bare = gr::detail::instantiateBlockFromYamlDefinition(loader, definition, {});
+            expect(!bare.has_value()) << "a bare instantiation is refused";
+            if (!bare.has_value()) {
+                const std::string message = bare.error().message;
+                expect(message.contains("recipe_parameter_required")) << message;
+                expect(message.contains("sample_rate")) << message;
+                expect(message.contains("symbol_rate")) << message;
+            }
+        }
+        expect(indexed) << "the recipe is in index.yaml";
+
+        gr::property_map parameters;
+        parameters["sample_rate"] = 48000.0f;
+        parameters["symbol_rate"] = 9600.0f;
+        auto composite            = loader.instantiate("gr::recipes::FskDemodAudio", parameters);
+        expect(composite != nullptr) << "instantiate with the required parameters";
+        if (composite == nullptr) {
+            return;
+        }
+
+        const auto inputs  = exportedNames(composite->exportedInputPorts());
+        const auto outputs = exportedNames(composite->exportedOutputPorts());
+        expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ));
+        expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end());
+
+        // the two derivations the recipe exists to save, at the 9600-baud packet radio the arm is written around
+        const auto lowpass = interiorByName(composite, "lowpass");
+        expect(lowpass != nullptr);
+        if (lowpass != nullptr) {
+            const auto cutoff = lowpass->settings().get("cutoff");
+            expect(cutoff.has_value());
+            if (cutoff.has_value()) {
+                expect(eq(numericOf(*cutoff), 4800.0)) << "the post-detection cutoff is half the symbol rate";
+            }
+        }
+        const auto timing = interiorByName(composite, "timing");
+        expect(timing != nullptr);
+        if (timing != nullptr) {
+            const auto sps = timing->settings().get("samples_per_symbol");
+            expect(sps.has_value());
+            if (sps.has_value()) {
+                expect(eq(numericOf(*sps), 5.0)) << "9600 baud out of a 48 kHz recording is exactly five samples a symbol";
+            }
+        }
+    };
+
     "SampleClockOffset turns parts per million into a resampling rate, and re-derives live"_test = [] {
         auto loader = makeRecipeLoader();
 
