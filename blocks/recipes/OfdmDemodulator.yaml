@@ -1,0 +1,132 @@
+# gr::recipes::OfdmDemodulator — the receive half of an OFDM link, from baseband to equalized carriers.
+#
+# The mirror of OfdmModulator, and it exists for the same reason: the sync block, the prefix removal and
+# the equalizer all read the same numerology, and nothing in a graph makes three settings agree.
+#
+# Complex baseband in, equalized data carriers out as one record per symbol, in data_carriers order, ready
+# for a constellation decoder. The optional channel port carries the least-squares estimate as magnitude and
+# phase against the carrier axis.
+#
+# The chain is the sync block, prefix removal and the equalizer. The sync finds each frame from a
+# repeated-half preamble and writes a trigger at the frame's first sample -- the first sample of that
+# preamble's own prefix -- with the fractional carrier offset beside it, and derotates the stream by it.
+# Prefix removal cuts on that trigger and takes the forward transform; the equalizer divides by the channel
+# the frame's known sync word measures and tracks what the pilots see between frames.
+#
+# Two prefix settings, not one. cp_len is the frame's whole cycle, which prefix removal walks; the sync
+# block reads the preamble's own prefix alone, which sets the width of its correlation plateau and the
+# offset from that plateau's midpoint back to the frame's first sample. They are the same number in a
+# numerology with a constant prefix and preamble_cp_len is cp_len's first entry in one without.
+#
+# timing_offset biases the cut into the prefix and wants to cover two things at once: the channel's delay
+# spread, so the transform window holds no energy from the symbol before, and whatever the sync's plateau
+# midpoint leaves, which is a property of the preamble sequence and is measured rather than derived. A
+# rotation of 2*pi*k*timing_offset/fft_len at signed carrier k is what it costs, and the least-squares
+# estimate absorbs it along with the channel.
+#
+# r_floor is the received energy below which the timing metric's ratio means nothing, so it is scale
+# dependent: a quarter of what a correlation window of fft_len/2 samples holds when the preamble is present
+# is the setting a link is tuned around, and the default only keeps a silent input from triggering.
+definition_metadata:
+  block_type: gr::recipes::OfdmDemodulator
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: ofdm_demodulator
+    exported_parameters:
+      - name: fft_len
+        type: uint32
+        doc: "transform length, a power of two; one symbol is this many carriers; required"
+      - name: data_carriers
+        type: int32[]
+        doc: "signed logical carrier indices the output holds, in order; required"
+      - name: pilot_carriers
+        type: int32[]
+        doc: "signed logical carrier indices the tracking reads; required"
+      - name: pilot_symbols
+        type: float32[]
+        doc: "interleaved re,im read by (s * n_pilots + p) % len with s the symbol's data index in its frame; required"
+      - name: sync_word
+        type: float32[]
+        doc: "interleaved re,im, one whole fft_len symbol: the known symbol least squares divides by; required"
+      - name: n_sync
+        type: uint32
+        doc: "sync symbols at a frame's head, the preamble among them; required"
+      - name: sync_index
+        type: uint32
+        default: !!uint32 1
+        doc: "which of those sync symbols is the known one; a Schmidl-Cox preamble occupies even carriers only and cannot be it"
+      - name: frame_len
+        type: uint32
+        doc: "data symbols per frame; required"
+      - name: cp_len
+        type: uint32[]
+        doc: "prefix samples per symbol, the transmitter's own cycle; required"
+      - name: preamble_cp_len
+        type: uint32
+        doc: "the preamble symbol's prefix, which sets the sync's plateau width; cp_len's first entry; required"
+      - name: timing_offset
+        type: int32
+        default: !!int32 0
+        doc: "signed bias of the cut, in [-min(cp_len), 0]; negative starts the transform window inside the prefix"
+      - name: threshold
+        type: float32
+        default: !!float32 0.6
+        doc: "the timing metric above which the sync holds a preamble's plateau to have started, in (0, 1)"
+      - name: r_floor
+        type: float32
+        default: !!float32 1.0e-9
+        doc: "received energy below which no trigger is emitted; scale dependent, set it from the link's own level"
+      - name: min_gap
+        type: uint32
+        default: !!uint32 1
+        doc: "dead time after a trigger, in symbols; a frame's own length keeps it from being detected twice"
+      - name: tracking
+        type: string
+        default: "cpe"
+        doc: "'cpe', 'cpe_interp' or 'none'"
+      - name: alpha
+        type: float32
+        default: !!float32 0.1
+        doc: "single-pole coefficient of the per-carrier update, in (0, 1]; read by 'cpe_interp'"
+    graph:
+      blocks:
+        - id: "gr::blocks::ofdm::SchmidlCoxSync"
+          parameters:
+            name: sync
+            fft_len: "=fft_len"
+            cp_len: "=preamble_cp_len"
+            threshold: "=threshold"
+            r_floor: "=r_floor"
+            min_gap: "=min_gap"
+        - id: "gr::blocks::ofdm::CpRemove"
+          parameters:
+            name: prefix
+            fft_len: "=fft_len"
+            cp_len: "=cp_len"
+            n_sync: "=n_sync"
+            frame_len: "=frame_len"
+            timing_offset: "=timing_offset"
+        - id: "gr::blocks::ofdm::OfdmChannelEqualizer"
+          parameters:
+            name: equalizer
+            fft_len: "=fft_len"
+            data_carriers: "=data_carriers"
+            pilot_carriers: "=pilot_carriers"
+            pilot_symbols: "=pilot_symbols"
+            sync_word: "=sync_word"
+            n_sync: "=n_sync"
+            sync_index: "=sync_index"
+            tracking: "=tracking"
+            alpha: "=alpha"
+      connections:
+        - [sync, 0, prefix, 0]
+        - [prefix, 0, equalizer, 0]
+      exported_ports:
+        - [sync, INPUT, in, in]
+        - [equalizer, OUTPUT, out, out]
+        - [equalizer, OUTPUT, channel, channel]
