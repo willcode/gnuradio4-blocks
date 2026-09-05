@@ -13,6 +13,7 @@ add_subdirectory(filter)
 add_subdirectory(fourier)
 add_subdirectory(http)
 add_subdirectory(math)
+add_subdirectory(sync)
 add_subdirectory(timing)
 
 # optional families, added before libs so the registry audit there can see their shared libraries when they are built.
