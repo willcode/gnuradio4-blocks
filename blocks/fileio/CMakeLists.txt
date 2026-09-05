@@ -15,9 +15,12 @@ gr_add_block_library(
   HEADERS
   include/gnuradio-4.0/fileio/BasicFileIo.hpp
   include/gnuradio-4.0/fileio/PacketFileSink.hpp
+  include/gnuradio-4.0/fileio/SigMfIo.hpp
   include/gnuradio-4.0/fileio/WavBlocks.hpp
   LINK_LIBRARIES
   gnuradio4::gr-fileio)
+
+add_subdirectory(bench)
 
 if(TARGET gnuradio4::GrFileIoBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
