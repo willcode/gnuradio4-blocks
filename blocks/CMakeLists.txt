@@ -30,6 +30,11 @@ if(GR4_ENABLE_AUDIO)
   add_subdirectory(audio)
 endif()
 
+# shared library that contains all registered blocks
+add_subdirectory(libs)
+
+# YAML subgraph recipes — composed capabilities that need no new code; data plus a qa
+add_subdirectory(recipes)
 if(GR4_ENABLE_SDR)
   add_subdirectory(sdr)
 endif()

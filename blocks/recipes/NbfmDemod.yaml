@@ -1,0 +1,47 @@
+# gr::recipes::NbfmDemod — narrow-band FM demodulation, general form.
+#
+# The derivation this recipe saves: an FM discriminator's gain must be
+# sample_rate / (2·pi·deviation), and the de-emphasis constant is evaluated at the same
+# rate. sample_rate and deviation carry no defaults BY DESIGN — a general recipe demands
+# them, because a defaulted rate hides behavior from a user unaware of the parameter and
+# is usually wrong (a PTT radio and a broadcast differ in exactly these). A well-defined
+# recipe built for one service is the place for defaults that really are normal values.
+# Complex baseband at sample_rate in; demodulated float audio out at the same rate —
+# resample downstream to the sink's rate.
+definition_metadata:
+  block_type: gr::recipes::NbfmDemod
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-08-28"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: nbfm_demod
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "channel sample rate in hertz; required"
+      - name: deviation
+        type: float32
+        doc: "nominal FM deviation in hertz; required"
+      - name: tau
+        type: float64
+        default: !!float64 7.5e-05
+        doc: "de-emphasis time constant in seconds; 75 us is the common narrow-band choice"
+    graph:
+      blocks:
+        - id: "gr::blocks::analog::QuadratureDemod<float32>"
+          parameters:
+            name: discriminator
+            gain: "=sample_rate / (2 * pi * deviation)"
+        - id: "gr::blocks::analog::FmDeemphasis<float32>"
+          parameters:
+            name: deemphasis
+            sample_rate: "=sample_rate"
+            tau: "=tau"
+      connections:
+        - [discriminator, 0, deemphasis, 0]
+      exported_ports:
+        - [discriminator, INPUT, in, in]
+        - [deemphasis, OUTPUT, out, out]
