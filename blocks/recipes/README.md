@@ -10,11 +10,25 @@ scheduler's chain fusion makes the composed form cost what a hand-fused block wo
 
 | Recipe | What it composes | Required parameters |
 |---|---|---|
+| `gr::recipes::AfskDemod` | Hilbert branch and matching delay, tuner, channel filter, discriminator, lowpass, timing recovery | `sample_rate`, `symbol_rate`, `mark_hz`, `space_hz` |
+| `gr::recipes::BpskDemod` | `BpskFrontEnd`'s five stages, a Costas loop at order 2, the real part | `sample_rate`, `symbol_rate` |
+| `gr::recipes::BpskFrontEnd` | tuner, decimating channel filter, AGC, frequency-locked loop, timing recovery | `sample_rate`, `symbol_rate` |
+| `gr::recipes::DbpskDemod` | `BpskFrontEnd`'s five stages, a one-symbol phasor, the real part | `sample_rate`, `symbol_rate` |
+| `gr::recipes::FskDemodDcBlock` | `FskDemod`'s chain with a DC blocker after the discriminator, soft symbols out | `sample_rate`, `symbol_rate`, `modulation_index` |
 | `gr::recipes::NbfmDemod` | discriminator and de-emphasis, general form | `sample_rate`, `deviation` |
 | `gr::recipes::SampleClockOffset` | a resampling by `1 + ppm*1e-6`, tags re-originated | none |
 | `gr::recipes::WbfmMonoDemod` | tuner, decimating channel filter, discriminator, audio resampler, de-emphasis | `sample_rate` |
 
 A recipe with no required parameter instantiates bare; the rest name what they are missing.
+
+A recipe cannot yet name another indexed recipe as an interior block when that recipe has
+a required parameter: the graph importer creates an interior block from its `id` alone and
+never hands `PluginLoader::instantiate` the block's `parameters`, so the nested recipe
+refuses for the parameters it was never given. `BpskDemod` and `DbpskDemod` therefore write
+out the five stages `BpskFrontEnd` holds instead of naming it, and each says so in its
+header. `BpskFrontEnd` ships and is usable on its own; when the loader forwards parameters,
+those five blocks collapse into one line in each file. It is the same limitation
+`blocks/examples/graphs` records for naming a recipe from a graph file.
 
 ## The dialect
 

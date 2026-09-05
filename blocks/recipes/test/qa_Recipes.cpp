@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/recipes/NbfmDemod.hpp>
 #include <gnuradio-4.0/recipes/WbfmMonoDemod.hpp>
@@ -96,6 +97,120 @@ struct ToneReading {
     const double meanSquare = power / count;
     const double amplitude  = 2.0 * std::hypot(real, imag) / count;
     return {amplitude, meanSquare > 0.0 ? 0.5 * amplitude * amplitude / meanSquare : 0.0};
+}
+
+/// @brief Drives @p name over @p input under the scheduler and hands back what the sink saw. A recipe's numbers only
+/// mean something if the chain they configure demodulates, so every functional case below goes through a real graph.
+template<typename TIn, typename TOut>
+[[nodiscard]] std::vector<TOut> runRecipe(std::string_view name, const gr::property_map& parameters, const std::vector<TIn>& input) {
+    using gr::blocks::testing::ProcessFunction;
+
+    auto loader    = makeRecipeLoader();
+    auto composite = loader.instantiate(std::string(name), parameters);
+    boost::ut::expect(composite != nullptr) << name << boost::ut::fatal;
+
+    gr::Graph       graph;
+    gr::Tensor<TIn> values(input.begin(), input.end());
+    auto&           source = graph.emplaceBlock<gr::blocks::testing::TagSource<TIn, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(input.size())}, {"values", values}, {"mark_tag", false}});
+    auto&           sink   = graph.emplaceBlock<gr::blocks::testing::TagSink<TOut, ProcessFunction::USE_PROCESS_BULK>>({{"name", "recipe_out"}});
+    const auto      demod  = graph.addBlock(std::move(composite));
+
+    const auto sourceModel = gr::graph::findBlock(graph, source);
+    const auto sinkModel   = gr::graph::findBlock(graph, sink);
+    boost::ut::expect(sourceModel.has_value() && sinkModel.has_value()) << boost::ut::fatal;
+    boost::ut::expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, demod, gr::PortDefinition{"in"}).has_value()) << name;
+    boost::ut::expect(graph.connect(demod, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value()) << name;
+
+    gr::scheduler::Simple scheduler;
+    boost::ut::expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+    const auto finished = scheduler.runAndWait();
+    boost::ut::expect(finished.has_value()) << (finished.has_value() ? std::string{} : finished.error().message);
+    return std::vector<TOut>(sink._samples.begin(), sink._samples.end());
+}
+
+/// @brief A deterministic bit stream, so a failure is the chain's and never the draw's.
+[[nodiscard]] std::vector<int> sourceBits(std::size_t count, std::uint64_t seed = 0x9e3779b97f4a7c15ULL) {
+    std::vector<int> bits(count);
+    std::uint64_t    state = seed;
+    for (int& bit : bits) {
+        state ^= state << 13U;
+        state ^= state >> 7U;
+        state ^= state << 17U;
+        bit = static_cast<int>(state & 1ULL);
+    }
+    return bits;
+}
+
+/// @brief The best agreement between the recovered signs and @p bits over any lag up to @p maxLag, and the lag it was
+/// found at. Every chain here carries filter and loop delays the recipe does not compensate, so the alignment is
+/// searched rather than derived; what is measured is the agreement, not the lag.
+struct Agreement {
+    double      fraction = 0.0;
+    std::size_t lag      = 0UZ;
+    bool        inverted = false;
+};
+
+[[nodiscard]] Agreement bestAgreement(std::span<const float> soft, std::span<const int> bits, std::size_t skip, std::size_t maxLag, bool allowInversion) {
+    Agreement best;
+    for (std::size_t lag = 0UZ; lag <= maxLag; ++lag) {
+        for (const bool invert : {false, true}) {
+            if (invert && !allowInversion) {
+                continue;
+            }
+            std::size_t matched = 0UZ;
+            std::size_t counted = 0UZ;
+            for (std::size_t k = skip; k + lag < soft.size() && k < bits.size(); ++k) {
+                const int decided = (soft[k + lag] > 0.f) != invert ? 1 : 0;
+                matched += decided == bits[k] ? 1UZ : 0UZ;
+                ++counted;
+            }
+            if (counted == 0UZ) {
+                continue;
+            }
+            const double fraction = static_cast<double>(matched) / static_cast<double>(counted);
+            if (fraction > best.fraction) {
+                best = {fraction, lag, invert};
+            }
+        }
+    }
+    return best;
+}
+
+/// @brief Phase-continuous binary FSK on a REAL carrier: the audio a soundcard hands an AFSK receiver.
+[[nodiscard]] std::vector<float> afskAudio(std::span<const int> bits, double sampleRate, double symbolRate, double markHz, double spaceHz) {
+    const auto         perSymbol = static_cast<std::size_t>(sampleRate / symbolRate);
+    std::vector<float> audio;
+    audio.reserve(bits.size() * perSymbol);
+    double phase = 0.0;
+    for (const int bit : bits) {
+        const double tone = bit == 1 ? markHz : spaceHz;
+        for (std::size_t n = 0UZ; n < perSymbol; ++n) {
+            audio.push_back(static_cast<float>(std::cos(phase)));
+            phase += 2.0 * std::numbers::pi * tone / sampleRate;
+        }
+    }
+    return audio;
+}
+
+/// @brief Root-raised-cosine shaped BPSK at complex baseband, with a residual carrier offset the receiver must find.
+[[nodiscard]] std::vector<std::complex<float>> bpskBaseband(std::span<const int> symbols, std::size_t samplesPerSymbol, double rolloff, double offsetCyclesPerSample, double phase0) {
+    const auto shape = gr::filter::design::designRootRaisedCosine(static_cast<int>(8UZ * samplesPerSymbol + 1UZ), static_cast<double>(samplesPerSymbol), 1.0, rolloff, 1.0);
+
+    std::vector<float> impulses(symbols.size() * samplesPerSymbol, 0.f);
+    for (std::size_t k = 0UZ; k < symbols.size(); ++k) {
+        impulses[k * samplesPerSymbol] = symbols[k] == 1 ? 1.f : -1.f;
+    }
+
+    std::vector<std::complex<float>> out(impulses.size());
+    for (std::size_t n = 0UZ; n < impulses.size(); ++n) {
+        double sum = 0.0;
+        for (std::size_t k = 0UZ; k < shape.size() && k <= n; ++k) {
+            sum += static_cast<double>(shape[k]) * static_cast<double>(impulses[n - k]);
+        }
+        const double angle = 2.0 * std::numbers::pi * offsetCyclesPerSample * static_cast<double>(n) + phase0;
+        out[n]             = std::complex<float>(static_cast<float>(sum * std::cos(angle)), static_cast<float>(sum * std::sin(angle)));
+    }
+    return out;
 }
 
 } // namespace
@@ -441,6 +556,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const auto applied   = wrapper->applyRecipeParameters(change);
         expect(applied.has_value()) << (applied.has_value() ? "" : applied.error().message);
         if (tuner != nullptr) {
+            const auto staged  = tuner->settings().stagedParameters();
+            const auto shiftIt = staged.find("frequency_shift");
             expect(shiftIt != staged.end()) << "the re-derived shift is staged";
             if (shiftIt != staged.end()) {
                 expect(eq(numericOf(shiftIt->second), -250000.0)) << "a station above the center is brought down to it";
@@ -514,6 +631,357 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const auto ratio   = kDeviation / kReference;
         expect(lt(std::abs(reading.amplitude - ratio), 0.001 * ratio)) << std::format("tone amplitude {:.5f}, expected {:.5f}", reading.amplitude, ratio);
         expect(gt(reading.powerShare, 0.9999)) << std::format("the tone accounts for {:.4f} of the audio's power", reading.powerShare);
+    };
+
+    "AfskDemod demands its tone pair, and the deviation's sign is the polarity rule"_test = [] {
+        auto loader = makeRecipeLoader();
+        expect(loader.instantiate("gr::recipes::AfskDemod") == nullptr) << "the tone pair is an interoperability fact and has no default";
+
+        // Bell 202 at 48 kHz with decimation 5: eight samples per symbol into the timing loop
+        constexpr double kSampleRate = 48000.0;
+        constexpr double kSymbolRate = 1200.0;
+        constexpr double kMark       = 1200.0;
+        constexpr double kSpace      = 2200.0;
+        constexpr double kDecimation = 5.0;
+        constexpr double kHilbert    = 127.0;
+
+        gr::property_map parameters;
+        parameters["sample_rate"] = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"] = static_cast<float>(kSymbolRate);
+        parameters["mark_hz"]     = kMark;
+        parameters["space_hz"]    = kSpace;
+        parameters["decimation"]  = static_cast<gr::Size_t>(kDecimation);
+        auto composite            = loader.instantiate("gr::recipes::AfskDemod", parameters);
+        expect(composite != nullptr) << boost::ut::fatal;
+
+        const auto inputs  = exportedNames(composite->exportedInputPorts());
+        const auto outputs = exportedNames(composite->exportedOutputPorts());
+        expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ));
+        expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end());
+
+        const auto reads = [&composite](std::string_view block, const char* key) {
+            const auto interior = interiorByName(composite, block);
+            boost::ut::expect(interior != nullptr) << block << boost::ut::fatal;
+            const auto value = interior->settings().get(key);
+            boost::ut::expect(value.has_value()) << block << "." << key << boost::ut::fatal;
+            return numericOf(*value);
+        };
+
+        const double expectedGain = kSampleRate / (kDecimation * std::numbers::pi * (kMark - kSpace));
+        expect(lt(std::abs(expectedGain + 3.055775), 1e-5)) << std::format("the worked figure is -3.055775, computed as {:.6f}", expectedGain);
+        expect(eq(static_cast<float>(reads("discriminator", "gain")), static_cast<float>(expectedGain))) << "a mark below a space is a NEGATIVE deviation and a negative gain";
+        expect(eq(reads("timing", "samples_per_symbol"), 8.0)) << "48000 / (5 * 1200)";
+        expect(eq(reads("delay", "delay"), (kHilbert - 1.0) / 2.0)) << "the real branch takes the Hilbert design's own group delay, as an integer";
+        expect(eq(reads("hilbert", "designed_taps"), kHilbert)) << "and the design is the length the parameter states";
+        expect(eq(reads("channel", "cutoff"), 0.9167 * kSymbolRate)) << "half of Carson's 2*(500 + 600) = 2200 Hz";
+        expect(eq(reads("channel", "decimation"), kDecimation));
+
+        // move the space below the mark and the polarity has to follow, with no other setting touched
+        auto* wrapper = dynamic_cast<gr::GraphWrapper<gr::Graph>*>(composite.get());
+        expect(wrapper != nullptr) << boost::ut::fatal;
+        gr::property_map change;
+        change["space_hz"] = 200.0;
+        expect(wrapper->applyRecipeParameters(change).has_value());
+
+        const auto discriminator = interiorByName(composite, "discriminator");
+        expect(discriminator != nullptr) << boost::ut::fatal;
+        const auto staged = discriminator->settings().stagedParameters();
+        const auto gainIt = staged.find("gain");
+        expect(gainIt != staged.end()) << "the re-derived gain is staged";
+        if (gainIt != staged.end()) {
+            const double flipped = kSampleRate / (kDecimation * std::numbers::pi * (kMark - 200.0));
+            expect(eq(static_cast<float>(numericOf(gainIt->second)), static_cast<float>(flipped))) << std::format("the sign flips to {:+.6f} because the mark is now the higher tone", flipped);
+            expect(gt(flipped, 0.0));
+        }
+    };
+
+    "BpskFrontEnd and its two consumers, one recipe naming another"_test = [] {
+        auto loader = makeRecipeLoader();
+        for (const char* name : {"gr::recipes::BpskFrontEnd", "gr::recipes::BpskDemod", "gr::recipes::DbpskDemod"}) {
+            expect(loader.instantiate(name) == nullptr) << name << ": a general recipe demands the link's rates";
+        }
+
+        constexpr double kSampleRate = 200000.0;
+        constexpr double kSymbolRate = 12500.0;
+        constexpr double kDecimation = 4.0;
+        constexpr double kOffset     = 3000.0;
+
+        gr::property_map parameters;
+        parameters["sample_rate"]      = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"]      = static_cast<float>(kSymbolRate);
+        parameters["decimation"]       = static_cast<gr::Size_t>(kDecimation);
+        parameters["frequency_offset"] = kOffset;
+
+        for (const char* name : {"gr::recipes::BpskFrontEnd", "gr::recipes::BpskDemod", "gr::recipes::DbpskDemod"}) {
+            auto composite = loader.instantiate(name, parameters);
+            expect(composite != nullptr) << name << boost::ut::fatal;
+
+            const auto inputs  = exportedNames(composite->exportedInputPorts());
+            const auto outputs = exportedNames(composite->exportedOutputPorts());
+            expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ)) << name;
+            expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end()) << name;
+
+            // BpskDemod and DbpskDemod write BpskFrontEnd's five stages out rather than naming it: the graph importer
+            // creates an interior block from its id alone and never hands it the block's parameters, so a nested
+            // recipe with a required parameter refuses. The three must therefore derive the same five settings, and
+            // this is the assertion that says the copies have not drifted.
+            const auto reads = [&composite, name](std::string_view block, const char* key) {
+                const auto interior = interiorByName(composite, block);
+                boost::ut::expect(interior != nullptr) << name << ": " << block << boost::ut::fatal;
+                const auto value = interior->settings().get(key);
+                boost::ut::expect(value.has_value()) << name << ": " << block << "." << key << boost::ut::fatal;
+                return numericOf(*value);
+            };
+
+            expect(eq(static_cast<float>(reads("translate", "frequency_shift")), static_cast<float>(-kOffset))) << name;
+            expect(eq(reads("channel", "cutoff"), 0.75 * kSymbolRate)) << name;
+            expect(eq(reads("channel", "decimation"), kDecimation)) << name;
+            expect(eq(static_cast<float>(reads("agc", "sample_rate")), static_cast<float>(kSampleRate / kDecimation))) << name << ": the AGC's time constants are measured against the rate it runs at";
+            expect(eq(reads("agc", "reference_db"), 0.0)) << name << ": the loops downstream state their gains at unit amplitude";
+            expect(eq(reads("fll", "samples_per_symbol"), kSampleRate / (kDecimation * kSymbolRate))) << name;
+            expect(eq(reads("timing", "samples_per_symbol"), kSampleRate / (kDecimation * kSymbolRate))) << name;
+        }
+
+        // the two detectors are the whole of the difference
+        auto coherent = loader.instantiate("gr::recipes::BpskDemod", parameters);
+        expect(coherent != nullptr) << boost::ut::fatal;
+        const auto costas = interiorByName(coherent, "costas");
+        expect(costas != nullptr) << boost::ut::fatal;
+        const auto order = costas->settings().get("order");
+        const auto kdet  = costas->settings().get("detector_gain");
+        expect(order.has_value() && numericOf(*order) == 2.0) << "a settable order would make this a PSK recipe";
+        expect(kdet.has_value() && numericOf(*kdet) == 1.0) << "1.0 is the order-2 S-curve slope at the unit amplitude the AGC delivers";
+
+        auto differential = loader.instantiate("gr::recipes::DbpskDemod", parameters);
+        expect(differential != nullptr) << boost::ut::fatal;
+        expect(interiorByName(differential, "phasor") != nullptr) << "and the differential arm has a phasor where the coherent one has a loop";
+        expect(interiorByName(differential, "costas") == nullptr) << "and no carrier loop at all";
+
+        // the limitation the two files are written around, pinned so that it is a finding and not a habit: a nested
+        // recipe with a required parameter cannot be built, because the importer never forwards the parameters
+        expect(loader.instantiate("gr::recipes::BpskFrontEnd") == nullptr) << "which is the refusal a nested instantiation would run into";
+    };
+
+    "FskDemodDcBlock is FskDemod's chain plus the blocker, and hands back soft symbols"_test = [] {
+        auto loader = makeRecipeLoader();
+        expect(loader.instantiate("gr::recipes::FskDemodDcBlock") == nullptr);
+
+        constexpr double kSampleRate      = 48000.0;
+        constexpr double kSymbolRate      = 4800.0;
+        constexpr double kModulationIndex = 0.5;
+
+        gr::property_map parameters;
+        parameters["sample_rate"]      = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"]      = static_cast<float>(kSymbolRate);
+        parameters["modulation_index"] = kModulationIndex;
+        auto composite                 = loader.instantiate("gr::recipes::FskDemodDcBlock", parameters);
+        expect(composite != nullptr) << boost::ut::fatal;
+
+        const auto outputs = exportedNames(composite->exportedOutputPorts());
+        expect(eq(outputs.size(), 1UZ) && std::ranges::find(outputs, "out") != outputs.end());
+        expect(interiorByName(composite, "slicer") == nullptr) << "soft is the general form; a slicer downstream is one landed block and unslicing is impossible";
+
+        const auto blocker = interiorByName(composite, "dc_block");
+        expect(blocker != nullptr) << boost::ut::fatal;
+        const auto length = blocker->settings().get("length");
+        expect(length.has_value() && numericOf(*length) == 128.0) << "the notch corner is sample_rate/128, which at ten samples per symbol is well under the symbol rate";
+
+        const auto discriminator = interiorByName(composite, "discriminator");
+        expect(discriminator != nullptr) << boost::ut::fatal;
+        const auto gain = discriminator->settings().get("gain");
+        expect(gain.has_value());
+        if (gain.has_value()) {
+            expect(eq(static_cast<float>(numericOf(*gain)), static_cast<float>(kSampleRate / (kSymbolRate * std::numbers::pi * kModulationIndex)))) << "the gain is FskDemod's, unchanged";
+        }
+
+        // and the signed index inverts it, which is the polarity rule FskDemod's header now states
+        auto* wrapper = dynamic_cast<gr::GraphWrapper<gr::Graph>*>(composite.get());
+        expect(wrapper != nullptr) << boost::ut::fatal;
+        gr::property_map change;
+        change["modulation_index"] = -kModulationIndex;
+        expect(wrapper->applyRecipeParameters(change).has_value());
+        const auto staged = discriminator->settings().stagedParameters();
+        const auto gainIt = staged.find("gain");
+        expect(gainIt != staged.end());
+        if (gainIt != staged.end()) {
+            expect(lt(numericOf(gainIt->second), 0.0)) << "a negative index means the higher tone is the zero, and the gain inverts with it";
+        }
+    };
+
+    "AfskDemod recovers Bell 202 from real audio, the mark positive"_test = [] {
+        constexpr double      kSampleRate = 48000.0;
+        constexpr double      kSymbolRate = 1200.0;
+        constexpr double      kMark       = 1200.0;
+        constexpr double      kSpace      = 2200.0;
+        constexpr std::size_t kBits       = 400UZ;
+
+        const std::vector<int>   bits  = sourceBits(kBits);
+        const std::vector<float> audio = afskAudio(std::span<const int>(bits), kSampleRate, kSymbolRate, kMark, kSpace);
+
+        gr::property_map parameters;
+        parameters["sample_rate"] = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"] = static_cast<float>(kSymbolRate);
+        parameters["mark_hz"]     = kMark;
+        parameters["space_hz"]    = kSpace;
+        parameters["decimation"]  = static_cast<gr::Size_t>(5);
+
+        const std::vector<float> soft = runRecipe<float, float>("gr::recipes::AfskDemod", parameters, audio);
+        expect(ge(soft.size(), kBits - 40UZ)) << std::format("one soft symbol per symbol: {} out of {}", soft.size(), kBits) << boost::ut::fatal;
+
+        // the mark carries a one and is the LOWER tone, so the polarity is right only if the deviation's sign reached
+        // the discriminator: an uninverted match is the assertion, and the inverted one is what a wrong sign gives
+        const Agreement upright  = bestAgreement(std::span<const float>(soft), std::span<const int>(bits), 8UZ, 40UZ, false);
+        const Agreement anyPhase = bestAgreement(std::span<const float>(soft), std::span<const int>(bits), 8UZ, 40UZ, true);
+        expect(ge(upright.fraction, 0.99)) << std::format("{:.4f} of symbols recovered at lag {}", upright.fraction, upright.lag);
+        expect(that % (!anyPhase.inverted)) << "the best alignment is the uninverted one, which is the deviation-sign polarity rule end to end";
+    };
+
+    "BpskFrontEnd levels its input and takes the residual carrier frequency out"_test = [] {
+        constexpr double      kSampleRate = 200000.0;
+        constexpr double      kSymbolRate = 12500.0;
+        constexpr std::size_t kDecimation = 4UZ;
+        constexpr std::size_t kSymbols    = 3000UZ;
+        constexpr double      kOffsetHz   = 400.0;
+        constexpr double      kAmplitude  = 0.05; // well away from unity, so the AGC has something to do
+
+        const std::vector<int>           symbols = sourceBits(kSymbols);
+        std::vector<std::complex<float>> wave    = bpskBaseband(std::span<const int>(symbols), static_cast<std::size_t>(kSampleRate / kSymbolRate), 0.35, kOffsetHz / kSampleRate, 0.7);
+        for (std::complex<float>& sample : wave) {
+            sample *= static_cast<float>(kAmplitude);
+        }
+
+        gr::property_map parameters;
+        parameters["sample_rate"] = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"] = static_cast<float>(kSymbolRate);
+        parameters["decimation"]  = static_cast<gr::Size_t>(kDecimation);
+
+        const std::vector<std::complex<float>> out = runRecipe<std::complex<float>, std::complex<float>>("gr::recipes::BpskFrontEnd", parameters, wave);
+        expect(ge(out.size(), kSymbols / 2UZ)) << std::format("one complex sample per symbol: {}", out.size()) << boost::ut::fatal;
+
+        // squaring removes the BPSK modulation, so the per-symbol phase advance of z^2 is twice the residual carrier
+        const std::size_t settled = out.size() / 2UZ;
+        double            level   = 0.0;
+        double            advance = 0.0;
+        std::size_t       counted = 0UZ;
+        for (std::size_t k = settled + 1UZ; k < out.size(); ++k) {
+            level += static_cast<double>(std::abs(out[k]));
+            const std::complex<double> now{out[k]};
+            const std::complex<double> before{out[k - 1UZ]};
+            advance += std::arg(now * now * std::conj(before * before));
+            ++counted;
+        }
+        level /= static_cast<double>(counted);
+        const double residualHz = (advance / static_cast<double>(counted)) * 0.5 * kSymbolRate / (2.0 * std::numbers::pi);
+
+        // the AGC levels the SAMPLE stream's mean magnitude to one; what is read here is the magnitude at the symbol
+        // instants after the matched filter, which sits above that mean for a shaped signal. 1.216 is the measured
+        // figure and the bound is around it, not around one.
+        expect(that % (std::abs(level - 1.0) < 0.3)) << std::format("the AGC delivers unit amplitude for the loops downstream: measured {:.4f}", level);
+        expect(that % (std::abs(residualHz) < 0.1 * kOffsetHz)) << std::format("the frequency-locked loop leaves {:.2f} Hz of a {:.0f} Hz offset", residualHz, kOffsetHz);
+    };
+
+    "BpskDemod decides on the axis the Costas loop finds"_test = [] {
+        constexpr double      kSampleRate = 200000.0;
+        constexpr double      kSymbolRate = 12500.0;
+        constexpr std::size_t kDecimation = 4UZ;
+        constexpr std::size_t kSymbols    = 3000UZ;
+
+        const std::vector<int>                 bits = sourceBits(kSymbols);
+        const std::vector<std::complex<float>> wave = bpskBaseband(std::span<const int>(bits), static_cast<std::size_t>(kSampleRate / kSymbolRate), 0.35, 200.0 / kSampleRate, 1.1);
+
+        gr::property_map parameters;
+        parameters["sample_rate"] = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"] = static_cast<float>(kSymbolRate);
+        parameters["decimation"]  = static_cast<gr::Size_t>(kDecimation);
+
+        const std::vector<float> soft = runRecipe<std::complex<float>, float>("gr::recipes::BpskDemod", parameters, wave);
+        expect(ge(soft.size(), kSymbols / 2UZ)) << std::format("soft symbols: {}", soft.size()) << boost::ut::fatal;
+
+        // an order-2 Costas loop has a 180-degree ambiguity, so the recovered stream may be the transmitted one
+        // inverted; resolving that is a framing question and not this recipe's
+        const std::size_t skip  = soft.size() / 4UZ;
+        const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(skip), std::span<const int>(bits).subspan(skip), 0UZ, 40UZ, true);
+        expect(ge(found.fraction, 0.99)) << std::format("{:.4f} of symbols recovered at lag {}, {}", found.fraction, found.lag, found.inverted ? "inverted" : "upright");
+    };
+
+    "DbpskDemod needs no phase at all, which is the whole of the differential arm"_test = [] {
+        constexpr double      kSampleRate = 200000.0;
+        constexpr double      kSymbolRate = 12500.0;
+        constexpr std::size_t kDecimation = 4UZ;
+        constexpr std::size_t kSymbols    = 1500UZ;
+
+        // differentially encoded: the transmitted symbol is the running product, so the receiver's decision on
+        // adjacent pairs hands back the source bits without ever learning the carrier phase
+        const std::vector<int> bits = sourceBits(kSymbols);
+        std::vector<int>       encoded(bits.size());
+        int                    running = 1;
+        for (std::size_t k = 0UZ; k < bits.size(); ++k) {
+            running    = bits[k] == 1 ? running : -running;
+            encoded[k] = running > 0 ? 1 : 0;
+        }
+
+        gr::property_map parameters;
+        parameters["sample_rate"] = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"] = static_cast<float>(kSymbolRate);
+        parameters["decimation"]  = static_cast<gr::Size_t>(kDecimation);
+
+        std::vector<double> fractions;
+        for (const double phase0 : {0.0, std::numbers::pi / 2.0, std::numbers::pi, 3.0 * std::numbers::pi / 4.0}) {
+            const std::vector<std::complex<float>> wave = bpskBaseband(std::span<const int>(encoded), static_cast<std::size_t>(kSampleRate / kSymbolRate), 0.35, 0.0, phase0);
+            const std::vector<float>               soft = runRecipe<std::complex<float>, float>("gr::recipes::DbpskDemod", parameters, wave);
+            expect(ge(soft.size(), kSymbols / 2UZ)) << std::format("phase {:.3f}: soft symbols {}", phase0, soft.size()) << boost::ut::fatal;
+
+            const std::size_t skip  = soft.size() / 4UZ;
+            const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(skip), std::span<const int>(bits).subspan(skip), 0UZ, 40UZ, false);
+            expect(ge(found.fraction, 0.99)) << std::format("phase {:.3f}: {:.4f} recovered at lag {}", phase0, found.fraction, found.lag);
+            fractions.push_back(found.fraction);
+        }
+        const auto [worst, best] = std::ranges::minmax(fractions);
+        expect(that % (best - worst < 0.01)) << std::format("a carrier phase rotation costs the differential arm nothing: {:.4f} to {:.4f} across four rotations", worst, best);
+    };
+
+    "FskDemodDcBlock removes the offset FskDemod has no answer to"_test = [] {
+        // A discriminator turns a frequency offset into a DC offset, and past half a level every symbol decides
+        // wrong. The strict comparison is the only honest justification for an extra block.
+        constexpr double      kSampleRate = 96000.0;
+        constexpr double      kSymbolRate = 9600.0;
+        constexpr double      kIndex      = 0.5;
+        constexpr std::size_t kBits       = 600UZ;
+        const double          kDeviation  = kIndex * kSymbolRate / 2.0; // 2400 Hz
+        const double          kOffset     = 0.45 * kDeviation;          // just under half a level
+
+        const std::vector<int>           bits      = sourceBits(kBits);
+        const auto                       perSymbol = static_cast<std::size_t>(kSampleRate / kSymbolRate);
+        std::vector<std::complex<float>> wave;
+        wave.reserve(bits.size() * perSymbol);
+        double phase = 0.0;
+        for (const int bit : bits) {
+            const double tone = (bit == 1 ? kDeviation : -kDeviation) + kOffset;
+            for (std::size_t n = 0UZ; n < perSymbol; ++n) {
+                wave.emplace_back(static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase)));
+                phase += 2.0 * std::numbers::pi * tone / kSampleRate;
+            }
+        }
+
+        gr::property_map parameters;
+        parameters["sample_rate"]      = static_cast<float>(kSampleRate);
+        parameters["symbol_rate"]      = static_cast<float>(kSymbolRate);
+        parameters["modulation_index"] = kIndex;
+
+        const std::vector<std::uint8_t> plain = runRecipe<std::complex<float>, std::uint8_t>("gr::recipes::FskDemod", parameters, wave);
+        const std::vector<float>        fixed = runRecipe<std::complex<float>, float>("gr::recipes::FskDemodDcBlock", parameters, wave);
+        expect(ge(plain.size(), kBits / 2UZ) && ge(fixed.size(), kBits / 2UZ)) << boost::ut::fatal;
+
+        std::vector<float> plainSoft(plain.size());
+        for (std::size_t k = 0UZ; k < plain.size(); ++k) {
+            plainSoft[k] = plain[k] != 0U ? 1.f : -1.f;
+        }
+
+        const std::size_t skip      = 40UZ;
+        const Agreement   withoutDc = bestAgreement(std::span<const float>(plainSoft), std::span<const int>(bits), skip, 40UZ, true);
+        const Agreement   withDc    = bestAgreement(std::span<const float>(fixed), std::span<const int>(bits), skip, 40UZ, true);
+        expect(ge(withDc.fraction, 0.99)) << std::format("with the blocker: {:.4f} recovered", withDc.fraction);
+        expect(gt(withDc.fraction, withoutDc.fraction + 0.05)) << std::format("without it: {:.4f}; the offset is {:.0f} Hz against a {:.0f} Hz deviation", withoutDc.fraction, kOffset, kDeviation);
     };
 
     "the committed typed headers match a fresh emission byte for byte"_test = [] {
