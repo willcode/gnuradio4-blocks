@@ -20,7 +20,9 @@ gr_add_block_library(
 if(ENABLE_TESTING)
   add_subdirectory(test)
 endif()
+
 if(ENABLE_EXAMPLES)
+  add_subdirectory(src)
 endif()
 
 add_subdirectory(bench)
