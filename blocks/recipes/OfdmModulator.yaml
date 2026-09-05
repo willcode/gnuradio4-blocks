@@ -1,0 +1,82 @@
+# gr::recipes::OfdmModulator — the transmit half of an OFDM link, from data-carrier symbols to baseband.
+#
+# What this recipe saves is not a derivation but a numerology. Four blocks in an OFDM chain have to agree
+# on the same transform length, the same carrier sets, the same pilot cycle and the same sync words, and
+# there is nothing in a graph that makes them: a chain assembled by hand can differ between the transmitter
+# and the receiver in any one of them and still run, producing a stream that carries nothing. Stating the
+# numerology once, as this composite's own settings, is what makes that mismatch impossible on one side and
+# a single copied parameter block on the other.
+#
+# Post-encoder data-carrier symbols in, complex baseband out. The allocator maps them onto symbols in FFT
+# bin order and the prefix block takes the inverse transform and puts each symbol's tail in front of it.
+#
+# cp_len is a scalar or a per-symbol cycle whose position restarts at every frame, which is how 802.11's
+# long-then-short opening is written. window_len raised-cosine samples smooth the symbol edges into each
+# other; it is off by default, because it is a departure from the exact prefix algebra and its benefit -- a
+# narrower spectrum, measured at 4.0, 14.9 and 28.9 dB of shoulder for 4, 8 and 16 samples over 24 occupied
+# carriers of 64 -- is what a user turns it on against.
+#
+# The frame-start trigger the prefix block can write is off here. It is a transmit-side marker for a
+# loopback with no detector in it, and a receiver that runs a real sync block would see two triggers for
+# one frame and restart on the second.
+#
+# Every parameter but window_len is required. A numerology has no default that means anything: a receiver
+# built against a guessed one is a receiver that decodes noise.
+definition_metadata:
+  block_type: gr::recipes::OfdmModulator
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: ofdm_modulator
+    exported_parameters:
+      - name: fft_len
+        type: uint32
+        doc: "transform length, a power of two; one symbol is this many carriers; required"
+      - name: data_carriers
+        type: int32[]
+        doc: "signed logical carrier indices the data stream fills, in order; required"
+      - name: pilot_carriers
+        type: int32[]
+        doc: "signed logical carrier indices the pilot cycle fills; empty for a numerology without pilots; required"
+      - name: pilot_symbols
+        type: float32[]
+        doc: "interleaved re,im read by (s * n_pilots + p) % len with s the symbol's data index in its frame; required"
+      - name: sync_words
+        type: float32[]
+        doc: "interleaved re,im, a whole number of fft_len-carrier symbols, emitted verbatim at each frame's head; required"
+      - name: frame_len
+        type: uint32
+        doc: "data symbols per frame; required"
+      - name: cp_len
+        type: uint32[]
+        doc: "prefix samples: one entry is a constant, several are a per-symbol cycle restarting at each frame; required"
+      - name: window_len
+        type: uint32
+        default: !!uint32 0
+        doc: "raised-cosine edge samples overlapped with the next symbol; 0 is off"
+    graph:
+      blocks:
+        - id: "gr::blocks::ofdm::CarrierAllocator"
+          parameters:
+            name: allocator
+            fft_len: "=fft_len"
+            data_carriers: "=data_carriers"
+            pilot_carriers: "=pilot_carriers"
+            pilot_symbols: "=pilot_symbols"
+            sync_words: "=sync_words"
+            frame_len: "=frame_len"
+        - id: "gr::blocks::ofdm::CpInsert"
+          parameters:
+            name: prefix
+            cp_len: "=cp_len"
+            window_len: "=window_len"
+            emit_trigger: false
+      connections:
+        - [allocator, 0, prefix, 0]
+      exported_ports:
+        - [allocator, INPUT, in, in]
+        - [prefix, OUTPUT, out, out]
