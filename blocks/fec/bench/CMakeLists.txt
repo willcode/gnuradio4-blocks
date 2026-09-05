@@ -9,4 +9,5 @@ endfunction()
 gr_add_fec_benchmark(bm_InterleaveBlocks)
 
 if(GR4_FEC_HAVE_AFF3CT)
+  gr_add_fec_benchmark(bm_Aff3ctBlocks)
 endif()

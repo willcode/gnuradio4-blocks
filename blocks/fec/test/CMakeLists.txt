@@ -9,3 +9,13 @@ target_link_libraries(qa_PunctureBlocks PRIVATE gr-fec)
 
 add_ut_test(qa_InterleaveBlocks)
 target_link_libraries(qa_InterleaveBlocks PRIVATE gr-fec)
+
+if(GR4_FEC_HAVE_AFF3CT)
+  add_ut_test(qa_Aff3ctBlocks)
+  target_link_libraries(qa_Aff3ctBlocks PRIVATE gr-fec)
+  target_compile_definitions(qa_Aff3ctBlocks PRIVATE GR4_FEC_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../include")
+
+  # The acceptance gate needs a channel to run its loopbacks through, and it is the tree's own.
+  add_ut_test(qa_Aff3ctBer)
+  target_link_libraries(qa_Aff3ctBer PRIVATE gr-fec gr-channel)
+endif()

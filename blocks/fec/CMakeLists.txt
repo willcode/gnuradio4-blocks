@@ -14,9 +14,11 @@ if(GR4_ENABLE_AFF3CT)
   # directory is derived from where the config was found so that the 'standard' setting can resolve a name, and it is a
   # cache variable so a different layout is one -D away.
   get_filename_component(GR4_AFF3CT_PREFIX "${aff3ct_DIR}/../../.." ABSOLUTE)
-  set(GR4_AFF3CT_LDPC_CONF_DIR "${GR4_AFF3CT_PREFIX}/share/aff3ct-${aff3ct_VERSION}/conf/dec/LDPC"
+  set(GR4_AFF3CT_LDPC_CONF_DIR
+      "${GR4_AFF3CT_PREFIX}/share/aff3ct-${aff3ct_VERSION}/conf/dec/LDPC"
       CACHE PATH "directory holding the AFF3CT release's LDPC parity-check matrices")
-  set(GR4_AFF3CT_POLAR_CONF_DIR "${GR4_AFF3CT_PREFIX}/share/aff3ct-${aff3ct_VERSION}/conf/cde/awgn_polar_codes"
+  set(GR4_AFF3CT_POLAR_CONF_DIR
+      "${GR4_AFF3CT_PREFIX}/share/aff3ct-${aff3ct_VERSION}/conf/cde/awgn_polar_codes"
       CACHE PATH "directory holding the AFF3CT release's polar reliability sequences")
   foreach(dir "${GR4_AFF3CT_LDPC_CONF_DIR}" "${GR4_AFF3CT_POLAR_CONF_DIR}")
     if(NOT IS_DIRECTORY "${dir}")
@@ -50,15 +52,25 @@ if(GR4_FEC_HAVE_AFF3CT)
   # gnuradio-options carries the tree's warning set and is not itself installed, so it is a build-time link only; the
   # AFF3CT headers arrive through an imported target and are therefore system includes, which is what keeps that warning
   # set usable over them.
-  target_link_libraries(gr-fec-aff3ct PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm
-                        PRIVATE $<BUILD_INTERFACE:gnuradio-options> aff3ct::aff3ct-shared-lib Threads::Threads)
+  target_link_libraries(
+    gr-fec-aff3ct
+    PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm
+    PRIVATE $<BUILD_INTERFACE:gnuradio-options> aff3ct::aff3ct-shared-lib Threads::Threads)
   target_include_directories(gr-fec-aff3ct PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                   $<INSTALL_INTERFACE:include/>)
   target_compile_definitions(gr-fec-aff3ct PRIVATE GR4_AFF3CT_LDPC_CONF_DIR="${GR4_AFF3CT_LDPC_CONF_DIR}"
-                             GR4_AFF3CT_POLAR_CONF_DIR="${GR4_AFF3CT_POLAR_CONF_DIR}")
+                                                   GR4_AFF3CT_POLAR_CONF_DIR="${GR4_AFF3CT_POLAR_CONF_DIR}")
   install(TARGETS gr-fec-aff3ct EXPORT gnuradio4Targets)
   target_link_libraries(gr-fec INTERFACE gr-fec-aff3ct)
+  list(
+    APPEND
+    GrFecBlocks_HDRS
+    include/gnuradio-4.0/fec/LdpcBlocks.hpp
+    include/gnuradio-4.0/fec/PolarBlocks.hpp)
 else()
+  # The two headers are still on disk with the gate off, and they carry registrations. Naming them here is the module
+  # saying it meant it: without AFF3CT there is nothing behind them to register.
+  set(GrFecBlocks_UNREGISTERED include/gnuradio-4.0/fec/LdpcBlocks.hpp include/gnuradio-4.0/fec/PolarBlocks.hpp)
 endif()
 
 gr_add_block_library(
@@ -67,6 +79,8 @@ gr_add_block_library(
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   ${GrFecBlocks_HDRS}
+  UNREGISTERED_HEADERS
+  ${GrFecBlocks_UNREGISTERED}
   LINK_LIBRARIES
   gr-fec)
 
