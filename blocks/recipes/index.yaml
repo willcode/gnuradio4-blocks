@@ -24,6 +24,10 @@ assets:
     created: "2026-09-02-00:00:00"
     modified: "2026-09-02-00:00:00"
     block_type: gr::recipes::DbpskDemod
+  - file: FskDemodAudio.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::FskDemodAudio
   - file: FskDemodDcBlock.yaml
     created: "2026-09-02-00:00:00"
     modified: "2026-09-02-00:00:00"
