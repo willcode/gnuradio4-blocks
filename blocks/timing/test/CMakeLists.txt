@@ -15,6 +15,7 @@ function(add_timing_test TEST_NAME)
   add_test(NAME ${TEST_NAME} COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/${TEST_NAME})
 endfunction()
 
+add_timing_test(qa_DiscontinuityMonitor)
 add_timing_test(qa_NMEAParser)
 add_timing_test(qa_NMEADevice)
 
