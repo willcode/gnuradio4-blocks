@@ -22,6 +22,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -205,11 +206,14 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     std::size_t                        _partialSampleSize{0U};
     bool                               _formatTagPending{true};
     std::size_t                        _fileBytes{0U}; // 0 when the source is not a local file
+    // stop() runs on whichever thread requests it, which can be another thread's processBulk() call
+    // waiting inside the header drain; the reader handle is therefore only ever replaced under this
+    std::mutex _readerMutex;
 
     using gr::Block<WavSource<T>>::Block;
 
     void resetFileState() {
-        _reader          = {};
+        replaceReader({});
         _headerParsed    = false;
         _readerFinalSeen = false;
         _readerActive    = false;
@@ -233,6 +237,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     }
 
     void start() {
+        resetFileState();
         _currentFileIndex = 0U;
         sample_rate       = 0.f;
         num_channels      = 0U;
@@ -256,9 +261,12 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
         openNextFile();
     }
 
+    // Canceling wakes a header drain that is waiting inside the reader and ends the reader's own
+    // work, and it leaves the handle that drain is holding valid. The state a fresh run needs is
+    // reset by start(), which runs on the thread that owns it.
     void stop() {
+        std::lock_guard guard(_readerMutex);
         _reader.cancel();
-        resetFileState();
     }
 
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
@@ -269,6 +277,13 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
         if (_failed) {
             outSpan.publish(0U);
             return gr::work::Status::ERROR;
+        }
+
+        // a reader canceled from outside means the graph is stopping: report the stream as ended
+        // rather than as the truncation the half-read file would otherwise look like
+        if (_reader.cancelRequested()) {
+            outSpan.publish(0U);
+            return gr::work::Status::DONE;
         }
 
         auto                       output    = std::span<T>(outSpan);
@@ -431,6 +446,11 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     }
 
 private:
+    void replaceReader(gr::algorithm::fileio::Reader reader) {
+        std::lock_guard guard(_readerMutex);
+        _reader = std::move(reader);
+    }
+
     void openNextFile() {
         if (_currentFileIndex >= _filesToRead.size()) {
             return;
@@ -453,9 +473,59 @@ private:
             fail("WavSource::openNextFile()", readerExp.error());
             return;
         }
-        _reader       = std::move(readerExp.value());
+        replaceReader(std::move(readerExp.value()));
         _readerActive = true;
         _currentFileIndex++;
+
+        parseHeaderSync();
+    }
+
+    /// Drains the reader up to and including the `fmt ` and `data` chunks before returning, so `sample_rate`
+    /// and `num_channels` carry the decoded file's own values from the moment the file is open, in time for
+    /// the first `settingsChanged()` that follows. The body of the file streams through the same asynchronous
+    /// reader afterward; only the header portion blocks here, on the reader's own `wait()` rather than a spin,
+    /// the way `Reader::get()` drains a whole stream. A canceled reader ends the drain: its `wait()` returns
+    /// at once with nothing to poll, so the loop would otherwise spin for as long as the graph took to stop.
+    void parseHeaderSync() {
+        while (!_failed && !_headerParsed && !_reader.cancelRequested()) {
+            std::optional<gr::Error> error;
+
+            _reader.poll(
+                [&](const auto& res) {
+                    if (res.isFinal) {
+                        _readerFinalSeen = true;
+                    }
+                    if (!res.data) {
+                        error = res.data.error();
+                        return;
+                    }
+                    const auto chunk = res.data.value();
+                    if (!chunk.empty()) {
+                        _headerBuffer.insert(_headerBuffer.end(), chunk.begin(), chunk.end());
+                        if (_headerBuffer.size() > kMaxHeaderBytes) {
+                            error = gr::Error("WAV header exceeds 1MB");
+                        }
+                    }
+                },
+                std::numeric_limits<std::size_t>::max(), true);
+
+            if (error) {
+                fail("WavSource::openNextFile()", *error);
+                return;
+            }
+
+            auto headerParsedExp = tryParseHeader();
+            if (!headerParsedExp) {
+                fail("WavSource::openNextFile()", headerParsedExp.error());
+                return;
+            }
+            _headerParsed = *headerParsedExp;
+
+            if (!_headerParsed && _readerFinalSeen) {
+                fail("WavSource::openNextFile()", gr::Error("WAV stream ended before data chunk"));
+                return;
+            }
+        }
     }
 
     [[nodiscard]] gr::work::Status finishCurrentFile() {
