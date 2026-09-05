@@ -8,4 +8,5 @@ function(gr_add_digital_benchmark BM_NAME)
 endfunction()
 
 gr_add_digital_benchmark(bm_ConstellationBlocks)
+gr_add_digital_benchmark(bm_CpmModulate)
 gr_add_digital_benchmark(bm_DifferentialCoding)
