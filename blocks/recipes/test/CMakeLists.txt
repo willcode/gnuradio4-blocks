@@ -14,3 +14,9 @@ target_link_libraries(
 target_include_directories(qa_Recipes PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../tools"
                                               "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 target_compile_definitions(qa_Recipes PRIVATE RECIPES_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+# the network family is optional, so the recipes' socket legs are built only where it is
+if(TARGET gnuradio4::GrNetworkBlocksShared)
+  target_link_libraries(qa_Recipes PRIVATE gnuradio4::GrNetworkBlocksShared)
+  target_compile_definitions(qa_Recipes PRIVATE GNURADIO4_HAVE_NETWORK_BLOCKS)
+endif()
