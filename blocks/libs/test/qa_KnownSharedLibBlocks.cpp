@@ -169,6 +169,8 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::fec::ViterbiDecodeSoft"sv));
         expect(registry.contains("gr::blocks::fec::Puncture"sv));
         expect(registry.contains("gr::blocks::fec::Depuncture"sv));
+        expect(registry.contains("gr::blocks::fec::Interleave<uint8>"sv));
+        expect(registry.contains("gr::blocks::fec::Deinterleave<uint8>"sv));
     };
 
     "CheckBlockInstantiations"_test = [&] {
