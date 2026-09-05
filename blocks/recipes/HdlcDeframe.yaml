@@ -1,0 +1,92 @@
+# gr::recipes::HdlcDeframe — sliced symbols in, validated frames out: the tail every HDLC link in this tree ends in.
+#
+# DifferentialDecoder<u8>(nrzi) → DelimiterExtractor<u8>(hdlc) → CrcCheck(CRC-16/IBM-SDLC). Three landed blocks and
+# three constants, with no new arithmetic: what this recipe saves is the constants agreeing with each other, which
+# is where a hand-built chain goes wrong.
+#
+# The constants, and where each comes from. ISO/IEC 13239 frames with the flag 01111110, keeps it out of the payload
+# by inserting a zero after five consecutive ones, and abandons a frame on seven, so the extractor runs at one bit an
+# item with bit stuffing at five and abort at seven. The frame check sequence is the same standard's 16-bit CRC —
+# poly 0x1021 with both reflections, seed and final XOR 0xFFFF, and its two octets least significant first on the
+# wire, which is `crc_byte_order: little`. AX.25, synchronous PPP and the AIS VHF data link of ITU-R M.1371 Annex 2
+# all use exactly this framing and exactly this frame check; the recipe is one for all three.
+#
+# The line code is NRZI, which every HDLC-on-air link this tree knows uses: a zero bit is a transition and a one is
+# none, so the receiver never has to know the absolute polarity. `coding` exposes the block's other value,
+# `differential`, for a link that is coded the other way round.
+#
+# `payload_bit_order` is the order the pack stage assembles a de-stuffed octet in. HDLC transmits each octet least
+# significant bit first, which is the default here and what the AX.25 chain runs at. A protocol whose own parser
+# reads the frame as one most-significant-bit-first bit string states `msb_first` instead; the choice belongs to
+# that parser and not to the framing, which is why it is a parameter.
+#
+# `max_payload_items` is the extractor contract's own bound and has no default by that contract: without it a frame
+# whose closing flag was corrupted accumulates with the stream. It is stated here in payload OCTETS, which is what a
+# caller of a byte protocol knows, and reaches the extractor multiplied by eight — the extractor counts the decoded
+# items it scans, and an HDLC stream is one bit an item. `min_payload_items` is fixed at 24 items, three octets in the
+# same units: the smallest region that could hold a frame check and one octet of payload, so a shorter region leaves
+# by `reject` naming itself undersize rather than reaching a check too short to read.
+#
+# Both failure ports are exported. A discard leaves by a port with its reason — `reject` carries the extractor's
+# overrun, undersize and unaligned regions, `fail` the frames whose check sequence disagreed — and hiding either
+# inside the composite would hide the reason.
+definition_metadata:
+  block_type: gr::recipes::HdlcDeframe
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: hdlc_deframe
+    exported_parameters:
+      - name: max_payload_items
+        type: uint32
+        doc: "largest payload a frame may carry, in octets; required, there is no default — the extractor contract admits none"
+      - name: coding
+        type: string
+        default: "nrzi"
+        doc: "line code ahead of the framing: 'nrzi', or 'differential' for a link coded the other way round"
+      - name: payload_bit_order
+        type: string
+        default: "lsb_first"
+        doc: "order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first"
+    graph:
+      blocks:
+        - id: "gr::blocks::digital::DifferentialDecoder<uint8>"
+          parameters:
+            name: line_code
+            coding: "=coding"
+        - id: "gr::blocks::digital::DelimiterExtractor<uint8>"
+          parameters:
+            name: extractor
+            end_delimiter: "01111110"
+            transparency: "bit_stuffing"
+            stuff_after_ones: !!uint32 5
+            abort_ones: !!uint32 7
+            bits_per_item: !!uint32 1
+            max_payload_items: "=max_payload_items * 8" # the extractor counts bit items, the parameter counts octets
+            min_payload_items: !!uint32 24 # three octets in bit items: a shorter region cannot hold a check sequence and a payload octet
+            payload_pack_bits: !!uint32 8
+            payload_bit_order: "=payload_bit_order"
+            frame_label: "hdlc"
+        - id: "gr::blocks::digital::CrcCheck"
+          parameters:
+            name: check
+            width: !!uint32 16
+            poly: !!uint64 4129 # 0x1021
+            initial_value: !!uint64 65535
+            final_xor: !!uint64 65535
+            input_reflected: !!bool true
+            result_reflected: !!bool true
+            crc_byte_order: "little"
+            discard_crc: !!bool true
+      connections:
+        - [line_code, 0, extractor, 0]
+        - [extractor, 0, check, 0]
+      exported_ports:
+        - [line_code, INPUT, in, in]
+        - [check, OUTPUT, ok, out]
+        - [check, OUTPUT, fail, fail]
+        - [extractor, OUTPUT, reject, reject]
