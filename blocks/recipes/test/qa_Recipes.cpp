@@ -301,6 +301,7 @@ struct KissByteSink : gr::Block<KissByteSink> {
     writeParameters["mode"]      = std::pmr::string("overwrite");
 
     auto loader    = makeRecipeLoader();
+    auto composite = loader.instantiate("gr::recipes::KissFileWrite", writeParameters);
     boost::ut::expect(composite != nullptr) << boost::ut::fatal;
 
     gr::Graph graph;
@@ -335,6 +336,7 @@ struct KissByteSink : gr::Block<KissByteSink> {
     readParameters["file_name"] = std::pmr::string(path);
 
     auto loader    = makeRecipeLoader();
+    auto composite = loader.instantiate("gr::recipes::KissFileRead", readParameters);
     boost::ut::expect(composite != nullptr) << boost::ut::fatal;
 
     gr::Graph  graph;
@@ -1514,13 +1516,23 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         auto loader = makeRecipeLoader();
 
         const std::string tempFile = (std::filesystem::temp_directory_path() / "qa_recipes_kiss_load.bin").string();
+        expect(loader.instantiate("gr::recipes::KissFileWrite", {{"file_name", tempFile}}) != nullptr) << "KissFileWrite via the loader";
+        expect(loader.instantiate("gr::recipes::KissFileRead", {{"file_name", tempFile}, {"max_payload_items", gr::Size_t{4096U}}}) != nullptr) << "KissFileRead via the loader";
+#ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
+        expect(loader.instantiate("gr::recipes::KissServe", {{"endpoint", std::string("127.0.0.1:1")}, {"queue_bytes", gr::Size_t{4096U}}}) != nullptr) << "KissServe via the loader";
+#endif // GNURADIO4_HAVE_NETWORK_BLOCKS
+        expect(loader.instantiate("gr::recipes::KissStreamDecode", {{"max_payload_items", gr::Size_t{4096U}}}) != nullptr) << "KissStreamDecode via the loader";
 
         gr::Graph gWrite;
+        expect(gr::recipes::KissFileWrite::emplace(gWrite, gr::recipes::KissFileWrite::Parameters(tempFile)) != nullptr) << "KissFileWrite via the generated header";
         gr::Graph gRead;
+        expect(gr::recipes::KissFileRead::emplace(gRead, gr::recipes::KissFileRead::Parameters(tempFile, std::uint32_t{4096U})) != nullptr) << "KissFileRead via the generated header";
 #ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
         gr::Graph gServe;
+        expect(gr::recipes::KissServe::emplace(gServe, gr::recipes::KissServe::Parameters(std::string("127.0.0.1:1"), std::uint32_t{4096U})) != nullptr) << "KissServe via the generated header";
 #endif // GNURADIO4_HAVE_NETWORK_BLOCKS
         gr::Graph gStream;
+        expect(gr::recipes::KissStreamDecode::emplace(gStream, gr::recipes::KissStreamDecode::Parameters(std::uint32_t{4096U})) != nullptr) << "KissStreamDecode via the generated header";
     };
 
     "KissFileWrite -> KissFileRead reproduces seeded frames over a temporary file, with kiss_port and timestamps"_test = [] {
@@ -1536,6 +1548,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         {
             auto                   loader = makeRecipeLoader();
             const gr::property_map writeParams{{"file_name", path}, {"mode", std::string("overwrite")}, {"kiss_port", gr::Size_t{5U}}, {"emit_timestamp", true}};
+            auto                   composite = loader.instantiate("gr::recipes::KissFileWrite", writeParams);
             expect(composite != nullptr) << boost::ut::fatal;
 
             gr::Graph graph;
@@ -1555,6 +1568,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         {
             auto                   loader = makeRecipeLoader();
             const gr::property_map readParams{{"file_name", path}, {"max_payload_items", gr::Size_t{4096U}}, {"read_timestamp", true}};
+            auto                   composite = loader.instantiate("gr::recipes::KissFileRead", readParams);
             expect(composite != nullptr) << boost::ut::fatal;
 
             gr::Graph  graph;
@@ -1609,6 +1623,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         serveParams["bind"]          = true;
         serveParams["overflow"]      = std::pmr::string("backpressure");
         serveParams["queue_bytes"]   = gr::Size_t{65536U};
+        auto composite               = loader.instantiate("gr::recipes::KissServe", serveParams);
         expect(composite != nullptr) << boost::ut::fatal;
 
         gr::Graph serverGraph;
@@ -1673,6 +1688,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
                 fragments.push_back(kissPayload(std::vector<std::uint8_t>(wire.begin() + static_cast<std::ptrdiff_t>(at), wire.begin() + static_cast<std::ptrdiff_t>(at + take))));
             }
 
+            auto composite = loader.instantiate("gr::recipes::KissStreamDecode", readParams);
             expect(composite != nullptr) << boost::ut::fatal;
 
             gr::Graph graph;

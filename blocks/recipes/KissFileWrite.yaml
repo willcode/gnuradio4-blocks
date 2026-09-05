@@ -1,0 +1,73 @@
+# gr::recipes::KissFileWrite — a record chain written to a KISS file: KissEncode → DelimiterFramer(slip) →
+# DataSetToStream<u8> → BasicFileSink<u8>.
+#
+# A KISS terminal node controller writes its frames to a file this way. `KissEncode` prepends the command byte
+# (and, with `emit_timestamp`, a command-9 stamp frame ahead of a record whose `DataSet::timestamp` is non-zero);
+# `DelimiterFramer` puts the SLIP framing on; `DataSetToStream<u8>` flattens the framed record onto a byte stream,
+# because a file has no record boundary of its own; `BasicFileSink<u8>` appends that stream to a file. The chain
+# carries data frames only, exactly as `KissEncode` does alone — nothing here sends a KISS parameter frame.
+#
+# The SLIP profile is spelled out rather than named, because a reader of this recipe should not have to open a
+# header to know what framing it configures: end delimiter 0xC0 ("11000000", MSB first), byte escaping, introducer
+# 0xDB (219), map {0xDC (220) -> 0xC0 (192), 0xDD (221) -> 0xDB (219)}, eight bits per item — `gr::digital::slip()`
+# read back as the `DelimiterFramer` settings it compiles to.
+#
+# `file_name` and `mode` are `BasicFileSink`'s; `kiss_port` and `emit_timestamp` are `KissEncode`'s. Both keep the
+# block's own default where it has one — `mode` "overwrite", `kiss_port` 0, `emit_timestamp` false — and `file_name`
+# is required, on the same rule a sink with no path has nothing to write to.
+definition_metadata:
+  block_type: gr::recipes::KissFileWrite
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: kiss_file_write
+    exported_parameters:
+      - name: file_name
+        type: string
+        doc: "the KISS file's path; required, there is no default"
+      - name: mode
+        type: string
+        default: "overwrite"
+        doc: "BasicFileSink's own: 'overwrite', 'append' or 'multi'"
+      - name: kiss_port
+        type: uint32
+        default: !!uint32 0
+        doc: "the terminal node controller port a frame is for, 0 to 15; KissEncode's own default"
+      - name: emit_timestamp
+        type: bool
+        default: !!bool false
+        doc: "publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero"
+    graph:
+      blocks:
+        - id: "gr::blocks::ax25::KissEncode"
+          parameters:
+            name: kiss
+            kiss_port: "=kiss_port"
+            emit_timestamp: "=emit_timestamp"
+        - id: "gr::blocks::digital::DelimiterFramer"
+          parameters:
+            name: framer
+            end_delimiter: "11000000"
+            transparency: "byte_escape"
+            escape_item: !!uint32 219
+            escape_map: !!uint32 [220, 192, 221, 219]
+            bits_per_item: !!uint32 8
+            max_payload_items: !!uint32 4096
+        - id: "gr::blocks::basic::DataSetToStream<uint8>"
+          parameters:
+            name: flatten
+        - id: "gr::blocks::fileio::BasicFileSink<uint8>"
+          parameters:
+            name: file
+            file_name: "=file_name"
+            mode: "=mode"
+      connections:
+        - [kiss, 0, framer, 0]
+        - [framer, 0, flatten, 0]
+        - [flatten, 0, file, 0]
+      exported_ports:
+        - [kiss, INPUT, in, in]
