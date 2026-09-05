@@ -24,3 +24,22 @@ if(TARGET gnuradio4::GrNetworkBlocksShared)
   target_link_libraries(qa_Recipes PRIVATE gnuradio4::GrNetworkBlocksShared)
   target_compile_definitions(qa_Recipes PRIVATE GNURADIO4_HAVE_NETWORK_BLOCKS)
 endif()
+
+# the burst gate: an AIS slot rendered, modulated, and taken back through FskDemod into HdlcDeframe
+add_ut_test(qa_HdlcBursts)
+target_link_libraries(
+  qa_HdlcBursts
+  PRIVATE gnuradio-core
+          gnuradio4::gr-testing
+          gr-ax25
+          gr-basic
+          gr-channel
+          gr-digital
+          gnuradio4::GrAnalogBlocksShared
+          gnuradio4::GrAx25BlocksShared
+          gnuradio4::GrBasicBlocksShared
+          gnuradio4::GrChannelBlocksShared
+          gnuradio4::GrDigitalBlocksShared
+          gnuradio4::GrFilterBlocksShared
+          gnuradio4::GrSyncBlocksShared)
+target_compile_definitions(qa_HdlcBursts PRIVATE RECIPES_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/..")
