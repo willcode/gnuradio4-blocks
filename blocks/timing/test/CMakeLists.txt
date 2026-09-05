@@ -16,6 +16,8 @@ function(add_timing_test TEST_NAME)
 endfunction()
 
 add_timing_test(qa_DiscontinuityMonitor)
+add_timing_test(qa_PpsCorrelator)
+target_link_libraries(qa_PpsCorrelator PRIVATE gnuradio4::gr-filter)
 add_timing_test(qa_NMEAParser)
 add_timing_test(qa_NMEADevice)
 
