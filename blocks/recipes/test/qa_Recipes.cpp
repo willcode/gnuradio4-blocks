@@ -690,6 +690,21 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             }
         }
 
+        const auto preamble = interiorByName(composite, "preamble");
+        expect(preamble != nullptr);
+        if (preamble != nullptr) {
+            const auto symbols = preamble->settings().get("preamble_symbols");
+            expect(symbols.has_value());
+            if (symbols.has_value()) {
+                expect(eq(numericOf(*symbols), 0.0)) << "the burst timing preset is a wire until a link states the training symbols it opens with";
+            }
+            const auto rate = preamble->settings().get("symbol_rate");
+            expect(rate.has_value());
+            if (rate.has_value()) {
+                expect(eq(static_cast<float>(numericOf(*rate)), static_cast<float>(kSymbolRate))) << "and it reads the link's own rates, so the tone it looks for is at half the symbol rate";
+            }
+        }
+
         const auto slicer = interiorByName(composite, "slicer");
         expect(slicer != nullptr);
         if (slicer != nullptr) {
