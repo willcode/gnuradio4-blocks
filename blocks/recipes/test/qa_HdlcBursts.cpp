@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <print>
 #include <set>
@@ -30,6 +31,8 @@
 #include <gnuradio-4.0/digital/DelimiterExtractor.hpp>
 #include <gnuradio-4.0/digital/DelimiterFramer.hpp>
 #include <gnuradio-4.0/digital/DifferentialCoding.hpp>
+#include <gnuradio-4.0/sync/PreambleTiming.hpp>
+#include <gnuradio-4.0/sync/SymbolSync.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -230,9 +233,9 @@ struct Received {
  * The noise is added to the whole stream, so the silence either side of a burst is noise and the receiver has to
  * find the burst in it rather than being told where it is.
  */
-[[nodiscard]] Received receive(std::span<const CF> stream, double noiseBandwidth, double esN0_db, std::uint64_t seed) {
+[[nodiscard]] Received receive(std::span<const CF> stream, double noiseBandwidth, double esN0_db, std::uint64_t seed, std::uint32_t preambleSymbols = 0U) {
     auto loader = recipeLoader();
-    auto demod  = loader.instantiate("gr::recipes::FskDemod", {{"sample_rate", kSampleRate}, {"symbol_rate", kSymbolRate}, {"modulation_index", kModIndex}, {"noise_bandwidth", noiseBandwidth}});
+    auto demod  = loader.instantiate("gr::recipes::FskDemod", {{"sample_rate", kSampleRate}, {"symbol_rate", kSymbolRate}, {"modulation_index", kModIndex}, {"noise_bandwidth", noiseBandwidth}, {"preamble_symbols", preambleSymbols}});
     boost::ut::expect(demod != nullptr) << "gr::recipes::FskDemod" << boost::ut::fatal;
     auto deframe = loader.instantiate("gr::recipes::HdlcDeframe", {{"max_payload_items", std::uint32_t{64U}}});
     boost::ut::expect(deframe != nullptr) << "gr::recipes::HdlcDeframe" << boost::ut::fatal;
@@ -273,10 +276,87 @@ struct Received {
     return result;
 }
 
+struct LabelSink : gr::Block<LabelSink> {
+    gr::PortIn<std::uint8_t> in;
+    GR_MAKE_REFLECTABLE(LabelSink, in);
+    std::vector<std::uint8_t> _labels{};
+
+    [[nodiscard]] gr::work::Status processBulk(std::span<const std::uint8_t> input) {
+        _labels.insert(_labels.end(), input.begin(), input.end());
+        return gr::work::Status::OK;
+    }
+};
+
+/// @brief What the composite's own preamble stage counted, read off the interior block the recipe names.
+[[nodiscard]] std::pair<std::uint64_t, std::uint64_t> detectionsOf(const std::shared_ptr<gr::BlockModel>& composite) {
+    using Detector = gr::blocks::sync::PreambleTiming<float>;
+    if (composite == nullptr || composite->graph() == nullptr) {
+        return {~0ULL, ~0ULL};
+    }
+    for (const auto& child : composite->graph()->blocks()) {
+        if (child != nullptr && child->name() == "preamble" && child->typeName() == gr::meta::type_name<Detector>()) {
+            const auto* block = static_cast<Detector*>(child->raw());
+            return {block->nDetections, block->nSuppressed};
+        }
+    }
+    return {~0ULL, ~0ULL};
+}
+
+/// @brief What the composite's own timing loop refused, read off the interior block the recipe names.
+[[nodiscard]] std::uint64_t ignoredBy(const std::shared_ptr<gr::BlockModel>& composite) {
+    using Loop = gr::blocks::sync::SymbolSync<float>;
+    if (composite == nullptr || composite->graph() == nullptr) {
+        return ~0ULL;
+    }
+    for (const auto& child : composite->graph()->blocks()) {
+        if (child != nullptr && child->name() == "timing" && child->typeName() == gr::meta::type_name<Loop>()) {
+            return static_cast<const Loop*>(child->raw())->ignoredTagPayloads();
+        }
+    }
+    return ~0ULL;
+}
+
+/// @brief One `FskDemod` run: the labels the deframer would be handed, and what the stage inside it counted.
+struct Demodulated {
+    std::vector<std::uint8_t> labels{};
+    std::uint64_t             detections = 0ULL;
+    std::uint64_t             suppressed = 0ULL;
+    std::uint64_t             refused    = 0ULL; ///< timing payloads the loop declined
+};
+
+/// @brief `FskDemod` alone over @p stream: the sliced labels the deframer would be handed.
+[[nodiscard]] Demodulated demodulate(std::span<const CF> stream, double noiseBandwidth, double esN0_db, std::uint64_t seed, std::uint32_t preambleSymbols) {
+    auto loader = recipeLoader();
+    auto demod  = loader.instantiate("gr::recipes::FskDemod", {{"sample_rate", kSampleRate}, {"symbol_rate", kSymbolRate}, {"modulation_index", kModIndex}, {"noise_bandwidth", noiseBandwidth}, {"preamble_symbols", preambleSymbols}});
+    boost::ut::expect(demod != nullptr) << boost::ut::fatal;
+
+    gr::Graph  graph;
+    const auto values  = gr::Tensor<CF>(stream.begin(), stream.end());
+    auto&      source  = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(stream.size())}, {"values", values}, {"mark_tag", false}});
+    auto&      channel = graph.emplaceBlock<AwgnChannel<CF>>({{"noise_power", static_cast<double>(gr::channel::noisePowerFor(static_cast<float>(esN0_db), 1.F, static_cast<float>(kSps)))}, {"seed", seed}});
+    const auto front   = graph.addBlock(std::move(demod));
+    auto&      sink    = graph.emplaceBlock<LabelSink>();
+
+    const auto sourceModel  = gr::graph::findBlock(graph, source);
+    const auto channelModel = gr::graph::findBlock(graph, channel);
+    const auto sinkModel    = gr::graph::findBlock(graph, sink);
+    boost::ut::expect(sourceModel.has_value() && channelModel.has_value() && sinkModel.has_value()) << boost::ut::fatal;
+    boost::ut::expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, *channelModel, gr::PortDefinition{"in"}).has_value());
+    boost::ut::expect(graph.connect(*channelModel, gr::PortDefinition{"out"}, front, gr::PortDefinition{"in"}).has_value());
+    boost::ut::expect(graph.connect(front, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+    gr::scheduler::Simple scheduler;
+    boost::ut::expect(scheduler.exchange(std::move(graph)).has_value());
+    std::ignore                         = scheduler.runAndWait();
+    const auto [detections, suppressed] = detectionsOf(front);
+    return Demodulated{std::move(sink._labels), detections, suppressed, ignoredBy(front)};
+}
+
 /// @brief A stream of @p count seeded slots, each starting at a random symbol phase inside a noise-only gap.
 struct Scene {
     std::vector<CF>                        stream{};
     std::vector<std::vector<std::uint8_t>> payloads{};
+    std::vector<std::size_t>               starts{};
 };
 
 [[nodiscard]] Scene bursts(std::size_t count, std::uint64_t seed, std::size_t gapSymbols = 40UZ) {
@@ -290,11 +370,65 @@ struct Scene {
         }
         const std::vector<CF> burst = modulate(std::span<const float>(symbolsOf(std::span<const std::uint8_t>(slotBits(std::span<const std::uint8_t>(payload))))));
         scene.stream.insert(scene.stream.end(), rng.below(kSps), CF{}); // the burst starts at a random symbol phase
+        scene.starts.push_back(scene.stream.size());
         scene.stream.insert(scene.stream.end(), burst.begin(), burst.end());
         scene.stream.insert(scene.stream.end(), gapSymbols * kSps, CF{});
         scene.payloads.push_back(std::move(payload));
     }
     return scene;
+}
+
+/// @brief What the sliced label stream says about one arm's slots, read against the bits transmitted.
+struct Sliced {
+    std::size_t labels        = 0UZ; ///< labels the demodulator produced over the whole stream
+    std::size_t perfect       = 0UZ; ///< slots reproduced symbol for symbol, training sequence included
+    std::size_t frameClean    = 0UZ; ///< slots whose frame region, from the start flag on, carries no error
+    std::size_t frameErrors   = 0UZ; ///< symbol errors inside those frame regions, over every slot
+    std::size_t flagWrong     = 0UZ; ///< slots whose start flag's first bit is wrong
+    std::size_t alignmentSpan = 0UZ; ///< symbols between the earliest slot alignment and the latest
+};
+
+/// @brief Each slot at its own best alignment in @p labels: where the demodulator put it, and what it got wrong.
+[[nodiscard]] Sliced slice(const Scene& scene, std::span<const std::uint8_t> labels) {
+    constexpr long kSearch = 40L; // the chain's group delay is about fourteen symbols and every slot carries the same one
+    Sliced         result{};
+    long           earliest = std::numeric_limits<long>::max();
+    long           latest   = std::numeric_limits<long>::min();
+    result.labels           = labels.size();
+    for (std::size_t k = 0UZ; k < scene.payloads.size(); ++k) {
+        const std::vector<std::uint8_t> bits   = slotBits(std::span<const std::uint8_t>(scene.payloads[k]));
+        const long                      center = static_cast<long>(scene.starts[k] / kSps);
+        long                            best   = -1L;
+        std::size_t                     fewest = bits.size() + 1UZ;
+        for (long a = center - kSearch; a <= center + kSearch; ++a) {
+            if (a < 0L || static_cast<std::size_t>(a) + bits.size() > labels.size()) {
+                continue;
+            }
+            std::size_t errors = 0UZ;
+            for (std::size_t i = 0UZ; i < bits.size(); ++i) {
+                errors += labels[static_cast<std::size_t>(a) + i] != bits[i] ? 1UZ : 0UZ;
+            }
+            if (errors < fewest) {
+                fewest = errors;
+                best   = a;
+            }
+        }
+        if (best < 0L) {
+            continue;
+        }
+        std::size_t frameErrors = 0UZ;
+        for (std::size_t i = kTraining; i < bits.size(); ++i) {
+            frameErrors += labels[static_cast<std::size_t>(best) + i] != bits[i] ? 1UZ : 0UZ;
+        }
+        result.perfect += fewest == 0UZ ? 1UZ : 0UZ;
+        result.frameClean += frameErrors == 0UZ ? 1UZ : 0UZ;
+        result.frameErrors += frameErrors;
+        result.flagWrong += labels[static_cast<std::size_t>(best) + kTraining] != bits[kTraining] ? 1UZ : 0UZ;
+        earliest = std::min(earliest, best - center);
+        latest   = std::max(latest, best - center);
+    }
+    result.alignmentSpan = latest >= earliest ? static_cast<std::size_t>(latest - earliest) : 0UZ;
+    return result;
 }
 
 /// @brief How many of @p expected payloads appear among @p received, each counted once.
@@ -518,6 +652,63 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
         std::println("[record] a slot cut after 100 data bits: {} on out, {} failed the check, {} refused by the extractor, {} aborts counted", truncated.ok.size(), truncated.fail.size(), truncated.reject.size(), truncated.aborts);
         expect(gt(truncated.reject.size() + truncated.fail.size(), 0UZ)) << "the region the abandoned frame left reaches a failure port";
         expect(eq(truncated.aborts, 1ULL)) << "the abort itself leaves by no port, so the extractor's own counter is where the reason is stated";
+    };
+
+    "the burst timing preset takes the loop bandwidth out of the decision"_test = [] {
+        // The same 200 slots and the same seeds as the leg above, which is the negative control: that leg runs the
+        // chain with the preset stage a wire and its counts are the ones this arm is read against. What the preset
+        // claims is not a better best but a flat table -- the bandwidth stops deciding whether a burst acquires --
+        // so the spread across the sweep is asserted as well as the counts.
+        constexpr std::size_t kBursts = 200UZ;
+        const Scene           scene   = bursts(kBursts, 0xA15ULL);
+
+        const Received    reference = receive(std::span<const CF>(scene.stream), 0.05, 20.0, 0xC0FFEEULL);
+        const std::size_t control   = matched(std::span<const std::vector<std::uint8_t>>(scene.payloads), std::span<const Record>(reference.ok));
+        std::println("[record] the control's best bandwidth, noise_bandwidth 0.050 with the stage a wire: {} of {} payloads", control, kBursts);
+
+        std::size_t fewest = kBursts;
+        std::size_t most   = 0UZ;
+        for (const double width : {0.002, 0.01, 0.02, 0.05}) {
+            const Received    run  = receive(std::span<const CF>(scene.stream), width, 20.0, 0xC0FFEEULL, static_cast<std::uint32_t>(kTraining));
+            const std::size_t hits = matched(std::span<const std::vector<std::uint8_t>>(scene.payloads), std::span<const Record>(run.ok));
+            std::println("[record] preamble_symbols {}, noise_bandwidth {:.3f}: {} of {} payloads, {} failed, {} refused, {} aborts", kTraining, width, hits, kBursts, run.fail.size(), run.reject.size(), run.aborts);
+            fewest = std::min(fewest, hits);
+            most   = std::max(most, hits);
+            expect(ge(hits, control)) << "every bandwidth decodes at least what the best one does without the preset, at " << width;
+        }
+        std::println("[record] preamble_symbols {} over the four narrow bandwidths: {} to {} of {}, a spread of {}", kTraining, fewest, most, kBursts, most - fewest);
+        expect(lt(most - fewest, kBursts / 16UZ)) << "and the sweep is flat, against the 42 slots the control spreads over";
+
+        const Received    wide     = receive(std::span<const CF>(scene.stream), 0.1, 20.0, 0xC0FFEEULL, static_cast<std::uint32_t>(kTraining));
+        const std::size_t atWidest = matched(std::span<const std::vector<std::uint8_t>>(scene.payloads), std::span<const Record>(wide.ok));
+        std::println("[record] preamble_symbols {}, noise_bandwidth 0.100: {} of {} payloads", kTraining, atWidest, kBursts);
+        expect(ge(atWidest, control)) << "the widest bandwidth's loss is tracking jitter, and the preset carries it too";
+    };
+
+    "the preset re-times the symbol stream and does not shorten it"_test = [] {
+        // A decode count cannot say why a slot was lost, so this reads the sliced labels against the transmitted
+        // bits directly. Two properties decide it. The stream must stay one label per symbol: a preset that takes a
+        // sample out of it walks every later slot's alignment earlier and costs one label a burst. And the last
+        // training symbol must be taken at the preset phase, because a differential decoder reads it together with
+        // the start flag's first bit, so slicing it at the phase the loop was holding inverts the flag.
+        constexpr std::size_t kBursts = 200UZ;
+        const Scene           scene   = bursts(kBursts, 0xA15ULL);
+
+        std::array<Sliced, 2UZ> arms{};
+        for (const std::size_t arm : {0UZ, 1UZ}) {
+            const std::uint32_t training = arm == 0UZ ? 0U : static_cast<std::uint32_t>(kTraining);
+            const Demodulated   run      = demodulate(std::span<const CF>(scene.stream), 0.002, 20.0, 0xC0FFEEULL, training);
+            arms[arm]                    = slice(scene, std::span<const std::uint8_t>(run.labels));
+            std::println("[record] preamble_symbols {}: {} labels, {} of {} slots symbol-perfect, {} with the whole frame region clean, {} symbol errors in the frame regions, {} slots with the flag's first bit wrong, alignment over {} symbols", training, arms[arm].labels, arms[arm].perfect, kBursts, arms[arm].frameClean, arms[arm].frameErrors, arms[arm].flagWrong, arms[arm].alignmentSpan);
+            expect(eq(run.detections, training == 0U ? 0ULL : static_cast<std::uint64_t>(kBursts))) << "one tag a burst and none from a payload, at preamble_symbols " << training;
+            expect(eq(run.suppressed, 0ULL)) << "and none of them inside a hold-off";
+            expect(eq(run.refused, 0ULL)) << "and the loop honored every payload it was handed";
+        }
+
+        expect(lt(arms[0UZ].labels, arms[1UZ].labels + kBursts / 4UZ)) << "the preset re-times the stream without taking a symbol out of it, or the count falls by about one a burst";
+        expect(le(arms[1UZ].alignmentSpan, arms[0UZ].alignmentSpan)) << "and every slot lands where the control puts it, rather than walking a symbol earlier burst by burst";
+        expect(lt(arms[1UZ].flagWrong, arms[0UZ].flagWrong / 4UZ)) << "the last training symbol is taken at the preset phase, so the differential decoder reads the flag's first bit right";
+        expect(gt(arms[1UZ].frameClean, arms[0UZ].frameClean)) << "and more slots reach the deframer with the whole frame region symbol-perfect";
     };
 };
 
