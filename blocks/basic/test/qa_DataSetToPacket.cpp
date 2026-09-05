@@ -336,6 +336,7 @@ const boost::ut::suite<"DataSetToPacket vocabulary"> vocabularyTests = [] {
     using namespace gr::blocks::basic::detail;
     using namespace gr::blocks::basic::detail;
     using namespace gr::blocks::basic::detail;
+    using namespace gr::blocks::basic::detail;
     using namespace gr::blocks::basic::detail::packet;
 
     // The vocabulary is what the record-metadata declaration says, and a framework retyping breaks the
