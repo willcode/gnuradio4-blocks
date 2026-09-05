@@ -15,6 +15,7 @@ gr_add_block_library(
   include/gnuradio-4.0/channel/Awgn.hpp
   include/gnuradio-4.0/channel/CarrierImpairments.hpp
   include/gnuradio-4.0/channel/Converter.hpp
+  include/gnuradio-4.0/channel/DopplerShift.hpp
   include/gnuradio-4.0/channel/Multipath.hpp
   LINK_LIBRARIES
   gr-channel)
