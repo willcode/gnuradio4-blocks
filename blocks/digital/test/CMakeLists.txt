@@ -20,6 +20,9 @@ target_link_libraries(
 add_ut_test(qa_CrcBlocks)
 target_link_libraries(qa_CrcBlocks PRIVATE gr-digital gr-testing)
 
+add_ut_test(qa_CsmaGate)
+target_link_libraries(qa_CsmaGate PRIVATE gr-digital gr-testing)
+
 add_ut_test(qa_DelimiterExtractor)
 target_link_libraries(qa_DelimiterExtractor PRIVATE gr-digital gr-testing)
 
