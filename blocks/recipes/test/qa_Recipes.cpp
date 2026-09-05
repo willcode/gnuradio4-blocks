@@ -4,18 +4,27 @@
  * general recipe's required parameters are part of the contract: instantiating it bare
  * must refuse by name, and instantiating it with the parameters must derive the interior
  * settings and keep deriving them when a parameter changes live. */
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <complex>
+#include <filesystem>
 #include <format>
+#include <mutex>
 #include <numbers>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <boost/ut.hpp>
 
 #include <fstream>
 #include <sstream>
+
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
@@ -26,8 +35,21 @@
 #include <gnuradio-4.0/algorithm/fec/Convolutional.hpp>
 #include <gnuradio-4.0/algorithm/fec/ReedSolomon.hpp>
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
+#include <gnuradio-4.0/ax25/Kiss.hpp>
 #include <gnuradio-4.0/digital/AccessCodeCorrelator.hpp>
+#include <gnuradio-4.0/digital/DelimiterExtractor.hpp>
+// the socket legs need the optional network family
+#ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
+#include <gnuradio-4.0/network/TcpByteIo.hpp>
+#endif // GNURADIO4_HAVE_NETWORK_BLOCKS
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+
+#include <gnuradio-4.0/recipes/KissFileRead.hpp>
+#include <gnuradio-4.0/recipes/KissFileWrite.hpp>
+#ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
+#include <gnuradio-4.0/recipes/KissServe.hpp>
+#endif // GNURADIO4_HAVE_NETWORK_BLOCKS
+#include <gnuradio-4.0/recipes/KissStreamDecode.hpp>
 #include <gnuradio-4.0/recipes/NbfmDemod.hpp>
 #include <gnuradio-4.0/recipes/WbfmMonoDemod.hpp>
 
@@ -146,6 +168,188 @@ struct CcsdsRecordSink : gr::Block<CcsdsRecordSink> {
         return gr::work::Status::OK;
     }
 };
+
+// ─── the four KISS recipes (criterion 14): a record source, a byte source that never ends, a graph runner ────────
+
+/// @brief A source of prepared records, feeding a composite's `in` port and reporting DONE once exhausted.
+struct KissRecordSource : gr::Block<KissRecordSource> {
+    gr::PortOut<gr::DataSet<std::uint8_t>, gr::Async> out;
+    GR_MAKE_REFLECTABLE(KissRecordSource, out);
+    std::vector<gr::DataSet<std::uint8_t>> _records{};
+    std::size_t                            _pos = 0UZ;
+    // A chain that ends in a socket outlives its own record queue: the peer may still be connecting when the last
+    // record is consumed, so the source can be told to idle instead of ending the graph under it. Left false it
+    // reports the plain, natural DONE that lets a graph writing to a file terminate on its own.
+    bool _neverDone = false;
+
+    [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        if (_pos >= _records.size()) {
+            outSpan.publish(0UZ);
+            return _neverDone ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::DONE;
+        }
+        const std::size_t n = std::min(outSpan.size(), _records.size() - _pos);
+        for (std::size_t i = 0UZ; i < n; ++i) {
+            outSpan[i] = _records[_pos + i];
+        }
+        outSpan.publish(n);
+        _pos += n;
+        return gr::work::Status::OK;
+    }
+};
+
+/// @brief One record, its bytes and its carrier timestamp, shaped as the KISS recipes' `in` port expects.
+[[nodiscard]] gr::DataSet<std::uint8_t> kissPayload(std::vector<std::uint8_t> bytes, std::int64_t timestamp = 0) {
+    gr::DataSet<std::uint8_t> record;
+    record.signal_values = std::move(bytes);
+    record.extents.push_back(static_cast<std::int32_t>(record.signal_values.size()));
+    record.signal_names.emplace_back("kiss");
+    record.timing_events.resize(1UZ);
+    record.meta_information.resize(1UZ);
+    record.timestamp = timestamp;
+    return record;
+}
+
+// the socket legs need the optional network family
+#ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
+/// @brief Runs a graph in a background thread until explicitly stopped — `KissServe`'s sink and its own I/O thread
+/// have no natural end, so the test owns the teardown rather than waiting on scheduler.runAndWait() to return.
+struct KissGraphRunner {
+    gr::scheduler::Simple<> scheduler;
+    std::thread             worker;
+
+    explicit KissGraphRunner(gr::Graph&& graph) {
+        boost::ut::expect(scheduler.exchange(std::move(graph)).has_value());
+        worker = std::thread([this] { std::ignore = scheduler.runAndWait(); });
+    }
+    KissGraphRunner(const KissGraphRunner&)            = delete;
+    KissGraphRunner& operator=(const KissGraphRunner&) = delete;
+
+    void stop() {
+        scheduler.requestStop();
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    ~KissGraphRunner() { stop(); }
+};
+
+template<typename F>
+[[nodiscard]] bool kissWaitUntil(F&& ready, std::chrono::milliseconds deadline = std::chrono::milliseconds(8000)) {
+    const auto until = std::chrono::steady_clock::now() + deadline;
+    while (std::chrono::steady_clock::now() < until) {
+        if (ready()) {
+            return true;
+        }
+        std::this_thread::yield();
+    }
+    return ready();
+}
+
+/// @brief An ephemeral loopback port: bind a throwaway socket to port 0, read back what the kernel chose, close it —
+/// which is what leaves `KissServe`'s own listener free to bind that same port a moment later.
+[[nodiscard]] std::uint16_t reserveKissPort() {
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    boost::ut::expect(fd >= 0) << "could not open a socket to reserve a port";
+    ::sockaddr_in address{};
+    address.sin_family      = AF_INET;
+    address.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+    address.sin_port        = 0;
+    boost::ut::expect(::bind(fd, reinterpret_cast<const ::sockaddr*>(&address), static_cast<::socklen_t>(sizeof(address))) == 0);
+    ::socklen_t length = static_cast<::socklen_t>(sizeof(address));
+    boost::ut::expect(::getsockname(fd, reinterpret_cast<::sockaddr*>(&address), &length) == 0);
+    const std::uint16_t port = ::ntohs(address.sin_port);
+    std::ignore              = ::close(fd);
+    return port;
+}
+
+/// @brief A byte-stream sink whose collection the test thread may read while the graph is still running.
+struct KissByteSink : gr::Block<KissByteSink> {
+    gr::PortIn<std::uint8_t> in;
+    GR_MAKE_REFLECTABLE(KissByteSink, in);
+
+    mutable std::mutex        _mutex;
+    std::vector<std::uint8_t> _bytes{};
+
+    [[nodiscard]] std::size_t count() const {
+        std::lock_guard lock(_mutex);
+        return _bytes.size();
+    }
+
+    [[nodiscard]] std::vector<std::uint8_t> take() const {
+        std::lock_guard lock(_mutex);
+        return _bytes;
+    }
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
+        {
+            std::lock_guard lock(_mutex);
+            for (std::size_t i = 0UZ; i < inSpan.size(); ++i) {
+                _bytes.push_back(inSpan[i]);
+            }
+        }
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
+#endif // GNURADIO4_HAVE_NETWORK_BLOCKS
+
+/// @brief The bytes `KissFileWrite` puts in a file for @p records, which is the KISS-over-SLIP wire form of the
+/// encode-frame-flatten chain `KissServe` also carries. @p path is written and removed again.
+[[nodiscard]] std::vector<std::uint8_t> kissWireForm(const std::vector<gr::DataSet<std::uint8_t>>& records, gr::property_map writeParameters, const std::string& path) {
+    std::filesystem::remove(path);
+    writeParameters["file_name"] = std::pmr::string(path);
+    writeParameters["mode"]      = std::pmr::string("overwrite");
+
+    auto loader    = makeRecipeLoader();
+    boost::ut::expect(composite != nullptr) << boost::ut::fatal;
+
+    gr::Graph graph;
+    auto&     source       = graph.emplaceBlock<KissRecordSource>();
+    source._records        = records;
+    const auto chain       = graph.addBlock(std::move(composite));
+    const auto sourceModel = gr::graph::findBlock(graph, source);
+    boost::ut::expect(sourceModel.has_value()) << boost::ut::fatal;
+    boost::ut::expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, chain, gr::PortDefinition{"in"}).has_value());
+
+    gr::scheduler::Simple scheduler;
+    boost::ut::expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+    boost::ut::expect(scheduler.runAndWait().has_value());
+
+    std::vector<std::uint8_t> wire;
+    {
+        std::ifstream in(path, std::ios::binary);
+        boost::ut::expect(bool(in)) << boost::ut::fatal;
+        wire.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    std::filesystem::remove(path);
+    return wire;
+}
+
+/// @brief What `KissFileRead` decodes back out of @p wire, through a file it is given and then relieved of.
+[[nodiscard]] std::vector<gr::DataSet<std::uint8_t>> kissReadBack(std::span<const std::uint8_t> wire, gr::property_map readParameters, const std::string& path) {
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        boost::ut::expect(bool(out)) << boost::ut::fatal;
+        out.write(reinterpret_cast<const char*>(wire.data()), static_cast<std::streamsize>(wire.size()));
+    }
+    readParameters["file_name"] = std::pmr::string(path);
+
+    auto loader    = makeRecipeLoader();
+    boost::ut::expect(composite != nullptr) << boost::ut::fatal;
+
+    gr::Graph  graph;
+    auto&      sink      = graph.emplaceBlock<CcsdsRecordSink>();
+    const auto chain     = graph.addBlock(std::move(composite));
+    const auto sinkModel = gr::graph::findBlock(graph, sink);
+    boost::ut::expect(sinkModel.has_value()) << boost::ut::fatal;
+    boost::ut::expect(graph.connect(chain, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+    gr::scheduler::Simple scheduler;
+    boost::ut::expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+    boost::ut::expect(scheduler.runAndWait().has_value());
+    std::filesystem::remove(path);
+    return sink._records;
+}
 
 /// @brief A deterministic bit stream, so a failure is the chain's and never the draw's.
 [[nodiscard]] std::vector<int> sourceBits(std::size_t count, std::uint64_t seed = 0x9e3779b97f4a7c15ULL) {
@@ -749,6 +953,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const double expectedGain = kSampleRate / (kDecimation * std::numbers::pi * (kMark - kSpace));
         expect(lt(std::abs(expectedGain + 3.055775), 1e-5)) << std::format("the worked figure is -3.055775, computed as {:.6f}", expectedGain);
         expect(eq(static_cast<float>(reads("discriminator", "gain")), static_cast<float>(expectedGain))) << "a mark below a space is a NEGATIVE deviation and a negative gain";
+        expect(eq(static_cast<float>(reads("translate", "frequency_shift")), -1700.f)) << "the band center is (1200 + 2200)/2";
         expect(eq(reads("timing", "samples_per_symbol"), 8.0)) << "48000 / (5 * 1200)";
         expect(eq(reads("delay", "delay"), (kHilbert - 1.0) / 2.0)) << "the real branch takes the Hilbert design's own group delay, as an integer";
         expect(eq(reads("hilbert", "designed_taps"), kHilbert)) << "and the design is the length the parameter states";
@@ -1302,6 +1507,200 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             }
         }
         expect(eq(cleanFrames, 2UZ)) << "one instance, both offsets: the marker's position is the pairing";
+    };
+
+    // The four KISS recipes load through both front ends and round-trip.
+    "the four KISS recipes load through the YAML front end and the generated typed header"_test = [] {
+        auto loader = makeRecipeLoader();
+
+        const std::string tempFile = (std::filesystem::temp_directory_path() / "qa_recipes_kiss_load.bin").string();
+
+        gr::Graph gWrite;
+        gr::Graph gRead;
+#ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
+        gr::Graph gServe;
+#endif // GNURADIO4_HAVE_NETWORK_BLOCKS
+        gr::Graph gStream;
+    };
+
+    "KissFileWrite -> KissFileRead reproduces seeded frames over a temporary file, with kiss_port and timestamps"_test = [] {
+        const std::string path = (std::filesystem::temp_directory_path() / "qa_recipes_kiss_write_read.bin").string();
+        std::filesystem::remove(path);
+
+        const std::vector<gr::DataSet<std::uint8_t>> seeded{
+            kissPayload({0x01U, 0x02U, 0x03U}, 1'500'000'000'123'000'000LL),
+            kissPayload({0xC0U, 0xDBU, 0xAAU}), // the two SLIP-significant bytes, and no timestamp
+            kissPayload({0xFFU, 0x00U, 0x7EU}, 2'000'000'000'000'000'000LL),
+        };
+
+        {
+            auto                   loader = makeRecipeLoader();
+            const gr::property_map writeParams{{"file_name", path}, {"mode", std::string("overwrite")}, {"kiss_port", gr::Size_t{5U}}, {"emit_timestamp", true}};
+            expect(composite != nullptr) << boost::ut::fatal;
+
+            gr::Graph graph;
+            auto&     source = graph.emplaceBlock<KissRecordSource>();
+            source._records  = seeded;
+            const auto chain = graph.addBlock(std::move(composite));
+
+            const auto sourceModel = gr::graph::findBlock(graph, source);
+            expect(sourceModel.has_value()) << boost::ut::fatal;
+            expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, chain, gr::PortDefinition{"in"}).has_value());
+
+            gr::scheduler::Simple scheduler;
+            expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+            expect(scheduler.runAndWait().has_value());
+        }
+
+        {
+            auto                   loader = makeRecipeLoader();
+            const gr::property_map readParams{{"file_name", path}, {"max_payload_items", gr::Size_t{4096U}}, {"read_timestamp", true}};
+            expect(composite != nullptr) << boost::ut::fatal;
+
+            gr::Graph  graph;
+            auto&      sink  = graph.emplaceBlock<CcsdsRecordSink>();
+            const auto chain = graph.addBlock(std::move(composite));
+
+            const auto sinkModel = gr::graph::findBlock(graph, sink);
+            expect(sinkModel.has_value()) << boost::ut::fatal;
+            expect(graph.connect(chain, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+            gr::scheduler::Simple scheduler;
+            expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+            expect(scheduler.runAndWait().has_value());
+
+            expect(eq(sink._records.size(), seeded.size())) << "KissFileWrite -> KissFileRead: frame count";
+            if (sink._records.size() == seeded.size()) {
+                for (std::size_t i = 0UZ; i < seeded.size(); ++i) {
+                    expect(std::ranges::equal(sink._records[i].signal_values, seeded[i].signal_values)) << std::format("frame {}: payload byte for byte", i);
+                    const auto& map       = sink._records[i].meta_information[0UZ];
+                    const auto  portEntry = map.find(gr::property_map::key_type("kiss_port"));
+                    expect(that % (portEntry != map.end() && portEntry->second.value_or(gr::Size_t{0xFFFFU}) == gr::Size_t{5U})) << std::format("frame {}: kiss_port", i);
+                    if (seeded[i].timestamp != 0) {
+                        expect(eq(sink._records[i].timestamp, (seeded[i].timestamp / 1'000'000LL) * 1'000'000LL)) << std::format("frame {}: timestamp truncated to the millisecond", i);
+                    } else {
+                        expect(eq(sink._records[i].timestamp, std::int64_t{0LL})) << std::format("frame {}: no timestamp, none invented", i);
+                    }
+                }
+            }
+        }
+        std::filesystem::remove(path);
+    };
+
+#ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
+    "KissServe puts KissFileWrite's own bytes on a socket, and KissFileRead reads them back with their timestamps"_test = [] {
+        const std::vector<gr::DataSet<std::uint8_t>> seeded{
+            kissPayload({0x66U, 0xC0U, 0x77U}, 1'500'000'000'123'000'000LL), // a SLIP-significant byte, and a stamp
+            kissPayload({0xDBU, 0x88U}),                                     // the escape introducer, and no stamp
+        };
+        const gr::property_map encodeParams{{"kiss_port", gr::Size_t{7U}}, {"emit_timestamp", true}};
+
+        // `KissServe` is `KissFileWrite` with the file swapped for a socket, so what the file holds is exactly what
+        // the socket must carry: the reference is the sibling recipe's own output, not a wire form spelled out here
+        const std::vector<std::uint8_t> wire = kissWireForm(seeded, encodeParams, (std::filesystem::temp_directory_path() / "qa_recipes_kiss_serve_reference.bin").string());
+        expect(that % (wire.size() > 4UZ)) << boost::ut::fatal;
+
+        const std::uint16_t port     = reserveKissPort();
+        const std::string   endpoint = std::format("127.0.0.1:{}", port);
+
+        auto             loader      = makeRecipeLoader();
+        gr::property_map serveParams = encodeParams;
+        serveParams["endpoint"]      = std::pmr::string(endpoint);
+        serveParams["bind"]          = true;
+        serveParams["overflow"]      = std::pmr::string("backpressure");
+        serveParams["queue_bytes"]   = gr::Size_t{65536U};
+        expect(composite != nullptr) << boost::ut::fatal;
+
+        gr::Graph serverGraph;
+        auto&     source       = serverGraph.emplaceBlock<KissRecordSource>();
+        source._records        = seeded;
+        source._neverDone      = true; // the test owns the teardown; DONE here would tear the sink down before a peer connects
+        const auto chain       = serverGraph.addBlock(std::move(composite));
+        const auto sourceModel = gr::graph::findBlock(serverGraph, source);
+        expect(sourceModel.has_value()) << boost::ut::fatal;
+        expect(serverGraph.connect(*sourceModel, gr::PortDefinition{"out"}, chain, gr::PortDefinition{"in"}).has_value());
+
+        gr::Graph tailGraph;
+        auto&     tcp      = tailGraph.emplaceBlock<gr::blocks::network::TcpByteSource>({{"endpoint", endpoint}, {"bind", false}, {"overflow", std::string("backpressure")}, {"queue_bytes", gr::Size_t{65536U}}});
+        auto&     tailSink = tailGraph.emplaceBlock<KissByteSink>();
+        expect(tailGraph.connect<"out", "in">(tcp, tailSink).has_value());
+
+        KissGraphRunner server(std::move(serverGraph));
+        KissGraphRunner tail(std::move(tailGraph));
+        expect(kissWaitUntil([&tailSink, &wire] { return tailSink.count() >= wire.size(); })) << std::format("only {} of {} bytes crossed the loopback link", tailSink.count(), wire.size());
+        server.stop();
+        tail.stop();
+
+        const std::vector<std::uint8_t> carried = tailSink.take();
+        expect(that % (carried == wire)) << "the socket carried the file recipe's bytes, byte for byte";
+
+        // the decode is `KissFileRead` itself, given the bytes the socket delivered
+        const std::vector<gr::DataSet<std::uint8_t>> decoded = kissReadBack(carried, {{"max_payload_items", gr::Size_t{4096U}}, {"read_timestamp", true}}, (std::filesystem::temp_directory_path() / "qa_recipes_kiss_serve_through.bin").string());
+
+        expect(eq(decoded.size(), seeded.size())) << "KissServe -> KissFileRead: frame count";
+        if (decoded.size() == seeded.size()) {
+            for (std::size_t i = 0UZ; i < seeded.size(); ++i) {
+                expect(std::ranges::equal(decoded[i].signal_values, seeded[i].signal_values)) << std::format("frame {}: payload byte for byte, SLIP-significant bytes included", i);
+                const auto& map       = decoded[i].meta_information[0UZ];
+                const auto  portEntry = map.find(gr::property_map::key_type("kiss_port"));
+                expect(that % (portEntry != map.end() && portEntry->second.value_or(gr::Size_t{0xFFFFU}) == gr::Size_t{7U})) << std::format("frame {}: kiss_port", i);
+                expect(eq(decoded[i].timestamp, seeded[i].timestamp)) << std::format("frame {}: the stamp the record carried, or none invented for the record that had none", i);
+            }
+        }
+    };
+#endif // GNURADIO4_HAVE_NETWORK_BLOCKS
+
+    "KissStreamDecode reassembles a KISS stream split at every stride, mid-frame and mid-escape alike"_test = [] {
+        // frameA's payload deliberately contains both SLIP-significant bytes, so the wire form needs escaping —
+        // exactly where a split must not desynchronize DelimiterExtractor's machine
+        const gr::DataSet<std::uint8_t> frameA = kissPayload({0x11U, 0xC0U, 0x22U, 0xDBU, 0x33U});
+        const gr::DataSet<std::uint8_t> frameB = kissPayload({0x44U, 0x55U});
+
+        const std::vector<std::uint8_t> wire = kissWireForm({frameA, frameB}, {{"kiss_port", gr::Size_t{3U}}}, (std::filesystem::temp_directory_path() / "qa_recipes_kiss_stream_decode.bin").string());
+        expect(that % (wire.size() > 4UZ)) << boost::ut::fatal;
+        expect(that % (std::ranges::count(wire, std::uint8_t{0xDBU}) >= 2)) << "the wire form carries escape pairs, so a split can land inside one";
+
+        auto                   loader = makeRecipeLoader();
+        const gr::property_map readParams{{"drop_head", gr::Size_t{0U}}, {"max_payload_items", gr::Size_t{4096U}}};
+
+        // every stride from one byte a record up to one byte short of the whole stream: some of them put a record
+        // boundary between an escape introducer and the byte it escapes, and some put one between the two frames,
+        // which are the splits a record-domain decoder gets wrong and the ones this recipe exists for
+        for (std::size_t stride = 1UZ; stride < wire.size(); ++stride) {
+            std::vector<gr::DataSet<std::uint8_t>> fragments;
+            for (std::size_t at = 0UZ; at < wire.size(); at += stride) {
+                const std::size_t take = std::min(stride, wire.size() - at);
+                fragments.push_back(kissPayload(std::vector<std::uint8_t>(wire.begin() + static_cast<std::ptrdiff_t>(at), wire.begin() + static_cast<std::ptrdiff_t>(at + take))));
+            }
+
+            expect(composite != nullptr) << boost::ut::fatal;
+
+            gr::Graph graph;
+            auto&     source       = graph.emplaceBlock<KissRecordSource>();
+            source._records        = fragments;
+            auto&      sink        = graph.emplaceBlock<CcsdsRecordSink>();
+            const auto chain       = graph.addBlock(std::move(composite));
+            const auto sourceModel = gr::graph::findBlock(graph, source);
+            const auto sinkModel   = gr::graph::findBlock(graph, sink);
+            expect(sourceModel.has_value() && sinkModel.has_value()) << boost::ut::fatal;
+            expect(graph.connect(*sourceModel, gr::PortDefinition{"out"}, chain, gr::PortDefinition{"in"}).has_value());
+            expect(graph.connect(chain, gr::PortDefinition{"out"}, *sinkModel, gr::PortDefinition{"in"}).has_value());
+
+            gr::scheduler::Simple scheduler;
+            expect(scheduler.exchange(std::move(graph)).has_value()) << boost::ut::fatal;
+            expect(scheduler.runAndWait().has_value());
+
+            expect(eq(sink._records.size(), 2UZ)) << std::format("stride {}: both frames, reassembled across the record boundaries it makes", stride);
+            if (sink._records.size() == 2UZ) {
+                expect(std::ranges::equal(sink._records[0UZ].signal_values, frameA.signal_values)) << std::format("stride {}: frame A, its escaped bytes included", stride);
+                expect(std::ranges::equal(sink._records[1UZ].signal_values, frameB.signal_values)) << std::format("stride {}: frame B", stride);
+                for (std::size_t i = 0UZ; i < sink._records.size(); ++i) {
+                    const auto& map       = sink._records[i].meta_information[0UZ];
+                    const auto  portEntry = map.find(gr::property_map::key_type("kiss_port"));
+                    expect(that % (portEntry != map.end() && portEntry->second.value_or(gr::Size_t{0xFFFFU}) == gr::Size_t{3U})) << std::format("stride {}, frame {}", stride, i);
+                }
+            }
+        }
     };
 
     "the committed typed headers match a fresh emission byte for byte"_test = [] {
