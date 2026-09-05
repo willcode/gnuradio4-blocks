@@ -7,3 +7,4 @@ endfunction()
 
 gr_add_sync_benchmark(bm_Pll)
 gr_add_sync_benchmark(bm_CostasLoop)
+gr_add_sync_benchmark(bm_FllBandEdge)
