@@ -138,11 +138,62 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         }
     };
 
+    "SampleClockOffset turns parts per million into a resampling rate, and re-derives live"_test = [] {
+        auto loader = makeRecipeLoader();
+
+        // a clock error has a meaningful zero, so unlike the general demod this one defaults and instantiates
+        auto nominal = loader.instantiate("gr::recipes::SampleClockOffset");
+        expect(nominal != nullptr) << "a defaulted clock offset is a valid, and inert, channel";
+
+        gr::property_map parameters;
+        parameters["ppm"] = 20.0;
+        auto composite    = loader.instantiate("gr::recipes::SampleClockOffset", parameters);
+        expect(composite != nullptr);
+        if (composite == nullptr) {
+            return;
+        }
+
+        const auto inputs  = exportedNames(composite->exportedInputPorts());
+        const auto outputs = exportedNames(composite->exportedOutputPorts());
+        expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ));
+        expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end());
+
+        const auto clock = interiorByName(composite, "clock");
+        expect(clock != nullptr);
+        if (clock == nullptr) {
+            return;
+        }
+        const auto rate = clock->settings().get("rate");
+        expect(rate.has_value());
+        if (rate.has_value()) {
+            expect(eq(numericOf(*rate), 1.0 + 20.0e-6)) << "20 ppm fast is 1 + 20e-6 output samples per input";
+        }
+
+        auto* wrapper = dynamic_cast<gr::GraphWrapper<gr::Graph>*>(composite.get());
+        expect(wrapper != nullptr);
+        if (wrapper == nullptr) {
+            return;
+        }
+        gr::property_map change;
+        change["ppm"]      = -50.0;
+        const auto applied = wrapper->applyRecipeParameters(change);
+        expect(applied.has_value()) << (applied.has_value() ? "" : applied.error().message);
+        const auto staged = clock->settings().stagedParameters();
+        const auto rateIt = staged.find("rate");
+        expect(rateIt != staged.end()) << "the re-derived rate is staged";
+        if (rateIt != staged.end()) {
+            expect(eq(numericOf(rateIt->second), 1.0 - 50.0e-6)) << "a slow clock resamples below unity";
+        }
+    };
+
     "the committed typed headers match a fresh emission byte for byte"_test = [] {
         auto        loader = makeRecipeLoader();
         const auto& defs   = loader.definitionForBlockName();
         expect(!defs.empty());
         for (const auto& [name, definition] : defs) {
+            const auto lastColon  = name.rfind("::");
+            const auto structName = lastColon == std::string::npos ? name : name.substr(lastColon + 2);
+            const auto emitted    = gr::recipe::emitter::emitRecipeHeader(definition, structName + ".yaml");
             expect(emitted.has_value()) << name << (emitted.has_value() ? "" : emitted.error().message);
             if (!emitted.has_value()) {
                 continue;
