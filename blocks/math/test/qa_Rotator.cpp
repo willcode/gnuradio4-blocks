@@ -250,8 +250,9 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         }
     } | kArithmeticTypes;
 
-    // short calls re-seed from '_accumulated_phase' every call, so its rounding is the floor here rather
-    // than the loop's: in double that floor is flat, i.e. the bound does not grow with the call count
+    // short calls exercise the kernel's cross-call state: the lane vector and the position within the
+    // re-seed interval both carry, so the floor here is the re-seed rounding rather than anything that
+    // accumulates per call, and in double that floor is flat
     "Rotator - short calls stay bounded as the stream grows"_test = []<typename T> {
         constexpr double tolerance = std::is_same_v<typename T::value_type, float> ? 1e-5 : 1e-9;
 
