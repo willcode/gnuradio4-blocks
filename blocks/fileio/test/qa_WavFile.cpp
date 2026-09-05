@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -232,6 +233,55 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
 
         expect(eq(std::vector<std::int16_t>(sink._samples.begin(), sink._samples.end()), reference)) << caseName;
         expectSingleFormatTag(sink._tags, static_cast<float>(sampleRate), 1U, caseName);
+    };
+
+    "WavSource reads its header at start(), before any processBulk() call"_test = [] {
+        constexpr std::string_view caseName = "WavSource header timing";
+
+        const std::vector<std::int16_t> reference{0, 16384, -16384, 32767};
+        const std::uint32_t             sampleRate = 22050U;
+
+        const auto wavBytes = makeWav(1U, 1U, 16U, sampleRate, encodePcm16(reference));
+        TempFile   file{writeTempAudioFile(wavBytes)};
+
+        gr::blocks::fileio::WavSource<std::int16_t> source({{"uri", file.path.string()}});
+        source.settings().init();
+        std::ignore = source.settings().applyStagedParameters();
+        expect(eq(source.sample_rate.value, 0.f)) << caseName << ": unopened, the setting carries no reading yet";
+
+        source.start();
+        expect(eq(source.sample_rate.value, static_cast<float>(sampleRate))) << caseName << ": the header is read synchronously at start(), before the first processBulk() call reaches it";
+        expect(eq(source.num_channels.value, gr::Size_t(1))) << caseName;
+        source.stop();
+    };
+
+    "WavSource::stop() cancels the open reader in place"_test = [] {
+        constexpr std::string_view caseName = "WavSource stop and the reader handle";
+
+        const std::vector<std::int16_t> reference{0, 1000, -1000, 2000};
+        const std::uint32_t             sampleRate = 8000U;
+
+        const auto wavBytes = makeWav(1U, 1U, 16U, sampleRate, encodePcm16(reference));
+        TempFile   file{writeTempAudioFile(wavBytes)};
+
+        gr::blocks::fileio::WavSource<std::int16_t> source({{"uri", file.path.string()}});
+        source.settings().init();
+        std::ignore = source.settings().applyStagedParameters();
+
+        source.start();
+        expect(eq(source.sample_rate.value, static_cast<float>(sampleRate))) << caseName;
+
+        // A stop runs on whichever thread requests it, so a processBulk() call can still be waiting
+        // inside the header drain on this very reader. Replacing the handle there would pull the
+        // reader state out from under that call; canceling wakes it and leaves the handle valid.
+        source.stop();
+        expect(source._reader.cancelRequested()) << caseName << ": the stopped reader is canceled, not replaced";
+
+        // a fresh start() is what returns the block to the head of the file
+        source.start();
+        expect(eq(source.sample_rate.value, static_cast<float>(sampleRate))) << caseName << ": start() opens the file again";
+        expect(!source._reader.cancelRequested()) << caseName << ": start() opens a reader of its own rather than carrying the stopped one over";
+        source.stop();
     };
 
     "PCM16 sources handle channels and pre-data chunks"_test = [] {
@@ -529,4 +579,12 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
 #endif
 };
 
-int main() { return boost::ut::cfg<boost::ut::override>.run(); }
+// The unit-test runner holds a case's report until the case ends and prints the suite summary only when the
+// runner is torn down, after main() returns, so a crash leaves nothing behind. Naming every finished case on
+// an unbuffered stdout pins a crash to the case that follows the last line printed, and reporting the summary
+// from run() puts it out before the process tears its statics down.
+int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    boost::ut::detail::cfg::show_successful_tests = true;
+    return boost::ut::cfg<boost::ut::override>.run({.report_errors = true});
+}
