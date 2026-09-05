@@ -21,6 +21,8 @@ add_subdirectory(adsb)
 add_subdirectory(filter)
 add_subdirectory(fourier)
 add_subdirectory(http)
+# after channel, whose impairments the cell identifier's QA drives
+add_subdirectory(lte)
 add_subdirectory(math)
 add_subdirectory(measurement)
 add_subdirectory(ofdm)
