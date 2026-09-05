@@ -102,9 +102,12 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::audio::AudioSink<float32>"sv));
 #endif
         expect(registry.contains("gr::blocks::analog::QuadratureDemod<float32>"sv));
+        expect(registry.contains("gr::blocks::analog::HardLimiter<complex<float32>>"sv));
         expect(registry.contains("gr::blocks::filter::DesignedFilter<float32, float32>"sv));
         expect(registry.contains("gr::blocks::filter::DesignedFilter<complex<float32>, float32>"sv));
+        expect(registry.contains("gr::blocks::sync::SymbolSync<float32>"sv));
         expect(registry.contains("gr::blocks::sync::PreambleTiming<float32>"sv));
+        expect(registry.contains("gr::blocks::digital::PamSlicer<float32>"sv));
         expect(registry.contains("gr::blocks::sync::PllCarrierTracking"sv));
         expect(registry.contains("gr::blocks::sync::PllFreqDet"sv));
         expect(registry.contains("gr::blocks::sync::PllRefOut"sv));
