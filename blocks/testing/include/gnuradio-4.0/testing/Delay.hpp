@@ -12,9 +12,9 @@ namespace gr::blocks::testing {
 
 GR_REGISTER_BLOCK(gr::blocks::testing::Delay, [T], [float])
 
-// NoTagPropagation: a pure pass-through must forward every input tag, not just the auto-forward keys
+// UnfilteredTagPropagation: a pure pass-through forwards every input tag key, not just the auto-forward ones
 template<typename T>
-struct Delay : Block<Delay<T>, NoTagPropagation> {
+struct Delay : Block<Delay<T>, UnfilteredTagPropagation> {
     using clock = std::chrono::steady_clock;
 
     PortIn<T>  in;
@@ -37,11 +37,6 @@ struct Delay : Block<Delay<T>, NoTagPropagation> {
         }
 
         const auto n = std::min(input.size(), output.size());
-        for (const Tag& tag : input.rawTags) {
-            if (tag.index >= input.streamIndex && tag.index - input.streamIndex < n) {
-                output.publishTag(tag.map, tag.index - input.streamIndex);
-            }
-        }
         std::ranges::copy(input.first(n), output.begin());
         std::ignore = input.consume(n);
         output.publish(n);
