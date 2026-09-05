@@ -6,6 +6,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/DataSink.hpp
     include/gnuradio-4.0/basic/Decimators.hpp
     include/gnuradio-4.0/basic/FunctionGenerator.hpp
+    include/gnuradio-4.0/basic/GraphBridge.hpp
     include/gnuradio-4.0/basic/IqCorrection.hpp
     include/gnuradio-4.0/basic/MovingAverage.hpp
     include/gnuradio-4.0/basic/PacketToDataSet.hpp
