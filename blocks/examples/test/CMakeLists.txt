@@ -32,8 +32,10 @@ target_link_libraries(
           gnuradio4::gr-basic
           gnuradio4::GrAnalogBlocksShared
           gnuradio4::GrBasicBlocksShared
+          gnuradio4::GrChannelBlocksShared
           gnuradio4::GrFilterBlocksShared
-          gnuradio4::GrMathBlocksShared)
+          gnuradio4::GrMathBlocksShared
+          gnuradio4::GrMeasurementBlocksShared)
 
 # The install-layout case reads the files where the install rule puts them: a setup test installs this directory's
 # component into a prefix inside the build tree, and ctest runs it before the qa. The case is left out where the host

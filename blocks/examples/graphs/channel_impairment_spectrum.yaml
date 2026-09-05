@@ -1,0 +1,79 @@
+# A clean tone through the channel models, read back as a power spectral density.
+#
+# Every impairment in gr::blocks::channel leaves a signature a spectrum shows, and this graph puts
+# them in the order a link applies them so each one can be turned off and back on against the same
+# picture. At 1 MS/s with a 100 kHz tone:
+#
+#   noise      AwgnChannel     a flat floor at -30 dB of the tone's power per unit bandwidth
+#   drift      FrequencyOffset 20 kHz/s of chirp, so the line walks the axis while the graph runs
+#   jitter     PhaseNoise      a 2 Hz Lorentzian skirt at the foot of the line, out to about 18 kHz
+#   imbalance  IqImbalance     an image at -100 kHz, about 30 dB down at 0.5 dB and 0.02 rad
+#
+# The linewidth is 2 Hz and not something broader because a Wiener skirt falls only as 1/f^2: against
+# this floor, a 200 Hz line stands above the noise out to 178 kHz and sets the floor over a third of
+# the band, so the flat floor the first line above promises would not be the AWGN's. At 2 Hz the skirt
+# crosses the floor 18 kHz out - visible at the foot of the line, and past it the floor is the noise
+# the graph asked for. That is also what makes the picture a calibration: qa_ExampleGraphs reads the
+# tone's power and the noise floor off these records and holds them to the numbers below.
+#
+# The estimate is Welch's: 1024-point Hann segments at half overlap, eight per record. Each record
+# carries `sample_rate`, `sample_start`, `n_averaged` and `enbw_bins` in its metadata; `enbw_bins`
+# times the bin width is what turns the peak density back into the tone's own power.
+#
+# `tone` is paced to wall-clock time, so the graph runs at 1 MS/s and the drift is real seconds.
+# A host reads the records through the DataSetSink registry under the signal name `psd`; studio
+# substitutes its own gr::studio::* waterfall or series sink, whose `in` is a port COLLECTION -
+# a bare `in` on one connects nothing and silently passes no data, so write those edges `in#0`.
+# DataSetSink's `in` is a plain port and is written as one.
+blocks:
+  - id: gr::blocks::basic::SignalGenerator<complex<float32>>
+    parameters:
+      name: tone
+      sample_rate: !!float32 1000000.0
+      signal_type: Sin
+      tone_frequency: !!float32 100000.0
+      amplitude: !!float32 1.0
+      chunk_size: !!uint32 8192
+  - id: gr::blocks::channel::AwgnChannel<complex<float32>>
+    parameters:
+      name: noise
+      noise_power: !!float64 0.001
+      seed: !!uint64 1
+  - id: gr::blocks::channel::FrequencyOffset<complex<float32>>
+    parameters:
+      name: drift
+      sample_rate: !!float32 1000000.0
+      frequency_offset: !!float64 0.0
+      drift: !!float64 20000.0
+  - id: gr::blocks::channel::PhaseNoise<complex<float32>>
+    parameters:
+      name: jitter
+      sample_rate: !!float32 1000000.0
+      linewidth: !!float64 2.0
+      seed: !!uint64 2
+  - id: gr::blocks::channel::IqImbalance<complex<float32>>
+    parameters:
+      name: imbalance
+      amplitude_imbalance_db: !!float64 0.5
+      phase_imbalance: !!float64 0.02
+  - id: gr::blocks::measurement::WelchPsd<complex<float32>>
+    parameters:
+      name: spectrum
+      fft_size: !!uint32 1024
+      window: Hann
+      overlap: !!float64 0.5
+      n_averages: !!uint32 8
+      mode: mean
+      sample_rate: !!float32 1000000.0
+      signal_name: psd
+  - id: gr::blocks::basic::DataSetSink<float32>
+    parameters:
+      name: psd_sink
+      signal_name: psd
+connections:
+  - [tone, out, noise, in]
+  - [noise, out, drift, in]
+  - [drift, out, jitter, in]
+  - [jitter, out, imbalance, in]
+  - [imbalance, out, spectrum, in]
+  - [spectrum, out, psd_sink, in]

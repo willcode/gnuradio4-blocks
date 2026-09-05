@@ -10,12 +10,16 @@ files.
 - `fm_radio_mono.yaml`: broadcast FM mono, from a wideband front end to
   audio. The chain is a tuner, a decimating channel filter, a discriminator,
   a rational resampler to the audio rate and de-emphasis.
+- `channel_impairment_spectrum.yaml`: a tone through the channel models in
+  the order a link applies them, read back as a Welch power spectral
+  density.
 
 ## Running one
 
 Each graph runs with no hardware, no sound device and no display. The
-source is a `SignalGenerator` and the sink a `DataSink`. The header comment
-of each file names the radio and audio blocks that replace them.
+source is a `SignalGenerator` and the sink a `DataSink` or a `DataSetSink`.
+The header comment of each file names the radio and audio blocks that
+replace them.
 
 To listen to a station, copy `fm_radio_mono.yaml` and change its
 `rf_source` entry to a `gr::blocks::sdr::SoapySource<complex<float32>>`
@@ -48,4 +52,6 @@ rungraph --graph my_fm.yaml --seconds 30
 `test/qa_ExampleGraphs.cpp` loads every graph and checks that each block is
 constructed under the id its file names. It reads the graphs from a header
 the build generates from the files, and from the install layout where the
-host file system is readable. It also runs the FM graph headless.
+host file system is readable. It also runs the FM graph headless, and it
+runs the spectrum graph and checks the tone and noise levels of its records
+against the numbers in the file.

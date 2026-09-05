@@ -10,7 +10,9 @@ install(
 if(ENABLE_TESTING
    AND TARGET gnuradio4::GrAnalogBlocksShared
    AND TARGET gnuradio4::GrBasicBlocksShared
+   AND TARGET gnuradio4::GrChannelBlocksShared
    AND TARGET gnuradio4::GrFilterBlocksShared
-   AND TARGET gnuradio4::GrMathBlocksShared)
+   AND TARGET gnuradio4::GrMathBlocksShared
+   AND TARGET gnuradio4::GrMeasurementBlocksShared)
   add_subdirectory(test)
 endif()
