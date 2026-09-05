@@ -17,6 +17,7 @@ add_subdirectory(fourier)
 add_subdirectory(http)
 add_subdirectory(math)
 add_subdirectory(measurement)
+add_subdirectory(ofdm)
 add_subdirectory(sync)
 
 # Optional families go before libs: the registry audit there links the shared library a family's target provides, so a
