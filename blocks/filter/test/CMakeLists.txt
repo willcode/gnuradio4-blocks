@@ -1,6 +1,9 @@
 add_ut_test(qa_filter)
 target_link_libraries(qa_filter PRIVATE gr-filter gr-testing)
 
+add_ut_test(qa_ArbitraryResampler)
+target_link_libraries(qa_ArbitraryResampler PRIVATE gr-filter gr-testing)
+
 add_ut_test(qa_DcBlocker)
 target_link_libraries(qa_DcBlocker PRIVATE gr-filter gr-testing)
 
