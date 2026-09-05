@@ -13,6 +13,7 @@ gr_add_block_library(
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   include/gnuradio-4.0/digital/ConstellationBlocks.hpp
+  include/gnuradio-4.0/digital/CpmModulate.hpp
   include/gnuradio-4.0/digital/DifferentialCoding.hpp
   LINK_LIBRARIES
   gr-digital)
