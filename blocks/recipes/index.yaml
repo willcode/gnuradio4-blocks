@@ -12,6 +12,14 @@ assets:
     created: "2026-09-02-00:00:00"
     modified: "2026-09-02-00:00:00"
     block_type: gr::recipes::AfskDemod
+  - file: CcsdsConcatenatedFrames.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::CcsdsConcatenatedFrames
+  - file: CcsdsRsFrames.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::CcsdsRsFrames
   - file: BpskDemod.yaml
     created: "2026-09-02-00:00:00"
     modified: "2026-09-02-00:00:00"
