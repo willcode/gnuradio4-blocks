@@ -13,6 +13,7 @@ gr_add_block_library(
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   include/gnuradio-4.0/ofdm/CarrierAllocator.hpp
+  include/gnuradio-4.0/ofdm/ChannelEqualizer.hpp
   include/gnuradio-4.0/ofdm/CyclicPrefix.hpp
   include/gnuradio-4.0/ofdm/SchmidlCoxSync.hpp
   LINK_LIBRARIES
