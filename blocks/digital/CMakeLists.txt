@@ -27,6 +27,7 @@ gr_add_block_library(
   include/gnuradio-4.0/digital/OffsetWordFraming.hpp
   include/gnuradio-4.0/digital/PacketFramer.hpp
   include/gnuradio-4.0/digital/PamSymbols.hpp
+  include/gnuradio-4.0/digital/PpmFramer.hpp
   include/gnuradio-4.0/digital/PreambleCorrelator.hpp
   include/gnuradio-4.0/digital/Scrambler.hpp
   include/gnuradio-4.0/digital/SignalQuality.hpp

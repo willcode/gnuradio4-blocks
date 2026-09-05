@@ -44,6 +44,9 @@ target_link_libraries(qa_ManchesterCombine PRIVATE gr-digital gr-testing)
 add_ut_test(qa_PacketFramer)
 target_link_libraries(qa_PacketFramer PRIVATE gr-digital gr-testing)
 
+add_ut_test(qa_PpmFramer)
+target_link_libraries(qa_PpmFramer PRIVATE gr-digital gr-testing)
+
 add_ut_test(qa_PreambleCorrelator)
 target_link_libraries(qa_PreambleCorrelator PRIVATE gr-digital gr-testing)
 
