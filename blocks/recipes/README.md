@@ -16,6 +16,7 @@ scheduler's chain fusion makes the composed form cost what a hand-fused block wo
 | `gr::recipes::DbpskDemod` | `BpskFrontEnd`'s five stages, a one-symbol phasor, the real part | `sample_rate`, `symbol_rate` |
 | `gr::recipes::FskDemodAudio` | `FskDemod`'s chain from the discriminator on — post-detection lowpass, timing recovery, slicer — for a stream that is already detected | `sample_rate`, `symbol_rate` |
 | `gr::recipes::FskDemodDcBlock` | `FskDemod`'s chain with a DC blocker after the discriminator, soft symbols out | `sample_rate`, `symbol_rate`, `modulation_index` |
+| `gr::recipes::HdlcDeframe` | NRZI line decoding, HDLC delimiter extraction, the ISO/IEC 13239 frame check; the tail of every HDLC link, AX.25 and the AIS VHF data link included | `max_payload_items` |
 | `gr::recipes::NbfmDemod` | discriminator and de-emphasis, general form | `sample_rate`, `deviation` |
 | `gr::recipes::SampleClockOffset` | a resampling by `1 + ppm*1e-6`, tags re-originated | none |
 | `gr::recipes::WbfmMonoDemod` | tuner, decimating channel filter, discriminator, audio resampler, de-emphasis | `sample_rate` |

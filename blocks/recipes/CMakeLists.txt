@@ -10,6 +10,7 @@ install(
         FskDemod.yaml
         FskDemodAudio.yaml
         FskDemodDcBlock.yaml
+        HdlcDeframe.yaml
         NbfmDemod.yaml
         SampleClockOffset.yaml
         WbfmMonoDemod.yaml
