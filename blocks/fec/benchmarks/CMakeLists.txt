@@ -11,4 +11,7 @@ function(add_fec_benchmark BM_NAME)
   target_compile_options(${BM_NAME} PRIVATE -O3)
 endfunction()
 
+if(GR4_FEC_HAVE_AFF3CT)
+  add_fec_benchmark(bm_Aff3ctBlocks)
+endif()
 add_fec_benchmark(bm_InterleaveBlocks)
