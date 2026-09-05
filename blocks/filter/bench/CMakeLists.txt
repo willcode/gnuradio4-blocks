@@ -7,4 +7,5 @@ function(gr_add_filter_benchmark BM_NAME)
   target_include_directories(${BM_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../test)
 endfunction()
 
+gr_add_filter_benchmark(bm_ArbitraryResampler)
 gr_add_filter_benchmark(bm_FirFilter)
