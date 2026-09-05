@@ -28,6 +28,14 @@ option(GR_USE_FETCHCONTENT_DEPS "Allow CMake to download selected third-party de
 option(USE_CCACHE "Use ccache if available" ON)
 option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 
+# Recorded captures a recording leg reads. Such a leg stands beside a synthetic criterion and never instead of one, so
+# an empty directory is not an error: the leg prints the path it wanted and exits 77, which CTest registers as a skip.
+set(GR4_RECORDINGS_DIR
+    ""
+    CACHE PATH "Directory holding the recorded captures the recording legs read; empty makes those tests skip")
+set(GR4_SATELLITE_RECORDINGS_DIR
+    "")
+
 # Test executables check correctness, not performance; a lower optimization level roughly halves their compile time and
 # peak RSS. Benchmarks pin their own level and are unaffected. Empty keeps the build type's default.
 set(GR_QA_OPTIMIZATION_LEVEL
