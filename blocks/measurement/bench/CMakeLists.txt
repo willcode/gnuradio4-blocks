@@ -6,6 +6,7 @@ function(gr_add_measurement_benchmark BM_NAME)
   target_include_directories(${BM_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
+gr_add_measurement_benchmark(bm_Autocorrelation)
 
 gr_add_measurement_benchmark(bm_Detectors)
 
