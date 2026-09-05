@@ -13,3 +13,5 @@ gr_add_channel_benchmark(bm_FrequencyOffset)
 gr_add_channel_benchmark(bm_ChannelImpairments)
 
 gr_add_channel_benchmark(bm_DopplerShift)
+
+gr_add_channel_benchmark(bm_RangeDelay)
