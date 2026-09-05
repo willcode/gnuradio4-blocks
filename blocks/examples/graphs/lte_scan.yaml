@@ -1,0 +1,46 @@
+# Scan a wideband recording for E-UTRA cells and print the distinct stations it found.
+#
+# Three blocks, because the two things a graph dialect cannot say - the sweep along a channel raster and the set of
+# stations it accumulates - live inside gr::blocks::lte::LteCellScanner, which prints its table at stop(). The sink
+# is what a host reads the per-station records through; the table itself needs no sink at all.
+#
+# Run it with the tree's own graph runner, which takes one graph file and runs it until its sources are finished:
+#
+#     gr4-run-graph blocks/examples/graphs/lte_scan.yaml
+#
+# `file_name` is the one line to edit. It takes a SigMF base name, or a path ending .sigmf-meta or .sigmf-data; the
+# recording named here is 757 MHz at 25 MS/s for 30.5 s, whose 744.5-769.5 MHz span holds band 13 and band 14
+# downlinks and the top of band 12. The recording's own metadata carries its center frequency and rate as tags, and
+# the scanner takes the center from the tag, so `center_frequency` below is only what it falls back to; a capture
+# with no center at all is reported relative to the input and every record says so.
+#
+# What the settings cost. A dwell examines `dwell_half_frames` half-frames at 1.92 MS/s with
+# `2*ceil(frequency_search_hz/7500)+1` frequency hypotheses, and one pass visits every `step_hz` position across
+# the swept span. Widening the search or narrowing the step buys sensitivity at a directly proportional cost;
+# `passes` bounds the run where the whole file is more than is wanted. `min_confirmations` is what separates a
+# carrier from a false confirmation of a very large search: a carrier is in the band for the whole dwell and is
+# named in half-frame after half-frame of it, a false one is a single draw. Lower it to 1 to see every draw.
+blocks:
+  - id: gr::blocks::fileio::SigMfSource<complex<float32>>
+    parameters:
+      name: capture
+      file_name: /home/jwl/gnuradio-claude/recordings/20260730_182327_757000000_25000000_fc.sigmf-meta
+  - id: gr::blocks::lte::LteCellScanner
+    parameters:
+      name: scanner
+      sample_rate: !!float32 25000000.0
+      center_frequency: !!float32 757000000.0
+      raster_hz: !!float32 100000.0
+      step_hz: !!float32 400000.0
+      frequency_search_hz: !!float32 200000.0
+      dwell_half_frames: !!uint32 4
+      min_confirmations: !!uint32 2
+      passes: !!uint32 0
+      report: unique
+  - id: gr::blocks::basic::DataSetSink<float32>
+    parameters:
+      name: stations
+      signal_name: lte_stations
+connections:
+  - [capture, out, scanner, in]
+  - [scanner, out, stations, in]
