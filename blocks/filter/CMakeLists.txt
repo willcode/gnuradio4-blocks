@@ -13,6 +13,7 @@ gr_add_block_library(
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   include/gnuradio-4.0/filter/DcBlocker.hpp
+  include/gnuradio-4.0/filter/FirFilter.hpp
   include/gnuradio-4.0/filter/FrequencyEstimator.hpp
   include/gnuradio-4.0/filter/SavitzkyGolayFilter.hpp
   include/gnuradio-4.0/filter/SvdDenoiser.hpp
@@ -24,3 +25,5 @@ gr_add_block_library(
 if(TARGET gnuradio4::GrFilterBlocksShared AND ENABLE_TESTING)
   add_subdirectory(test)
 endif()
+
+add_subdirectory(bench)
