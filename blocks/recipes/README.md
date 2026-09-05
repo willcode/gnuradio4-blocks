@@ -8,18 +8,20 @@ scheduler's chain fusion makes the composed form cost what a hand-fused block wo
 
 ## What ships
 
-| Recipe | What it composes | Required parameters |
-|---|---|---|
-| `gr::recipes::AfskDemod` | Hilbert branch and matching delay, tuner, channel filter, discriminator, lowpass, timing recovery | `sample_rate`, `symbol_rate`, `mark_hz`, `space_hz` |
-| `gr::recipes::BpskDemod` | `BpskFrontEnd`'s five stages, a Costas loop at order 2, the real part | `sample_rate`, `symbol_rate` |
-| `gr::recipes::BpskFrontEnd` | tuner, decimating channel filter, AGC, frequency-locked loop, timing recovery | `sample_rate`, `symbol_rate` |
-| `gr::recipes::DbpskDemod` | `BpskFrontEnd`'s five stages, a one-symbol phasor, the real part | `sample_rate`, `symbol_rate` |
-| `gr::recipes::FskDemodAudio` | `FskDemod`'s chain from the discriminator on — post-detection lowpass, timing recovery, slicer — for a stream that is already detected | `sample_rate`, `symbol_rate` |
-| `gr::recipes::FskDemodDcBlock` | `FskDemod`'s chain with a DC blocker after the discriminator, soft symbols out | `sample_rate`, `symbol_rate`, `modulation_index` |
-| `gr::recipes::HdlcDeframe` | NRZI line decoding, HDLC delimiter extraction, the ISO/IEC 13239 frame check; the tail of every HDLC link, AX.25 and the AIS VHF data link included | `max_payload_items` |
-| `gr::recipes::NbfmDemod` | discriminator and de-emphasis, general form | `sample_rate`, `deviation` |
-| `gr::recipes::SampleClockOffset` | a resampling by `1 + ppm*1e-6`, tags re-originated | none |
-| `gr::recipes::WbfmMonoDemod` | tuner, decimating channel filter, discriminator, audio resampler, de-emphasis | `sample_rate` |
+| Recipe                                 | What it composes                                                                                                                                    | Required parameters                                                                                   |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `gr::recipes::AfskDemod`               | Hilbert branch and matching delay, tuner, channel filter, discriminator, lowpass, timing recovery                                                   | `sample_rate`, `symbol_rate`, `mark_hz`, `space_hz`                                                   |
+| `gr::recipes::BpskDemod`               | `BpskFrontEnd`'s five stages, a Costas loop at order 2, the real part                                                                               | `sample_rate`, `symbol_rate`                                                                          |
+| `gr::recipes::BpskFrontEnd`            | tuner, decimating channel filter, AGC, frequency-locked loop, timing recovery                                                                       | `sample_rate`, `symbol_rate`                                                                          |
+| `gr::recipes::CcsdsConcatenatedFrames` | access-code correlator, packet framer, soft-decision Viterbi decode, record trim, descrambler, bit repacking, Reed-Solomon decode                   | `frame_length`, `error_capability`, `code`, `basis`, `convolutional`, `encoded_marker`, `sync_errors` |
+| `gr::recipes::CcsdsRsFrames`           | bit slicer, access-code correlator, packet framer, descrambler, bit repacking, Reed-Solomon decode                                                  | `frame_length`, `error_capability`, `code`, `basis`, `sync_errors`                                    |
+| `gr::recipes::DbpskDemod`              | `BpskFrontEnd`'s five stages, a one-symbol phasor, the real part                                                                                    | `sample_rate`, `symbol_rate`                                                                          |
+| `gr::recipes::FskDemodAudio`           | `FskDemod`'s chain from the discriminator on — post-detection lowpass, timing recovery, slicer — for a stream that is already detected              | `sample_rate`, `symbol_rate`                                                                          |
+| `gr::recipes::FskDemodDcBlock`         | `FskDemod`'s chain with a DC blocker after the discriminator, soft symbols out                                                                      | `sample_rate`, `symbol_rate`, `modulation_index`                                                      |
+| `gr::recipes::HdlcDeframe`             | NRZI line decoding, HDLC delimiter extraction, the ISO/IEC 13239 frame check; the tail of every HDLC link, AX.25 and the AIS VHF data link included | `max_payload_items`                                                                                   |
+| `gr::recipes::NbfmDemod`               | discriminator and de-emphasis, general form                                                                                                         | `sample_rate`, `deviation`                                                                            |
+| `gr::recipes::SampleClockOffset`       | a resampling by `1 + ppm*1e-6`, tags re-originated                                                                                                  | none                                                                                                  |
+| `gr::recipes::WbfmMonoDemod`           | tuner, decimating channel filter, discriminator, audio resampler, de-emphasis                                                                       | `sample_rate`                                                                                         |
 
 A recipe with no required parameter instantiates bare; the rest name what they are missing.
 
@@ -53,7 +55,7 @@ whenever a parameter changes; a string- or vector-typed parameter by substitutio
 one. A literal beginning with `=` is written `\=`.
 
 The derivations themselves belong in the file's header comment: a recipe pins the numbers
-*and* shows where they came from, so a reader can build a variant instead of guessing.
+_and_ shows where they came from, so a reader can build a variant instead of guessing.
 
 ## Reaching recipes from code
 
