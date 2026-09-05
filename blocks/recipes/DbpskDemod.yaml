@@ -1,0 +1,145 @@
+# gr::recipes::DbpskDemod — differential BPSK: BpskFrontEnd's five stages, a one-symbol phasor, and the real part.
+#
+# The differential arm. Where BpskDemod tracks the carrier phase and decides on the axis it finds, this one never
+# learns the phase at all: for a noiseless input x[n] = A*exp(j*theta)*d[n] with d in {+1,-1},
+#
+#   Re( x[n] * conj(x[n-1]) ) = A^2 * d[n] * d[n-1]
+#
+# and theta cancels exactly. So the decision is on the PRODUCT of adjacent symbols, which means the data must have
+# been differentially ENCODED upstream — gr::blocks::digital::DifferentialEncoder at modulus 2 is that encoder — and
+# the recipe hands back the encoded bit stream's differences, which are the original bits.
+#
+# What it costs: adjacent-symbol errors are correlated, so at the same Eb/N0 the differential rate is about twice the
+# coherent one. What it buys: no phase ambiguity, no acquisition transient on the phase loop, and nothing to slip.
+#
+# DifferentialPhasor has no settings and its FIRST OUTPUT IS EXACTLY ZERO — there is no previous symbol to multiply
+# against — so item 0 of a run is not a decision, and a downstream framer's sync word must not begin at it.
+#
+# The two-block difference from BpskDemod is the whole of the differential arm. It is a sibling recipe and not a
+# parameter because it changes the block set, and the recipe dialect has no conditionals.
+#
+# Every parameter is BpskFrontEnd's. There is no carrier loop, so there is no loop bandwidth for
+# one.
+#
+# WHY THE FIVE SHARED STAGES ARE WRITTEN OUT HERE AND NOT NAMED. BpskFrontEnd is the recipe that holds exactly these
+# five blocks, and this file should have instantiated it. It cannot: the graph importer creates an interior block from
+# its `id` alone and never hands PluginLoader::instantiate the block's `parameters`, so a nested recipe with a
+# required exported parameter refuses. That is the same loader limitation blocks/examples/graphs records for naming a
+# recipe from a graph file. BpskFrontEnd ships and is usable on its own; when the loader forwards parameters, the five
+# blocks below collapse into one line and nothing else in this file changes.
+#
+# Complex baseband at sample_rate in; one soft symbol per symbol out, item 0 excepted.
+definition_metadata:
+  block_type: gr::recipes::DbpskDemod
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: dbpsk_demod
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "input sample rate in hertz; required"
+      - name: symbol_rate
+        type: float32
+        doc: "symbol rate in hertz; required"
+      - name: frequency_offset
+        type: float64
+        default: !!float64 0.0
+        doc: "where the carrier sits relative to the front end's center, in hertz"
+      - name: decimation
+        type: uint32
+        default: !!uint32 1
+        doc: "decimation in the channel filter; pick it for about four samples per symbol after it"
+      - name: channel_bandwidth
+        type: float64
+        default: !!float64 0.75
+        doc: "cutoff of the channel filter as a multiple of the symbol rate"
+      - name: rolloff
+        type: float64
+        default: !!float64 0.35
+        doc: "excess bandwidth of the transmit shaping filter, in [0, 1]"
+      - name: fll_noise_bandwidth
+        type: float64
+        default: !!float64 0.01
+        doc: "closed-loop noise bandwidth of the frequency-locked loop, normalized: Bn*T per sample"
+      - name: fll_filter_length
+        type: uint32
+        default: !!uint32 45
+        doc: "taps in each band-edge filter"
+      - name: timing_detector
+        type: string
+        default: "gardner"
+        doc: "timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: gardner, zero_crossing or early_late"
+      - name: timing_noise_bandwidth
+        type: float64
+        default: !!float64 0.002
+        doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
+      - name: agc_reference_db
+        type: float64
+        default: !!float64 0.0
+        doc: "target output level of the front end's AGC, in decibels"
+      - name: agc_attack_symbols
+        type: float64
+        default: !!float64 256.0
+        doc: "gain-control time constant when the gain must decrease, in SYMBOL PERIODS; the recipe divides by symbol_rate, because a gain loop reading the instantaneous magnitude follows the modulation's own envelope unless its constant is long against a symbol"
+      - name: agc_decay_symbols
+        type: float64
+        default: !!float64 512.0
+        doc: "gain-control time constant when the gain must increase, in SYMBOL PERIODS; twice the attack, so a level that rises is followed half as fast as one that falls"
+    graph:
+      blocks:
+        - id: "gr::blocks::math::Rotator<complex<float32>>"
+          parameters:
+            name: translate
+            sample_rate: "=sample_rate"
+            frequency_shift: "=-frequency_offset"
+        - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"
+          parameters:
+            name: channel
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=channel_bandwidth * symbol_rate"
+            transition_width: "=0.5 * channel_bandwidth * symbol_rate"
+            decimation: "=decimation"
+        - id: "gr::blocks::analog::Agc<complex<float32>>"
+          parameters:
+            name: agc
+            sample_rate: "=sample_rate / decimation"
+            reference_db: "=agc_reference_db"
+            attack_s: "=agc_attack_symbols / symbol_rate"
+            decay_s: "=agc_decay_symbols / symbol_rate"
+        - id: "gr::blocks::sync::FllBandEdge"
+          parameters:
+            name: fll
+            samples_per_symbol: "=sample_rate / (decimation * symbol_rate)"
+            rolloff: "=rolloff"
+            filter_length: "=fll_filter_length"
+            noise_bandwidth: "=fll_noise_bandwidth"
+        - id: "gr::blocks::sync::SymbolSync<complex<float32>>"
+          parameters:
+            name: timing
+            samples_per_symbol: "=sample_rate / (decimation * symbol_rate)"
+            rolloff: "=rolloff"
+            noise_bandwidth: "=timing_noise_bandwidth"
+            detector: "=timing_detector"
+            constellation: "bpsk"
+        - id: "gr::blocks::digital::DifferentialPhasor<float32>"
+          parameters:
+            name: phasor
+        - id: "gr::blocks::basic::Real<complex<float32>>"
+          parameters:
+            name: decision
+      connections:
+        - [translate, 0, channel, 0]
+        - [channel, 0, agc, 0]
+        - [agc, 0, fll, 0]
+        - [fll, 0, timing, 0]
+        - [timing, 0, phasor, 0]
+        - [phasor, 0, decision, 0]
+      exported_ports:
+        - [translate, INPUT, in, in]
+        - [decision, OUTPUT, real, out]

@@ -8,6 +8,26 @@
 # what a remote catalog of these recipes is served against, and it is the only account of
 # the definition's age a reader has.
 assets:
+  - file: AfskDemod.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::AfskDemod
+  - file: BpskDemod.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::BpskDemod
+  - file: BpskFrontEnd.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::BpskFrontEnd
+  - file: DbpskDemod.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::DbpskDemod
+  - file: FskDemodDcBlock.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::FskDemodDcBlock
   - file: FskDemod.yaml
     created: "2026-08-31-00:00:00"
     block_type: gr::recipes::FskDemod

@@ -1,0 +1,113 @@
+# gr::recipes::FskDemodDcBlock — FskDemod's chain with a DC blocker after the discriminator.
+#
+# A discriminator turns a frequency offset into a DC offset. A receiver mistuned by df hands the slicer a PAM grid
+# shifted by df / deviation of a level, and past half a level every symbol decides wrong. FskDemod has no answer to
+# that; this recipe puts gr::blocks::filter::DcBlocker between the discriminator and the post-detection lowpass, which
+# removes the mean and leaves the modulation.
+#
+# WHY THIS IS A SIBLING AND NOT A SETTING. DcBlocker has no bypass, so adding it to FskDemod would move that recipe's
+# measured bit error rates — a behavior change to a landed recipe, not an addition. A sibling leaves the landed
+# numbers exactly where FskDemod's own header claims they are.
+#
+# The derivations are FskDemod's, unchanged:
+#
+#   discriminator gain = sample_rate / (symbol_rate * pi * modulation_index) = sample_rate / (2*pi*deviation)
+#   samples per symbol = sample_rate / symbol_rate
+#
+# and one more:
+#
+#   the blocker's notch corner is about sample_rate / dc_block_length, and it must sit well below the symbol rate or
+#   the blocker eats the modulation as well as the offset. `dc_block_length` of 128 at eight samples per symbol puts
+#   the corner at symbol_rate / 16, which is the inequality this recipe exists under; a long-form blocker's group
+#   delay is 2*length - 2 samples and is uncompensated, which the timing loop absorbs.
+#
+# THE SUB-AUDIO ARM IS THIS RECIPE'S PARAMETERS AND NOT A THIRD FILE. A sub-audio FSK link carries its data under a
+# voice channel: the deviation is small, the symbol rate is low, and the discriminator's output rides an offset the
+# blocker removes. Set `channel_bandwidth` and `lowpass_bandwidth` from the deviation rather than from the audio band,
+# and `dc_block_length` so that sample_rate / dc_block_length stays well under symbol_rate.
+#
+# `modulation_index` IS SIGNED, as it is in FskDemod: a negative h means the higher-frequency tone carries the ZERO,
+# and the gain inverts with it, which keeps a positive soft decision meaning a one.
+#
+# Output is the SOFT symbol stream, not FskDemod's sliced bytes: soft is the general form, a PamSlicer downstream is
+# one landed block, and unslicing is impossible.
+#
+# Complex baseband at sample_rate in; one soft symbol per symbol out.
+definition_metadata:
+  block_type: gr::recipes::FskDemodDcBlock
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: fsk_demod_dc_block
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "input sample rate in hertz; required"
+      - name: symbol_rate
+        type: float32
+        doc: "symbol rate in hertz; required"
+      - name: modulation_index
+        type: float64
+        doc: "h, the phase in units of pi one unit of symbol amplitude turns the carrier by; required, and signed: a negative value means the higher tone is the zero"
+      - name: channel_bandwidth
+        type: float64
+        default: !!float64 0.6
+        doc: "cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate"
+      - name: lowpass_bandwidth
+        type: float64
+        default: !!float64 0.5
+        doc: "cutoff of the post-discriminator lowpass, as a multiple of the symbol rate"
+      - name: dc_block_length
+        type: uint32
+        default: !!uint32 128
+        doc: "boxcar length D of the DC blocker; its notch corner is about sample_rate/D and must stay well under the symbol rate"
+      - name: noise_bandwidth
+        type: float64
+        default: !!float64 0.002
+        doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
+      - name: detector
+        type: string
+        default: "mueller_muller"
+        doc: "timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"
+    graph:
+      blocks:
+        - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"
+          parameters:
+            name: channel
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=channel_bandwidth * symbol_rate"
+            transition_width: "=0.5 * channel_bandwidth * symbol_rate"
+        - id: "gr::blocks::analog::QuadratureDemod<float32>"
+          parameters:
+            name: discriminator
+            gain: "=sample_rate / (symbol_rate * pi * modulation_index)"
+        - id: "gr::blocks::filter::DcBlocker<float32>"
+          parameters:
+            name: dc_block
+            length: "=dc_block_length"
+        - id: "gr::blocks::filter::DesignedFilter<float32, float32>"
+          parameters:
+            name: lowpass
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=lowpass_bandwidth * symbol_rate"
+            transition_width: "=0.5 * lowpass_bandwidth * symbol_rate"
+        - id: "gr::blocks::sync::SymbolSync<float32>"
+          parameters:
+            name: timing
+            samples_per_symbol: "=sample_rate / symbol_rate"
+            noise_bandwidth: "=noise_bandwidth"
+            detector: "=detector"
+      connections:
+        - [channel, 0, discriminator, 0]
+        - [discriminator, 0, dc_block, 0]
+        - [dc_block, 0, lowpass, 0]
+        - [lowpass, 0, timing, 0]
+      exported_ports:
+        - [channel, INPUT, in, in]
+        - [timing, OUTPUT, out, out]
