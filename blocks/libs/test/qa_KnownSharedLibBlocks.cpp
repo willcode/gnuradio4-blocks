@@ -9,6 +9,7 @@ using namespace boost::ut;
 
 using namespace std::string_view_literals;
 
+#include <gnuradio-4.0/GrAnalogBlocks.hpp>
 #include <gnuradio-4.0/GrBasicBlocks.hpp>
 #include <gnuradio-4.0/GrElectricalBlocks.hpp>
 #include <gnuradio-4.0/GrFileIoBlocks.hpp>
@@ -24,9 +25,11 @@ using namespace std::string_view_literals;
 #define GNURADIO4_HAVE_AUDIO_BLOCKS 0
 #endif
 
+
 const boost::ut::suite TagTests = [] {
     auto&       registry = gr::globalBlockRegistry();
     std::size_t result   = 0UZ;
+    result += gr::blocklib::initGrAnalogBlocks(registry);
     result += gr::blocklib::initGrBasicBlocks(registry);
 #if GNURADIO4_HAVE_AUDIO_BLOCKS
     result += gr::blocklib::initGrAudioBlocks(registry);
@@ -97,6 +100,7 @@ const boost::ut::suite TagTests = [] {
 #if GNURADIO4_HAVE_AUDIO_BLOCKS
         expect(registry.contains("gr::blocks::audio::AudioSink<float32>"sv));
 #endif
+        expect(registry.contains("gr::blocks::analog::QuadratureDemod<float32>"sv));
         expect(registry.contains("gr::blocks::filter::fir_filter<float32>"sv));
         expect(registry.contains("gr::blocks::fourier::FFT<float32>"sv));
         // an alias registers under the name of the template it expands to unless the registration states one, so
