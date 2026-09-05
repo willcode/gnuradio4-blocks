@@ -120,6 +120,7 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::filter::DesignedFilter<float32, float32>"sv));
         expect(registry.contains("gr::blocks::filter::DesignedFilter<complex<float32>, float32>"sv));
         expect(registry.contains("gr::blocks::sync::SymbolSync<float32>"sv));
+        expect(registry.contains("gr::blocks::sync::PreambleTiming<float32>"sv));
         expect(registry.contains("gr::blocks::digital::PamSlicer<float32>"sv));
         expect(registry.contains("gr::blocks::analog::PowerSquelch<float32>"sv));
         expect(registry.contains("gr::blocks::analog::CtcssSquelch"sv));
