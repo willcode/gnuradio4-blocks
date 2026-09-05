@@ -63,22 +63,11 @@ const boost::ut::suite<"bulk expression block tests"> bulkExpression = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
 
-        // The expression aborts the run. The scheduler reports that failure through
-        // runAndWait()'s return value, and an abort escaping as an exception is the same
-        // refusal, so either form satisfies the test.
-        bool reportedFailure = false;
-        try {
-            if (const auto result = sched.runAndWait(); !result.has_value()) {
-                reportedFailure = true;
-                std::println("failed correctly with:\n{}\n", result.error().message);
-            }
-        } catch (const gr::exception& ex) {
-            reportedFailure = true;
-            std::println("failed correctly with:\n{}\n", ex);
-        } catch (...) {
-            expect(false) << std::format("caught unknown/unexpected exception");
+        const auto result = sched.runAndWait();
+        expect(!result.has_value()) << "a run the expression aborted must be reported as failed";
+        if (!result.has_value()) {
+            std::println("failed correctly with:\n{}\n", result.error().message);
         }
-        expect(reportedFailure) << std::format("a run the expression aborted must be reported as failed");
     } | std::vector{true /*, false -- disabled on purpose as this would correctly trigger the ASAN checks*/};
 };
 
