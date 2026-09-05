@@ -47,6 +47,22 @@ assets:
   - file: FskDemod.yaml
     created: "2026-08-31-00:00:00"
     block_type: gr::recipes::FskDemod
+  - file: KissFileWrite.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::KissFileWrite
+  - file: KissFileRead.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::KissFileRead
+  - file: KissServe.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::KissServe
+  - file: KissStreamDecode.yaml
+    created: "2026-09-02-00:00:00"
+    modified: "2026-09-02-00:00:00"
+    block_type: gr::recipes::KissStreamDecode
   - file: NbfmDemod.yaml
     created: "2026-08-28-00:00:00"
     modified: "2026-08-29-00:00:00"
