@@ -1,0 +1,106 @@
+# gr::recipes::FskDemod — noncoherent reception of two-level FSK and its continuous-phase relatives.
+#
+# The derivation this recipe saves is the discriminator gain. A continuous-phase modulator turns the carrier by
+# pi*h*a radians per symbol of amplitude a, so a discriminator scaled by samples_per_symbol / (pi*h) hands back the
+# transmitted PAM grid directly: a full-response symbol averages to its own amplitude over the symbol, which is the
+# grid the slicer and the level tracker already speak. In FM terms the same number is sample_rate / (2*pi*deviation),
+# the deviation of a two-level signal being h * symbol_rate / 2.
+#
+# The chain is a channel filter, the discriminator, a post-detection lowpass, timing recovery and the slicer. The
+# channel filter is what keeps the receiver above the FM click threshold: a discriminator's noise is the noise in the
+# band it is handed, so at eight samples per symbol an unfiltered front end sees nine decibels more of it than the
+# signal band carries, and the bit error rate then follows a different exponent from the noncoherent bound rather
+# than sitting a fixed distance from it. With the channel filter at 0.6 symbol rates the chain measures between 0.32
+# and 1.11 times the noncoherent orthogonal reference exp(-EbN0/2)/2 over 6 to 12 dB Es/N0.
+#
+# The discriminator itself is an arctangent of the product of consecutive samples with the earlier one conjugated, so
+# its output depends on the phase advance alone and the chain takes the signal at whatever amplitude it arrives.
+#
+# modulation_index IS SIGNED, and its sign is the polarity rule. This tree's convention is that a positive soft
+# decision is a one, so a link whose HIGHER-frequency tone carries the zero states a negative h; the discriminator
+# gain inverts with it and the slicer's grid comes out the right way up, with no extra setting and no inverting block.
+# A chain that passes the magnitude instead receives every bit inverted and nothing but a CRC downstream can tell.
+# The deviation is the same statement — deviation = h * symbol_rate / 2 — and is not a second parameter, because the
+# dialect has no conditional to choose between two spellings of one number; a caller who knows the deviation states
+# h = 2*deviation/symbol_rate.
+#
+# The timing error detector is a parameter. It defaults to Mueller & Muller, the detector the bit error rates
+# above were measured through; the other six are available and each carries its own gain, so selecting one
+# costs nothing but a re-measurement of the rates.
+#
+# Complex baseband at sample_rate in, one label per symbol out. sample_rate, symbol_rate and modulation_index carry
+# no defaults: a general recipe demands them, because every link differs in exactly these.
+definition_metadata:
+  block_type: gr::recipes::FskDemod
+  plugin_name: GrRecipes
+  plugin_author: gnuradio4 recipes
+  plugin_license: MIT
+  plugin_version: "2026-09-02"
+blocks:
+  - id: SUBGRAPH
+    parameters:
+      name: fsk_demod
+    exported_parameters:
+      - name: sample_rate
+        type: float32
+        doc: "input sample rate in hertz; required"
+      - name: symbol_rate
+        type: float32
+        doc: "symbol rate in hertz; required"
+      - name: modulation_index
+        type: float64
+        doc: "h, the phase in units of pi one unit of symbol amplitude turns the carrier by; required, and signed: a negative value means the higher tone is the zero"
+      - name: channel_bandwidth
+        type: float64
+        default: !!float64 0.6
+        doc: "cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate"
+      - name: lowpass_bandwidth
+        type: float64
+        default: !!float64 0.5
+        doc: "cutoff of the post-discriminator lowpass, as a multiple of the symbol rate"
+      - name: noise_bandwidth
+        type: float64
+        default: !!float64 0.002
+        doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
+      - name: detector
+        type: string
+        default: "mueller_muller"
+        doc: "timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"
+    graph:
+      blocks:
+        - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"
+          parameters:
+            name: channel
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=channel_bandwidth * symbol_rate"
+            transition_width: "=0.5 * channel_bandwidth * symbol_rate"
+        - id: "gr::blocks::analog::QuadratureDemod<float32>"
+          parameters:
+            name: discriminator
+            gain: "=sample_rate / (symbol_rate * pi * modulation_index)"
+        - id: "gr::blocks::filter::DesignedFilter<float32, float32>"
+          parameters:
+            name: lowpass
+            profile: "lowpass"
+            sample_rate: "=sample_rate"
+            cutoff: "=lowpass_bandwidth * symbol_rate"
+            transition_width: "=0.5 * lowpass_bandwidth * symbol_rate"
+        - id: "gr::blocks::sync::SymbolSync<float32>"
+          parameters:
+            name: timing
+            samples_per_symbol: "=sample_rate / symbol_rate"
+            noise_bandwidth: "=noise_bandwidth"
+            detector: "=detector"
+        - id: "gr::blocks::digital::PamSlicer<float32>"
+          parameters:
+            name: slicer
+            n_levels: !!uint32 2
+      connections:
+        - [channel, 0, discriminator, 0]
+        - [discriminator, 0, lowpass, 0]
+        - [lowpass, 0, timing, 0]
+        - [timing, 0, slicer, 0]
+      exported_ports:
+        - [channel, INPUT, in, in]
+        - [slicer, OUTPUT, out, out]
