@@ -5,6 +5,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/DataSetToStream.hpp
     include/gnuradio-4.0/basic/DataSink.hpp
     include/gnuradio-4.0/basic/FunctionGenerator.hpp
+    include/gnuradio-4.0/basic/PacketToDataSet.hpp
     include/gnuradio-4.0/basic/Selector.hpp
     include/gnuradio-4.0/basic/SignalGenerator.hpp
     include/gnuradio-4.0/basic/StreamToDataSet.hpp
