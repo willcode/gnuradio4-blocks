@@ -110,6 +110,7 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::sync::PllCarrierTracking"sv));
         expect(registry.contains("gr::blocks::sync::PllFreqDet"sv));
         expect(registry.contains("gr::blocks::sync::PllRefOut"sv));
+        expect(registry.contains("gr::blocks::sync::CostasLoop"sv));
         expect(registry.contains("gr::blocks::basic::Throttle<float32>"sv));
         expect(registry.contains("gr::blocks::basic::KeepOneInN<float32>"sv));
         expect(registry.contains("gr::blocks::basic::KeepMInN<float32>"sv));

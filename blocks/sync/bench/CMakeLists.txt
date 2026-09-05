@@ -6,3 +6,4 @@ function(gr_add_sync_benchmark BM_NAME)
 endfunction()
 
 gr_add_sync_benchmark(bm_Pll)
+gr_add_sync_benchmark(bm_CostasLoop)
