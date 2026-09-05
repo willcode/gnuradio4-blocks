@@ -1,13 +1,15 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <cstdlib>
-#include <tuple>
+#include <span>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/algorithm/timing/ScheduleAnchor.hpp>
 
 #include <gnuradio-4.0/basic/ClockSource.hpp>
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
@@ -15,11 +17,14 @@
 #include <gnuradio-4.0/testing/ImChartMonitor.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include "TestSpans.hpp"
+
 using namespace boost::ut;
 
 const suite<"SchmittTrigger Block"> triggerTests = [] {
     using namespace gr::blocks::basic;
     using namespace gr::blocks::testing;
+    namespace spans = gr::blocks::basic::test;
 
     constexpr static float sample_rate       = 1000.f; // 100 Hz
     bool                   enableVisualTests = false;
@@ -46,6 +51,48 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
         std::ignore = trig.settings().applyStagedParameters();
         // 0.25 s past trigger_time is 250 ms, not 250 us.
         expect(eq(trig._now, 1'250'000'000ULL));
+    };
+
+    "trigger_offset publishes in seconds, and trigger_time plus it recovers the detected instant"_test = [] {
+        SchmittTrigger<float, BASIC_LINEAR_INTERPOLATION> trig({{"sample_rate", 2'400'000.f}, {"trigger_time", std::uint64_t{0}}, {"trigger_offset", 0.0f}});
+        trig.settings().init();
+        std::ignore = trig.settings().applyStagedParameters();
+        expect(eq(trig._period, 416ULL));
+        expect(eq(trig._now, 0ULL));
+
+        // a step at sample 40, well clear of both ends of the processed window, so the edge and its
+        // interpolated sub-sample offset are unambiguous
+        std::vector<float> input(128UZ, 5.0f);
+        std::fill_n(input.begin(), 40UZ, 0.0f);
+        std::vector<float>   output(128UZ);
+        std::vector<gr::Tag> published;
+
+        spans::InputSpan<float>  inSpan(std::span<const float>(input), 0UZ);
+        spans::OutputSpan<float> outSpan(std::span<float>(output), 0UZ, &published);
+        expect(trig.processBulk(inSpan, outSpan) == gr::work::Status::OK);
+        expect(eq(published.size(), 1UZ)) << "the one rising edge in the step";
+
+        if (published.size() == 1UZ) {
+            const auto&         tagMap           = published.front().map;
+            const std::uint64_t publishedTime    = tagMap.at(std::pmr::string(gr::tag::TRIGGER_TIME.shortKey())).value_or(std::uint64_t{0});
+            const float         publishedOffsetS = tagMap.at(std::pmr::string(gr::tag::TRIGGER_OFFSET.shortKey())).value_or(0.0f);
+
+            // the block's own clock at the edge: 41 samples (0-based index 40, plus one) at 416 ns each,
+            // from the zero seed staged above
+            constexpr std::int64_t kNowAtEdge = 41LL * 416LL;
+
+            const auto reconstructed = gr::timing::ScheduleAnchor::anchorNsFor(publishedTime, publishedOffsetS);
+            expect(reconstructed.has_value());
+            if (reconstructed.has_value()) {
+                // The pair carries the sub-sample position in two halves of different exactness: the
+                // published instant truncates it to a whole nanosecond and the offset carries it back as
+                // seconds, which the anchor rounds. The two disagree by at most one nanosecond, which is
+                // the resolution of the reserved keys themselves; any scale error is three or six orders
+                // of magnitude wide and this bound excludes it.
+                expect(le(std::abs(*reconstructed - kNowAtEdge), 1LL)) << "trigger_time plus trigger_offset scaled to nanoseconds recovers the edge's instant to the "
+                                                                          "nanosecond the two keys can hold; a microsecond-scaled offset would be six orders off";
+            }
+        }
     };
 
     skip / "SchmittTrigger"_test =
