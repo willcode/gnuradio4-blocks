@@ -14,6 +14,7 @@ scheduler's chain fusion makes the composed form cost what a hand-fused block wo
 | `gr::recipes::BpskDemod` | `BpskFrontEnd`'s five stages, a Costas loop at order 2, the real part | `sample_rate`, `symbol_rate` |
 | `gr::recipes::BpskFrontEnd` | tuner, decimating channel filter, AGC, frequency-locked loop, timing recovery | `sample_rate`, `symbol_rate` |
 | `gr::recipes::DbpskDemod` | `BpskFrontEnd`'s five stages, a one-symbol phasor, the real part | `sample_rate`, `symbol_rate` |
+| `gr::recipes::FskDemodAudio` | `FskDemod`'s chain from the discriminator on — post-detection lowpass, timing recovery, slicer — for a stream that is already detected | `sample_rate`, `symbol_rate` |
 | `gr::recipes::FskDemodDcBlock` | `FskDemod`'s chain with a DC blocker after the discriminator, soft symbols out | `sample_rate`, `symbol_rate`, `modulation_index` |
 | `gr::recipes::NbfmDemod` | discriminator and de-emphasis, general form | `sample_rate`, `deviation` |
 | `gr::recipes::SampleClockOffset` | a resampling by `1 + ppm*1e-6`, tags re-originated | none |
