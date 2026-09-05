@@ -34,6 +34,8 @@ add_subdirectory(libs)
 # example graphs: YAML files the core's importer reads, installed as data, with a qa that loads each one
 add_subdirectory(examples)
 
+# YAML subgraph recipes — composed capabilities that need no new code; data plus a qa
+add_subdirectory(recipes)
 if(GR4_ENABLE_SDR)
   add_subdirectory(sdr)
 endif()
