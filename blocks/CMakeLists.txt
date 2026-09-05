@@ -44,6 +44,10 @@ add_subdirectory(libs)
 
 # YAML subgraph recipes — composed capabilities that need no new code; data plus a qa
 add_subdirectory(recipes)
+
+# example graphs — YAML the tree's own importer reads; data plus a qa that loads and runs each one
+add_subdirectory(examples)
+
 if(GR4_ENABLE_SDR)
   add_subdirectory(sdr)
 endif()
