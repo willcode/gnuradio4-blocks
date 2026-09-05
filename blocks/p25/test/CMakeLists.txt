@@ -16,3 +16,5 @@ target_link_libraries(qa_P25ImbeFrame PRIVATE gr-p25)
 add_ut_test(qa_P25Nid)
 target_link_libraries(qa_P25Nid PRIVATE gr-p25)
 
+add_ut_test(qa_P25Blocks)
+target_link_libraries(qa_P25Blocks PRIVATE gr-p25 gr-digital gr-vocoder)

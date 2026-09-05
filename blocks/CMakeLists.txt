@@ -24,6 +24,7 @@ add_subdirectory(measurement)
 add_subdirectory(ofdm)
 add_subdirectory(sync)
 add_subdirectory(timing)
+add_subdirectory(vocoder)
 
 # Optional families go before libs: the registry audit there links the shared library a family's target provides, so a
 # family added after it is detected by the audit but not linked.
