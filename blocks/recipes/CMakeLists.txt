@@ -1,3 +1,5 @@
+install(
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/gnuradio-4.0/recipes")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/recipes")
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/recipes"
           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
