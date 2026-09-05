@@ -34,8 +34,12 @@ option(WARNINGS_AS_ERRORS "Enable -Werror flags" ON)
 set(GR4_RECORDINGS_DIR
     ""
     CACHE PATH "Directory holding the recorded captures the recording legs read; empty makes those tests skip")
+
+# Where the off-air satellite audio captures live, handed to the tests that read them through the environment. Empty
+# means the machine has none, and such a test reports a skip rather than a pass.
 set(GR4_SATELLITE_RECORDINGS_DIR
-    "")
+    ""
+    CACHE PATH "Directory of 48 kHz mono WAV satellite recordings for the tests that read real air")
 
 # Test executables check correctness, not performance; a lower optimization level roughly halves their compile time and
 # peak RSS. Benchmarks pin their own level and are unaffected. Empty keeps the build type's default.
