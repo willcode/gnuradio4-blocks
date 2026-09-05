@@ -1,0 +1,7 @@
+# The recipe index. The YAML-definitions loader reads this file to learn which recipe
+# definitions this directory ships; a recipe absent from the index does not exist to a
+# loader, however present its file is.
+assets:
+  - file: NbfmDemod.yaml
+    created: "2026-08-28-00:00:00"
+    block_type: gr::recipes::NbfmDemod

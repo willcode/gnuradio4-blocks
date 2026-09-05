@@ -1,0 +1,3 @@
+# Recipe headers are emitted by gr4-recipe-gen and diffed against a fresh emission by
+# qa_Recipes, so the generator decides their layout; reformatting one breaks that check.
+blocks/recipes/include/gnuradio-4.0/recipes/*.hpp
