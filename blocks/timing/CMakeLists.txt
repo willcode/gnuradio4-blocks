@@ -14,15 +14,16 @@ install(
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/gnuradio-4.0/timing"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/gnuradio-4.0")
 
-# GpsSource and PpsSource are Linux device sources: they refuse to compile off Linux and open /dev/ptpN, /dev/ppsN and
-# a serial port. Registering them would put those interfaces in a library every platform loads, which is a decision of
-# its own; they are named here so the configure-time audit knows the omission is meant rather than forgotten.
+# GpsSource and PpsSource are Linux device sources: they refuse to compile off Linux and open /dev/ptpN, /dev/ppsN and a
+# serial port. Registering them would put those interfaces in a library every platform loads, which is a decision of its
+# own; they are named here so the configure-time audit knows the omission is meant rather than forgotten.
 gr_add_block_library(
   GrTimingBlocks
   MAKE_SHARED_LIBRARY
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   include/gnuradio-4.0/timing/DiscontinuityMonitor.hpp
+  include/gnuradio-4.0/timing/PpsCorrelator.hpp
   UNREGISTERED_HEADERS
   include/gnuradio-4.0/GpsSource.hpp
   include/gnuradio-4.0/PpsSource.hpp
