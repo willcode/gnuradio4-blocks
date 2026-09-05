@@ -15,11 +15,12 @@ if(NOT EMSCRIPTEN AND TARGET gnuradio4::GrBasicBlocksShared)
         gnuradio4::GrBasicBlocksShared
         gnuradio4::GrElectricalBlocksShared
         gnuradio4::GrHttpBlocksShared
-        gnuradio4::GrFilterBlocksShared
-        gnuradio4::GrFourierBlocksShared)
+        gnuradio4::GrFilterBlocksShared)
 
     if(TARGET gnuradio4::GrAudioBlocksShared)
       list(APPEND _known_shared_lib_targets gnuradio4::GrAudioBlocksShared)
+    endif()
+    if(TARGET gnuradio4::GrNetworkBlocksShared)
     endif()
 
     target_link_libraries(qa_KnownSharedLibBlocks PRIVATE ${_known_shared_lib_targets})
