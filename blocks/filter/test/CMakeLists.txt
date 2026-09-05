@@ -18,8 +18,12 @@ target_link_libraries(qa_FrequencyEstimator PRIVATE gr-filter gr-testing)
 
 add_ut_test(qa_RationalResampler)
 target_link_libraries(qa_RationalResampler PRIVATE gr-filter gr-testing)
+
 add_ut_test(qa_SvdDenoiser)
 target_link_libraries(qa_SvdDenoiser PRIVATE gr-filter gr-testing)
 
 add_ut_test(qa_SavitzkyGolayFilter)
 target_link_libraries(qa_SavitzkyGolayFilter PRIVATE gr-filter gr-testing)
+
+add_ut_test(qa_StagedDecimator)
+target_link_libraries(qa_StagedDecimator PRIVATE gr-filter gr-testing)
