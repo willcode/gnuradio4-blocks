@@ -341,6 +341,108 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         }
     };
 
+    "a hop above fft_size transforms one segment in every hop and consumes the rest"_test = [] {
+        // The duty-cycle contract: 256 points out of every 1024 samples. What the block must NOT do is transform the
+        // other 768, and what it must still do is count them, so the rows stay where the stream put them.
+        constexpr std::size_t  kHop     = 1024UZ;
+        constexpr std::size_t  kSamples = kHop * 10UZ;
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{kHop}}, {"sample_rate", kSampleRate}};
+        const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kSamples, 32., kFft), 4096UZ);
+
+        expect(eq(records.size(), 10UZ)) << "one segment starts at every hop the stream has room for, made " << records.size();
+        for (std::size_t r = 0UZ; r < records.size(); ++r) {
+            expect(eq(metaNumber(records[r], "sample_start"), static_cast<double>(r * kHop))) << "record " << r << " lost the samples the hop skipped over";
+            expect(eq(metaNumber(records[r], "hop"), static_cast<double>(kHop))) << "the record states the hop it was taken at";
+            expect(eq(metaNumber(records[r], "overlap"), 0.)) << "segments a gap apart share nothing";
+            expect(eq(metaNumber(records[r], "fft_size"), static_cast<double>(kFft))) << "the transform is the stated length, not the hop";
+            expect(eq(records[r].signal_values.size(), kFft));
+        }
+    };
+
+    "a skipped gap changes nothing about the segments that are transformed"_test = [] {
+        // The same stream read at hop 1024 and at hop 256: the hop-1024 records must be bit-identical to every fourth
+        // hop-256 record, since each is the same 256 samples through the same window.
+        const auto            samples = tone(kFft * 16UZ, 32., kFft);
+        const gr::property_map gapped{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{kFft * 4UZ}}, {"sample_rate", kSampleRate}};
+        const gr::property_map dense{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
+
+        const auto sparse = collect<WelchPsd<CF>, CF>(gapped, samples, 4096UZ);
+        const auto every  = collect<WelchPsd<CF>, CF>(dense, samples, 4096UZ);
+        expect(eq(sparse.size(), 4UZ)) << "sixteen segments' worth of stream holds four segments a gap apart";
+        expect(eq(every.size(), 16UZ));
+        for (std::size_t r = 0UZ; r < std::min(sparse.size(), every.size() / 4UZ); ++r) {
+            const auto& skipped = sparse[r];
+            const auto& whole   = every[r * 4UZ];
+            expect(eq(metaNumber(skipped, "sample_start"), metaNumber(whole, "sample_start")));
+            for (std::size_t k = 0UZ; k < skipped.signal_values.size(); ++k) {
+                expect(skipped.signal_values[k] == whole.signal_values[k]) << "record " << r << " bin " << k << " moved because samples were skipped around it";
+            }
+        }
+    };
+
+    "chunk independence holds across a skipped gap"_test = [] {
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"hop", gr::Size_t{1000U}}, {"sample_rate", kSampleRate}};
+        const auto             samples = tone(12000UZ, 32., kFft);
+        const auto             wide    = collect<WelchPsd<CF>, CF>(settings, samples, 4096UZ);
+        const auto             narrow  = collect<WelchPsd<CF>, CF>(settings, samples, 37UZ);
+
+        expect(!wide.empty()) << "a hop that is not a multiple of anything still has to produce records";
+        expect(eq(wide.size(), narrow.size())) << "the record count cannot depend on how the stream arrived";
+        for (std::size_t r = 0UZ; r < std::min(wide.size(), narrow.size()); ++r) {
+            expect(eq(metaNumber(wide[r], "sample_start"), metaNumber(narrow[r], "sample_start"))) << "record " << r << " moved in the stream";
+            for (std::size_t k = 0UZ; k < wide[r].signal_values.size(); ++k) {
+                expect(wide[r].signal_values[k] == narrow[r].signal_values[k]) << "record " << r << " bin " << k << " differs between chunkings";
+            }
+        }
+    };
+
+    "the spectrogram's rows may be a gap apart, and stay on the stream's own time axis"_test = [] {
+        constexpr std::size_t  kHop = 1024UZ;
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"hop", gr::Size_t{kHop}}, {"sample_rate", kSampleRate}};
+        const auto             records = collect<Spectrogram<CF>, CF>(settings, tone(kHop * 6UZ, 32., kFft), 4096UZ);
+
+        expect(eq(records.size(), 6UZ)) << "six hops fit in the stream, made " << records.size();
+        for (std::size_t r = 1UZ; r < records.size(); ++r) {
+            expect(eq(metaNumber(records[r], "sample_start") - metaNumber(records[r - 1UZ], "sample_start"), static_cast<double>(kHop))) << "rows advance by exactly one hop";
+            expect(eq(metaNumber(records[r], "hop"), static_cast<double>(kHop)));
+        }
+    };
+
+    "a hop below fft_size is an overlap named in samples"_test = [] {
+        // The point of the samples spelling: a hop a fraction cannot express. 100 out of 256 is one of them.
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{100U}}, {"sample_rate", kSampleRate}};
+        const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
+
+        expect(records.size() >= 3UZ);
+        if (records.size() < 2UZ) {
+            return;
+        }
+        expect(eq(metaNumber(records[1UZ], "sample_start") - metaNumber(records[0UZ], "sample_start"), 100.)) << "the stated hop governs, not the overlap";
+        expect(approx(metaNumber(records[0UZ], "hop"), 100., 1e-9));
+        expect(approx(metaNumber(records[0UZ], "overlap"), 1. - 100. / static_cast<double>(kFft), 1e-9)) << "and the record states the fraction that hop shares";
+    };
+
+    "the hop is live, and moving it restarts the accumulation without moving the stream"_test = [] {
+        WelchPsd<CF> block({{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{8U}}, {"sample_rate", kSampleRate}});
+        block.settings().init();
+        std::ignore = block.settings().applyStagedParameters();
+        block.start();
+        expect(eq(block._core.hop, kFft / 2UZ)) << "with no hop stated the overlap sets it";
+
+        block._core.streamAt = 4096ULL;
+        block._core.segments = 3UZ;
+        block._core.skipping = 700UZ; // a gap left over from the hop that is about to be replaced
+
+        std::ignore = block.settings().set({{"hop", gr::Size_t{5000U}}});
+        std::ignore = block.settings().activateContext();
+        std::ignore = block.settings().applyStagedParameters();
+
+        expect(eq(block._core.hop, 5000UZ)) << "the new hop is in force";
+        expect(eq(block._core.segments, 0UZ)) << "and the accumulation it changes the meaning of is discarded";
+        expect(eq(block._core.skipping, 0UZ)) << "a gap measured against the old hop does not survive it";
+        expect(eq(block._core.streamAt, std::uint64_t{4096ULL})) << "the stream position is not a setting";
+    };
+
     "settings that cannot describe a measurement are refused"_test = [] {
         const auto refused = [](gr::property_map settings) {
             settings.insert({std::pmr::string("sample_rate"), gr::pmt::Value(kSampleRate)});
