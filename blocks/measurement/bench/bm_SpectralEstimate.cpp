@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <cstdint>
 #include <numbers>
 #include <span>
@@ -86,7 +87,7 @@ int main() {
     std::vector<gr::DataSet<float>> records(kMaxRecords);
 
     gr::blocks::measurement::detail::SegmentAccumulator<CF> floorCore;
-    floorCore.configure(1024UZ, 512UZ, 16UZ, false, gr::algorithm::window::Type::Hann, kSampleRate);
+    floorCore.configure(1024UZ, 512UZ, 16UZ, false, gr::algorithm::window::Type::Hann, std::numeric_limits<float>::quiet_NaN(), kSampleRate);
 
     WelchPsd<CF>    welch1024({{"fft_size", gr::Size_t{1024U}}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
     WelchPsd<CF>    welchEvery({{"fft_size", gr::Size_t{1024U}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
