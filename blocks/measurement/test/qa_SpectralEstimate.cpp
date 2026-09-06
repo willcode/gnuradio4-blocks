@@ -515,6 +515,39 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(nothrow([&] { refused({{"window", std::string("Hann")}, {"window_param", 3.0f}}); })) << "a window with no parameter ignores one, as the library does";
     };
 
+    "the ceiling is a receiver's largest display size, and what it costs is stated"_test = [] {
+        // Accepting 2^22 is what the test can afford: a 2^22-point transform is about 15 ms and its record is 32 MiB,
+        // which belongs in a bench and not in a test budget. What must hold here is that the setting is taken, that
+        // the accumulator is built for the length, and that a size well above the old 65536 ceiling runs end to end.
+        constexpr gr::Size_t kCeiling = 4194304U;
+
+        WelchPsd<CF> atCeiling({{"fft_size", kCeiling}, {"n_averages", gr::Size_t{1U}}, {"sample_rate", kSampleRate}});
+        expect(nothrow([&] {
+            atCeiling.settings().init();
+            std::ignore = atCeiling.settings().applyStagedParameters();
+        })) << "the largest size gqrx4's dock offers has to be a size this block accepts";
+        expect(eq(atCeiling._core.fftSize, static_cast<std::size_t>(kCeiling)));
+        expect(eq(atCeiling._core.window.size(), static_cast<std::size_t>(kCeiling))) << "and the window is built for it";
+
+        const auto refused = [](gr::Size_t size) {
+            WelchPsd<CF> block({{"fft_size", size}, {"sample_rate", kSampleRate}});
+            block.settings().init();
+            std::ignore = block.settings().applyStagedParameters();
+        };
+        expect(throws([&] { refused(kCeiling * 2U); })) << "and one size above it is not";
+
+        // A mid size, run whole: 65536 was the old ceiling, so this is the first length the amendment admits into a
+        // running graph rather than merely into a settings map.
+        constexpr std::size_t  kMid = 65536UZ;
+        const gr::property_map settings{{"fft_size", gr::Size_t{static_cast<unsigned>(kMid)}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
+        const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kMid * 3UZ, 1024., kMid), 65536UZ);
+        expect(eq(records.size(), 3UZ)) << "three whole transforms of the old ceiling's length, made " << records.size();
+        if (!records.empty()) {
+            expect(eq(records.front().signal_values.size(), kMid));
+            expect(eq(records.front().axis_values[0UZ].size(), kMid)) << "the axis is the other half of a record's bulk";
+        }
+    };
+
     "settings that cannot describe a measurement are refused"_test = [] {
         const auto refused = [](gr::property_map settings) {
             settings.insert({std::pmr::string("sample_rate"), gr::pmt::Value(kSampleRate)});
