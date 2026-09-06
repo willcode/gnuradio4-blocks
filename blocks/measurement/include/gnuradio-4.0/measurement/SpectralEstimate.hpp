@@ -6,6 +6,8 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,7 @@ struct SegmentAccumulator {
     std::size_t hop       = 512UZ;
     std::size_t nAverages = 16UZ;
     bool        maxHold   = false;
+    Real        shape     = std::numeric_limits<Real>::quiet_NaN(); ///< the parameter the window was built with, which the record states
 
     std::vector<Real>                       window{};
     gr::algorithm::fft::SpectralScale<Real> scale{};
@@ -68,24 +71,25 @@ struct SegmentAccumulator {
 
     /// @brief Build for a transform length. The stream position goes back to zero: a different length is a different
     /// window grid, and there is no honest way to continue the old grid on the new one.
-    void configure(std::size_t size, std::size_t hopSize, std::size_t averages, bool holdMode, gr::algorithm::window::Type windowType, Real sampleRate) {
+    void configure(std::size_t size, std::size_t hopSize, std::size_t averages, bool holdMode, gr::algorithm::window::Type windowType, Real windowParam, Real sampleRate) {
         fftSize   = size;
         transform = gr::algorithm::FFT<Windowed, Spectrum>{};
         windowed.assign(fftSize, Windowed{});
         spectrum.assign(fftSize, Spectrum{});
         pending.clear();
         streamAt = 0ULL;
-        reconfigure(hopSize, averages, holdMode, windowType, sampleRate);
+        reconfigure(hopSize, averages, holdMode, windowType, windowParam, sampleRate);
     }
 
     /// @brief Set what may move while the block runs. The accumulation in progress restarts — a spectrum averaged
     /// half under one window and half under another states nothing — but `pending` and `streamAt` survive, so the
     /// grid stays anchored where the stream anchored it and no buffered sample is dropped.
-    void reconfigure(std::size_t hopSize, std::size_t averages, bool holdMode, gr::algorithm::window::Type windowType, Real sampleRate) {
+    void reconfigure(std::size_t hopSize, std::size_t averages, bool holdMode, gr::algorithm::window::Type windowType, Real windowParam, Real sampleRate) {
         hop       = hopSize;
         nAverages = averages;
         maxHold   = holdMode;
-        window    = gr::algorithm::window::create<Real>(windowType, fftSize);
+        shape     = windowParam;
+        window    = gr::algorithm::window::create<Real>(windowType, fftSize, windowParam);
         scale     = gr::algorithm::fft::spectralScale(std::span<const Real>(window), sampleRate);
         hold.assign(bins(), Real{0});
         restart();
@@ -172,7 +176,7 @@ struct Progress {
 
 /// @brief The record every block in this module emits, on the tier's §0 conventions.
 template<typename Real>
-[[nodiscard]] DataSet<Real> makeSpectralRecord(std::vector<Real> values, Real sampleRate, std::size_t fftSize, bool oneSided, std::uint64_t sampleStart, std::size_t nAveraged, std::size_t hop, Real enbwBins, std::string_view windowName, std::string_view signalName) {
+[[nodiscard]] DataSet<Real> makeSpectralRecord(std::vector<Real> values, Real sampleRate, std::size_t fftSize, bool oneSided, std::uint64_t sampleStart, std::size_t nAveraged, std::size_t hop, Real enbwBins, std::string_view windowName, Real windowParam, std::string_view signalName) {
     DataSet<Real> ds;
     const auto    bins = values.size();
 
@@ -215,6 +219,10 @@ template<typename Real>
         {std::pmr::string("hop"), pmt::Value(static_cast<std::uint64_t>(hop))},
         {std::pmr::string("enbw_bins"), pmt::Value(enbwBins)},
         {std::pmr::string("window"), pmt::Value(std::string(windowName))},
+        // the shape parameter the window was actually built with, which is the window's own default where the setting
+        // named none. Kaiser at beta 1.6 and Kaiser at beta 6.76 are different windows with different sidelobes and a
+        // different noise bandwidth, and a record that names only "Kaiser" does not say which one it is.
+        {std::pmr::string("window_param"), pmt::Value(windowParam)},
         {std::pmr::string("fft_size"), pmt::Value(static_cast<std::uint64_t>(fftSize))},
         {std::pmr::string("one_sided"), pmt::Value(oneSided)},
         {std::pmr::string("level_reference"), pmt::Value(std::string("full-scale sine"))},
@@ -267,6 +275,24 @@ inline void requireSampleRate(float sampleRate) {
     return *windowType;
 }
 
+/// @brief The shape parameter the window is built with: the setting where it names one, the window's own default
+/// where it does not, and a refusal naming the window where the value is outside what that window accepts.
+///
+/// Zero and NaN both select the default so that a graph description leaving the key out, one writing 0 and one
+/// writing a NaN all mean the same thing; a window whose parameter is legitimately zero — Kaiser beta 0, which is the
+/// rectangular window — is named by its own type instead. The default is read from the window library rather than
+/// repeated here, because the record states the parameter in force and a second copy of the number would be the one
+/// that goes stale.
+[[nodiscard]] inline float windowParamFor(gr::algorithm::window::Type windowType, float param) {
+    const float shape = (param == 0.f || std::isnan(param)) ? gr::algorithm::window::detail::defaultParameter<float>(windowType) : param;
+    try {
+        gr::algorithm::window::detail::validateParameter<float>(windowType, shape);
+    } catch (const std::invalid_argument& refusal) {
+        throw gr::exception(std::format("window_param: {}", refusal.what()));
+    }
+    return shape;
+}
+
 /// @brief The refusal both blocks give when `fft_size` is moved under a running graph.
 [[nodiscard]] inline gr::exception runningFftSizeRefusal(gr::Size_t was, gr::Size_t asked) { return gr::exception(std::format("fft_size is a staged-restart setting: moving it from {} to {} would rebuild the transform and re-anchor the window grid underneath a running graph, with nothing downstream to say so - stop the graph to change it", was, asked)); }
 
@@ -293,10 +319,15 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
  * is what lets a display cost its frame rate instead of its sample rate. Left at zero the hop follows `overlap`, as
  * it always has.
  *
+ * `window_param` is the shape parameter the parameterized windows take — Kaiser beta, Tukey alpha, Gaussian sigma,
+ * Exponential decay in decibels — and selects the window library's own default when it is zero or NaN. It changes
+ * the sidelobe level and with it the noise bandwidth, so the record states the value in force beside the window's
+ * name: "Kaiser" alone does not say which Kaiser.
+ *
  * `fft_size` is staged-restart: changing it rebuilds the transform and re-anchors the window grid, so it is refused
- * while the graph runs. `window`, `overlap`, `hop`, `n_averages`, `mode` and `sample_rate` are live — they restart
- * the accumulation in progress, since half a spectrum under one window and half under another estimates nothing, but
- * they keep the stream position and every buffered sample.
+ * while the graph runs. `window`, `window_param`, `overlap`, `hop`, `n_averages`, `mode` and `sample_rate` are live —
+ * they restart the accumulation in progress, since half a spectrum under one window and half under another estimates
+ * nothing, but they keep the stream position and every buffered sample.
  *
  * A record states the segment count that actually went into it. A stream that ends mid-accumulation flushes what it
  * has, marked with that count, rather than discarding it or padding it to look complete.
@@ -304,7 +335,7 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
-    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. fft_size is staged-restart; window, overlap, hop, n_averages, mode and sample_rate are live and restart the accumulation in progress">;
+    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. fft_size is staged-restart; window, window_param, overlap, hop, n_averages, mode and sample_rate are live and restart the accumulation in progress">;
     using Real        = float;
 
     PortIn<T>                     in;
@@ -312,6 +343,7 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
 
     Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">>                                                                    fft_size    = 1024U;
     Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                      window      = std::string("Hann");
+    Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">> window_param = 0.f;
     Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                   overlap     = 0.5;
     Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per transform; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">> hop = 0U;
     Annotated<gr::Size_t, "n_averages", Visible, Doc<"segments per emitted record; 1 is a bare periodogram">>                                                                             n_averages  = 16U;
@@ -319,7 +351,7 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
     Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                          sample_rate = 1.f;
     Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                        signal_name = std::string("psd");
 
-    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, overlap, hop, n_averages, mode, sample_rate, signal_name);
+    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, window_param, overlap, hop, n_averages, mode, sample_rate, signal_name);
 
     detail::SegmentAccumulator<T> _core{};
     bool                          _flushed      = false;
@@ -328,7 +360,7 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         // Only these change what the accumulator is; `signal_name` on its own must not restart an average in progress.
-        static constexpr std::array kRebuildKeys{"fft_size", "window", "overlap", "hop", "n_averages", "mode", "sample_rate"};
+        static constexpr std::array kRebuildKeys{"fft_size", "window", "window_param", "overlap", "hop", "n_averages", "mode", "sample_rate"};
         const bool                  built = !_core.window.empty();
         if (built && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
             return;
@@ -343,7 +375,8 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
         if (mode.value != "mean" && mode.value != "max_hold") {
             throw gr::exception(std::format("mode must be 'mean' or 'max_hold', got '{}'", mode.value));
         }
-        const auto windowType = detail::requireWindow(window.value);
+        const auto windowType  = detail::requireWindow(window.value);
+        const auto windowShape = detail::windowParamFor(windowType, window_param);
 
         // A refused change stays staged and is written again on the next apply, so the block keeps refusing until it
         // is stopped and the value put back. That is the framework's behavior for any throwing settings change.
@@ -354,9 +387,9 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
         const std::size_t size       = static_cast<std::size_t>(fft_size.value);
         const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
         if (built && fft_size.value == _builtFftSize) {
-            _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, sample_rate);
+            _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, windowShape, sample_rate);
         } else {
-            _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, sample_rate);
+            _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, windowShape, sample_rate);
             _flushed = false;
         }
         _builtFftSize = fft_size;
@@ -448,7 +481,7 @@ private:
     [[nodiscard]] DataSet<Real> emit() {
         const std::size_t   averaged = _core.segments;
         const std::uint64_t startAt  = _core.recordStartAt;
-        return detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.hop, _core.scale.enbwBins, window.value, signal_name.value);
+        return detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.hop, _core.scale.enbwBins, window.value, _core.shape, signal_name.value);
     }
 };
 
@@ -466,13 +499,17 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::Spectrogram, [T], [ float, std::compl
  * its own row rate instead of inheriting the sample rate: the samples between rows are consumed and never copied or
  * transformed, and `sample_start` keeps counting the whole stream so the rows stay on a true time axis.
  *
- * `fft_size` is staged-restart and refused while the graph runs; `window`, `overlap`, `hop` and `sample_rate` are
- * live. A row is one whole transform, so there is no partial record to flush: the stream stops between rows.
+ * `window_param` is the shape parameter the parameterized windows take, as `WelchPsd` states it, and the record
+ * carries the value in force.
+ *
+ * `fft_size` is staged-restart and refused while the graph runs; `window`, `window_param`, `overlap`, `hop` and
+ * `sample_rate` are live. A row is one whole transform, so there is no partial record to flush: the stream stops
+ * between rows.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
-    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. fft_size is staged-restart; window, overlap, hop and sample_rate are live">;
+    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. fft_size is staged-restart; window, window_param, overlap, hop and sample_rate are live">;
     using Real        = float;
 
     PortIn<T>                     in;
@@ -480,19 +517,20 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
 
     Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">>                                                                fft_size    = 1024U;
     Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                  window      = std::string("Hann");
+    Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">> window_param = 0.f;
     Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                               overlap     = 0.5;
     Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per row; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">> hop = 0U;
     Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                      sample_rate = 1.f;
     Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                    signal_name = std::string("spectrogram");
 
-    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, overlap, hop, sample_rate, signal_name);
+    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, window_param, overlap, hop, sample_rate, signal_name);
 
     detail::SegmentAccumulator<T> _core{};
     bool                          _running      = false;
     gr::Size_t                    _builtFftSize = 0U; ///< the length the current transform and window were built for
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kRebuildKeys{"fft_size", "window", "overlap", "hop", "sample_rate"};
+        static constexpr std::array kRebuildKeys{"fft_size", "window", "window_param", "overlap", "hop", "sample_rate"};
         const bool                  built = !_core.window.empty();
         if (built && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
             return;
@@ -501,7 +539,8 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
         detail::requireFftSize(fft_size);
         detail::requireOverlap(overlap);
         detail::requireSampleRate(sample_rate);
-        const auto windowType = detail::requireWindow(window.value);
+        const auto windowType  = detail::requireWindow(window.value);
+        const auto windowShape = detail::windowParamFor(windowType, window_param);
 
         if (_running && built && fft_size.value != _builtFftSize) {
             throw detail::runningFftSizeRefusal(_builtFftSize, fft_size);
@@ -510,9 +549,9 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
         const std::size_t size       = static_cast<std::size_t>(fft_size.value);
         const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
         if (built && fft_size.value == _builtFftSize) {
-            _core.reconfigure(hopSamples, 1UZ, false, windowType, sample_rate);
+            _core.reconfigure(hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
         } else {
-            _core.configure(size, hopSamples, 1UZ, false, windowType, sample_rate);
+            _core.configure(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
         }
         _builtFftSize = fft_size;
     }
@@ -556,7 +595,7 @@ private:
                 }
                 const std::uint64_t startAt = _core.streamAt;
                 _core.accumulateFront();
-                outSpan[progress.made] = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, _core.hop, _core.scale.enbwBins, window.value, signal_name.value);
+                outSpan[progress.made] = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, _core.hop, _core.scale.enbwBins, window.value, _core.shape, signal_name.value);
                 ++progress.made;
                 continue;
             }

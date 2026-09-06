@@ -15,6 +15,7 @@
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/RuntimeTest.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
+#include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/measurement/Detectors.hpp>
 #include <gnuradio-4.0/measurement/SpectralEstimate.hpp>
 
@@ -441,6 +442,77 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(eq(block._core.segments, 0UZ)) << "and the accumulation it changes the meaning of is discarded";
         expect(eq(block._core.skipping, 0UZ)) << "a gap measured against the old hop does not survive it";
         expect(eq(block._core.streamAt, std::uint64_t{4096ULL})) << "the stream position is not a setting";
+    };
+
+    "window_param builds the window the library builds, and the record says which one it is"_test = [] {
+        // gqrx4's display is calibrated at Kaiser beta 6.76; the library's own default is 1.6, which costs about 45 dB
+        // of sidelobe. A block that cannot be told the beta cannot produce that display's spectrum.
+        constexpr float kBeta = 6.76f;
+
+        const auto build = [](gr::property_map settings) {
+            auto block = std::make_unique<WelchPsd<CF>>(std::move(settings));
+            block->settings().init();
+            std::ignore = block->settings().applyStagedParameters();
+            return block;
+        };
+        const auto stated  = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}, {"window_param", kBeta}});
+        const auto omitted = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}});
+
+        const auto direct  = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft, kBeta);
+        const auto library = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft);
+
+        expect(eq(stated->_core.window.size(), direct.size()));
+        for (std::size_t k = 0UZ; k < std::min(stated->_core.window.size(), direct.size()); ++k) {
+            expect(stated->_core.window[k] == direct[k]) << "tap " << k << " is not what window::create builds at beta " << kBeta;
+        }
+        std::size_t differing = 0UZ;
+        for (std::size_t k = 0UZ; k < stated->_core.window.size(); ++k) {
+            differing += stated->_core.window[k] != library[k] ? 1UZ : 0UZ;
+        }
+        expect(differing > kFft / 2UZ) << "a stated beta has to be a different window from the default, " << differing << " taps differ";
+
+        for (std::size_t k = 0UZ; k < omitted->_core.window.size(); ++k) {
+            expect(omitted->_core.window[k] == library[k]) << "tap " << k << " does not match the library's own default";
+        }
+
+        // The window changes the noise bandwidth, so a record that names the window without the parameter under-states
+        // its own calibration; both facts ride in the metadata.
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}, {"window_param", kBeta}};
+        const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
+        expect(!records.empty());
+        if (records.empty()) {
+            return;
+        }
+        expect(approx(metaNumber(records.front(), "window_param"), static_cast<double>(kBeta), 1e-5)) << "the record states the beta it was taken at";
+
+        const gr::property_map defaulted{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}};
+        const auto             plain = collect<WelchPsd<CF>, CF>(defaulted, tone(kFft * 8UZ, 32., kFft), 4096UZ);
+        expect(!plain.empty());
+        if (plain.empty()) {
+            return;
+        }
+        expect(approx(metaNumber(plain.front(), "window_param"), 1.6, 1e-5)) << "and with no parameter stated the record names the default the library used, not the zero the setting held";
+
+        // The calibration follows the parameter, which is the reason the record has to state it: a larger beta trades
+        // sidelobe level for a wider main lobe, so the noise bandwidth the reader divides out is a different number.
+        // The relationship is what is asserted; the figures are recorded rather than pinned.
+        const double statedEnbw  = metaNumber(records.front(), "enbw_bins");
+        const double defaultEnbw = metaNumber(plain.front(), "enbw_bins");
+        std::println("window_param: Kaiser ENBW {:.4f} bins at beta {:.2f}, {:.4f} at the default 1.6", statedEnbw, static_cast<double>(kBeta), defaultEnbw);
+        expect(statedEnbw > defaultEnbw) << "beta 6.76 has to spread a tone over more bins than beta 1.6, measured " << statedEnbw << " against " << defaultEnbw;
+    };
+
+    "a window parameter outside what the window accepts is refused, naming the setting"_test = [] {
+        const auto refused = [](gr::property_map settings) {
+            settings.insert({std::pmr::string("sample_rate"), gr::pmt::Value(kSampleRate)});
+            WelchPsd<CF> block(std::move(settings));
+            block.settings().init();
+            std::ignore = block.settings().applyStagedParameters();
+        };
+        expect(throws([&] { refused({{"window", std::string("Gaussian")}, {"window_param", 0.9f}}); })) << "a Gaussian sigma is a fraction of the half-length";
+        expect(throws([&] { refused({{"window", std::string("Tukey")}, {"window_param", 2.0f}}); })) << "a Tukey alpha is a fraction";
+        expect(throws([&] { refused({{"window", std::string("Kaiser")}, {"window_param", -1.0f}}); })) << "a Kaiser beta is not negative";
+        expect(nothrow([&] { refused({{"window", std::string("Hann")}, {"window_param", 3.0f}}); })) << "a window with no parameter ignores one, as the library does";
     };
 
     "settings that cannot describe a measurement are refused"_test = [] {
