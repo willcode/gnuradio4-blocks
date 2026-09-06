@@ -976,6 +976,45 @@ const boost::ut::suite DataSinkTests = [] {
         expect(eq(globalDataSinkRegistry().getDataSetPoller<std::uint8_t>(DataSinkQuery::sinkName("byte_data_set_sink")), nullptr));
         expect(eq(globalDataSinkRegistry().getDataSetPoller<std::uint8_t>(DataSinkQuery::signalName("byte signal")), nullptr));
     };
+
+    "DataSet - the poller's ring is as deep as the consumer asked for, and says what it dropped"_test = [] {
+        // A record's size follows the transform behind it, so a deep ring of records is a large backlog of stale
+        // frames rather than useful slack: at 8192 bins a record is 64 KiB and at 4194304 it is 32 MiB. The depth is
+        // therefore the consumer's own response time, and a consumer that stops answering drops and is told so.
+        constexpr std::size_t kDepth   = 2UZ;
+        constexpr std::size_t kRecords = 8UZ;
+
+        gr::Graph testGraph;
+        auto&     source          = testGraph.emplaceBlock<testing::TagSource<float, testing::ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(4096)}, {"signal_name", "depth signal"}, {"mark_tag", false}});
+        auto&     streamToDataSet = testGraph.emplaceBlock<StreamToDataSet<float>>({{"filter", "CMD_DIAG_TRIGGER1"}, {"n_pre", static_cast<gr::Size_t>(0)}, {"n_post", static_cast<gr::Size_t>(64)}});
+        auto&     sink            = testGraph.emplaceBlock<DataSetSink<float>>({{"name", "depth_sink"}, {"signal_name", "depth signal"}});
+        expect(testGraph.connect<"out", "in">(source, streamToDataSet).has_value());
+        expect(testGraph.connect<"out", "in">(streamToDataSet, sink).has_value());
+
+        for (std::size_t k = 0UZ; k < kRecords; ++k) {
+            source._tags.push_back(Tag{128UZ + 256UZ * k, {{gr::tag::TRIGGER_NAME.shortKey(), "CMD_DIAG_TRIGGER1"}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, {gr::tag::CONTEXT.shortKey(), std::string()}, {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}});
+        }
+
+        // Drop rather than backpressure, which is what a display asks for, and a consumer that never answers, which
+        // is the case the depth is there to bound.
+        auto poller = sink.getPoller(PollerConfig{.overflowPolicy = OverflowPolicy::Drop, .dataSetDepth = kDepth});
+        expect(poller != nullptr) << fatal;
+        expect(eq(poller->buffer.size(), kDepth)) << "the ring is as deep as the config asked for, not a fixed size";
+
+        Scheduler sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+
+        std::size_t held = 0UZ;
+        while (poller->process([&held](const auto& records) { held += records.size(); })) {
+        }
+        const std::size_t dropped = poller->dropCount.load();
+        expect(le(held, kDepth)) << "a consumer that never answered cannot be holding more than its ring, has " << held;
+        expect(gt(dropped, 0UZ)) << "and what it missed is counted rather than waited for";
+        expect(gt(held + dropped, kDepth)) << "the run has to have made more records than the ring holds to say anything, made " << (held + dropped);
+    };
 };
 
 int main() { /* tests are statically executed */ }
