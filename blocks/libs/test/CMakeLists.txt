@@ -40,9 +40,11 @@ if(NOT EMSCRIPTEN AND TARGET gnuradio4::GrBasicBlocksShared)
   add_executable(qa_apptest_LoadingPlainBlocklibs qa_apptest_LoadingPlainBlocklibs.cpp)
   setup_test(qa_apptest_LoadingPlainBlocklibs)
   target_link_libraries(qa_apptest_LoadingPlainBlocklibs PRIVATE gnuradio-core gnuradio-blocklib-core)
+  # the math library carries the registrations whose short alias the test resolves through the importer
   set_property(
     TEST qa_apptest_LoadingPlainBlocklibs
     PROPERTY ENVIRONMENT_MODIFICATION
-             "GNURADIO4_PLUGIN_DIRECTORIES=set:${CMAKE_CURRENT_BINARY_DIR}/../../../blocks/basic")
+             "GNURADIO4_PLUGIN_DIRECTORIES=set:${CMAKE_CURRENT_BINARY_DIR}/../../../blocks/basic"
+             "GNURADIO4_PLUGIN_DIRECTORIES=path_list_append:${CMAKE_CURRENT_BINARY_DIR}/../../../blocks/math")
 
 endif()
