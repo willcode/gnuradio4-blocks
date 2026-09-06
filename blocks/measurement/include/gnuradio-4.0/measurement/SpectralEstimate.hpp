@@ -29,6 +29,10 @@ namespace detail {
 /// The window grid is anchored at the stream start: the first segment begins at sample zero and each next one a hop
 /// later, so a record's `sample_start` is a stream-absolute fact and the same input split differently yields the same
 /// records. Segments are accumulated in power, and the emitted record is the density the calibration kernel defines.
+///
+/// A hop larger than the transform leaves a gap between segments. Those samples are counted into the stream position
+/// and never copied: the grid stays stream-absolute while the transform runs on a stated fraction of the stream, which
+/// is what a display costing its frame rate rather than its sample rate needs.
 template<typename T>
 struct SegmentAccumulator {
     using Real     = float;
@@ -56,6 +60,7 @@ struct SegmentAccumulator {
     std::vector<Real>     hold{}; ///< one segment's density, kept apart so max_hold can compare rather than sum
 
     std::size_t   segments      = 0UZ;  ///< segments in the accumulator, which is what `n_averaged` reports
+    std::size_t   skipping      = 0UZ;  ///< samples still to be dropped before the next segment starts, when hop > fftSize
     std::uint64_t streamAt      = 0ULL; ///< absolute index of `pending`'s first sample
     std::uint64_t recordStartAt = 0ULL; ///< absolute index of the first segment in the accumulator
 
@@ -86,10 +91,13 @@ struct SegmentAccumulator {
         restart();
     }
 
-    /// @brief Drop the accumulation in progress, keeping the stream position.
+    /// @brief Drop the accumulation in progress, keeping the stream position. A gap left over from the previous hop
+    /// goes with it: it was measured against the hop that has just been replaced, and the new grid starts where the
+    /// stream now is.
     void restart() {
         accumulator.assign(bins(), Real{0});
         segments      = 0UZ;
+        skipping      = 0UZ;
         recordStartAt = streamAt;
     }
 
@@ -125,9 +133,12 @@ struct SegmentAccumulator {
         }
         ++segments;
 
+        // The hop advances the grid; what it reaches past the buffered samples is a gap the caller consumes without
+        // copying, so a hop above `fftSize` costs the stream position but not a transform and not a memory move.
         const std::size_t advance = std::min(hop, pending.size());
         pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(advance));
         streamAt += advance;
+        skipping = hop - advance;
     }
 
     /// @brief The record the accumulator currently holds, averaged by the segments that actually contributed.
@@ -155,9 +166,13 @@ struct Progress {
     bool        outputFull = false; ///< a segment was ready and the record it completes had nowhere to go
 };
 
+/// @brief The fraction a segment shares with the next at a stated hop: zero once the hop reaches the whole transform,
+/// and zero again for a hop that leaves a gap, since disjoint segments share nothing however far apart they sit.
+[[nodiscard]] inline double overlapAt(std::size_t fftSize, std::size_t hop) noexcept { return hop >= fftSize ? 0.0 : 1.0 - static_cast<double>(hop) / static_cast<double>(fftSize); }
+
 /// @brief The record every block in this module emits, on the tier's §0 conventions.
 template<typename Real>
-[[nodiscard]] DataSet<Real> makeSpectralRecord(std::vector<Real> values, Real sampleRate, std::size_t fftSize, bool oneSided, std::uint64_t sampleStart, std::size_t nAveraged, double overlap, Real enbwBins, std::string_view windowName, std::string_view signalName) {
+[[nodiscard]] DataSet<Real> makeSpectralRecord(std::vector<Real> values, Real sampleRate, std::size_t fftSize, bool oneSided, std::uint64_t sampleStart, std::size_t nAveraged, std::size_t hop, Real enbwBins, std::string_view windowName, std::string_view signalName) {
     DataSet<Real> ds;
     const auto    bins = values.size();
 
@@ -193,7 +208,11 @@ template<typename Real>
         // the fraction each averaged segment shared with the next. A consumer that averages these records further, or
         // states a variance for one, needs it: overlapping segments are correlated, so `n_averaged` alone does not say
         // how many independent looks the estimate holds, and a shape that cannot be averaged is refused on this key.
-        {std::pmr::string("overlap"), pmt::Value(overlap)},
+        {std::pmr::string("overlap"), pmt::Value(overlapAt(fftSize, hop))},
+        // the samples the grid advanced between the segments of this record. Above `fft_size` it says the record
+        // describes a stated fraction of the stream rather than all of it, which is what a consumer needs to know
+        // before reading a duty-cycled estimate as an average over the whole interval it spans.
+        {std::pmr::string("hop"), pmt::Value(static_cast<std::uint64_t>(hop))},
         {std::pmr::string("enbw_bins"), pmt::Value(enbwBins)},
         {std::pmr::string("window"), pmt::Value(std::string(windowName))},
         {std::pmr::string("fft_size"), pmt::Value(static_cast<std::uint64_t>(fftSize))},
@@ -211,6 +230,11 @@ inline constexpr std::size_t kMaxFftSize = 65536UZ;
 
 /// @brief The hop `overlap` implies for a transform of `size` samples, never less than one sample.
 [[nodiscard]] inline std::size_t hopFor(std::size_t size, double overlap) noexcept { return std::max(1UZ, static_cast<std::size_t>(std::llround(static_cast<double>(size) * (1.0 - overlap)))); }
+
+/// @brief The hop in force: the `hop` setting when it states one, and the hop `overlap` implies when it is zero. A
+/// stated hop above `size` leaves a gap between segments; below it, it is an overlap named in samples rather than as
+/// a fraction, which is the only way to ask for a hop a fraction cannot express.
+[[nodiscard]] inline std::size_t hopFrom(std::size_t size, double overlap, gr::Size_t hopSetting) noexcept { return hopSetting == 0U ? hopFor(size, overlap) : static_cast<std::size_t>(hopSetting); }
 
 /// @brief Reject a transform length the segmenting cannot use, naming the value that arrived.
 inline void requireFftSize(gr::Size_t size) {
@@ -263,9 +287,15 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
  * record's `enbw_bins` is what a consumer multiplies a peak density by, along with the bin width, to read a tone's
  * own power rather than a noise density.
  *
+ * `hop` states in samples what the grid advances between segments, and above `fft_size` it makes the block a duty
+ * cycle rather than a continuous estimator: the samples between one segment and the next are consumed and never
+ * copied or transformed, so the cost falls with the duty while `sample_start` keeps counting the whole stream. That
+ * is what lets a display cost its frame rate instead of its sample rate. Left at zero the hop follows `overlap`, as
+ * it always has.
+ *
  * `fft_size` is staged-restart: changing it rebuilds the transform and re-anchors the window grid, so it is refused
- * while the graph runs. `window`, `overlap`, `n_averages`, `mode` and `sample_rate` are live — they restart the
- * accumulation in progress, since half a spectrum under one window and half under another estimates nothing, but
+ * while the graph runs. `window`, `overlap`, `hop`, `n_averages`, `mode` and `sample_rate` are live — they restart
+ * the accumulation in progress, since half a spectrum under one window and half under another estimates nothing, but
  * they keep the stream position and every buffered sample.
  *
  * A record states the segment count that actually went into it. A stream that ends mid-accumulation flushes what it
@@ -274,21 +304,22 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
-    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. fft_size is staged-restart; window, overlap, n_averages, mode and sample_rate are live and restart the accumulation in progress">;
+    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. fft_size is staged-restart; window, overlap, hop, n_averages, mode and sample_rate are live and restart the accumulation in progress">;
     using Real        = float;
 
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">> fft_size    = 1024U;
-    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                   window      = std::string("Hann");
-    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                overlap     = 0.5;
-    Annotated<gr::Size_t, "n_averages", Visible, Doc<"segments per emitted record; 1 is a bare periodogram">>          n_averages  = 16U;
-    Annotated<std::string, "mode", Visible, Doc<"mean or max_hold">>                                                   mode        = std::string("mean");
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>       sample_rate = 1.f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                     signal_name = std::string("psd");
+    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">>                                                                    fft_size    = 1024U;
+    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                      window      = std::string("Hann");
+    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                   overlap     = 0.5;
+    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per transform; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">> hop = 0U;
+    Annotated<gr::Size_t, "n_averages", Visible, Doc<"segments per emitted record; 1 is a bare periodogram">>                                                                             n_averages  = 16U;
+    Annotated<std::string, "mode", Visible, Doc<"mean or max_hold">>                                                                                                                      mode        = std::string("mean");
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                          sample_rate = 1.f;
+    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                        signal_name = std::string("psd");
 
-    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, overlap, n_averages, mode, sample_rate, signal_name);
+    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, overlap, hop, n_averages, mode, sample_rate, signal_name);
 
     detail::SegmentAccumulator<T> _core{};
     bool                          _flushed      = false;
@@ -297,7 +328,7 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         // Only these change what the accumulator is; `signal_name` on its own must not restart an average in progress.
-        static constexpr std::array kRebuildKeys{"fft_size", "window", "overlap", "n_averages", "mode", "sample_rate"};
+        static constexpr std::array kRebuildKeys{"fft_size", "window", "overlap", "hop", "n_averages", "mode", "sample_rate"};
         const bool                  built = !_core.window.empty();
         if (built && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
             return;
@@ -320,12 +351,12 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
             throw detail::runningFftSizeRefusal(_builtFftSize, fft_size);
         }
 
-        const std::size_t size = static_cast<std::size_t>(fft_size.value);
-        const std::size_t hop  = detail::hopFor(size, overlap);
+        const std::size_t size       = static_cast<std::size_t>(fft_size.value);
+        const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
         if (built && fft_size.value == _builtFftSize) {
-            _core.reconfigure(hop, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, sample_rate);
+            _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, sample_rate);
         } else {
-            _core.configure(size, hop, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, sample_rate);
+            _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), mode.value == "max_hold", windowType, sample_rate);
             _flushed = false;
         }
         _builtFftSize = fft_size;
@@ -392,6 +423,18 @@ private:
                 }
                 continue;
             }
+            if (_core.skipping > 0UZ) {
+                // The gap a hop above `fftSize` leaves: consumed through the port, counted into the stream position,
+                // and never copied anywhere. This is the whole of what a duty cycle saves.
+                const std::size_t drop = std::min(_core.skipping, offer - progress.taken);
+                if (drop == 0UZ) {
+                    return progress;
+                }
+                _core.skipping -= drop;
+                _core.streamAt += drop;
+                progress.taken += drop;
+                continue;
+            }
             if (progress.taken == offer) {
                 return progress;
             }
@@ -405,7 +448,7 @@ private:
     [[nodiscard]] DataSet<Real> emit() {
         const std::size_t   averaged = _core.segments;
         const std::uint64_t startAt  = _core.recordStartAt;
-        return detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, overlap, _core.scale.enbwBins, window.value, signal_name.value);
+        return detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.hop, _core.scale.enbwBins, window.value, signal_name.value);
     }
 };
 
@@ -419,32 +462,37 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::Spectrogram, [T], [ float, std::compl
  * absolute index of the hop it was taken from, so a consumer stacks rows on a real time axis rather than on arrival
  * order. Values are linear power per hertz referred to a full-scale sine, as `WelchPsd`'s are.
  *
- * `fft_size` is staged-restart and refused while the graph runs; `window`, `overlap` and `sample_rate` are live.
- * A row is one whole transform, so there is no partial record to flush: the stream stops between rows.
+ * `hop` states the advance in samples and above `fft_size` leaves a gap between rows, which is how a waterfall states
+ * its own row rate instead of inheriting the sample rate: the samples between rows are consumed and never copied or
+ * transformed, and `sample_start` keeps counting the whole stream so the rows stay on a true time axis.
+ *
+ * `fft_size` is staged-restart and refused while the graph runs; `window`, `overlap`, `hop` and `sample_rate` are
+ * live. A row is one whole transform, so there is no partial record to flush: the stream stops between rows.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
-    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. fft_size is staged-restart; window, overlap and sample_rate are live">;
+    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. fft_size is staged-restart; window, overlap, hop and sample_rate are live">;
     using Real        = float;
 
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">> fft_size    = 1024U;
-    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                   window      = std::string("Hann");
-    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                overlap     = 0.5;
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>       sample_rate = 1.f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                     signal_name = std::string("spectrogram");
+    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">>                                                                fft_size    = 1024U;
+    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                  window      = std::string("Hann");
+    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                               overlap     = 0.5;
+    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per row; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">> hop = 0U;
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                      sample_rate = 1.f;
+    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                    signal_name = std::string("spectrogram");
 
-    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, overlap, sample_rate, signal_name);
+    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, overlap, hop, sample_rate, signal_name);
 
     detail::SegmentAccumulator<T> _core{};
     bool                          _running      = false;
     gr::Size_t                    _builtFftSize = 0U; ///< the length the current transform and window were built for
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kRebuildKeys{"fft_size", "window", "overlap", "sample_rate"};
+        static constexpr std::array kRebuildKeys{"fft_size", "window", "overlap", "hop", "sample_rate"};
         const bool                  built = !_core.window.empty();
         if (built && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
             return;
@@ -459,12 +507,12 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
             throw detail::runningFftSizeRefusal(_builtFftSize, fft_size);
         }
 
-        const std::size_t size = static_cast<std::size_t>(fft_size.value);
-        const std::size_t hop  = detail::hopFor(size, overlap);
+        const std::size_t size       = static_cast<std::size_t>(fft_size.value);
+        const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
         if (built && fft_size.value == _builtFftSize) {
-            _core.reconfigure(hop, 1UZ, false, windowType, sample_rate);
+            _core.reconfigure(hopSamples, 1UZ, false, windowType, sample_rate);
         } else {
-            _core.configure(size, hop, 1UZ, false, windowType, sample_rate);
+            _core.configure(size, hopSamples, 1UZ, false, windowType, sample_rate);
         }
         _builtFftSize = fft_size;
     }
@@ -508,8 +556,20 @@ private:
                 }
                 const std::uint64_t startAt = _core.streamAt;
                 _core.accumulateFront();
-                outSpan[progress.made] = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, overlap, _core.scale.enbwBins, window.value, signal_name.value);
+                outSpan[progress.made] = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, _core.hop, _core.scale.enbwBins, window.value, signal_name.value);
                 ++progress.made;
+                continue;
+            }
+            if (_core.skipping > 0UZ) {
+                // The gap a hop above `fftSize` leaves between rows: consumed, counted into the stream position, and
+                // never copied. A row's `sample_start` therefore still names its true place in the stream.
+                const std::size_t drop = std::min(_core.skipping, offer - progress.taken);
+                if (drop == 0UZ) {
+                    return progress;
+                }
+                _core.skipping -= drop;
+                _core.streamAt += drop;
+                progress.taken += drop;
                 continue;
             }
             if (progress.taken == offer) {
