@@ -29,14 +29,16 @@ constexpr std::size_t kFft        = 256UZ;
 constexpr float       kSampleRate = 48000.f;
 
 /// Emits a fixed sequence in bursts of a stated size, then ends the stream. The burst size is what makes chunk
-/// independence testable: the same samples presented differently must produce the same records.
+/// independence testable: the same samples presented differently must produce the same records. `tags` are stamped at
+/// their absolute sample index, which is how a setting is moved on a block inside a running graph.
 template<typename T>
 struct BurstSource : gr::Block<BurstSource<T>> {
     gr::PortOut<T> out;
 
-    std::vector<T> samples{};
-    std::size_t    burst = 4096UZ;
-    std::size_t    at    = 0UZ;
+    std::vector<T>       samples{};
+    std::vector<gr::Tag> tags{}; ///< index is an absolute sample index
+    std::size_t          burst = 4096UZ;
+    std::size_t          at    = 0UZ;
 
     GR_MAKE_REFLECTABLE(BurstSource, out);
 
@@ -47,6 +49,11 @@ struct BurstSource : gr::Block<BurstSource<T>> {
             return gr::work::Status::DONE;
         }
         const std::size_t take = std::min({burst, samples.size() - at, outSpan.size()});
+        for (const gr::Tag& tag : tags) {
+            if (tag.index >= at && tag.index < at + take) {
+                outSpan.publishTag(tag.map, tag.index - at);
+            }
+        }
         std::copy_n(samples.begin() + static_cast<std::ptrdiff_t>(at), take, outSpan.begin());
         at += take;
         outSpan.publish(take);
@@ -363,7 +370,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     "a skipped gap changes nothing about the segments that are transformed"_test = [] {
         // The same stream read at hop 1024 and at hop 256: the hop-1024 records must be bit-identical to every fourth
         // hop-256 record, since each is the same 256 samples through the same window.
-        const auto            samples = tone(kFft * 16UZ, 32., kFft);
+        const auto             samples = tone(kFft * 16UZ, 32., kFft);
         const gr::property_map gapped{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{kFft * 4UZ}}, {"sample_rate", kSampleRate}};
         const gr::property_map dense{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
 
@@ -441,7 +448,16 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(eq(block._core.hop, 5000UZ)) << "the new hop is in force";
         expect(eq(block._core.segments, 0UZ)) << "and the accumulation it changes the meaning of is discarded";
         expect(eq(block._core.skipping, 0UZ)) << "a gap measured against the old hop does not survive it";
+        expect(eq(block._core.gridStart, std::uint64_t{4096ULL})) << "a new hop is a new grid, anchored where the stream stands";
         expect(eq(block._core.streamAt, std::uint64_t{4096ULL})) << "the stream position is not a setting";
+
+        // A change that leaves the hop alone leaves the grid alone with it, gap and all.
+        block._core.skipping = 700UZ;
+        std::ignore          = block.settings().set({{"window", std::string("Hamming")}});
+        std::ignore          = block.settings().activateContext();
+        std::ignore          = block.settings().applyStagedParameters();
+        expect(eq(block._core.skipping, 700UZ)) << "a window change does not move the grid, so the gap it was going to skip stands";
+        expect(eq(block._core.gridStart, std::uint64_t{4096ULL}));
     };
 
     "window_param builds the window the library builds, and the record says which one it is"_test = [] {
@@ -625,7 +641,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(eq(block._core.segments, 2UZ)) << "a transaction naming no accumulation setting leaves the accumulation alone";
     };
 
-    "fft_size is refused while the block runs and moves again once it is stopped"_test = [] {
+    "fft_size moves under a running block, keeping the stream and losing no buffered sample"_test = [] {
         const auto running = [](gr::property_map settings) {
             auto block = std::make_unique<WelchPsd<CF>>(std::move(settings));
             block->settings().init();
@@ -641,18 +657,74 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
 
         {
             auto block = running({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}});
-            expect(throws([&] { live(*block, {{"fft_size", gr::Size_t{512U}}}); })) << "a running block refuses a new transform length";
-        }
-        {
-            auto block = running({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}});
             expect(nothrow([&] { live(*block, {{"overlap", 0.75}}); })) << "the overlap is live";
             expect(eq(block->_core.hop, kFft / 4UZ));
         }
         {
-            auto block = running({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}});
-            block->stop();
-            expect(nothrow([&] { live(*block, {{"fft_size", gr::Size_t{512U}}}); })) << "stopped, the length moves: the contract is staged-restart, not immutable";
-            expect(eq(block->_core.fftSize, 512UZ));
+            auto block = running({{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{8U}}, {"sample_rate", kSampleRate}});
+            block->_core.pending.assign(60UZ, CF{1.f, 0.f});
+            block->_core.streamAt      = 9000ULL;
+            block->_core.recordStartAt = 9000ULL;
+            block->_core.segments      = 5UZ;
+
+            expect(nothrow([&] { live(*block, {{"fft_size", gr::Size_t{512U}}}); })) << "a running block takes a new transform length";
+            expect(eq(block->_core.fftSize, 512UZ)) << "and is built for it";
+            expect(eq(block->_core.window.size(), 512UZ));
+            expect(eq(block->_core.windowed.size(), 512UZ)) << "the transform's own buffers move with the length";
+            expect(eq(block->_core.accumulator.size(), 512UZ));
+            expect(eq(block->_core.segments, 0UZ)) << "the five segments at the old resolution are discarded, not averaged with the new";
+            expect(eq(block->_core.pending.size(), 60UZ)) << "no buffered sample is dropped";
+            expect(eq(block->_core.streamAt, std::uint64_t{9000ULL})) << "and the stream position is not a setting";
+            expect(eq(block->_core.gridStart, std::uint64_t{9000ULL})) << "the new grid is anchored where the stream stands, and the record says so";
+        }
+    };
+
+    "a live fft_size change reaches a block inside a running graph, through a tag"_test = [] {
+        // The framework's own path for a setting that moves mid-stream: a tag whose key names a setting the block did
+        // not have written at construction. fft_size is therefore left at its 1024 default here, which is what makes
+        // it auto-updatable; the source stamps the change at a known sample and the records either side are read.
+        constexpr std::size_t kFirst  = 1024UZ; // the block's default
+        constexpr std::size_t kSecond = 256UZ;
+        constexpr std::size_t kAt     = 4096UZ; // the change lands here, on a segment boundary of the old grid
+
+        gr::property_map settings{{"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
+        gr::property_map moveTo{{"fft_size", gr::Size_t{static_cast<unsigned>(kSecond)}}};
+
+        gr::test::RuntimeTest test;
+        auto&                 source = test.emplace<BurstSource<CF>>();
+        auto&                 block  = test.emplace<WelchPsd<CF>>(std::move(settings));
+        auto&                 sink   = test.emplace<RecordSink>();
+        source.samples               = tone(8192UZ, 32., kFirst);
+        source.burst                 = 512UZ;
+        source.tags.push_back(gr::Tag{kAt, std::move(moveTo)});
+
+        expect(test.connect(source, "out", block, "in").has_value() && test.connect(block, "out", sink, "in").has_value()) << fatal;
+        std::ignore = test.run();
+
+        const auto& records = sink.records;
+        expect(records.size() > 4UZ) << "the run has to produce records at both lengths, made " << records.size();
+
+        std::size_t atFirst  = 0UZ;
+        std::size_t atSecond = 0UZ;
+        for (const auto& record : records) {
+            const auto size = static_cast<std::size_t>(metaNumber(record, "fft_size"));
+            if (size == kFirst) {
+                ++atFirst;
+                expect(eq(metaNumber(record, "grid_start"), 0.)) << "records before the change are on the grid the stream started";
+            } else if (size == kSecond) {
+                ++atSecond;
+                expect(eq(record.signal_values.size(), kSecond)) << "a record's length is the transform that made it";
+                expect(metaNumber(record, "grid_start") > 0.) << "and records after it say the grid moved";
+                expect(metaNumber(record, "sample_start") >= metaNumber(record, "grid_start")) << "no segment starts before the grid it is on";
+            }
+            expect(eq(metaNumber(record, "n_averaged"), 1.)) << "no record is a partial average across the change";
+        }
+        expect(atFirst > 0UZ) << "records at the first length";
+        expect(atSecond > 0UZ) << "and records at the second, which is the whole point";
+
+        // The stream position keeps counting the same stream across the change: sample_start never goes backwards.
+        for (std::size_t r = 1UZ; r < records.size(); ++r) {
+            expect(metaNumber(records[r], "sample_start") > metaNumber(records[r - 1UZ], "sample_start")) << "record " << r << " went backwards in the stream";
         }
     };
 
@@ -665,9 +737,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         block._flushed       = true; // what the end of a first run leaves behind
         block._core.streamAt = 999ULL;
         block._core.pending.assign(7UZ, CF{});
-        block.stop();
 
-        block.start();
+        block.start(); // the framework's own second run; the block keeps no state that a stop would have to clear
         expect(!block._flushed) << "a second run's flush must not be suppressed by the first run's";
         expect(eq(block._core.streamAt, std::uint64_t{0ULL})) << "and the grid is anchored at the new stream's origin";
         expect(block._core.pending.empty());
