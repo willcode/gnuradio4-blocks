@@ -76,6 +76,24 @@ enum class VocabularyType : std::uint8_t { NotVocabulary, Float, Double, String,
     return true;
 }
 
+/// @brief How many vocabulary keys of @p map hold a value whose type disagrees with the declaration.
+///
+/// It lives beside the table it reads because every transport in the tree needs the same count and a second loop over
+/// the same table is the drift this header exists to prevent. What a caller does with the count is its own: at a
+/// record boundary a wrongly typed key is dropped, because an absent key at least reads as absent; across a process
+/// boundary it is counted and kept, because the value's author is in another process and cannot be told, so dropping
+/// it would erase the only evidence that a peer is misconfigured. The value still reads as absent through the
+/// declared accessor either way, so nothing downstream is misled.
+[[nodiscard]] inline std::uint64_t countMistypedKeys(const property_map& map) noexcept {
+    std::uint64_t mistyped = 0ULL;
+    for (const auto& [key, value] : map) {
+        if (!holdsVocabularyType(vocabularyType(shortKey(std::string_view(key))), value)) {
+            ++mistyped;
+        }
+    }
+    return mistyped;
+}
+
 } // namespace detail::packet
 
 } // namespace gr::blocks::basic
