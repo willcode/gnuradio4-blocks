@@ -36,6 +36,16 @@ struct PollerConfig {
     std::size_t              minRequiredSamples  = 1UZ;                                     // Minimum number of samples required before `process` call. Higher values optimize throughput by reducing frequent small `process` calls.
     std::size_t              maxRequiredSamples  = std::numeric_limits<std::size_t>::max(); // Maximum number of samples that can be processed in a single `process` call. Lower values optimize latency by allowing faster processing of small batches.
 
+    // How many DataSet records a poller's ring holds. This is slack for a consumer that answers late, not storage: a
+    // record occupies a slot only while it waits there, and a consumer that keeps up uses one or two whatever the
+    // depth is. The depth is what a consumer that stops answering can accumulate before the policy takes over, and a
+    // record is as large as its transform - 64 KiB at 8192 bins and 32 MiB at 2^22 - so a deep ring buys nothing but
+    // a large backlog of stale frames. Four is a display's own answer: at 25 records a second a consumer that replies
+    // within one or two frame periods needs two to four records of slack, and one that needs more than that is not
+    // keeping up and should drop and say so rather than fall further behind. Raise it only for a consumer that reads
+    // in batches on purpose. Only used by the DataSet pollers.
+    std::size_t dataSetDepth = 4UZ;
+
     std::size_t preSamples  = 100; // Only used in trigger mode. Number of samples to keep before a trigger.
     std::size_t postSamples = 100; // Only used in trigger mode. Number of samples to keep after a trigger.
 
@@ -69,9 +79,8 @@ static_assert(DataSinkOrDataSetSinkLike<DataSink<float>>);
 static_assert(DataSinkOrDataSetSinkLike<DataSetSink<float>>);
 
 namespace detail {
-constexpr std::size_t data_sink_buffer_size          = 65536;
-constexpr std::size_t data_sink_tag_buffer_size      = 1024;
-constexpr std::size_t data_sink_data_set_buffer_size = 1024;
+constexpr std::size_t data_sink_buffer_size     = 65536;
+constexpr std::size_t data_sink_tag_buffer_size = 1024;
 
 inline std::size_t calculateNSamplesToProcess(std::size_t available, std::size_t requested, std::size_t minRequired, std::size_t maxRequired) {
     const std::size_t clampRequested = std::clamp(requested, minRequired, maxRequired);
@@ -173,17 +182,24 @@ struct StreamingPoller {
 
 template<typename T>
 struct DataSetPoller {
-    gr::CircularBuffer<DataSet<T>> buffer    = gr::CircularBuffer<DataSet<T>>(detail::data_sink_data_set_buffer_size);
-    decltype(buffer.new_reader())  reader    = buffer.new_reader();
-    decltype(buffer.new_writer())  writer    = buffer.new_writer();
-    std::atomic<bool>              finished  = false;
-    std::atomic<std::size_t>       dropCount = 0;
-    std::size_t                    minRequiredSamples; // the number of samples (DataSets) to process must be in a range [minRequiredSamples, maxRequiredSamples]
-    std::size_t                    maxRequiredSamples;
+    gr::CircularBuffer<DataSet<T>> buffer;
+    decltype(buffer.new_reader())  reader   = buffer.new_reader();
+    decltype(buffer.new_writer())  writer   = buffer.new_writer();
+    std::atomic<bool>              finished = false;
+    /// Records this poller was not given room for, counted rather than waited for. It is a plain counter a consumer
+    /// may read at any rate and from any thread - once a frame is the usual one - and it only rises, so a consumer
+    /// wanting a rate takes the difference between two readings rather than resetting it. Nothing but this poller's
+    /// own listener writes it, so it says what this consumer missed and not what any other did.
+    std::atomic<std::size_t> dropCount = 0;
+    std::size_t              minRequiredSamples; // the number of samples (DataSets) to process must be in a range [minRequiredSamples, maxRequiredSamples]
+    std::size_t              maxRequiredSamples;
 
-    DataSetPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_) : minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
+    DataSetPoller(std::size_t minRequiredSamples_, std::size_t maxRequiredSamples_, std::size_t depth) : buffer(std::max(1UZ, depth)), minRequiredSamples(minRequiredSamples_), maxRequiredSamples(maxRequiredSamples_) {
         if (minRequiredSamples > maxRequiredSamples) {
             throw gr::exception(std::format("Failed to create DataSetPoller: minRequiredSamples ({}) > maxRequiredSamples ({})", minRequiredSamples, maxRequiredSamples));
+        }
+        if (depth == 0UZ) {
+            throw gr::exception("Failed to create DataSetPoller: a ring holding no record can never deliver one");
         }
     }
 
@@ -605,7 +621,7 @@ public:
     std::shared_ptr<DataSetPoller<T>> getTriggerPoller(TMatcher&& matcher, PollerConfig config = {}) {
         const auto      backpressure     = detail::BackpressureMode{config.overflowPolicy, config.backpressureTimeout};
         const auto      withBackpressure = config.overflowPolicy != OverflowPolicy::Drop;
-        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples, config.dataSetDepth);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
         addListener(std::make_unique<TriggerListener<TMatcher>>(std::forward<TMatcher>(matcher), handler, config.preSamples, config.postSamples, backpressure), withBackpressure);
@@ -618,7 +634,7 @@ public:
         std::lock_guard lg(_listener_mutex);
         const auto      backpressure     = detail::BackpressureMode{config.overflowPolicy, config.backpressureTimeout};
         const auto      withBackpressure = config.overflowPolicy != OverflowPolicy::Drop;
-        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples, config.dataSetDepth);
         addListener(std::make_unique<MultiplexedListener<TMatcher>>(std::forward<TMatcher>(matcher), config.maximumWindowSize, handler, backpressure), withBackpressure);
         return handler;
     }
@@ -627,7 +643,7 @@ public:
     std::shared_ptr<DataSetPoller<T>> getSnapshotPoller(TMatcher&& matcher, PollerConfig config = {}) {
         const auto      backpressure     = detail::BackpressureMode{config.overflowPolicy, config.backpressureTimeout};
         const auto      withBackpressure = config.overflowPolicy != OverflowPolicy::Drop;
-        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples, config.dataSetDepth);
         std::lock_guard lg(_listener_mutex);
         addListener(std::make_unique<SnapshotListener<TMatcher>>(std::forward<TMatcher>(matcher), config.delay, handler, backpressure), withBackpressure);
         return handler;
@@ -1141,7 +1157,7 @@ public:
     std::shared_ptr<DataSetPoller<T>> getPoller(M&& matcher, PollerConfig config = {}) {
         const auto      backpressure     = detail::BackpressureMode{config.overflowPolicy, config.backpressureTimeout};
         const auto      withBackpressure = config.overflowPolicy != OverflowPolicy::Drop;
-        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples);
+        auto            handler          = std::make_shared<DataSetPoller<T>>(config.minRequiredSamples, config.maxRequiredSamples, config.dataSetDepth);
         std::lock_guard lg(_listener_mutex);
         handler->finished = _listeners_finished;
         addListener(std::make_unique<Listener<gr::meta::null_type, M>>(std::forward<M>(matcher), handler, backpressure), withBackpressure);
@@ -1215,7 +1231,15 @@ private:
         template<typename CallbackFW, DataSetMatcher<T> Matcher>
         explicit Listener(Matcher&& matcher_, CallbackFW&& cb) : matcher(std::forward<Matcher>(matcher_)), callback{std::forward<CallbackFW>(cb)} {}
 
-        inline void publishDataSet(const DataSet<T>& data) {
+        /// @brief Hand one record to this listener's consumer. Taken by value so that the record moves into the ring
+        /// slot and into a callback: `std::move` on a const reference names the copy assignment, which is what this
+        /// took before and cost a whole record's memory move per frame - 64 KiB at 8192 bins, 32 MiB at 2^22.
+        ///
+        /// The copy that remains is the one into the parameter, and it is a property of the sink's input span being
+        /// const: several listeners may want the same record, and none of them may take it out of the graph's own
+        /// buffer. A sole listener could be given the record to move, and that is a change to the port rather than to
+        /// this block.
+        inline void publishDataSet(DataSet<T> data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
             } else {

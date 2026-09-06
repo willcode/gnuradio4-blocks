@@ -232,9 +232,13 @@ template<typename Real>
     return ds;
 }
 
-/// The transform lengths both blocks accept, stated once because both validate against them.
+/// The transform lengths both blocks accept, stated once because both validate against them. The ceiling is the
+/// largest size a receiver's display offers, and it is not free: a record carries its values and its frequency axis,
+/// both `bins` floats, so a record is `8 * bins` bytes -- 64 KiB at 8192 bins and 32 MiB at the ceiling -- and the
+/// accumulator's own working set is about `36 * fft_size` bytes for a complex stream. A consumer at these sizes
+/// sizes its record ring in records and expects to drop, which is what `PollerConfig::dataSetDepth` is for.
 inline constexpr std::size_t kMinFftSize = 64UZ;
-inline constexpr std::size_t kMaxFftSize = 65536UZ;
+inline constexpr std::size_t kMaxFftSize = 4194304UZ;
 
 /// @brief The hop `overlap` implies for a transform of `size` samples, never less than one sample.
 [[nodiscard]] inline std::size_t hopFor(std::size_t size, double overlap) noexcept { return std::max(1UZ, static_cast<std::size_t>(std::llround(static_cast<double>(size) * (1.0 - overlap)))); }
@@ -341,7 +345,7 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">>                                                                    fft_size    = 1024U;
+    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 4194304]; staged-restart">>                                                                    fft_size    = 1024U;
     Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                      window      = std::string("Hann");
     Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">> window_param = 0.f;
     Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                   overlap     = 0.5;
@@ -515,7 +519,7 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 65536]; staged-restart">>                                                                fft_size    = 1024U;
+    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 4194304]; staged-restart">>                                                                fft_size    = 1024U;
     Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                  window      = std::string("Hann");
     Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">> window_param = 0.f;
     Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                               overlap     = 0.5;
