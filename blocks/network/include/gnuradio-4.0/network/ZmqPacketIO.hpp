@@ -42,6 +42,7 @@ namespace detail::zmqio {
 // The record-metadata vocabulary and its declared types are the basic module's, reused rather than restated: two
 // tables for one vocabulary is the drift these blocks exist to avoid, and both ends of this transport have to agree
 // on the same table as the blocks that convert records into the packets it carries.
+using gr::blocks::basic::detail::packet::countMistypedKeys;
 using gr::blocks::basic::detail::packet::holdsVocabularyType;
 using gr::blocks::basic::detail::packet::shortKey;
 using gr::blocks::basic::detail::packet::vocabularyType;
@@ -52,22 +53,6 @@ using gr::blocks::basic::detail::packet::vocabularyType;
 /// on arrival, so the vocabulary's one-spelling rule survives the crossing. The alternative to carrying it is losing
 /// it silently, which is what the envelope exists to prevent.
 inline constexpr std::string_view kTimestampKey = "packet_timestamp";
-
-/// @brief Vocabulary keys of @p map whose value type disagrees with the declaration.
-///
-/// Counted and never dropped. At a record boundary a wrongly typed key is dropped because an absent key at least
-/// reads as absent, but here the value's author is in another process and cannot be told: dropping it would erase the
-/// only evidence that a peer is misconfigured. The value still reads as absent through the declared accessor, so
-/// nothing downstream is misled; the counter is what makes the peer's bug visible.
-[[nodiscard]] inline std::uint64_t countMistypedKeys(const property_map& map) noexcept {
-    std::uint64_t mistyped = 0ULL;
-    for (const auto& [key, value] : map) {
-        if (!holdsVocabularyType(vocabularyType(shortKey(std::string_view(key))), value)) {
-            ++mistyped;
-        }
-    }
-    return mistyped;
-}
 
 /// @brief One finished envelope waiting for the I/O thread, frames 1 to 3. Frame 0 is the block's constant topic.
 struct Outgoing {
