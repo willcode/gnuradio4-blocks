@@ -535,6 +535,13 @@ private:
         while (!_failed && !_headerParsed && !_reader.cancelRequested()) {
             const auto error = pollHeader(true);
 
+            // a cancel that lands while this poll is waiting drops the reader's queued bytes and ends it
+            // with an empty final message, which is indistinguishable here from a file that stops before
+            // its data chunk; the graph is stopping, so leave the header unparsed rather than report it
+            if (_reader.cancelRequested()) {
+                return;
+            }
+
             if (error) {
                 fail("WavSource::openNextFile()", *error);
                 return;
