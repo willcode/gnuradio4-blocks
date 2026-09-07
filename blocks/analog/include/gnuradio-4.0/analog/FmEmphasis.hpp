@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <limits>
 #include <numbers>
 #include <span>
 
@@ -143,8 +144,11 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
         for (std::size_t i = 0UZ; i < std::min(input.size(), output.size()); ++i) {
             const T sample = input[i];
             lastOutput     = b0 * sample + b1 * lastInput + p * lastOutput;
-            lastInput      = sample;
-            output[i]      = lastOutput;
+            if (std::abs(lastOutput) < std::numeric_limits<T>::min()) {
+                lastOutput = T{}; // a pole below one decays a silent input into subnormals and stays there; each one costs a microcode assist
+            }
+            lastInput = sample;
+            output[i] = lastOutput;
         }
         _lastInput  = lastInput;
         _lastOutput = lastOutput;
@@ -207,8 +211,11 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
         for (std::size_t i = 0UZ; i < std::min(input.size(), output.size()); ++i) {
             const T sample = input[i];
             lastOutput     = b0 * sample + b1 * lastInput + p * lastOutput;
-            lastInput      = sample;
-            output[i]      = lastOutput;
+            if (std::abs(lastOutput) < std::numeric_limits<T>::min()) {
+                lastOutput = T{}; // a pole below one decays a silent input into subnormals and stays there; each one costs a microcode assist
+            }
+            lastInput = sample;
+            output[i] = lastOutput;
         }
         _lastInput  = lastInput;
         _lastOutput = lastOutput;

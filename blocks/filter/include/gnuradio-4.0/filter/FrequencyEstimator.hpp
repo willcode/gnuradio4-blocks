@@ -522,14 +522,15 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
             return work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
-        // HP filter: y[n] = α·(y[n-1] + x[n] - x[n-1])
+        // HP filter: y[n] = α·(y[n-1] + x[n] - x[n-1]); flushed so a silent input leaves the state at zero rather than
+        // in the subnormals, where every operation costs a microcode assist
         auto processHP = [alpha_hp = _alpha_hp](T x, T& state, T& x_prev) noexcept -> T {
             state  = flushSubnormal(alpha_hp * (state + x - x_prev));
             x_prev = x;
             return state;
         };
 
-        // LP filter: y[n] = y[n-1] + α·(x[n] - y[n-1])
+        // LP filter: y[n] = y[n-1] + α·(x[n] - y[n-1]), flushed for the same reason: the pole is exp(-2π f_lp/fs)
         auto processLP = [alpha_lp = _alpha_lp](T x, T& state) noexcept -> T {
             state += alpha_lp * (x - state);
             state = flushSubnormal(state);
