@@ -8,6 +8,13 @@ add_basic_test(qa_Selector)
 add_basic_test(qa_sources)
 add_basic_test(qa_DataSink)
 add_basic_test(qa_GraphBridge)
+
+# the two halves are loaded by block id through the global registry, so the shared library carrying the basic blocks has
+# to be loaded for those ids to resolve
+add_basic_test(qa_GraphBridgeRegistry)
+target_link_libraries(qa_GraphBridgeRegistry PRIVATE gnuradio4::GrBasicBlocksShared)
+set_tests_properties(qa_GraphBridgeRegistry PROPERTIES TIMEOUT 60)
+
 add_basic_test(qa_IqCorrection)
 add_basic_test(qa_IqTap)
 add_basic_test(qa_TriggerBlocks)

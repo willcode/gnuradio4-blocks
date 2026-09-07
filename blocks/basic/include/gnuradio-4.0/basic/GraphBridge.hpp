@@ -10,9 +10,15 @@
 #include <complex>
 #include <condition_variable>
 #include <cstdint>
+#include <format>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <source_location>
 #include <span>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -23,6 +29,16 @@ using namespace gr;
 
 GR_REGISTER_BLOCK(gr::blocks::basic::BridgeSink)
 GR_REGISTER_BLOCK(gr::blocks::basic::BridgeSource)
+
+/// What a bridge counts, readable through the registry by name and without a handle on either block:
+/// the samples the producer side has dropped since the last configure(), the ring's capacity, the
+/// samples waiting in it, and whether the producer has latched end-of-stream.
+struct BridgeCounters {
+    std::uint64_t overflows = 0;
+    std::size_t   capacity  = 0;
+    std::size_t   available = 0;
+    bool          eos       = false;
+};
 
 /*!
  * @brief Bounded ring joining two independently scheduled flow graphs.
@@ -75,6 +91,12 @@ struct BridgeState {
             eos   = false;
         }
         cv.notify_all();
+    }
+
+    /// A consistent reading of the counters, taken under the lock.
+    [[nodiscard]] BridgeCounters counters() const {
+        std::lock_guard lk(mtx);
+        return {overflows.load(std::memory_order_relaxed), cap, count, eos};
     }
 
     /// Latch end-of-stream: the consumer graph drains what is left, then emits EoS.
@@ -188,16 +210,103 @@ struct BridgeState {
     }
 };
 
+/*!
+ * @brief Bridge rings published by name, so a loaded graph can join one without a C++ handle.
+ *
+ * A settings map cannot carry a shared pointer, so the two halves of an exported flow graph have
+ * no way to name the same ring. The application creates the ring, publishes it here under a name,
+ * and both files name that string in their `bridge_name` setting. This is `DataSinkRegistry` for
+ * bridges: one global instance, a duplicate name refused, and the counters readable from outside
+ * the blocks.
+ */
+class BridgeRegistry {
+    mutable std::mutex                                  _mutex;
+    std::map<std::string, std::shared_ptr<BridgeState>> _bridges;
+
+public:
+    void publish(std::string_view name, std::shared_ptr<BridgeState> state, std::source_location location = std::source_location::current()) {
+        if (name.empty()) {
+            throw gr::exception("Failed to publish a bridge under an empty name.", location);
+        }
+        if (state == nullptr) {
+            throw gr::exception(std::format("Failed to publish bridge `{}`. The state is null.", name), location);
+        }
+        std::lock_guard lg{_mutex};
+        if (!_bridges.try_emplace(std::string{name}, std::move(state)).second) {
+            throw gr::exception(std::format("Failed to publish bridge `{}`. A bridge of that name is already published.", name), location);
+        }
+    }
+
+    [[nodiscard]] std::shared_ptr<BridgeState> find(std::string_view name) const {
+        std::lock_guard lg{_mutex};
+        const auto      it = _bridges.find(std::string{name});
+        return it == _bridges.end() ? nullptr : it->second;
+    }
+
+    /// `find`, refusing by name rather than returning null: what a block joining by name needs.
+    [[nodiscard]] std::shared_ptr<BridgeState> require(std::string_view name, std::string_view blockName, std::source_location location = std::source_location::current()) const {
+        std::shared_ptr<BridgeState> state = find(name);
+        if (state == nullptr) {
+            throw gr::exception(std::format("Block `{}` cannot join bridge `{}`. No bridge of that name is published.", blockName, name), location);
+        }
+        return state;
+    }
+
+    void withdraw(std::string_view name) {
+        std::lock_guard lg{_mutex};
+        _bridges.erase(std::string{name});
+    }
+
+    [[nodiscard]] std::optional<BridgeCounters> counters(std::string_view name) const {
+        const std::shared_ptr<BridgeState> state = find(name);
+        return state == nullptr ? std::nullopt : std::optional<BridgeCounters>{state->counters()};
+    }
+};
+
+__attribute__((visibility("default"))) inline BridgeRegistry& globalBridgeRegistry() {
+    static BridgeRegistry instance;
+    return instance;
+}
+
+namespace detail {
+
+// Called from settingsChanged rather than start(): a loaded graph applies its settings at init, and
+// a BridgeSource with no ring returns DONE on its first work call, before start() would have run.
+inline void rebindBridge(std::shared_ptr<BridgeState>& bridge, const property_map& oldSettings, std::string_view bridgeName, std::string_view blockName) {
+    if (!oldSettings.contains("bridge_name")) {
+        return;
+    }
+    if (oldSettings.at("bridge_name").value_or(std::string{}) == bridgeName) {
+        return;
+    }
+    bridge = bridgeName.empty() ? nullptr : globalBridgeRegistry().require(bridgeName, blockName);
+}
+
+} // namespace detail
+
 struct BridgeSink : Block<BridgeSink> {
     using Description = Doc<R""(@brief producer-graph terminal of a GraphBridge: pushes its input into the shared BridgeState ring.
 
-Assign the shared `BridgeState` after `emplaceBlock`. Without one the block consumes
-and discards its input.)"">;
+Assign the shared `BridgeState` after `emplaceBlock`, or set `bridge_name` to a name the
+application has published in the global bridge registry, which is how a graph loaded from a
+file reaches a ring no settings map could carry. Without either the block consumes and
+discards its input.)"">;
 
     PortIn<std::complex<float>> in;
-    GR_MAKE_REFLECTABLE(BridgeSink, in);
+
+    Annotated<std::string, "bridge name", Visible> bridge_name = "";
+
+    GR_MAKE_REFLECTABLE(BridgeSink, in, bridge_name);
 
     std::shared_ptr<BridgeState> bridge;
+
+    void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) { detail::rebindBridge(bridge, oldSettings, bridge_name.value, this->name.value); }
+
+    void stop() noexcept {
+        if (!bridge_name.value.empty()) {
+            bridge.reset();
+        }
+    }
 
     // InputSpanLike rather than the auto-consume-all span form, so backpressure mode can
     // consume only what fit -- that partial consume is what stalls the upstream source.
@@ -215,12 +324,25 @@ struct BridgeSource : Block<BridgeSource> {
     using Description = Doc<R""(@brief consumer-graph source of a GraphBridge: pops from the shared BridgeState ring.
 
 Waits on a condition variable rather than polling, so an idle bridge never spins the
-scheduler. Emits DONE once the ring has drained and the producer side has latched EoS.)"">;
+scheduler. Emits DONE once the ring has drained and the producer side has latched EoS.
+Takes its ring the same two ways `BridgeSink` does: assigned after `emplaceBlock`, or named
+through `bridge_name` in the global bridge registry.)"">;
 
     PortOut<std::complex<float>> out;
-    GR_MAKE_REFLECTABLE(BridgeSource, out);
+
+    Annotated<std::string, "bridge name", Visible> bridge_name = "";
+
+    GR_MAKE_REFLECTABLE(BridgeSource, out, bridge_name);
 
     std::shared_ptr<BridgeState> bridge;
+
+    void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) { detail::rebindBridge(bridge, oldSettings, bridge_name.value, this->name.value); }
+
+    void stop() noexcept {
+        if (!bridge_name.value.empty()) {
+            bridge.reset();
+        }
+    }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) {
         if (!bridge) {
