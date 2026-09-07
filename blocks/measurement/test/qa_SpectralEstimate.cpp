@@ -2,6 +2,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -938,6 +939,134 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         const float meanPeak = *std::ranges::max_element(meanRecords.front().signal_values);
         const float holdPeak = *std::ranges::max_element(holdRecords.front().signal_values);
         expect(holdPeak > meanPeak) << "the hold keeps the loud half, the mean divides it away";
+    };
+
+    // `threads` buys the transform threads and changes nothing else. At 2^18 the second thread moves the transform
+    // off SimdFFT and onto the four-step split, which is a different factorization of the same DFT, so the records
+    // agree to the two engines' rounding rather than bit for bit -- the bound is against the record's own peak,
+    // because a bin far down the skirt has no absolute scale of its own.
+    "threads change what a transform costs and not what it says"_test = [] {
+        constexpr std::size_t kLong = 1UZ << 18UZ;
+
+        const auto samples = tone(kLong * 2UZ, 1024., kLong);
+        const auto records = [&samples](gr::Size_t threads) {
+            const gr::property_map settings{{"fft_size", gr::Size_t{static_cast<gr::Size_t>(kLong)}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}, {"threads", threads}};
+            return collect<WelchPsd<CF>, CF>(settings, samples, 65536UZ);
+        };
+
+        const auto single = records(1U);
+        const auto many   = records(4U);
+        expect(!single.empty() && eq(single.size(), many.size())) << "the thread count cannot change how many records a stream makes";
+        if (single.empty() || single.size() != many.size()) {
+            return;
+        }
+
+        for (std::size_t r = 0UZ; r < single.size(); ++r) {
+            expect(eq(single[r].signal_values.size(), many[r].signal_values.size()));
+            expect(eq(metaNumber(single[r], "sample_start"), metaNumber(many[r], "sample_start"))) << "and cannot move the window grid";
+
+            const float peak      = *std::ranges::max_element(single[r].signal_values);
+            float       deviation = 0.f;
+            for (std::size_t k = 0UZ; k < single[r].signal_values.size(); ++k) {
+                deviation = std::max(deviation, std::abs(single[r].signal_values[k] - many[r].signal_values[k]));
+            }
+            expect(lt(deviation, peak * 1.e-5f)) << std::format("record {} worst deviation {} against a peak of {}", r, deviation, peak);
+        }
+    };
+
+    "threads is live on its own and survives a length rebuild"_test = [] {
+        const auto live = [](auto& block, gr::property_map changes) {
+            std::ignore = block.settings().set(std::move(changes));
+            std::ignore = block.settings().activateContext();
+            std::ignore = block.settings().applyStagedParameters();
+        };
+
+        WelchPsd<CF> block({{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{8U}}, {"sample_rate", kSampleRate}});
+        block.settings().init();
+        std::ignore = block.settings().applyStagedParameters();
+        block.start();
+        expect(eq(block._core.threads, 1UZ)) << "one thread is the default";
+        expect(eq(block._core.transform.threads, 1UZ)) << "and it reaches the transform";
+
+        block._core.pending.assign(60UZ, CF{1.f, 0.f});
+        block._core.streamAt = 9000ULL;
+        block._core.segments = 5UZ;
+
+        expect(nothrow([&] { live(block, {{"threads", gr::Size_t{4U}}}); })) << "a running block takes a new thread count";
+        expect(eq(block._core.transform.threads, 4UZ)) << "which reaches the transform";
+        expect(eq(block._core.pending.size(), 60UZ)) << "and the buffered samples survive it";
+        expect(eq(block._core.streamAt, std::uint64_t{9000ULL})) << "and the stream position";
+
+        // Whether the accumulation survives is the block's own rule, and it is pinned against the callback rather
+        // than against settings(): a change through settings() re-stages every key the block was explicitly given,
+        // not only the one that moved, so that path cannot show which key the block acted on.
+        block._core.segments = 5UZ;
+        block.threads        = 8U;
+        expect(nothrow([&] { block.settingsChanged({}, gr::property_map{{"threads", gr::Size_t{8U}}}); }));
+        expect(eq(block._core.transform.threads, 8UZ)) << "the count reaches the transform";
+        expect(eq(block._core.segments, 5UZ)) << "and on its own it does not restart the accumulation -- it changes cost, not meaning";
+
+        live(block, {{"fft_size", gr::Size_t{512U}}});
+        expect(eq(block._core.fftSize, 512UZ));
+        expect(eq(block._core.transform.threads, 4UZ)) << "a length rebuild makes a fresh transform, which is re-told the thread count in force";
+
+        expect(throws([&] { live(block, {{"threads", gr::Size_t{0U}}}); })) << "zero threads is not a thread count";
+    };
+
+    // The tuning belongs in the record, not in the signal name: a consumer that stacks records on an absolute axis
+    // reads one number rather than parsing one out of a string. It changes nothing about the estimate, so like
+    // `signal_name` it must not restart an average that is part way through -- a receiver retunes mid-stream.
+    "center_frequency reaches the record and restarts nothing"_test = [] {
+        constexpr double       kCenter = 435.5e6;
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{4U}}, {"sample_rate", kSampleRate}, {"center_frequency", kCenter}};
+        const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
+        expect(!records.empty());
+        if (records.empty()) {
+            return;
+        }
+        expect(eq(metaNumber(records.front(), "center_frequency"), kCenter)) << "the record carries the tuning beside sample_rate";
+        expect(approx(records.front().axis_values[0UZ].front(), -kSampleRate / 2.f, 1.f)) << "and the axis itself stays baseband";
+
+        const auto rows = collect<Spectrogram<CF>, CF>({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"center_frequency", kCenter}}, tone(kFft * 4UZ, 32., kFft), 4096UZ);
+        expect(!rows.empty());
+        if (!rows.empty()) {
+            expect(eq(metaNumber(rows.front(), "center_frequency"), kCenter)) << "and so does a spectrogram row";
+        }
+
+        WelchPsd<CF> block({{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{8U}}, {"sample_rate", kSampleRate}});
+        block.settings().init();
+        std::ignore = block.settings().applyStagedParameters();
+        block.start();
+        block._core.pending.assign(60UZ, CF{1.f, 0.f});
+        block._core.streamAt = 9000ULL;
+        block._core.segments = 5UZ;
+
+        const auto live = [](auto& target, gr::property_map changes) {
+            std::ignore = target.settings().set(std::move(changes));
+            std::ignore = target.settings().activateContext();
+            std::ignore = target.settings().applyStagedParameters();
+        };
+        expect(nothrow([&] { live(block, {{"center_frequency", 88.5e6}}); })) << "a running block retunes";
+        expect(eq(block.center_frequency.value, 88.5e6)) << "and the new tuning is in force";
+        expect(eq(block._core.pending.size(), 60UZ)) << "with every buffered sample kept";
+        expect(eq(block._core.gridStart, std::uint64_t{0ULL})) << "and the grid where it was";
+
+        // as for `threads`: the block's own rule is pinned against the callback, because a change through settings()
+        // re-stages every key the block was explicitly given rather than only the one that moved
+        block._core.segments   = 5UZ;
+        block.center_frequency = 144.5e6;
+        expect(nothrow([&] { block.settingsChanged({}, gr::property_map{{"center_frequency", 144.5e6}}); }));
+        expect(eq(block._core.segments, 5UZ)) << "a retune on its own does not restart the average in progress";
+
+        expect(throws([&] { live(block, {{"center_frequency", std::numeric_limits<double>::quiet_NaN()}}); })) << "a tuning that is not a number is refused";
+    };
+
+    "the spectrogram takes the same thread setting"_test = [] {
+        Spectrogram<CF> block({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"threads", gr::Size_t{2U}}});
+        block.settings().init();
+        std::ignore = block.settings().applyStagedParameters();
+        block.start();
+        expect(eq(block._core.transform.threads, 2UZ)) << "the setting reaches the transform at construction";
     };
 };
 
