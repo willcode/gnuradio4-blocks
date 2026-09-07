@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <format>
+#include <limits>
 #include <numbers>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -118,10 +119,21 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
             const double imag = static_cast<double>(sample.imag());
             _real             = _alpha * real + _oneMinusAlpha * _real;
             _imag             = _alpha * imag + _oneMinusAlpha * _imag;
+            // Each component is its own recursion, so each is flushed rather than the magnitude: one of them can sit
+            // in the subnormals while the other carries a normal estimate, and the assist is charged per operation.
+            if (std::abs(_real) < std::numeric_limits<double>::min()) {
+                _real = 0.0;
+            }
+            if (std::abs(_imag) < std::numeric_limits<double>::min()) {
+                _imag = 0.0;
+            }
             return T(static_cast<Real>(real - _real), static_cast<Real>(imag - _imag));
         } else {
             const double real = static_cast<double>(sample);
             _real             = _alpha * real + _oneMinusAlpha * _real;
+            if (std::abs(_real) < std::numeric_limits<double>::min()) {
+                _real = 0.0; // a pole below one decays a silent input into subnormals and stays there; each one costs a microcode assist
+            }
             return static_cast<T>(real - _real);
         }
     }
