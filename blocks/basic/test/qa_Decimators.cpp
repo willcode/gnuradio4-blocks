@@ -175,7 +175,87 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         const auto      input  = counted(1000UZ);
         const auto      result = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input), 137UZ);
         expect(eq(result.samples.size(), 3UZ * (1000UZ / 8UZ)));
-        expect(eq(result.consumed, 8UZ * (1000UZ / 8UZ))) << "whole groups only";
+        expect(eq(result.consumed, 8UZ * (1000UZ / 8UZ))) << "the whole stream, which here is a whole number of groups";
+    };
+
+    "a partial group at the end of the stream is not held back"_test = [] {
+        KeepMInN<float> block  = makeBlock<KeepMInN<float>>({{"m", 3U}, {"n", 8U}, {"offset", 2U}});
+        const auto      input  = counted(1003UZ); // 125 whole groups and three items
+        const auto      result = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input), 137UZ);
+        expect(eq(result.consumed, 1003UZ)) << "every item in, whole group or not";
+        expect(eq(result.samples.size(), 3UZ * 125UZ + 1UZ)) << "and the one item of the last group that reached the slice";
+        expect(eq(result.samples.back(), 1002.f));
+    };
+
+    "a group larger than the input span is counted across calls"_test = [] {
+        constexpr std::size_t edge   = 65536UZ;     // the span a scheduler hands the block
+        constexpr gr::Size_t  n      = 4U * 65536U; // four spans to the group: a declared decimator could not run here at all
+        constexpr gr::Size_t  m      = 1024U;
+        constexpr std::size_t groups = 3UZ;
+
+        KeepMInN<float> block  = makeBlock<KeepMInN<float>>({{"m", m}, {"n", n}, {"offset", 0U}});
+        const auto      input  = counted(groups * static_cast<std::size_t>(n));
+        const auto      result = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input), edge);
+
+        std::vector<float> want;
+        for (std::size_t group = 0UZ; group < groups; ++group) {
+            for (std::size_t i = 0UZ; i < static_cast<std::size_t>(m); ++i) {
+                want.push_back(static_cast<float>(group * static_cast<std::size_t>(n) + i));
+            }
+        }
+        expect(eq(result.samples.size(), groups * static_cast<std::size_t>(m)));
+        expect(that % (result.samples == want)) << "the head of each group and nothing else";
+        expect(eq(result.consumed, input.size()));
+        expect(eq(static_cast<std::size_t>(block._phase), 0UZ)) << "three whole groups leave the phase at the start of a fourth";
+    };
+
+    "a period of two million items is a number, not a buffer demand"_test = [] {
+        constexpr gr::Size_t  n      = 2000000U;
+        constexpr gr::Size_t  m      = 4096U;
+        constexpr std::size_t stream = 3000000UZ;
+
+        KeepMInN<float> block  = makeBlock<KeepMInN<float>>({{"m", m}, {"n", n}, {"offset", 0U}});
+        const auto      input  = counted(stream);
+        const auto      result = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input), 65536UZ);
+
+        std::vector<float> want;
+        for (const std::size_t base : {0UZ, static_cast<std::size_t>(n)}) {
+            for (std::size_t i = 0UZ; i < static_cast<std::size_t>(m); ++i) {
+                want.push_back(static_cast<float>(base + i));
+            }
+        }
+        expect(eq(result.samples.size(), 2UZ * static_cast<std::size_t>(m)));
+        expect(that % (result.samples == want)) << "the first 4096 items of each of the two groups the stream reaches";
+        expect(eq(result.consumed, stream));
+        expect(eq(static_cast<std::size_t>(block._phase), stream % static_cast<std::size_t>(n))) << "the phase is where the stream left it";
+    };
+
+    "a slice longer than one call leaves over several of them"_test = [] {
+        // the harness gives each call an output span as short as its input one, so a 4096-item slice takes five calls
+        KeepMInN<float> block  = makeBlock<KeepMInN<float>>({{"m", 4096U}, {"n", 8192U}, {"offset", 0U}});
+        const auto      input  = counted(3UZ * 8192UZ);
+        const auto      result = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input), 1000UZ);
+
+        std::vector<float> want;
+        for (std::size_t group = 0UZ; group < 3UZ; ++group) {
+            for (std::size_t i = 0UZ; i < 4096UZ; ++i) {
+                want.push_back(static_cast<float>(group * 8192UZ + i));
+            }
+        }
+        expect(eq(result.samples.size(), 3UZ * 4096UZ));
+        expect(that % (result.samples == want)) << "no item repeated and none lost across the call boundaries";
+        expect(eq(result.consumed, input.size()));
+    };
+
+    "m = n is a pass-through, tags included"_test = [] {
+        KeepMInN<float>            block = makeBlock<KeepMInN<float>>({{"m", 1024U}, {"n", 1024U}, {"offset", 0U}});
+        const auto                 input = counted(4096UZ);
+        const std::vector<gr::Tag> tags{gr::Tag{0UZ, probe(0)}, gr::Tag{1023UZ, probe(1)}, gr::Tag{1024UZ, probe(2)}, gr::Tag{4095UZ, probe(3)}};
+
+        const auto result = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input), 300UZ, std::span<const gr::Tag>(tags));
+        expect(std::ranges::equal(result.samples, input));
+        expect(eq(result.consumed, input.size()));
+        expect(that % (result.offsetsOf("probe") == std::vector<std::size_t>{0UZ, 1023UZ, 1024UZ, 4095UZ})) << "every item is kept, so no tag moves";
     };
 
     "the item size is carried, not assumed"_test = [] {
@@ -231,18 +311,37 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         }
     };
 
-    "a live change lands on a group boundary"_test = [] {
+    "a live change starts a new group at the next item"_test = [] {
         KeepMInN<float> block = makeBlock<KeepMInN<float>>({{"m", 2U}, {"n", 5U}, {"offset", 1U}});
         const auto      input = counted(100UZ);
 
         const auto before = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).first(20UZ));
-        expect(eq(before.consumed, 20UZ)) << "four whole groups";
+        expect(eq(before.consumed, 20UZ)) << "every item in, which here is four whole groups";
 
         std::ignore = block.settings().setStaged({{"m", 1U}, {"n", 4U}, {"offset", 3U}});
         std::ignore = block.settings().applyStagedParameters();
 
         const auto after = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).subspan(20UZ));
         expect(eq(after.samples.front(), 23.f)) << "the first group after the change starts where the last one ended";
+    };
+
+    "a change of n mid-group restarts the phase"_test = [] {
+        KeepMInN<float> block = makeBlock<KeepMInN<float>>({{"m", 2U}, {"n", 5U}, {"offset", 0U}});
+        const auto      input = counted(40UZ);
+
+        const auto before = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).first(13UZ));
+        expect(that % (before.samples == std::vector<float>{0.f, 1.f, 5.f, 6.f, 10.f, 11.f}));
+        expect(eq(before.consumed, 13UZ));
+        expect(eq(static_cast<std::size_t>(block._phase), 3UZ)) << "three items into the third group";
+
+        std::ignore = block.settings().setStaged({{"n", 4U}});
+        std::ignore = block.settings().applyStagedParameters();
+        expect(eq(static_cast<std::size_t>(block._phase), 0UZ)) << "the change restarts the phase, mid-group or not";
+
+        const auto               after = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).subspan(13UZ));
+        const std::vector<float> head(after.samples.begin(), after.samples.begin() + 4);
+        expect(that % (head == std::vector<float>{13.f, 14.f, 17.f, 18.f})) << "the new group begins at the next item in, not two items later";
+        expect(eq(static_cast<std::size_t>(block._phase), (40UZ - 13UZ) % 4UZ));
     };
 
     "nanoseconds per sample"_test = [] {
@@ -282,6 +381,39 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         }
         std::println("KeepOneInN<complex<float>> n=8: best {:.3f} ns/input sample, spread {:.3f} ns", bestOne, worstOne - bestOne);
         std::println("KeepMInN<complex<float>> 3/8: best {:.3f} ns/input sample, spread {:.3f} ns", bestM, worstM - bestM);
+
+        // the snapshot case, as a publisher would drive it: a period of two million items against the same block as a
+        // pass-through, both over spans of the size a scheduler hands out, so one stage can be costed against three
+        const gr::Size_t span        = static_cast<gr::Size_t>(x.size());
+        KeepMInN<CF>     passThrough = makeBlock<KeepMInN<CF>>({{"m", span}, {"n", span}, {"offset", 0U}});
+        constexpr int    kCalls      = 32; // 2 097 152 items: one whole period and the head of the next
+
+        double bestSnapshot = 1e30, bestPassThrough = 1e30;
+        for (int repeat = 0; repeat < kRepeats; ++repeat) {
+            const double perRun = static_cast<double>(kCalls) * static_cast<double>(x.size());
+
+            // built inside the loop: the phase carries across calls, so a block reused between repeats would spend most
+            // of them dropping and the figure would leave the slice out
+            KeepMInN<CF> snapshot = makeBlock<KeepMInN<CF>>({{"m", 4096U}, {"n", 2000000U}, {"offset", 0U}});
+
+            auto start = Clock::now();
+            for (int call = 0; call < kCalls; ++call) {
+                spans::InputSpan<CF>  in{std::span<const CF>(x)};
+                spans::OutputSpan<CF> out{std::span<CF>(y)};
+                std::ignore = snapshot.processBulk(in, out);
+            }
+            bestSnapshot = std::min(bestSnapshot, static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / perRun);
+
+            start = Clock::now();
+            for (int call = 0; call < kCalls; ++call) {
+                spans::InputSpan<CF>  in{std::span<const CF>(x)};
+                spans::OutputSpan<CF> out{std::span<CF>(y)};
+                std::ignore = passThrough.processBulk(in, out);
+            }
+            bestPassThrough = std::min(bestPassThrough, static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / perRun);
+        }
+        std::println("KeepMInN<complex<float>> m=4096 n=2000000, one slice kept per run: best {:.4f} ns/input sample over {} spans of {}", bestSnapshot, kCalls, x.size());
+        std::println("KeepMInN<complex<float>> m=n={} (pass-through): best {:.4f} ns/input sample", x.size(), bestPassThrough);
     };
 };
 
