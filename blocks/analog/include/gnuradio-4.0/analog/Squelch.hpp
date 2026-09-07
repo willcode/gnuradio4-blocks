@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -156,6 +157,9 @@ struct PowerDetector {
 
     [[nodiscard]] bool unmuted(double magnitudeSquared) noexcept {
         _power = (1.0 - _alpha) * _power + _alpha * magnitudeSquared;
+        if (_power < std::numeric_limits<double>::min()) {
+            _power = 0.0; // a pole below one decays a silent input into subnormals and stays there; each one costs a microcode assist
+        }
         return _power >= _threshold;
     }
 };

@@ -5,6 +5,7 @@
 #include <complex>
 #include <cstddef>
 #include <numbers>
+#include <span>
 #include <vector>
 
 #include <gnuradio-4.0/basic/IqCorrection.hpp>
@@ -37,15 +38,44 @@ int main() {
         x[i]               = CF(static_cast<float>(0.7 * std::cos(phase) + 0.05), static_cast<float>(0.7 * std::sin(phase) - 0.02));
     }
     std::vector<CF> y(kSamples);
+    std::vector<CF> silence(kSamples, CF{});
 
     IqSwap<CF>          swapOff = make<IqSwap<CF>>({});
     IqSwap<CF>          swapOn  = make<IqSwap<CF>>({{"enabled", true}});
     DcOffsetCorrect<CF> dcOff   = make<DcOffsetCorrect<CF>>({{"sample_rate", 25e6f}, {"tau", 1.0}});
     DcOffsetCorrect<CF> dcOn    = make<DcOffsetCorrect<CF>>({{"enabled", true}, {"sample_rate", 25e6f}, {"tau", 1.0}});
+    DcOffsetCorrect<CF> device  = make<DcOffsetCorrect<CF>>({{"enabled", true}, {"sample_rate", 10e6f}, {"tau", 1.0}});
 
     const auto sweep = [&x, &y](auto& block) {
         for (std::size_t i = 0UZ; i < kSamples; ++i) {
             y[i] = block.processOne(x[i]);
+        }
+        return static_cast<double>(y[kSamples / 2UZ].real());
+    };
+
+    // What the subnormal flush costs and what it saves, at the rate a device delivers. On a live stream the flush is
+    // two compares and two conditional stores. On silence the recursion as it stood decays the estimate below the
+    // smallest normal after 7 054 006 510 zeros - 705 s at 10 MS/s - and then sits on the smallest subnormal, where
+    // every operation costs a microcode assist; the flushed block sits on an exact zero instead, which is where the
+    // last two arms start.
+    const double alpha     = device._alpha;
+    const double rest      = device._oneMinusAlpha;
+    const auto   asItStood = [&y, alpha, rest](std::span<const CF> input, double seed) {
+        double re = seed;
+        double im = seed;
+        for (std::size_t i = 0UZ; i < input.size(); ++i) {
+            const double real = static_cast<double>(input[i].real());
+            const double imag = static_cast<double>(input[i].imag());
+            re                = alpha * real + rest * re;
+            im                = alpha * imag + rest * im;
+            y[i]              = CF(static_cast<float>(real - re), static_cast<float>(imag - im));
+        }
+        return static_cast<double>(y[kSamples / 2UZ].real());
+    };
+    const auto quiet = [&silence, &y](auto& block) {
+        block.reset();
+        for (std::size_t i = 0UZ; i < kSamples; ++i) {
+            y[i] = block.processOne(silence[i]);
         }
         return static_cast<double>(y[kSamples / 2UZ].real());
     };
@@ -59,6 +89,10 @@ int main() {
     arms.emplace_back("IqSwap enabled", kSamples, [&sweep, &swapOn] { return sweep(swapOn); });
     arms.emplace_back("DcOffsetCorrect disabled", kSamples, [&sweep, &dcOff] { return sweep(dcOff); });
     arms.emplace_back("DcOffsetCorrect enabled", kSamples, [&sweep, &dcOn] { return sweep(dcOn); });
+    arms.emplace_back("at 10 MS/s, signal, the recursion as it stood", kSamples, [&asItStood, &x] { return asItStood(std::span<const CF>(x), 0.0); });
+    arms.emplace_back("at 10 MS/s, signal, with the flush", kSamples, [&sweep, &device] { return sweep(device); });
+    arms.emplace_back("at 10 MS/s, silence, the recursion as it stood", kSamples, [&asItStood, &silence] { return asItStood(std::span<const CF>(silence), 1e-310); });
+    arms.emplace_back("at 10 MS/s, silence, with the flush", kSamples, [&quiet, &device] { return quiet(device); });
 
     gr::blocks::basic::bench::report(std::span<Arm>(arms), kRepeats);
 }

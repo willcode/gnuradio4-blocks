@@ -163,6 +163,48 @@ const boost::ut::suite<"SimpleSquelch"> simpleSquelchTests = [] {
         expect(!block.unmuted.value);
     };
 
+    "a run of exact zeros leaves the detector at zero, not at a subnormal"_test = [] {
+        // The detector keeps a double, so a squelched stream has to stay silent a long time to walk it into the
+        // subnormals: at the default alpha = 1e-4 it takes 7 083 610 samples, some 148 s at 48 kHz. Only the pole sets
+        // the count, so the case runs at alpha = 1e-2, where it is 70 485, and the property is the same one.
+        constexpr std::size_t kZeros = 80000UZ;
+
+        SimpleSquelch<float>     block = makeBlock<SimpleSquelch<float>>({{"alpha", 1e-2}, {"threshold_db", -150.0}});
+        const std::vector<float> loud(1000UZ, 1.f);
+        std::ignore = run<float>(block, std::span<const float>(loud));
+        expect(gt(block._detector._power, 0.9)) << "the average is up before the silence starts";
+
+        const std::vector<float> zeros(kZeros, 0.f);
+        const std::vector<float> got = run<float>(block, std::span<const float>(zeros), 4096UZ);
+
+        expect(eq(std::fpclassify(block._detector._power), FP_ZERO)) << "the tracked power is exactly zero, not the smallest subnormal";
+        expect(eq(std::ranges::count_if(got, [](float sample) { return std::fpclassify(sample) == FP_SUBNORMAL; }), std::ptrdiff_t{0})) << "and no output on the run is subnormal";
+    };
+
+    "the flush changes nothing above the subnormal range"_test = [] {
+        // The recursion as it stood, sample by sample against the block, over a step and the decay that follows it. At
+        // alpha = 0.5 the state passes 1e-300 after 997 zeros and cannot be flushed before 1022, so every sample
+        // compared here is one the flush had no part in.
+        constexpr double      kAlpha = 0.5;
+        constexpr std::size_t kStep  = 8UZ;
+        constexpr std::size_t kDecay = 997UZ;
+
+        SimpleSquelch<float> block     = makeBlock<SimpleSquelch<float>>({{"alpha", kAlpha}, {"threshold_db", -150.0}});
+        double               reference = 0.0;
+        bool                 identical = true;
+
+        for (std::size_t i = 0UZ; i < kStep + kDecay; ++i) {
+            const float sample = i < kStep ? 1.f : 0.f;
+            reference          = (1.0 - kAlpha) * reference + kAlpha * static_cast<double>(sample) * static_cast<double>(sample);
+
+            float made  = 0.f;
+            std::ignore = block.processBulk(std::span<const float>(&sample, 1UZ), std::span<float>(&made, 1UZ));
+            identical   = identical && block._detector._power == reference && made == (reference >= block._detector._threshold ? sample : 0.f);
+        }
+        expect(identical) << "state and output agree bit for bit with the unflushed recursion at every sample";
+        expect(lt(reference, 1e-300)) << "and the comparison ran until the state was below 1e-300";
+    };
+
     "nanoseconds per sample"_test = [] {
         if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
             return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
