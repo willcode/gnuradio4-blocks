@@ -18,6 +18,7 @@
 #include <gnuradio-4.0/algorithm/fourier/window.hpp>
 #include <gnuradio-4.0/measurement/Detectors.hpp>
 #include <gnuradio-4.0/measurement/SpectralEstimate.hpp>
+#include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_spectral {
 
@@ -610,6 +611,45 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         for (std::size_t r = 0UZ; r < std::min(slow.size(), quick.size()); ++r) {
             expect(eq(metaNumber(slow[r], "sample_start"), metaNumber(quick[r], "sample_start"))) << "record " << r << " lost its place in the stream";
         }
+    };
+
+    "a starved call says it lacks input rather than answering OK"_test = [] {
+        // `in.min_samples` does not keep an empty span away from this block: an asynchronous output port is by
+        // itself reason enough for the framework to run the block with no input at all, which is the path that
+        // lets a full accumulation flush. A call that neither takes nor makes anything and still answers OK tells
+        // the scheduler that it made progress, so the scheduler re-runs it at once and never parks -- and the
+        // framework's own zero-progress watch then names this block for a stall that is upstream of it.
+        const auto fresh = [] {
+            auto block = std::make_unique<WelchPsd<CF>>(gr::property_map{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});
+            block->settings().init();
+            std::ignore = block->settings().applyStagedParameters();
+            block->start();
+            return block;
+        };
+
+        std::vector<gr::DataSet<float>> room(4UZ);
+
+        auto                                                      starved = fresh();
+        gr::blocks::testing::span::InputSpan<CF>                  noInput{std::span<const CF>{}};
+        gr::blocks::testing::span::OutputSpan<gr::DataSet<float>> outEmpty{std::span<gr::DataSet<float>>(room)};
+        expect(starved->processBulk(noInput, outEmpty) == gr::work::Status::INSUFFICIENT_INPUT_ITEMS) << "an empty span is a lack of input, not progress";
+        expect(eq(outEmpty.count, 0UZ)) << "and nothing is published on that path";
+
+        // One sample is still nothing this block can use: it holds a sample back so the end-of-stream epilogue
+        // has a span to run on, which is what `in.min_samples = 2` asks the framework for.
+        const std::vector<CF>                                     single{CF{1.f, 0.f}};
+        gr::blocks::testing::span::InputSpan<CF>                  oneSample{std::span<const CF>(single)};
+        gr::blocks::testing::span::OutputSpan<gr::DataSet<float>> outOne{std::span<gr::DataSet<float>>(room)};
+        expect(starved->processBulk(oneSample, outOne) == gr::work::Status::INSUFFICIENT_INPUT_ITEMS) << "one sample is the held-back sample and nothing else";
+        expect(eq(oneSample.consumed, 0UZ)) << "and it stays in the buffer";
+
+        // A span it can work with answers OK, so the status distinguishes the two cases rather than reporting one.
+        auto                                                      fed     = fresh();
+        const std::vector<CF>                                     samples = tone(kFft + 1UZ, 32., kFft);
+        gr::blocks::testing::span::InputSpan<CF>                  hasInput{std::span<const CF>(samples)};
+        gr::blocks::testing::span::OutputSpan<gr::DataSet<float>> outFed{std::span<gr::DataSet<float>>(room)};
+        expect(fed->processBulk(hasInput, outFed) == gr::work::Status::OK) << "a span it can take from is progress";
+        expect(gt(hasInput.consumed, 0UZ)) << "and it took from it";
     };
 
     "a live setting restarts the accumulation and keeps the stream-absolute grid"_test = [] {
