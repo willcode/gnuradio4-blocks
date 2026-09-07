@@ -447,6 +447,11 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
      * When the output fills, the call publishes what it made, consumes what it took, and reports that it stopped for
      * want of output room, so a slow consumer stalls the input rather than growing a backlog inside this block;
      * `pending` therefore never holds more than one segment.
+     *
+     * A call that moves nothing reports why. `in.min_samples` does not keep the block from being handed an empty
+     * span: an asynchronous output port is reason enough for the framework to run the block with no input at all,
+     * which is what lets the accumulation flush, and a starved call that answered OK would say it had made progress
+     * and leave the scheduler spinning on it.
      */
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const detail::Progress progress = fold(inSpan, inSpan.size() > 0UZ ? inSpan.size() - 1UZ : 0UZ, outSpan);
@@ -457,7 +462,7 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
         }
         outSpan.publish(progress.made);
         std::ignore = inSpan.consume(progress.taken);
-        return work::Status::OK;
+        return progress.made == 0UZ && progress.taken == 0UZ ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::OK;
     }
 
     /// @brief End of stream: fold the trailing samples, then emit the accumulation in progress marked with the segment
@@ -593,7 +598,8 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
         in.min_samples = 2UZ; // as WelchPsd: a sample is held back so the end-of-stream epilogue has a span to run on
     }
 
-    /// @brief The no-record-lost invariant `WelchPsd` states, with every folded segment completing a record.
+    /// @brief The no-record-lost invariant `WelchPsd` states, with every folded segment completing a record, and the
+    /// same rule for a call that moves nothing: a starved call says so rather than answering OK.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const detail::Progress progress = fold(inSpan, inSpan.size() > 0UZ ? inSpan.size() - 1UZ : 0UZ, outSpan);
         if (progress.outputFull && progress.made == 0UZ && progress.taken == 0UZ) {
@@ -603,7 +609,7 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
         }
         outSpan.publish(progress.made);
         std::ignore = inSpan.consume(progress.taken);
-        return work::Status::OK;
+        return progress.made == 0UZ && progress.taken == 0UZ ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::OK;
     }
 
     /// @brief End of stream: fold whatever whole segments the trailing samples still complete.
