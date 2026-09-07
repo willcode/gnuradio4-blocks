@@ -1,10 +1,15 @@
 #include <boost/ut.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <numbers>
+#include <print>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/Graph.hpp>
@@ -359,6 +364,76 @@ const boost::ut::suite<"FmEmphasis"> fmEmphasisTests = [] {
         };
         expect(throws([&] { refused(-1e-6); }));
         expect(throws([&] { refused(std::numeric_limits<double>::quiet_NaN()); }));
+    };
+
+    "a run of exact zeros leaves the state at zero, not at a subnormal"_test = []<typename T> {
+        // A squelch upstream writes exact zeros, and the recursion then decays by the pole every sample: at 96 kHz and
+        // tau = 75 us, p = 0.8699, so a float state passes below its smallest normal after 627 samples and a double
+        // after 5083. Without the flush it lands on the smallest subnormal and stays there -- 1.4e-45 * 0.87 rounds
+        // back to 1.4e-45 -- and every sample after that costs an x86 microcode assist.
+        constexpr std::size_t kZeros = 8000UZ;
+
+        auto deemphasis  = makeDeemphasis<T>(96000.f, 75e-6);
+        auto preemphasis = makePreemphasis<T>(96000.f, 75e-6);
+        std::ignore      = filterOne<T>(deemphasis, T(1));
+        std::ignore      = filterOne<T>(preemphasis, T(1));
+
+        const std::vector<T> zeros(kZeros, T{});
+        std::vector<T>       deemphasized(kZeros);
+        std::vector<T>       preemphasized(kZeros);
+        std::ignore = deemphasis.processBulk(std::span<const T>(zeros), std::span<T>(deemphasized));
+        std::ignore = preemphasis.processBulk(std::span<const T>(zeros), std::span<T>(preemphasized));
+
+        expect(eq(std::fpclassify(deemphasis._lastOutput), FP_ZERO)) << "the de-emphasis state is exactly zero";
+        expect(eq(std::fpclassify(preemphasis._lastOutput), FP_ZERO)) << "the pre-emphasis state is exactly zero";
+        expect(eq(std::fpclassify(deemphasized.back()), FP_ZERO)) << "and so is what it puts out";
+        expect(eq(std::fpclassify(preemphasized.back()), FP_ZERO));
+
+        const auto subnormals = [](const std::vector<T>& values) { return std::ranges::count_if(values, [](T value) { return std::fpclassify(value) == FP_SUBNORMAL; }); };
+        expect(eq(subnormals(deemphasized), std::ptrdiff_t{0})) << "no output on the run is subnormal";
+        expect(eq(subnormals(preemphasized), std::ptrdiff_t{0}));
+    } | std::tuple<float, double>{};
+
+    "nanoseconds per sample on a run of zeros"_test = [] {
+        if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
+            return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
+        }
+        using Clock = std::chrono::steady_clock;
+
+        constexpr std::size_t    kZeros = 100000UZ;
+        constexpr int            kRuns  = 5;
+        const std::vector<float> zeros(kZeros, 0.f);
+        std::vector<float>       output(kZeros);
+
+        const auto section = gr::blocks::analog::detail::designDeemphasis(96000.0, 75e-6);
+        const auto b0      = static_cast<float>(section.b0);
+        const auto b1      = static_cast<float>(section.b1);
+        const auto p       = static_cast<float>(section.p);
+
+        double without = 1e30;
+        for (int run = 0; run < kRuns; ++run) { // the recursion as it stood, so the assists are what the two arms differ by
+            float      lastInput  = 0.f;
+            float      lastOutput = 1.f;
+            const auto start      = Clock::now();
+            for (std::size_t i = 0UZ; i < kZeros; ++i) {
+                const float sample = zeros[i];
+                lastOutput         = b0 * sample + b1 * lastInput + p * lastOutput;
+                lastInput          = sample;
+                output[i]          = lastOutput;
+            }
+            without = std::min(without, static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(kZeros));
+        }
+        expect(eq(std::fpclassify(output.back()), FP_SUBNORMAL)) << "the arm without the flush ends on a subnormal, which is the cost being measured";
+
+        double with = 1e30;
+        for (int run = 0; run < kRuns; ++run) {
+            auto block       = makeDeemphasis<float>(96000.f, 75e-6);
+            std::ignore      = filterOne<float>(block, 1.f);
+            const auto start = Clock::now();
+            std::ignore      = block.processBulk(std::span<const float>(zeros), std::span<float>(output));
+            with             = std::min(with, static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(kZeros));
+        }
+        std::println("FmDeemphasis<float>, {} zeros after a signal: {:.3f} ns/sample without the flush, {:.3f} ns/sample with it", kZeros, without, with);
     };
 };
 
