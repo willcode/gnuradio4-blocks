@@ -603,6 +603,71 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         expect(eq(test::run(real, std::span<const float>(audio), 333UZ).samples.size(), audio.size())) << "and the real port runs the same code on x^2";
     };
 
+    "a run of exact zeros leaves both trackers at zero, not at a subnormal"_test = [] {
+        // Both trackers keep a double, so the silence that walks one into the subnormals is long: at the default pole
+        // (0.01 s at 96 kHz, alpha = 1.0411e-3) the power needs 680 061 samples and the duty, whose pole is ten times
+        // slower, 6.7 million. Only the pole sets the count, so the case runs at alpha = 0.1, where the power needs
+        // 6 724 samples and the duty, from a half, 70 416.
+        constexpr std::size_t kZeros = 80000UZ;
+
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 0.0}, {"alpha", 0.1}});
+        block._warmup          = 0UZ;
+        block._power           = 1.0; // where a settled tracker on unit-power noise sits
+        block._duty            = 0.5; // and where a run of impulses leaves the duty
+
+        const std::vector<CF>  zeros(kZeros, CF{});
+        const test::Result<CF> got = test::run(block, std::span<const CF>(zeros), 4096UZ);
+
+        expect(eq(std::fpclassify(block._power), FP_ZERO)) << "the tracked power is exactly zero, not the smallest subnormal";
+        expect(eq(std::fpclassify(block._duty), FP_ZERO)) << "and so is the duty, ten times slower to get there and flushed all the same";
+        const auto subnormal = [](CF sample) { return std::fpclassify(sample.real()) == FP_SUBNORMAL || std::fpclassify(sample.imag()) == FP_SUBNORMAL; };
+        expect(eq(std::ranges::count_if(got.samples, subnormal), std::ptrdiff_t{0})) << "and no output on the run is subnormal";
+    };
+
+    "the flush changes nothing above the subnormal range"_test = [] {
+        // The two recursions as they stood, sample by sample against the block, over a step of unit magnitude and the
+        // decay that follows it. The seeded reference power is exactly the step's power, so nothing is ever detected
+        // and no window ever opens: both updates run unconditionally and the mirror is exact. At alpha = 0.5 the power
+        // passes 1e-300 after 997 zeros and cannot be flushed before 1022; the duty, at a tenth of that pole, passes
+        // 1e-300 at sample 13 454 and cannot be flushed before 13 798.
+        constexpr double      kAlpha = 0.5;
+        constexpr std::size_t kStep  = 8UZ;
+        constexpr std::size_t kTotal = 13454UZ;
+
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 0.0}, {"alpha", kAlpha}});
+        block._warmup          = 0UZ;
+        block._power           = 1.0;
+        block._duty            = 0.5;
+
+        double      power        = block._power;
+        double      duty         = block._duty;
+        std::size_t powerSamples = 0UZ;
+        bool        identical    = true;
+
+        for (std::size_t i = 0UZ; i < kTotal && identical; ++i) {
+            const CF     sample = i < kStep ? CF(1.f, 0.f) : CF{};
+            const double p      = static_cast<double>(sample.real()) * static_cast<double>(sample.real()) + static_cast<double>(sample.imag()) * static_cast<double>(sample.imag());
+            const bool   above  = power >= 1e-300;
+            power += kAlpha * (p - power);
+            duty += 0.1 * kAlpha * (0.0 - duty);
+
+            CF                   made = CF(1.f, 1.f);
+            test::InputSpan<CF>  inSpan(std::span<const CF>(&sample, 1UZ), i);
+            test::OutputSpan<CF> outSpan(std::span<CF>(&made, 1UZ), i);
+            std::ignore = block.processBulk(inSpan, outSpan);
+
+            const CF want = i >= 9UZ && i < kStep + 9UZ ? CF(1.f, 0.f) : CF{}; // nothing is marked, so the output is the input delayed by nine
+            identical     = identical && block._duty == duty && made == want;
+            if (above) {
+                identical    = identical && block._power == power;
+                powerSamples = i + 1UZ;
+            }
+        }
+        expect(identical) << "both states and the output agree bit for bit with the unflushed recursions at every sample";
+        expect(lt(power, 1e-300) && lt(duty, 1e-300)) << "and the comparison ran until each state was below 1e-300";
+        expect(eq(powerSamples, kStep + 997UZ)) << "the power crossing 1e-300 where its pole says, well before it could be flushed";
+    };
+
     "the per-sample cost stays inside the recorded budget"_test = [] {
         if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
             return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
@@ -639,7 +704,12 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             }
         }
         std::println("NoiseBlanker<complex<float>> {:.3f} ns/sample (spread {:.3f}), span copy {:.3f}", best, worst - best, floorBest);
-        expect(lt(best, 9.0)) << std::format("the detector loop alone measures 3.94 at the baseline ISA and the whole block 7.8; this run reads {:.3f}", best);
+        // The 3.94 and 7.8 this bound was first written from are bm_NoiseBlanker's figures, and bm_NoiseBlanker builds
+        // at the build type's level; a test executable builds at -O1, where the same block reads 16.66 pinned, so the
+        // bound never held here. It is re-anchored at what this binary measures: 17.31 pinned with the subnormal
+        // flush, 16.66 without it, against 9.51 and 7.76 for the same pair at -O3. Read bm_NoiseBlanker for the cost a
+        // receiver pays; this bound only has to catch a change of shape.
+        expect(lt(best, 22.0)) << std::format("the block measures 17.31 at -O1 and 9.51 at -O3; this run reads {:.3f}", best);
     };
 };
 

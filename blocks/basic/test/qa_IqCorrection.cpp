@@ -449,6 +449,65 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         }
     };
 
+    "a run of exact zeros leaves the estimate at zero, not at a subnormal"_test = [] {
+        // The estimate is a double and the pole at a device rate is very close to one: at 10 MS/s with tau = 1 s,
+        // alpha = 1e-7, and an estimate of 0.05 needs 7 054 006 510 zeros - 705 s of stream - to reach the smallest
+        // normal. Only the pole sets the count, so the case runs at tau*fs = 9, where alpha = 0.1 and the count is
+        // 6 696 for a real component at 0.05 and 6 691 for an imaginary one at 0.03.
+        constexpr float       kRate  = 96000.f;
+        constexpr std::size_t kZeros = 8000UZ;
+
+        DcOffsetCorrect<CF> block = make<DcOffsetCorrect<CF>>({{"enabled", true}, {"sample_rate", kRate}, {"tau", tauFor(0.1, static_cast<double>(kRate))}});
+        std::ignore               = drive(block, std::span<const CF>(flat(500UZ, CF(0.05f, 0.03f))), 4096UZ);
+        expect(approx(block.dcEstimate().real(), 0.05, 1e-6) && approx(block.dcEstimate().imag(), 0.03, 1e-6)) << "both components are tracking before the silence starts";
+
+        const std::vector<CF> got = drive(block, std::span<const CF>(flat(kZeros, CF{})), 4096UZ);
+
+        expect(eq(std::fpclassify(block.dcEstimate().real()), FP_ZERO)) << "the real estimate is exactly zero, not the smallest subnormal";
+        expect(eq(std::fpclassify(block.dcEstimate().imag()), FP_ZERO)) << "and so is the imaginary one, the two being flushed separately";
+
+        // The port is float, so the output underflows to exactly zero once the estimate passes 7e-46, some 160 samples
+        // into the decay and long before the double state reaches its own smallest normal: the float subnormals on the
+        // way through 1e-40 are the estimate genuinely passing through that range. What the tail must not hold is a
+        // subnormal left behind by a state that stopped decaying.
+        const std::span<const CF> tail      = std::span<const CF>(got).last(kZeros / 2UZ);
+        const auto                subnormal = [](CF sample) { return std::fpclassify(sample.real()) == FP_SUBNORMAL || std::fpclassify(sample.imag()) == FP_SUBNORMAL; };
+        expect(eq(std::ranges::count_if(tail, subnormal), std::ptrdiff_t{0})) << "no output in the tail is subnormal";
+        expect(std::ranges::all_of(tail, [](CF sample) { return sample == CF{}; })) << "every one of them is exactly zero";
+    };
+
+    "the flush changes nothing above the subnormal range"_test = [] {
+        // The recursion as it stood, sample by sample against the block, over a step and the decay that follows it.
+        // The comparison stops as soon as both components are below 1e-300, which at alpha = 0.1 is some 6 528 zeros,
+        // while the flush cannot fire before 6 696: every sample compared is one the flush had no part in, and the
+        // final estimate being non-zero says so.
+        constexpr float       kRate = 96000.f;
+        constexpr std::size_t kStep = 500UZ;
+
+        DcOffsetCorrect<CF> block = make<DcOffsetCorrect<CF>>({{"enabled", true}, {"sample_rate", kRate}, {"tau", tauFor(0.1, static_cast<double>(kRate))}});
+        const double        alpha = block._alpha; // the block's own coefficients, so only the flush can differ
+        const double        rest  = block._oneMinusAlpha;
+
+        double      real      = 0.0;
+        double      imag      = 0.0;
+        std::size_t compared  = 0UZ;
+        bool        identical = true;
+        while (identical && compared < 20000UZ && (compared < kStep || real >= 1e-300 || imag >= 1e-300)) {
+            const CF     sample = compared < kStep ? CF(0.05f, 0.03f) : CF{};
+            const double x      = static_cast<double>(sample.real());
+            const double y      = static_cast<double>(sample.imag());
+            real                = alpha * x + rest * real;
+            imag                = alpha * y + rest * imag;
+
+            const CF made = block.processOne(sample);
+            identical     = block.dcEstimate().real() == real && block.dcEstimate().imag() == imag && made == CF(static_cast<float>(x - real), static_cast<float>(y - imag));
+            ++compared;
+        }
+        expect(identical) << std::format("the estimate and the output agree bit for bit with the unflushed recursion at every sample, {} of them", compared);
+        expect(lt(real, 1e-300) && lt(imag, 1e-300)) << "and the comparison ran until both components were below 1e-300";
+        expect(neq(block.dcEstimate().real(), 0.0) && neq(block.dcEstimate().imag(), 0.0)) << "with the flush still not fired, so none of it was flushed arithmetic";
+    };
+
     "the cost floor"_test = [] {
         using Clock                   = std::chrono::steady_clock;
         constexpr std::size_t kLength = 1UZ << 22;
@@ -517,7 +576,13 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         // A block pays one more store-to-load forward on the loop-carried estimate than the same two lines over locals
         // do, because its state lives in an object the compiler cannot promote to registers: about half as much again
         // per sample, which is the margin these bounds leave.
-        expect(lt(best[4UZ], pinned ? 6.0 : 12.0)) << std::format("DcOffsetCorrect enabled at {:.3f} ns/sample; the reference measurement is 5.26 and the arithmetic alone 3.24", best[4UZ]);
+        //
+        // These are -O1 figures, the level GR_QA_OPTIMIZATION_LEVEL pins for test executables, and -O1 charges the
+        // subnormal flush's two compares and two conditional stores about 3.7 ns of the enabled arm: the reference
+        // measurement went from 5.26 to 9.0 when the flush was added, with the arithmetic alone at 3.24. That is a
+        // property of the level, not of the block. bm_IqCorrection, built at the level the block ships at, has the
+        // same flush costing 0.7 ns of 3.8, and it is the figure to read for what a receiver pays.
+        expect(lt(best[4UZ], pinned ? 11.0 : 18.0)) << std::format("DcOffsetCorrect enabled at {:.3f} ns/sample; the reference measurement is 9.0 with the flush and 5.26 without it", best[4UZ]);
     };
 };
 

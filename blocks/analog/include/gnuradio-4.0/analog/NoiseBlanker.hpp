@@ -7,6 +7,7 @@
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -210,6 +211,9 @@ private:
         }
         if (!windowOpen && !detected && enabled) {
             _power += _alpha * (power - _power);
+            if (_power < std::numeric_limits<double>::min()) {
+                _power = 0.0; // a pole below one decays a silent input into subnormals and stays there; each one costs a microcode assist
+            }
         }
 
         _cursor        = _cursor + 1UZ == _ring ? 0UZ : _cursor + 1UZ;
@@ -229,6 +233,9 @@ private:
         _marked[_cursor] = marked ? std::uint8_t{1} : std::uint8_t{0};
         _windowLength    = marked ? _windowLength + 1U : 0U;
         _duty += 0.1 * _alpha * ((marked ? 1.0 : 0.0) - _duty); // ten tracker time constants: a 0.17 % duty needs a longer average than the power does
+        if (_duty < std::numeric_limits<double>::min()) {
+            _duty = 0.0; // the same decay into the subnormals as the power, ten times slower
+        }
 
         if (detected && windowOpen && retrigger) {
             const std::uint32_t room = _windowLength > static_cast<std::uint32_t>(_maxWindow) ? 0U : static_cast<std::uint32_t>(_maxWindow) + 1U - _windowLength;
