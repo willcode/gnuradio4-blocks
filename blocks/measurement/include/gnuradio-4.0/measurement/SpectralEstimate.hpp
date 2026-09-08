@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -68,6 +69,11 @@ struct SegmentAccumulator {
     std::uint64_t streamAt      = 0ULL; ///< absolute index of `pending`'s first sample
     std::uint64_t recordStartAt = 0ULL; ///< absolute index of the first segment in the accumulator
     std::uint64_t gridStart     = 0ULL; ///< absolute index the window grid in force was anchored at, which the record states
+
+    /// Wall clock the record in progress has cost so far, summed over the segments folded into it and measured on
+    /// `steady_clock`, so a transform spread over a thread pool the caller waits on is counted whole. It excludes the
+    /// time the block spent waiting for input, which is the stream's rate and not the block's cost.
+    double costSeconds = 0.;
 
     [[nodiscard]] std::size_t bins() const noexcept { return kRealInput ? fftSize / 2UZ + 1UZ : fftSize; }
 
@@ -148,10 +154,12 @@ struct SegmentAccumulator {
         restart();
     }
 
-    /// @brief Fold one whole segment out of `pending` into the accumulator.
+    /// @brief Fold one whole segment out of `pending` into the accumulator, adding what it cost to `costSeconds`.
     void accumulateFront() {
+        const auto started = std::chrono::steady_clock::now();
         if (segments == 0UZ) {
             recordStartAt = streamAt;
+            costSeconds   = 0.;
         }
         for (std::size_t k = 0UZ; k < fftSize; ++k) {
             if constexpr (kRealInput) {
@@ -179,6 +187,8 @@ struct SegmentAccumulator {
         pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(advance));
         streamAt += advance;
         skipping = hop - advance;
+
+        costSeconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     }
 
     /// @brief The record the accumulator currently holds, averaged by the segments that actually contributed.
@@ -209,6 +219,9 @@ struct Progress {
 /// @brief The fraction a segment shares with the next at a stated hop: zero once the hop reaches the whole transform,
 /// and zero again for a hop that leaves a gap, since disjoint segments share nothing however far apart they sit.
 [[nodiscard]] inline double overlapAt(std::size_t fftSize, std::size_t hop) noexcept { return hop >= fftSize ? 0.0 : 1.0 - static_cast<double>(hop) / static_cast<double>(fftSize); }
+
+/// @brief Seconds of wall clock elapsed since a steady-clock reading.
+[[nodiscard]] inline double secondsSince(std::chrono::steady_clock::time_point since) noexcept { return std::chrono::duration<double>(std::chrono::steady_clock::now() - since).count(); }
 
 /// @brief The record every block in this module emits, on the tier's §0 conventions.
 template<typename Real>
@@ -275,6 +288,19 @@ template<typename Real>
     ds.timing_events.resize(1UZ);
     ds.timestamp = 0;
     return ds;
+}
+
+/// @brief State on a built record what computing it cost, in seconds of wall clock, under the key `compute_seconds`.
+///
+/// The figure covers the windowing, the transform, the power accumulation and the assembly of the record, summed over
+/// every segment the record is made of, and it is wall clock rather than processor time because a transform given more
+/// than one thread runs on a pool the calling thread waits on: only a wall-clock reading around the whole computation
+/// covers what the record cost. Time the block spent waiting for input is not in it, so the figure states the block's
+/// own cost and not the rate of the stream. It is written after the record is built because building it is part of
+/// that cost, and it is a `double` in seconds, linear, as every other figure on these records is.
+template<typename Real>
+inline void stateComputeSeconds(DataSet<Real>& ds, double seconds) {
+    ds.meta_information[0UZ].insert_or_assign(std::pmr::string("compute_seconds"), pmt::Value(seconds));
 }
 
 /// The transform lengths both blocks accept, stated once because both validate against them. The ceiling is the
@@ -388,11 +414,16 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
  * block's cost -- a long length at a hop that leaves the machine busy. `center_frequency` says in hertz where the
  * zero of the record's baseband axis sits and is carried in the record beside `sample_rate`, so a consumer places
  * the record on an absolute axis without parsing a name; a receiver may retune mid-record and keep it.
+ *
+ * Every record states what computing it cost as `compute_seconds`: the windowing, the transform, the accumulation and
+ * the record's own assembly, summed over the segments the record averages. The reading is wall clock, so a transform
+ * spread over a thread pool the calling thread waits on is counted whole, and it excludes the wait for input, so a
+ * consumer pacing itself by what the block costs reads that rather than the rate of the stream.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
-    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start, and every setting the accumulation depends on restarts the accumulation in progress">;
+    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start, and every setting the accumulation depends on restarts the accumulation in progress. every record states the wall clock computing it cost, as compute_seconds">;
     using Real        = float;
 
     PortIn<T>                     in;
@@ -553,9 +584,14 @@ private:
     }
 
     [[nodiscard]] DataSet<Real> emit() {
+        const auto          assembly = std::chrono::steady_clock::now();
+        const double        folded   = _core.costSeconds;
         const std::size_t   averaged = _core.segments;
         const std::uint64_t startAt  = _core.recordStartAt;
-        return detail::makeSpectralRecord<Real>(_core.take(), sample_rate, center_frequency, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.hop, _core.scale.enbwBins, window.value, _core.shape, _core.gridStart, signal_name.value);
+
+        DataSet<Real> record = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, center_frequency, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.hop, _core.scale.enbwBins, window.value, _core.shape, _core.gridStart, signal_name.value);
+        detail::stateComputeSeconds(record, folded + detail::secondsSince(assembly));
+        return record;
     }
 };
 
@@ -584,11 +620,14 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::Spectrogram, [T], [ float, std::compl
  * thread produces, and the setting re-applies without disturbing the grid or the buffered samples. `center_frequency`
  * likewise states in hertz where the baseband axis's zero sits and is carried in the record beside `sample_rate`.
  * Neither is a setting a row depends on, so neither re-anchors the grid.
+ *
+ * A row states what computing it cost as `compute_seconds`, on the definition `WelchPsd` states: wall clock around the
+ * whole computation of the row, the wait for input excluded.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
-    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start">;
+    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start. every record states the wall clock computing it cost, as compute_seconds">;
     using Real        = float;
 
     PortIn<T>                     in;
@@ -676,6 +715,15 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
     }
 
 private:
+    [[nodiscard]] DataSet<Real> emit(std::uint64_t startAt) {
+        const auto   assembly = std::chrono::steady_clock::now();
+        const double folded   = _core.costSeconds;
+
+        DataSet<Real> record = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, center_frequency, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, _core.hop, _core.scale.enbwBins, window.value, _core.shape, _core.gridStart, signal_name.value);
+        detail::stateComputeSeconds(record, folded + detail::secondsSince(assembly));
+        return record;
+    }
+
     [[nodiscard]] detail::Progress fold(InputSpanLike auto& inSpan, std::size_t offer, OutputSpanLike auto& outSpan) {
         detail::Progress progress{};
         for (;;) {
@@ -686,7 +734,7 @@ private:
                 }
                 const std::uint64_t startAt = _core.streamAt;
                 _core.accumulateFront();
-                outSpan[progress.made] = detail::makeSpectralRecord<Real>(_core.take(), sample_rate, center_frequency, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, _core.hop, _core.scale.enbwBins, window.value, _core.shape, _core.gridStart, signal_name.value);
+                outSpan[progress.made] = emit(startAt);
                 ++progress.made;
                 continue;
             }
