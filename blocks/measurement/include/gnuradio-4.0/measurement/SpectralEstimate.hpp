@@ -419,29 +419,35 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
  * the record's own assembly, summed over the segments the record averages. The reading is wall clock, so a transform
  * spread over a thread pool the calling thread waits on is counted whole, and it excludes the wait for input, so a
  * consumer pacing itself by what the block costs reads that rather than the rate of the stream.
+ *
+ * `one_record_per_call` holds the input span to the effective hop, which is the least stream advance a record can be
+ * made of, so a work call emits at most one record and a record consumer is handed them one at a time rather than in
+ * bursts. It is on by default and its price is a scheduler visit a record, which is worth paying wherever a record
+ * costs more than a visit and is not where the hop is a few hundred samples.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
-    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start, and every setting the accumulation depends on restarts the accumulation in progress. every record states the wall clock computing it cost, as compute_seconds">;
+    using Description = Doc<"Welch averaged power spectral density: overlapping windowed segments accumulated in power, one calibrated DataSet record per n_averages segments. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one segment out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start, and every setting the accumulation depends on restarts the accumulation in progress. every record states the wall clock computing it cost, as compute_seconds. one_record_per_call holds the input span to one hop, so a work call emits at most one record">;
     using Real        = float;
 
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 4194304]; live, and a change re-anchors the window grid">>                                                                                     fft_size         = 1024U;
-    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                                                                        window           = std::string("Hann");
-    Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">>            window_param     = 0.f;
-    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                                                                     overlap          = 0.5;
-    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per transform; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">> hop              = 0U;
-    Annotated<gr::Size_t, "n_averages", Visible, Doc<"segments per emitted record; 1 is a bare periodogram">>                                                                                                                               n_averages       = 16U;
-    Annotated<std::string, "mode", Visible, Doc<"mean or max_hold">>                                                                                                                                                                        mode             = std::string("mean");
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                                                                            sample_rate      = 1.f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                                                                          signal_name      = std::string("psd");
-    Annotated<double, "center_frequency", Visible, Unit<"Hz">, Doc<"the frequency the record's baseband axis is centered on, carried in the record beside sample_rate. Live, and it restarts nothing">>                                     center_frequency = 0.;
-    Annotated<gr::Size_t, "threads", Visible, Doc<"threads one transform may use; 1 keeps it on the calling thread. Above 1 a long power-of-two length is split over them, clamped to the machine. Live on its own">>                       threads          = 1U;
+    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 4194304]; live, and a change re-anchors the window grid">>                                                                                                                                                   fft_size            = 1024U;
+    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                                                                                                                                      window              = std::string("Hann");
+    Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">>                                                                          window_param        = 0.f;
+    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                                                                                                                                   overlap             = 0.5;
+    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per transform; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">>                                                               hop                 = 0U;
+    Annotated<gr::Size_t, "n_averages", Visible, Doc<"segments per emitted record; 1 is a bare periodogram">>                                                                                                                                                                                             n_averages          = 16U;
+    Annotated<std::string, "mode", Visible, Doc<"mean or max_hold">>                                                                                                                                                                                                                                      mode                = std::string("mean");
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                                                                                                                                          sample_rate         = 1.f;
+    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                                                                                                                                        signal_name         = std::string("psd");
+    Annotated<double, "center_frequency", Visible, Unit<"Hz">, Doc<"the frequency the record's baseband axis is centered on, carried in the record beside sample_rate. Live, and it restarts nothing">>                                                                                                   center_frequency    = 0.;
+    Annotated<gr::Size_t, "threads", Visible, Doc<"threads one transform may use; 1 keeps it on the calling thread. Above 1 a long power-of-two length is split over them, clamped to the machine. Live on its own">>                                                                                     threads             = 1U;
+    Annotated<bool, "one_record_per_call", Visible, Doc<"hold the input span to one hop, so a work call emits at most one record and a consumer is handed records one at a time. Off, a call emits as many records as its span and the output allow, which costs fewer scheduler visits at a small hop">> one_record_per_call = true;
 
-    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, window_param, overlap, hop, n_averages, mode, sample_rate, signal_name, threads, center_frequency);
+    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, window_param, overlap, hop, n_averages, mode, sample_rate, signal_name, threads, center_frequency, one_record_per_call);
 
     detail::SegmentAccumulator<T> _core{};
     bool                          _flushed      = false;
@@ -464,39 +470,42 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
         // Only these change what the accumulator is; `signal_name` on its own must not restart an average in progress.
         static constexpr std::array kRebuildKeys{"fft_size", "window", "window_param", "overlap", "hop", "n_averages", "mode", "sample_rate"};
         const bool                  built = !_core.window.empty();
-        if (built && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            return;
-        }
+        if (!built || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+            detail::requireFftSize(fft_size);
+            detail::requireOverlap(overlap);
+            detail::requireSampleRate(sample_rate);
+            if (n_averages.value == 0U) {
+                throw gr::exception("n_averages counts the segments an estimate is made of and must be at least 1");
+            }
+            if (mode.value != "mean" && mode.value != "max_hold") {
+                throw gr::exception(std::format("mode must be 'mean' or 'max_hold', got '{}'", mode.value));
+            }
+            const auto windowType  = detail::requireWindow(window.value);
+            const auto windowShape = detail::windowParamFor(windowType, window_param);
 
-        detail::requireFftSize(fft_size);
-        detail::requireOverlap(overlap);
-        detail::requireSampleRate(sample_rate);
-        if (n_averages.value == 0U) {
-            throw gr::exception("n_averages counts the segments an estimate is made of and must be at least 1");
+            const std::size_t size       = static_cast<std::size_t>(fft_size.value);
+            const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
+            const bool        holdMode   = mode.value == "max_hold";
+            if (!built) {
+                _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
+                _flushed = false;
+            } else if (fft_size.value != _builtFftSize) {
+                // A new transform length under a running stream: the transform, the window and the buffers are rebuilt
+                // at the next segment boundary, which is where the block always is between calls, and the accumulation
+                // in progress is dropped rather than finished at two resolutions. Nothing is lost - `pending` and the
+                // stream position survive - and the record's `grid_start` states where the new grid was anchored.
+                _core.rebuild(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
+            } else {
+                _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
+            }
+            _builtFftSize = fft_size;
         }
-        if (mode.value != "mean" && mode.value != "max_hold") {
-            throw gr::exception(std::format("mode must be 'mean' or 'max_hold', got '{}'", mode.value));
-        }
-        const auto windowType  = detail::requireWindow(window.value);
-        const auto windowShape = detail::windowParamFor(windowType, window_param);
-
-        const std::size_t size       = static_cast<std::size_t>(fft_size.value);
-        const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
-        const bool        holdMode   = mode.value == "max_hold";
-        if (!built) {
-            _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
-            _flushed = false;
-        } else if (fft_size.value != _builtFftSize) {
-            // A new transform length under a running stream: the transform, the window and the buffers are rebuilt at
-            // the next segment boundary, which is where the block always is between calls, and the accumulation in
-            // progress is dropped rather than finished at two resolutions. Nothing is lost - `pending` and the stream
-            // position survive - and the record's `grid_start` states where the new grid was anchored.
-            _core.rebuild(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
-        } else {
-            _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
-        }
-        _builtFftSize = fft_size;
+        capInput();
     }
+
+    /// @brief Hold the input span to the effective hop, which is the least stream advance a record can be made of, so
+    /// a work call folds at most one record. Uncapped, the port takes whatever the edge offers.
+    void capInput() { in.max_samples = one_record_per_call ? std::max(_core.hop, 2UZ) : std::numeric_limits<std::size_t>::max(); }
 
     void start() {
         _core.reset();
@@ -622,28 +631,30 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::Spectrogram, [T], [ float, std::compl
  * Neither is a setting a row depends on, so neither re-anchors the grid.
  *
  * A row states what computing it cost as `compute_seconds`, on the definition `WelchPsd` states: wall clock around the
- * whole computation of the row, the wait for input excluded.
+ * whole computation of the row, the wait for input excluded. `one_record_per_call` holds the input span to one hop on
+ * the same terms, so a work call emits at most one row.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
-    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start. every record states the wall clock computing it cost, as compute_seconds">;
+    using Description = Doc<"Spectrogram: one calibrated power spectral density record per windowed transform, timestamped by the hop it came from. Values are linear power per hertz referred to a full-scale sine. hop above fft_size transforms one row out of every hop samples and consumes the rest untouched. every setting is live: a change to fft_size rebuilds the transform and re-anchors the grid, stated in the record's grid_start. every record states the wall clock computing it cost, as compute_seconds. one_record_per_call holds the input span to one hop, so a work call emits at most one record">;
     using Real        = float;
 
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 4194304]; live, and a change re-anchors the window grid">>                                                                               fft_size         = 1024U;
-    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                                                                  window           = std::string("Hann");
-    Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">>      window_param     = 0.f;
-    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                                                               overlap          = 0.5;
-    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per row; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">> hop              = 0U;
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                                                                      sample_rate      = 1.f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                                                                    signal_name      = std::string("spectrogram");
-    Annotated<double, "center_frequency", Visible, Unit<"Hz">, Doc<"the frequency the record's baseband axis is centered on, carried in the record beside sample_rate. Live, and it restarts nothing">>                               center_frequency = 0.;
-    Annotated<gr::Size_t, "threads", Visible, Doc<"threads one transform may use; 1 keeps it on the calling thread. Above 1 a long power-of-two length is split over them, clamped to the machine. Live on its own">>                 threads          = 1U;
+    Annotated<gr::Size_t, "fft_size", Visible, Doc<"transform length, a power of two in [64, 4194304]; live, and a change re-anchors the window grid">>                                                                                                                                          fft_size            = 1024U;
+    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                                                                                                                             window              = std::string("Hann");
+    Annotated<float, "window_param", Visible, Doc<"the window's shape parameter: Kaiser beta, Tukey alpha, Gaussian sigma, Exponential decay in dB; 0 or NaN takes the window's own default and every other window ignores it">>                                                                 window_param        = 0.f;
+    Annotated<double, "overlap", Visible, Doc<"fraction of a segment shared with the next, in [0, 1)">>                                                                                                                                                                                          overlap             = 0.5;
+    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples the grid advances per row; 0 takes the hop from overlap. Above fft_size the block transforms fft_size of every hop samples and consumes the rest untouched">>                                                            hop                 = 0U;
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's axis">>                                                                                                                                                                                 sample_rate         = 1.f;
+    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                                                                                                                               signal_name         = std::string("spectrogram");
+    Annotated<double, "center_frequency", Visible, Unit<"Hz">, Doc<"the frequency the record's baseband axis is centered on, carried in the record beside sample_rate. Live, and it restarts nothing">>                                                                                          center_frequency    = 0.;
+    Annotated<gr::Size_t, "threads", Visible, Doc<"threads one transform may use; 1 keeps it on the calling thread. Above 1 a long power-of-two length is split over them, clamped to the machine. Live on its own">>                                                                            threads             = 1U;
+    Annotated<bool, "one_record_per_call", Visible, Doc<"hold the input span to one hop, so a work call emits at most one row and a consumer is handed rows one at a time. Off, a call emits as many rows as its span and the output allow, which costs fewer scheduler visits at a small hop">> one_record_per_call = true;
 
-    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, window_param, overlap, hop, sample_rate, signal_name, threads, center_frequency);
+    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, window_param, overlap, hop, sample_rate, signal_name, threads, center_frequency, one_record_per_call);
 
     detail::SegmentAccumulator<T> _core{};
     gr::Size_t                    _builtFftSize = 0U; ///< the length the current transform and window were built for
@@ -664,29 +675,32 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
 
         static constexpr std::array kRebuildKeys{"fft_size", "window", "window_param", "overlap", "hop", "sample_rate"};
         const bool                  built = !_core.window.empty();
-        if (built && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            return;
-        }
+        if (!built || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+            detail::requireFftSize(fft_size);
+            detail::requireOverlap(overlap);
+            detail::requireSampleRate(sample_rate);
+            const auto windowType  = detail::requireWindow(window.value);
+            const auto windowShape = detail::windowParamFor(windowType, window_param);
 
-        detail::requireFftSize(fft_size);
-        detail::requireOverlap(overlap);
-        detail::requireSampleRate(sample_rate);
-        const auto windowType  = detail::requireWindow(window.value);
-        const auto windowShape = detail::windowParamFor(windowType, window_param);
-
-        const std::size_t size       = static_cast<std::size_t>(fft_size.value);
-        const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
-        if (!built) {
-            _core.configure(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
-        } else if (fft_size.value != _builtFftSize) {
-            // A row is one whole transform, so there is never a partial estimate to lose here; what a live length
-            // change costs is the grid anchor, which the record states as `grid_start`.
-            _core.rebuild(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
-        } else {
-            _core.reconfigure(hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+            const std::size_t size       = static_cast<std::size_t>(fft_size.value);
+            const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
+            if (!built) {
+                _core.configure(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+            } else if (fft_size.value != _builtFftSize) {
+                // A row is one whole transform, so there is never a partial estimate to lose here; what a live length
+                // change costs is the grid anchor, which the record states as `grid_start`.
+                _core.rebuild(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+            } else {
+                _core.reconfigure(hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+            }
+            _builtFftSize = fft_size;
         }
-        _builtFftSize = fft_size;
+        capInput();
     }
+
+    /// @brief Hold the input span to the effective hop, as `WelchPsd` does: a row is one hop of stream, so a capped
+    /// work call folds at most one.
+    void capInput() { in.max_samples = one_record_per_call ? std::max(_core.hop, 2UZ) : std::numeric_limits<std::size_t>::max(); }
 
     void start() {
         _core.reset();
