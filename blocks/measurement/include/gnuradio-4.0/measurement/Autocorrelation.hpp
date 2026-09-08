@@ -160,7 +160,11 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
     std::atomic<std::uint64_t> _nRateRefused{0ULL};
     std::atomic<std::uint64_t> _nTailDropped{0ULL};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { applySettings(); }
+
+    /// @brief Derives the kernel from the members. Idempotent, so `start()` runs it for a construction that moved
+    /// no value and therefore called back nowhere.
+    void applySettings() {
         detail::requireAcfWindowLength(window_length);
         detail::requireAcfLag(max_lag, window_length);
         detail::requireOverlap(overlap);
@@ -237,6 +241,9 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
     }
 
     void start() {
+        if (!_configured) { // a construction whose values all matched the defaults called back nowhere
+            applySettings();
+        }
         _kernel.reset();
         _pending.clear();
         _sequence  = 0ULL;
