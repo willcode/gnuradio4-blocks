@@ -296,7 +296,6 @@ struct CfarDetect : Block<CfarDetect, NoTagPropagation> {
 
     GR_MAKE_REFLECTABLE(CfarDetect, in, out, n_train, n_guard, pfa);
 
-    double                         _alpha = 0.;
     std::vector<detail::Detection> _found{};
     std::atomic<std::uint64_t>     _records{0ULL};
     std::atomic<std::uint64_t>     _emptyResults{0ULL};
@@ -308,8 +307,6 @@ struct CfarDetect : Block<CfarDetect, NoTagPropagation> {
         if (!(pfa > 0.0) || !(pfa < 1.0)) {
             throw gr::exception(std::format("pfa is a probability and must lie in (0, 1), got {}", pfa.value));
         }
-        const double n = 2. * static_cast<double>(n_train.value);
-        _alpha         = n * (std::pow(pfa.value, -1. / n) - 1.);
     }
 
     void start() {
@@ -336,7 +333,11 @@ struct CfarDetect : Block<CfarDetect, NoTagPropagation> {
     }
 
     /// @brief The multiplier the design false-alarm rate implies, exposed so a graph can state what it is running at.
-    [[nodiscard]] double alpha() const noexcept { return _alpha; }
+    /// Derived from the members on every read, so it is what `n_train` and `pfa` say whether or not either moved.
+    [[nodiscard]] double alpha() const noexcept {
+        const double n = 2. * static_cast<double>(n_train.value);
+        return n * (std::pow(pfa.value, -1. / n) - 1.);
+    }
 
     /// @brief The cells a record of `bins` bins actually tests — the denominator of a measured false-alarm rate.
     [[nodiscard]] std::size_t testableCells(std::size_t bins) const noexcept {
@@ -363,6 +364,7 @@ private:
         if (values.size() <= 2UZ * margin || !std::isfinite(step)) {
             return;
         }
+        const double threshold = alpha(); // one pow per record, against the O(bins * n_train) sweep below
         for (std::size_t k = margin; k + margin < values.size(); ++k) {
             double noise = 0.;
             for (std::size_t t = 0UZ; t < train; ++t) {
@@ -370,7 +372,7 @@ private:
                 noise += static_cast<double>(values[k + guard + 1UZ + t]);
             }
             noise /= 2. * static_cast<double>(train);
-            if (static_cast<double>(values[k]) > _alpha * noise) {
+            if (static_cast<double>(values[k]) > threshold * noise) {
                 _found.push_back(detail::Detection{
                     .frequencyHz = record.axis_values[0UZ][k],
                     .levelDb     = gr::algorithm::fft::powerToDb(values[k]),
