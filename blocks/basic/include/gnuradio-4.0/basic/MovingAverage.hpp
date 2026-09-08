@@ -65,7 +65,13 @@ uncompensated: the first `length - 1` outputs are partial-window sums over a zer
     std::uint64_t             _offset   = 0ULL;
     bool                      _reseed   = true;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+    /// The window is sized from the members, and a batch that moves no value never calls back, so a block
+    /// constructed at its declared defaults is born with the history and the accumulator it describes.
+    explicit MovingAverage(property_map init = {}) : Block<MovingAverage<T>>(std::move(init)) { configure(); }
+
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
+
+    void configure() {
         if (length < 1U || reseed_interval < 1U || vlen < 1U) {
             throw gr::exception(std::format("length ({}), reseed_interval ({}) and vlen ({}) must all be at least one", length.value, reseed_interval.value, vlen.value));
         }
@@ -101,6 +107,13 @@ uncompensated: the first `length - 1` outputs are partial-window sums over a zer
 
 private:
     void grow(std::size_t capacity) {
+        const std::size_t width = static_cast<std::size_t>(vlen.value);
+        if (_history.size() != _capacity * width) { // the element width moved, so the stored past is not this shape
+            _history.assign(capacity * width, T{});
+            _cursor   = 0UZ;
+            _capacity = capacity;
+            return;
+        }
         if (capacity <= _capacity) {
             return;
         }
