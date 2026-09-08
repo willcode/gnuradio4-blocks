@@ -72,12 +72,17 @@ struct RecordSink : gr::Block<RecordSink> {
 
     std::vector<gr::DataSet<float>> records{};
     std::size_t                     stride = std::numeric_limits<std::size_t>::max();
+    std::size_t                     seen   = 0UZ;  ///< records taken, which `keep` does not change
+    bool                            keep   = true; ///< off drops what arrives, so a rate measurement is not a memory one
 
     GR_MAKE_REFLECTABLE(RecordSink, in);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
         const std::size_t take = std::min(inSpan.size(), stride);
-        records.insert(records.end(), inSpan.begin(), inSpan.begin() + static_cast<std::ptrdiff_t>(take));
+        if (keep) {
+            records.insert(records.end(), inSpan.begin(), inSpan.begin() + static_cast<std::ptrdiff_t>(take));
+        }
+        seen += take;
         std::ignore = inSpan.consume(take);
         return gr::work::Status::OK;
     }
@@ -299,6 +304,28 @@ template<typename TBlock>
     const double outside = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 
     return {sink.records.empty() ? -1. : metaNumber(sink.records.front(), "compute_seconds", -1.), outside};
+}
+
+/// @brief The records a second one graph made, and how many it made: a fixed stream through one block into a sink that
+/// drops what it is handed. What the input cap costs is the difference between two of these.
+template<typename TBlock>
+[[nodiscard]] std::pair<double, std::size_t> recordRate(gr::property_map settings, std::size_t samples) {
+    gr::test::RuntimeTest test;
+    auto&                 source = test.emplace<BurstSource<CF>>();
+    auto&                 block  = test.emplace<TBlock>(std::move(settings));
+    auto&                 sink   = test.emplace<RecordSink>();
+    source.samples.assign(samples, CF{0.7f, 0.2f});
+    source.burst = 65536UZ;
+    sink.keep    = false;
+
+    if (!test.connect(source, "out", block, "in").has_value() || !test.connect(block, "out", sink, "in").has_value()) {
+        return {0., 0UZ};
+    }
+    const auto started   = std::chrono::steady_clock::now();
+    std::ignore          = test.run();
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+    return {elapsed > 0. ? static_cast<double>(sink.seen) / elapsed : 0., sink.seen};
 }
 
 } // namespace qa_spectral
@@ -1183,6 +1210,102 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
 
         check("WelchPsd", oneRecordGraphCost<WelchPsd<CF>>({{"fft_size", static_cast<gr::Size_t>(kSize)}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}}, kSize));
         check("Spectrogram", oneRecordGraphCost<Spectrogram<CF>>({{"fft_size", static_cast<gr::Size_t>(kSize)}, {"overlap", 0.0}, {"sample_rate", kSampleRate}}, kSize));
+    };
+
+    // A record is made of at least one hop of stream, so a span of one hop cannot complete two of them. The cap is
+    // therefore the effective hop, which only the block knows: a hop of zero takes its value from `overlap`, and a
+    // stated hop may sit either side of the transform length.
+    "the input span is held to one hop, so a work call makes at most one record"_test = [] {
+        const auto live = [](auto& target, gr::property_map changes) {
+            std::ignore = target.settings().set(std::move(changes));
+            std::ignore = target.settings().activateContext();
+            std::ignore = target.settings().applyStagedParameters();
+        };
+        const auto started = [](auto& target) {
+            target.settings().init();
+            std::ignore = target.settings().applyStagedParameters();
+            target.start();
+        };
+        const auto recordsInOneCall = [](auto& target, std::size_t span) {
+            const std::vector<CF>                                     samples = tone(span, 32., kFft);
+            std::vector<gr::DataSet<float>>                           room(64UZ);
+            gr::blocks::testing::span::InputSpan<CF>                  in{std::span<const CF>(samples)};
+            gr::blocks::testing::span::OutputSpan<gr::DataSet<float>> out{std::span<gr::DataSet<float>>(room)};
+            std::ignore = target.processBulk(in, out);
+            return out.count;
+        };
+        // Four calls of exactly the cap: the most any one of them made, and what they made between them, so a cap that
+        // held by making nothing at all is not mistaken for one that paced the records.
+        const auto overFourCalls = [&recordsInOneCall](auto& target) {
+            std::size_t most  = 0UZ;
+            std::size_t total = 0UZ;
+            for (std::size_t call = 0UZ; call < 4UZ; ++call) {
+                const std::size_t made = recordsInOneCall(target, target.in.max_samples);
+                most                   = std::max(most, made);
+                total += made;
+            }
+            return std::pair{most, total};
+        };
+
+        WelchPsd<CF> block({{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});
+        started(block);
+        expect(eq(block.in.max_samples, kFft)) << "at zero overlap the hop is the whole transform";
+        const auto [mostAtHop, totalAtHop] = overFourCalls(block);
+        expect(eq(mostAtHop, 1UZ)) << "a span of one hop completes one record and cannot complete two";
+        expect(totalAtHop >= 3UZ) << "and the calls did make records";
+
+        live(block, {{"overlap", 0.5}});
+        expect(eq(block.in.max_samples, kFft / 2UZ)) << "a live overlap change moves the effective hop and the cap follows it";
+
+        live(block, {{"hop", gr::Size_t{4U * kFft}}});
+        expect(eq(block.in.max_samples, 4UZ * kFft)) << "a stated hop above the transform is the cap";
+        const auto [mostAtGap, totalAtGap] = overFourCalls(block);
+        expect(eq(mostAtGap, 1UZ)) << "a hop that leaves a gap is still one record a call";
+        expect(totalAtGap >= 3UZ) << "and those calls made records too";
+
+        live(block, {{"one_record_per_call", false}});
+        expect(eq(block.in.max_samples, std::numeric_limits<std::size_t>::max())) << "turning the cap off releases the span";
+
+        WelchPsd<CF> uncapped({{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}, {"one_record_per_call", false}});
+        started(uncapped);
+        expect(recordsInOneCall(uncapped, 8UZ * kFft) > 1UZ) << "an uncapped call makes as many records as its span and the output allow";
+
+        Spectrogram<CF> rows({{"fft_size", gr::Size_t{kFft}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});
+        started(rows);
+        expect(eq(rows.in.max_samples, kFft)) << "the spectrogram's fold has the same shape and takes the same cap";
+        const auto [mostRows, totalRows] = overFourCalls(rows);
+        expect(eq(mostRows, 1UZ)) << "so a call makes at most one row";
+        expect(totalRows >= 3UZ) << "and the rows are made";
+    };
+
+    "what the input cap costs at a small hop and at a large one"_test = [] {
+        constexpr std::size_t kSmallStream = 1UZ << 19UZ;
+        constexpr std::size_t kLargeStream = 8UZ << 20UZ;
+
+        const auto smallHop = [](bool capped) { return recordRate<WelchPsd<CF>>({{"fft_size", gr::Size_t{512U}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{256U}}, {"sample_rate", kSampleRate}, {"one_record_per_call", capped}}, kSmallStream); };
+        const auto largeHop = [](bool capped) { return recordRate<WelchPsd<CF>>({{"fft_size", gr::Size_t{8192U}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{1U << 20U}}, {"sample_rate", kSampleRate}, {"one_record_per_call", capped}}, kLargeStream); };
+
+        // The two arms are interleaved and the best of each is taken, because the second of two separate runs inherits
+        // a machine the first warmed and a rate read that way is a reading of the order they were run in.
+        const auto compare = [](std::string_view name, auto shape) {
+            double      on       = 0.;
+            double      off      = 0.;
+            std::size_t onCount  = 0UZ;
+            std::size_t offCount = 0UZ;
+            for (std::size_t rep = 0UZ; rep < 3UZ; ++rep) {
+                const auto [onRate, onMade]   = shape(true);
+                const auto [offRate, offMade] = shape(false);
+                on                            = std::max(on, onRate);
+                off                           = std::max(off, offRate);
+                onCount                       = onMade;
+                offCount                      = offMade;
+            }
+            std::println("input cap, {}: {:.1f} records/s capped, {:.1f} uncapped, best of three interleaved, {} records a run", name, on, off, onCount);
+            expect(eq(onCount, offCount)) << name << ": the cap changes the pacing of the records and not which records are made";
+        };
+
+        compare("hop 256 at 512 points", smallHop);
+        compare("hop 1048576 at 8192 points", largeHop);
     };
 };
 
