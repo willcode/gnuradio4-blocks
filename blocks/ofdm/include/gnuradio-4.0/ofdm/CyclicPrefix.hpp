@@ -280,8 +280,14 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         static constexpr std::array kRebuildKeys{"fft_len", "cp_len", "timing_offset"};
         if (!_cut.empty() && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            return;
+            return; // a cost hint only: the cut is built from the members, never from what the callback was handed
         }
+        rebuild();
+    }
+
+    /// @brief Builds the cut, the transform buffers and the record shape from the members. Idempotent, so `start()`
+    /// runs it for a construction that moved no value and so never called back.
+    void rebuild() {
         detail::requireFftLength(fft_len);
         detail::requireCyclicPrefix(std::span<const gr::Size_t>(cp_len.value), fft_len);
 
@@ -303,6 +309,7 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     }
 
     void start() {
+        rebuild();
         _collecting    = false;
         _have          = 0UZ;
         _symbolInFrame = 0UZ;
