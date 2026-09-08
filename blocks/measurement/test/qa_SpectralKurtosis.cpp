@@ -395,19 +395,19 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
 
         {
             std::vector<gr::DataSet<float>> rows{spectrum({1.f, 2.f, 3.f}, 1ULL, 0.5)};
-            for (std::size_t k = 0UZ; k < 4UZ; ++k) {
+            for (std::size_t k = 0UZ; k < 8UZ; ++k) {
                 rows.push_back(clean);
             }
-            const Run r = runWith({{"n_spectra", gr::Size_t{4U}}, {"shape", gr::Size_t{1U}}}, rows);
+            const Run r = runWith({{"n_spectra", gr::Size_t{8U}}, {"shape", gr::Size_t{1U}}}, rows);
             expect(eq(r.nRefusedRecords, std::uint64_t{1ULL})) << "the overlapping record must be refused and counted";
-            expect(eq(r.records.size(), 1UZ)) << "the four remaining records still complete the n_spectra=4 accumulation";
+            expect(eq(r.records.size(), 1UZ)) << "the eight remaining records still complete the n_spectra=8 accumulation";
         }
         {
             std::vector<gr::DataSet<float>> rows{withoutMeta(clean, "overlap")};
-            for (std::size_t k = 0UZ; k < 4UZ; ++k) {
+            for (std::size_t k = 0UZ; k < 8UZ; ++k) {
                 rows.push_back(clean);
             }
-            const Run r = runWith({{"n_spectra", gr::Size_t{4U}}, {"shape", gr::Size_t{1U}}}, rows);
+            const Run r = runWith({{"n_spectra", gr::Size_t{8U}}, {"shape", gr::Size_t{1U}}}, rows);
             expect(eq(r.nRefusedRecords, std::uint64_t{1ULL})) << "a producer that states no overlap has not said its spectra are independent";
             expect(eq(r.records.size(), 1UZ));
         }
@@ -431,32 +431,32 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         { // the producer's own shape moves mid-accumulation: what was folded is discarded and only that record refused
             std::vector<gr::DataSet<float>> rows = repeated(shape1, 2UZ);
             rows.push_back(shape4);
-            for (const auto& row : repeated(shape4, 4UZ)) {
+            for (const auto& row : repeated(shape4, 8UZ)) {
                 rows.push_back(row);
             }
-            const Run r = runWith({{"n_spectra", gr::Size_t{4U}}}, rows);
+            const Run r = runWith({{"n_spectra", gr::Size_t{8U}}}, rows);
             expect(eq(r.nRefusedRecords, std::uint64_t{1ULL})) << "only the record that disagreed is refused";
-            expect(eq(r.records.size(), 1UZ)) << "the four records at the new shape complete a fresh accumulation";
+            expect(eq(r.records.size(), 1UZ)) << "the eight records at the new shape complete a fresh accumulation";
             if (!r.records.empty()) {
                 expect(eq(metaNumber(r.records.front(), "shape"), 4.)) << "and that record is measured under the new shape";
             }
         }
         { // a power that is not a power
             std::vector<gr::DataSet<float>> rows{spectrum({1.f, -1.f, 3.f, 4.f}, 1ULL, 0.0)};
-            for (const auto& row : repeated(shape1, 4UZ)) {
+            for (const auto& row : repeated(shape1, 8UZ)) {
                 rows.push_back(row);
             }
-            const Run r = runWith({{"n_spectra", gr::Size_t{4U}}}, rows);
+            const Run r = runWith({{"n_spectra", gr::Size_t{8U}}}, rows);
             expect(eq(r.nRefusedRecords, std::uint64_t{1ULL})) << "a negative bin refuses the record and folds nothing";
             expect(eq(r.records.size(), 1UZ));
         }
         { // a bin count that does not match the accumulation in progress
             std::vector<gr::DataSet<float>> rows = repeated(shape1, 2UZ);
             rows.push_back(spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0));
-            for (const auto& row : repeated(spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0), 4UZ)) {
+            for (const auto& row : repeated(spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0), 8UZ)) {
                 rows.push_back(row);
             }
-            const Run r = runWith({{"n_spectra", gr::Size_t{4U}}}, rows);
+            const Run r = runWith({{"n_spectra", gr::Size_t{8U}}}, rows);
             expect(eq(r.nRefusedRecords, std::uint64_t{1ULL}));
             expect(eq(r.records.size(), 1UZ));
             if (!r.records.empty()) {
