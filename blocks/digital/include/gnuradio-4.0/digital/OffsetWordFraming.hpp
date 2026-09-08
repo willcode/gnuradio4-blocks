@@ -191,7 +191,11 @@ begins a new group, so a relock upstream cannot splice two half groups into one 
     std::uint64_t              _sequence = 0ULL;
     std::uint64_t              _dropped  = 0ULL;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+
+    void start() { rebuild(); }
+
+    void rebuild() {
         if (group_size < 1U) {
             throw gr::exception("group_size must be at least one");
         }
@@ -210,6 +214,11 @@ begins a new group, so a relock upstream cannot splice two half groups into one 
     [[nodiscard]] std::uint64_t droppedGroups() const noexcept { return _dropped; }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
+        if (_words.size() != static_cast<std::size_t>(group_size.value)) { // unconfigured: inert rather than placing a word in a group that was never sized
+            std::ignore = inSpan.consume(0UZ);
+            outSpan.publish(0UZ);
+            return work::Status::ERROR;
+        }
         const property_map::key_type nameKey{gr::tag::TRIGGER_NAME.shortKey()};
         const property_map::key_type metaKey{gr::tag::TRIGGER_META_INFO.shortKey()};
         const auto                   size = static_cast<std::size_t>(group_size.value);
