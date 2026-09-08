@@ -76,14 +76,22 @@ what it had.
     std::atomic<double>         _floorLinear{1e-20};
     std::atomic<double>         _floorDb{-200.0};
 
+    /// The window is sized from the members, and a batch that moves no value never calls back, so a block
+    /// constructed at its declared defaults is born with the window its settings describe.
+    explicit PowerMeter(property_map init = {}) : Block<PowerMeter<T>>(std::move(init)) { configure(); }
+
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         _floorDb.store(floor_db, std::memory_order_relaxed);
         _floorLinear.store(std::pow(10.0, floor_db / 10.0), std::memory_order_relaxed);
 
         static constexpr std::array kRebuildKeys{"sample_rate", "window_time", "segments"};
-        if (!_segments.empty() && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+        if (!std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
             return; // floor_db alone changes the clamp and nothing else
         }
+        configure();
+    }
+
+    void configure() {
         if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
             throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
         }
