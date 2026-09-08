@@ -452,7 +452,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         expect(throws([&] { refused({{"overlap", -0.1}}); }));
         expect(throws([&] { refused({{"kind", std::string("envelop")}}); }));
         expect(throws([&] { refused({{"normalization", std::string("none")}}); }));
-        expect(throws([&] { refused({{"window", std::string("HannExp")}}); }));
+        expect(throws([&] { refused({{"window", std::string("NotAWindow")}}); }));
         expect(throws([&] { refused({{"false_alarm_rate", 0.0}}); }));
         expect(throws([&] { refused({{"sample_rate", 0.f}}); }));
 
@@ -464,6 +464,25 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
             const std::string what(error.what());
             expect(what.find("4096") != std::string::npos && what.find("1024") != std::string::npos) << std::format("the message names both values: {}", what);
         }
+    };
+
+    // HannExp is a deprecated name for Hann in the window vocabulary, so it is accepted and produces Hann's records
+    "the window named HannExp is the Hann window"_test = [] {
+        const std::vector<CF> input = complexNoise(20000UZ, 0x3333ULL);
+        const auto            run   = [&input](std::string windowName) { //
+            return collect<CF>({{"window_length", gr::Size_t(1024)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(2)}, {"sample_rate", 48000.f}, {"window", std::move(windowName)}}, input);
+        };
+
+        const Run<CF> hann    = run("Hann");
+        const Run<CF> aliased = run("HannExp");
+
+        expect(fatal(ge(hann.records.size(), 1UZ))) << "the stream is long enough for at least one record";
+        expect(fatal(eq(aliased.records.size(), hann.records.size())));
+        for (std::size_t index = 0UZ; index < hann.records.size(); ++index) {
+            expect(std::ranges::equal(aliased.records[index].signal_values, hann.records[index].signal_values)) << std::format("record {} holds the Hann record", index);
+            expect(std::ranges::equal(aliased.records[index].axis_values[0UZ], hann.records[index].axis_values[0UZ])) << std::format("record {} carries the Hann lag axis", index);
+        }
+        expect(metaText(aliased.records[0UZ], "window") == std::string("HannExp")) << "the record names the window the settings named";
     };
 
     "criterion 14: the staged-restart keys refuse while the block runs and move once it is stopped"_test = [] {
