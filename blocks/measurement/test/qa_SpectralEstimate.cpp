@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -8,6 +9,7 @@
 #include <numbers>
 #include <print>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <boost/ut.hpp>
@@ -244,6 +246,59 @@ template<typename TBlock>
         }
     }
     return static_cast<double>(detections.signal_values[best]) * static_cast<double>(fftSize) / static_cast<double>(sampleRate);
+}
+
+/// @brief What a record states its computation cost, beside the wall clock of the single `processBulk` call that
+/// produced it. The call brackets everything the stated figure covers and a little more — the segment's copy into the
+/// accumulator's buffer and the span bookkeeping — so a truthful figure lies inside the call and is a large part of it.
+/// `settings` must name a length and whatever else makes one whole segment complete one record.
+///
+/// The reading is taken after `warmup` records, because the first record a block makes carries the transform's plan and
+/// the first touch of every buffer with it and states a cost tens of times the standing one.
+template<typename TBlock>
+[[nodiscard]] std::pair<double, double> oneRecordCost(gr::property_map settings, std::size_t fftSize, std::size_t warmup = 2UZ) {
+    TBlock block(std::move(settings));
+    block.settings().init();
+    std::ignore = block.settings().applyStagedParameters();
+    block.start();
+
+    const std::vector<CF>           samples = tone(fftSize + 1UZ, 32., fftSize);
+    std::vector<gr::DataSet<float>> room(2UZ);
+
+    std::pair<double, double> reading{-1., 0.};
+    for (std::size_t pass = 0UZ; pass <= warmup; ++pass) {
+        gr::blocks::testing::span::InputSpan<CF>                  in{std::span<const CF>(samples)};
+        gr::blocks::testing::span::OutputSpan<gr::DataSet<float>> out{std::span<gr::DataSet<float>>(room)};
+
+        const auto started   = std::chrono::steady_clock::now();
+        std::ignore          = block.processBulk(in, out);
+        const double outside = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+        reading = {out.count == 0UZ ? -1. : metaNumber(room[0UZ], "compute_seconds", -1.), outside};
+    }
+    return reading;
+}
+
+/// @brief The same two figures for a graph that runs one record end to end, which is the reading a consumer of the
+/// record can take for itself: the graph's wall clock carries the scheduler's start-up, the source's copies and the
+/// record's copy out to the sink as well as the block's own computation.
+template<typename TBlock>
+[[nodiscard]] std::pair<double, double> oneRecordGraphCost(gr::property_map settings, std::size_t fftSize) {
+    gr::test::RuntimeTest test;
+    auto&                 source = test.emplace<BurstSource<CF>>();
+    auto&                 block  = test.emplace<TBlock>(std::move(settings));
+    auto&                 sink   = test.emplace<RecordSink>();
+    source.samples               = tone(fftSize + 1UZ, 32., fftSize);
+    source.burst                 = 65536UZ;
+
+    if (!test.connect(source, "out", block, "in").has_value() || !test.connect(block, "out", sink, "in").has_value()) {
+        return {-1., 0.};
+    }
+    const auto started   = std::chrono::steady_clock::now();
+    std::ignore          = test.run();
+    const double outside = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+
+    return {sink.records.empty() ? -1. : metaNumber(sink.records.front(), "compute_seconds", -1.), outside};
 }
 
 } // namespace qa_spectral
@@ -1067,6 +1122,67 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         std::ignore = block.settings().applyStagedParameters();
         block.start();
         expect(eq(block._core.transform.threads, 2UZ)) << "the setting reaches the transform at construction";
+    };
+
+    // A consumer pacing itself by what a record costs the block cannot read that cost off the thread it waits on:
+    // above one thread the transform runs on a pool and the calling thread's processor clock stops counting it. The
+    // record states a wall-clock reading around its whole computation instead, which covers every thread.
+    "every record states the wall clock computing it cost"_test = [] {
+        const auto samples = tone(kFft * 16UZ, 32., kFft);
+
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{4U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}};
+        const auto             records = collect<WelchPsd<CF>, CF>(settings, samples, 4096UZ);
+        expect(records.size() >= 2UZ) << "the run has to make more than one record";
+        for (std::size_t r = 0UZ; r < records.size(); ++r) {
+            expect(metaNumber(records[r], "compute_seconds", -1.) > 0.) << std::format("record {} states no compute cost", r);
+        }
+
+        const auto rows = collect<Spectrogram<CF>, CF>({{"fft_size", gr::Size_t{kFft}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}}, samples, 4096UZ);
+        expect(rows.size() >= 2UZ) << "and so has the spectrogram's";
+        for (std::size_t r = 0UZ; r < rows.size(); ++r) {
+            expect(metaNumber(rows[r], "compute_seconds", -1.) > 0.) << std::format("row {} states no compute cost", r);
+        }
+    };
+
+    "the stated cost is the block's own compute, and grows with the transform"_test = [] {
+        const auto check = [](std::string_view name, auto costAt) {
+            constexpr std::size_t kShort = 1UZ << 10UZ;
+            constexpr std::size_t kLong  = 1UZ << 20UZ;
+            constexpr double      kShare = 0.25; // the least of a bare call's wall clock the computation may be
+
+            const auto [shortCost, shortCall] = costAt(kShort, gr::Size_t{1U});
+            const auto [longCost, longCall]   = costAt(kLong, gr::Size_t{1U});
+            const auto [manyCost, manyCall]   = costAt(kLong, gr::Size_t{4U});
+            std::println("{}: compute_seconds {:.6e} s at {} points (call {:.6e} s), {:.6e} s at {} points (call {:.6e} s), {:.6e} s on four threads (call {:.6e} s)", name, shortCost, kShort, shortCall, longCost, kLong, longCall, manyCost, manyCall);
+
+            expect(shortCost > 0. && longCost > 0.) << name << ": a record that cost nothing was not computed";
+            expect(shortCost <= shortCall && longCost <= longCall) << name << ": the figure is measured inside the call and cannot exceed it";
+            expect(shortCost >= kShare * shortCall && longCost >= kShare * longCall) << name << ": the computation is the bulk of what a bare call does";
+            expect(longCost > 10. * shortCost) << name << ": a transform a thousand times longer must cost more";
+            expect(manyCost > 0. && manyCost <= manyCall) << name << ": a threaded transform still states what the record cost";
+        };
+
+        check("WelchPsd", [](std::size_t size, gr::Size_t threads) { return oneRecordCost<WelchPsd<CF>>({{"fft_size", static_cast<gr::Size_t>(size)}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}, {"threads", threads}}, size); });
+        check("Spectrogram", [](std::size_t size, gr::Size_t threads) { return oneRecordCost<Spectrogram<CF>>({{"fft_size", static_cast<gr::Size_t>(size)}, {"overlap", 0.0}, {"sample_rate", kSampleRate}, {"threads", threads}}, size); });
+    };
+
+    // The reading a consumer can take for itself is the graph's own wall clock, and a record's figure is one part of
+    // it: the scheduler's start-up, the source's copies and the record's copy out to the sink are the rest.
+    "the stated cost is consistent with an outside reading of a single-record graph"_test = [] {
+        constexpr std::size_t kSize = 1UZ << 18UZ;
+
+        const auto check = [](std::string_view name, std::pair<double, double> reading) {
+            constexpr double kFloor = 0.02; // the least of a single-record graph's wall clock the record may state
+
+            const auto [cost, run] = reading;
+            std::println("{}: a single-record graph ran in {:.6e} s and its record states {:.6e} s", name, run, cost);
+            expect(cost > 0.) << name << ": the graph made a record and it states a cost";
+            expect(cost <= run) << name << ": a record cannot have cost more than the run that made it";
+            expect(cost >= kFloor * run) << name << ": and it is a stated fraction of that run";
+        };
+
+        check("WelchPsd", oneRecordGraphCost<WelchPsd<CF>>({{"fft_size", static_cast<gr::Size_t>(kSize)}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}}, kSize));
+        check("Spectrogram", oneRecordGraphCost<Spectrogram<CF>>({{"fft_size", static_cast<gr::Size_t>(kSize)}, {"overlap", 0.0}, {"sample_rate", kSampleRate}}, kSize));
     };
 };
 
