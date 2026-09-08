@@ -98,7 +98,7 @@ Processing Magazine, Mar. 2008, pp. 132-134.
     Annotated<gr::Size_t, "length", Doc<"boxcar length D; longer narrows the notch. Construction-time">>          length          = 32U;
     Annotated<bool, "long_form", Doc<"true: four boxcars and 2D-2 delay; false: two and D-1. Construction-time">> long_form       = true;
     Annotated<gr::Size_t, "reseed_interval", Doc<"absolute sample offsets that are a multiple reseed the sums">>  reseed_interval = 4096U;
-    Annotated<gr::Size_t, "group_delay", Doc<"read-only: D-1 for the short form, 2D-2 for the long one">>         group_delay     = 31U;
+    Annotated<gr::Size_t, "group_delay", Doc<"read-only: D-1 for the short form, 2D-2 for the long one">>         group_delay     = 62U;
 
     GR_MAKE_REFLECTABLE(DcBlocker, in, out, length, long_form, reseed_interval, group_delay);
 
@@ -111,11 +111,15 @@ Processing Magazine, Mar. 2008, pp. 132-134.
     gr::Size_t _builtLength{};   /// the length the current pipeline was built for
     bool       _builtLongForm{}; /// and the form
 
+    /// The pipeline is built from the members, and a batch that moves no value never calls back, so a block
+    /// constructed at its declared defaults is born with its boxcars and its delay line already in place.
+    explicit DcBlocker(property_map init = {}) : Block<DcBlocker<T>, UnfilteredTagPropagation>(std::move(init)) { build(); }
+
     void start() { _running = true; }
 
     void stop() { _running = false; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
         // The documented contract, now enforced. Rebuilding the pipeline mid-stream is not unsafe — `build()`
         // reassigns every buffer — but it discards the history and moves `group_delay`, so the block's latency
         // changes underneath whatever downstream was aligned against it, and there is no tag that says so. The
@@ -133,9 +137,8 @@ Processing Magazine, Mar. 2008, pp. 132-134.
         if (reseed_interval < 1U) {
             throw gr::exception(std::format("reseed_interval must be at least one, got {}", reseed_interval.value));
         }
-        group_delay = static_cast<gr::Size_t>(stageCount() / 2UZ * (static_cast<std::size_t>(length.value) - 1UZ));
-        if (!_stages.empty() && !newSettings.contains("length") && !newSettings.contains("long_form")) {
-            return; // only reseed_interval moved, and that does not touch the pipeline
+        if (length.value == _builtLength && long_form.value == _builtLongForm) {
+            return; // the pipeline already matches the members, so nothing that touches it moved
         }
         build();
     }
@@ -165,6 +168,7 @@ private:
     [[nodiscard]] std::size_t stageCount() const noexcept { return long_form ? 4UZ : 2UZ; }
 
     void build() {
+        group_delay = static_cast<gr::Size_t>(stageCount() / 2UZ * (static_cast<std::size_t>(length.value) - 1UZ));
         _stages.assign(stageCount(), detail::Boxcar<T>{});
         for (detail::Boxcar<T>& stage : _stages) {
             stage.configure(length);
