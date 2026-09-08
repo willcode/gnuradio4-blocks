@@ -133,7 +133,11 @@ reserved stream vocabulary moves with the sample it marks.
     std::atomic<std::uint64_t> _nReanchors{0ULL};
     std::atomic<std::uint64_t> _nRefusedAnchors{0ULL};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+
+    /// @brief Stages the schedule and cuts the bank from the members. Idempotent - it cuts only what the members no
+    /// longer describe - so `start()` may run it for a batch that moved nothing and so never called back.
+    void rebuild() {
         if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
             throw gr::exception(std::format("RangeDelay: 'sample_rate' must be positive and finite, got {}", sample_rate.value));
         }
@@ -156,8 +160,8 @@ reserved stream vocabulary moves with the sample it marks.
         Staged                           staged = stage(seat);
 
         const bool held    = _line.has_value();
-        const bool rebuild = !held || bank != _builtBank || order.value != _builtOrder || rolloff.value != _builtRolloff || attenuation_db.value != _builtAttenuationDb;
-        if (rebuild) {
+        const bool cutBank = !held || bank != _builtBank || order.value != _builtOrder || rolloff.value != _builtRolloff || attenuation_db.value != _builtAttenuationDb;
+        if (cutBank) {
             // The window length follows the prototype, so samples the line holds would not line up with the taps
             // that read them; the bank is the one change that costs the history, and the count says how often.
             const gr::filter::ResamplerDesign  design = gr::filter::designFractionalDelay(bank, rolloff.value, attenuation_db.value);
@@ -184,6 +188,9 @@ reserved stream vocabulary moves with the sample it marks.
     }
 
     void start() {
+        if (!_line) { // a batch that moved no value never called back, so the bank may not be cut yet
+            rebuild();
+        }
         _position = 0ULL;
         _anchor.reset();
         if (_line) {
