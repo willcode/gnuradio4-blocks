@@ -469,38 +469,44 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
 
         // Only these change what the accumulator is; `signal_name` on its own must not restart an average in progress.
         static constexpr std::array kRebuildKeys{"fft_size", "window", "window_param", "overlap", "hop", "n_averages", "mode", "sample_rate"};
-        const bool                  built = !_core.window.empty();
-        if (!built || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            detail::requireFftSize(fft_size);
-            detail::requireOverlap(overlap);
-            detail::requireSampleRate(sample_rate);
-            if (n_averages.value == 0U) {
-                throw gr::exception("n_averages counts the segments an estimate is made of and must be at least 1");
-            }
-            if (mode.value != "mean" && mode.value != "max_hold") {
-                throw gr::exception(std::format("mode must be 'mean' or 'max_hold', got '{}'", mode.value));
-            }
-            const auto windowType  = detail::requireWindow(window.value);
-            const auto windowShape = detail::windowParamFor(windowType, window_param);
-
-            const std::size_t size       = static_cast<std::size_t>(fft_size.value);
-            const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
-            const bool        holdMode   = mode.value == "max_hold";
-            if (!built) {
-                _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
-                _flushed = false;
-            } else if (fft_size.value != _builtFftSize) {
-                // A new transform length under a running stream: the transform, the window and the buffers are rebuilt
-                // at the next segment boundary, which is where the block always is between calls, and the accumulation
-                // in progress is dropped rather than finished at two resolutions. Nothing is lost - `pending` and the
-                // stream position survive - and the record's `grid_start` states where the new grid was anchored.
-                _core.rebuild(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
-            } else {
-                _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
-            }
-            _builtFftSize = fft_size;
+        if (_core.window.empty() || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+            buildCore();
         }
         capInput();
+    }
+
+    /// @brief Fits the accumulator to the members: a first build configures, a new length rebuilds, anything else
+    /// re-fits. Derived from the members and never from a key's presence, so `start()` can run it.
+    void buildCore() {
+        const bool built = !_core.window.empty();
+        detail::requireFftSize(fft_size);
+        detail::requireOverlap(overlap);
+        detail::requireSampleRate(sample_rate);
+        if (n_averages.value == 0U) {
+            throw gr::exception("n_averages counts the segments an estimate is made of and must be at least 1");
+        }
+        if (mode.value != "mean" && mode.value != "max_hold") {
+            throw gr::exception(std::format("mode must be 'mean' or 'max_hold', got '{}'", mode.value));
+        }
+        const auto windowType  = detail::requireWindow(window.value);
+        const auto windowShape = detail::windowParamFor(windowType, window_param);
+
+        const std::size_t size       = static_cast<std::size_t>(fft_size.value);
+        const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
+        const bool        holdMode   = mode.value == "max_hold";
+        if (!built) {
+            _core.configure(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
+            _flushed = false;
+        } else if (fft_size.value != _builtFftSize) {
+            // A new transform length under a running stream: the transform, the window and the buffers are rebuilt
+            // at the next segment boundary, which is where the block always is between calls, and the accumulation
+            // in progress is dropped rather than finished at two resolutions. Nothing is lost - `pending` and the
+            // stream position survive - and the record's `grid_start` states where the new grid was anchored.
+            _core.rebuild(size, hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
+        } else {
+            _core.reconfigure(hopSamples, static_cast<std::size_t>(n_averages.value), holdMode, windowType, windowShape, sample_rate);
+        }
+        _builtFftSize = fft_size;
     }
 
     /// @brief Hold the input span to the effective hop, which is the least stream advance a record can be made of, so
@@ -508,8 +514,12 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
     void capInput() { in.max_samples = one_record_per_call ? std::max(_core.hop, 2UZ) : std::numeric_limits<std::size_t>::max(); }
 
     void start() {
+        if (_core.window.empty()) { // a construction whose values all matched the defaults called back nowhere
+            buildCore();
+        }
         _core.reset();
         _flushed = false;
+        capInput();
         // The framework runs `processEpilogue` only over a non-empty trailing span, and that epilogue is what flushes
         // a partial accumulation at end of stream. `processBulk` therefore always leaves one sample unconsumed, and
         // asking for two keeps that from stalling the steady state.
@@ -674,28 +684,33 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
         }
 
         static constexpr std::array kRebuildKeys{"fft_size", "window", "window_param", "overlap", "hop", "sample_rate"};
-        const bool                  built = !_core.window.empty();
-        if (!built || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            detail::requireFftSize(fft_size);
-            detail::requireOverlap(overlap);
-            detail::requireSampleRate(sample_rate);
-            const auto windowType  = detail::requireWindow(window.value);
-            const auto windowShape = detail::windowParamFor(windowType, window_param);
-
-            const std::size_t size       = static_cast<std::size_t>(fft_size.value);
-            const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
-            if (!built) {
-                _core.configure(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
-            } else if (fft_size.value != _builtFftSize) {
-                // A row is one whole transform, so there is never a partial estimate to lose here; what a live length
-                // change costs is the grid anchor, which the record states as `grid_start`.
-                _core.rebuild(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
-            } else {
-                _core.reconfigure(hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
-            }
-            _builtFftSize = fft_size;
+        if (_core.window.empty() || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+            buildCore();
         }
         capInput();
+    }
+
+    /// @brief As `WelchPsd::buildCore`: the accumulator follows the members, so `start()` can run it.
+    void buildCore() {
+        const bool built = !_core.window.empty();
+        detail::requireFftSize(fft_size);
+        detail::requireOverlap(overlap);
+        detail::requireSampleRate(sample_rate);
+        const auto windowType  = detail::requireWindow(window.value);
+        const auto windowShape = detail::windowParamFor(windowType, window_param);
+
+        const std::size_t size       = static_cast<std::size_t>(fft_size.value);
+        const std::size_t hopSamples = detail::hopFrom(size, overlap, hop);
+        if (!built) {
+            _core.configure(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+        } else if (fft_size.value != _builtFftSize) {
+            // A row is one whole transform, so there is never a partial estimate to lose here; what a live length
+            // change costs is the grid anchor, which the record states as `grid_start`.
+            _core.rebuild(size, hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+        } else {
+            _core.reconfigure(hopSamples, 1UZ, false, windowType, windowShape, sample_rate);
+        }
+        _builtFftSize = fft_size;
     }
 
     /// @brief Hold the input span to the effective hop, as `WelchPsd` does: a row is one hop of stream, so a capped
@@ -703,7 +718,11 @@ struct Spectrogram : Block<Spectrogram<T>, NoTagPropagation> {
     void capInput() { in.max_samples = one_record_per_call ? std::max(_core.hop, 2UZ) : std::numeric_limits<std::size_t>::max(); }
 
     void start() {
+        if (_core.window.empty()) { // a construction whose values all matched the defaults called back nowhere
+            buildCore();
+        }
         _core.reset();
+        capInput();
         in.min_samples = 2UZ; // as WelchPsd: a sample is held back so the end-of-stream epilogue has a span to run on
     }
 
