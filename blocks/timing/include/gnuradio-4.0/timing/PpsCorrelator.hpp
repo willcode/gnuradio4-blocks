@@ -127,9 +127,11 @@ two-point linear sub-sample interpolation, or from the trigger tags a PPS source
     std::array<double, kSlotValues> _values{};
     std::uint64_t                   _intervals{0ULL};
 
-    std::vector<double> _window{};        ///< the last accepted figures, a ring
-    std::size_t         _windowAt{0UZ};   ///< where the next accepted figure lands
-    std::size_t         _windowFill{0UZ}; ///< how much of the ring is written
+    /// The ring is as long as `n_intervals` says, from construction on: a batch that moves no value never calls back.
+    std::vector<double> _window = std::vector<double>(static_cast<std::size_t>(n_intervals.value), 0.);
+
+    std::size_t _windowAt{0UZ};   ///< where the next accepted figure lands
+    std::size_t _windowFill{0UZ}; ///< how much of the ring is written
 
     double        _previousEdge{0.}; ///< position of the edge that opened the current interval
     bool          _haveEdge{false};
@@ -158,7 +160,6 @@ two-point linear sub-sample interpolation, or from the trigger tags a PPS source
         }
         _source          = detail::parseEdgeSource(edge_source);
         _nominalInterval = sample_rate * pps_interval;
-        _window.assign(static_cast<std::size_t>(n_intervals.value), 0.);
         reset();
     }
 
@@ -170,7 +171,7 @@ two-point linear sub-sample interpolation, or from the trigger tags a PPS source
         _intervals  = 0ULL;
         _windowAt   = 0UZ;
         _windowFill = 0UZ;
-        std::ranges::fill(_window, 0.);
+        _window.assign(static_cast<std::size_t>(n_intervals.value), 0.); // sized from the member, so a batch that never called back still leaves a ring
         _previousEdge  = 0.;
         _haveEdge      = false;
         _lastMagnitude = 0.;
