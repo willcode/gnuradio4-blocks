@@ -115,6 +115,11 @@ runs at rather than the rate the bank was fed.
     std::size_t                         _channels = 4UZ;
     std::size_t                         _stride   = 4UZ;
 
+    /// The bank is built from the members, and a batch that moves no value never calls back: a block constructed
+    /// at its declared defaults must still be born with its ports plumbed, because the graph reads the port
+    /// collection once, at the first connection, and never again.
+    explicit PolyphaseChannelizer(property_map init = {}) : Block<PolyphaseChannelizer<F>, NoTagPropagation, Resampling<1UZ, 1UZ, false>>(std::move(init)) { rebuild(); }
+
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
 
     void start() { rebuild(); }
@@ -233,6 +238,9 @@ this block carries it around the bank.
     std::vector<std::complex<F>>        _step{};
     std::size_t                         _channels = 4UZ;
     std::size_t                         _stride   = 4UZ;
+
+    /// As in the analysis bank: the ports have to exist before the graph reads the collection.
+    explicit PolyphaseSynthesizer(property_map init = {}) : Block<PolyphaseSynthesizer<F>, NoTagPropagation, Resampling<1UZ, 1UZ, false>>(std::move(init)) { rebuild(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
 
