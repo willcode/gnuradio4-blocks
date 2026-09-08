@@ -85,7 +85,13 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
     double _real          = 0.0;
     double _imag          = 0.0;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
+    /// The pole and the two observables are a function of the members, and a batch that moves no value never calls
+    /// back, so a block constructed at its declared defaults is born with the corner its settings describe.
+    explicit DcOffsetCorrect(property_map init = {}) : Block<DcOffsetCorrect<T>, UnfilteredTagPropagation>(std::move(init)) { configure(); }
+
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
+
+    void configure() {
         if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
             throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
         }
