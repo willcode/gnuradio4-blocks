@@ -99,7 +99,18 @@ circular-complex-Gaussian stream.
     std::uint32_t             _runPosition  = 0U;
     T                         _anchor{};
 
+    /// The coefficients and the delay line are derived from the members, and a batch that moves no value never
+    /// calls back, so a block constructed at its declared defaults is born with the line its settings describe.
+    explicit NoiseBlanker(property_map init = {}) : Block<NoiseBlanker<T>, NoTagPropagation>(std::move(init)) { configure(); }
+
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+        configure();
+        if (newSettings.contains("sample_rate") || newSettings.contains("averaging_time") || newSettings.contains("alpha") || (newSettings.contains("enabled") && enabled)) {
+            _warmup = _warmupLength; // the tracked power is stale after a pole move or after the tracker was disabled
+        }
+    }
+
+    void configure() {
         if (blank_samples < 1U) {
             throw gr::exception(std::format("blank_samples must be at least one, got {}", blank_samples.value));
         }
@@ -132,9 +143,6 @@ circular-complex-Gaussian stream.
             _windowLength = 0U;
             _runPosition  = 0U;
             _anchor       = T{};
-        }
-        if (newSettings.contains("sample_rate") || newSettings.contains("averaging_time") || newSettings.contains("alpha") || (newSettings.contains("enabled") && enabled)) {
-            _warmup = _warmupLength; // the tracked power is stale after a pole move or after the tracker was disabled
         }
     }
 
