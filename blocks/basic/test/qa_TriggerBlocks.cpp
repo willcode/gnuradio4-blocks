@@ -191,6 +191,9 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             }
             expect(eq(rising_edge_indices.size(), 1UZ)) << std::format("test {} : expected one rising edge", magic_enum::enum_name(Method::value));
             expect(eq(falling_edge_indices.size(), 1UZ)) << std::format("test {} : expected one falling edge", magic_enum::enum_name(Method::value));
+            if (rising_edge_indices.size() != 1UZ || falling_edge_indices.size() != 1UZ) {
+                return; // the positions below index what the two assertions above have just failed to find
+            }
 
             if (Method::value == NO_INTERPOLATION) { // edge position once crossing the threshold
                 expect(approx(rising_edge_indices[0], 278UZ, 2UZ)) << std::format("test {} : detected rising edge index", magic_enum::enum_name(Method::value));
