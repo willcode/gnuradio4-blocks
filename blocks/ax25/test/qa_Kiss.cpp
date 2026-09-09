@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -563,13 +564,14 @@ const boost::ut::suite<"kiss"> kissTests = [] {
 
         expect(decoder.settings().setStaged({{"read_timestamp", true}}).empty());
         std::ignore = decoder.settings().applyStagedParameters();
-        expect(eq(decoder.nTimestampsUnused, std::uint64_t{0ULL})) << "staging the value it already has is not a change";
+        expect(decoder._pendingTimestamp.has_value()) << "staging the value it already has is not a change";
 
         const Driven carried = feed(decoder, std::span<const Record>(std::vector<Record>{recordOf(data)}));
         expect(eq(carried.out.size(), 1UZ));
         if (carried.out.size() == 1UZ) {
             expect(eq(carried.out[0UZ].timestamp, std::int64_t{1'234'000'000LL})) << "the stamp that survived the staging is the one the record carries";
         }
+        expect(eq(decoder.nTimestampsUnused, std::uint64_t{0ULL})) << "the record carried it, so no stamp is unused";
 
         std::ignore = feed(decoder, std::span<const Record>(std::vector<Record>{recordOf(stampFrame(5'678ULL))}));
         expect(eq(decoder.nTimestampsRead, std::uint64_t{2ULL}));
@@ -607,7 +609,7 @@ const boost::ut::suite<"kiss"> kissTests = [] {
         expect(eq(static_cast<unsigned>(room[0UZ].signal_values.at(0UZ)), 0x09U));
     };
 
-    "a malformed command-9 frame is counted and a stamp still pending at stop() is counted unused"_test = [] {
+    "a malformed command-9 frame is counted and a stamp no data frame took is counted unused"_test = [] {
         std::vector<std::uint8_t> shortStamp{0x09U, 0x01U, 0x02U, 0x03U}; // not the nine bytes a timestamp frame needs
         const std::vector<Record> records{recordOf(shortStamp)};
 
@@ -623,9 +625,30 @@ const boost::ut::suite<"kiss"> kissTests = [] {
         const Driven held = feed(decoder, std::span<const Record>(std::vector<Record>{recordOf(stamp)}));
         expect(eq(held.out.size(), 0UZ));
         expect(eq(decoder.nTimestampsRead, std::uint64_t{1ULL}));
-        expect(eq(decoder.nTimestampsUnused, std::uint64_t{0ULL})) << "not yet: it has not been superseded or stopped past";
+        expect(eq(decoder.nTimestampsUnused, std::uint64_t{1ULL})) << "a stamp no data frame took is counted by the thread that holds it";
         decoder.stop();
-        expect(eq(decoder.nTimestampsUnused, std::uint64_t{1ULL})) << "held at stop() with no data frame to carry it";
+        expect(eq(decoder.nTimestampsUnused, std::uint64_t{1ULL})) << "and stop() counts it no second time";
+    };
+
+    "the counters are complete after every call, and stop() only reports them"_test = [] {
+        // GR4 runs a block's stop() on the thread that asked for the stop: requestStop() reaches
+        // SchedulerBase::stop(), which walks the graph calling changeStateTo(REQUESTED_STOP), and that invokes this
+        // block's stop() while its own worker may still be inside processBulk. So stop() may read the counters and
+        // nothing else, and the pending stamp has to survive it untouched.
+        KissDecode   decoder = make<KissDecode>({{"read_timestamp", true}});
+        const Driven back    = feed(decoder, std::span<const Record>(std::vector<Record>{recordOf(stampFrame(1'700'000'000'000ULL))}));
+        expect(eq(back.out.size(), 0UZ));
+        expect(decoder._pendingTimestamp.has_value()) << "the stamp is held for the data frame that never came";
+
+        const std::optional<std::int64_t> pending = decoder._pendingTimestamp;
+        const std::uint64_t               read    = decoder.nTimestampsRead;
+        const std::uint64_t               unused  = decoder.nTimestampsUnused;
+        const std::uint64_t               records = decoder.nRecords;
+        decoder.stop();
+        expect(that % (decoder._pendingTimestamp == pending)) << "stop() does not touch the pending stamp";
+        expect(eq(decoder.nTimestampsRead, read));
+        expect(eq(decoder.nTimestampsUnused, unused)) << "stop() reports the counters and does not move them";
+        expect(eq(decoder.nRecords, records));
     };
 
     // Criterion 7: with the two settings false, each block's output is what a chain that sets neither gets.
