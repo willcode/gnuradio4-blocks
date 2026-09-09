@@ -55,9 +55,10 @@ separately. Either way the next record decodes.
 
 With `read_timestamp` set, a command nibble of 9 is read instead of counted: a nine-byte frame sets a pending stamp,
 counted `nTimestampsRead`, and the **next** data frame's output record carries `timestamp = milliseconds * 1'000'000`.
-A second timestamp frame arriving before any data frame consumed the first supersedes it, and a pending stamp still
-held at `stop()` or at a change to `read_timestamp` is discarded; both are counted `nTimestampsUnused`. A change to
-any other setting leaves a pending stamp where it is, because the frame it belongs to is still the next one.
+A second timestamp frame arriving before any data frame consumed the first supersedes it, and a change to
+`read_timestamp` discards one still pending; both are counted `nTimestampsUnused`, and so is a stamp still held when
+the stream ends, because no data frame will carry it. A change to any other setting leaves a pending stamp where it
+is, because the frame it belongs to is still the next one.
 
 A command-9 frame is malformed, counted `nTimestampsMalformed` and never held as pending, when it is not exactly nine
 bytes or when its eight bytes hold more milliseconds than a nanosecond count can carry: the wire field is unsigned
@@ -86,11 +87,13 @@ struct KissDecode : Block<KissDecode> {
     std::uint64_t nRefusedEmpty        = 0ULL; ///< records with no command byte to read
     std::uint64_t nControlFrames       = 0ULL; ///< parameter frames, counted once each and not published
     std::uint64_t nTimestampsRead      = 0ULL; ///< well-formed command-9 frames read into the pending stamp
-    std::uint64_t nTimestampsUnused    = 0ULL; ///< a pending stamp superseded, discarded at stop(), or dropped by a change to read_timestamp
+    std::uint64_t nTimestampsUnused    = 0ULL; ///< a pending stamp superseded or dropped by a change to read_timestamp, including one still held
     std::uint64_t nTimestampsMalformed = 0ULL; ///< a command-9 frame that was not nine bytes, or whose milliseconds exceed what nanoseconds hold
 
     std::optional<std::int64_t> _pendingTimestamp{}; ///< nanoseconds, ready for the next data frame's DataSet::timestamp
     bool                        _stamping = false;   ///< the read_timestamp in force, so that only a change to it discards a pending stamp
+    /// @brief The unused stamps this thread has already retired; the counter adds the one still held.
+    std::uint64_t _timestampsUnusedBanked = 0ULL;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
 
@@ -104,16 +107,17 @@ struct KissDecode : Block<KissDecode> {
         }
         _stamping = read_timestamp.value;
         if (_pendingTimestamp.has_value()) {
-            ++nTimestampsUnused;
+            ++_timestampsUnusedBanked;
             _pendingTimestamp.reset();
         }
+        countUnusedTimestamps();
     }
 
+    /// @brief Reports the counters, and touches nothing else: it does not run on the thread that owns the rest.
     void stop() {
-        if (_pendingTimestamp.has_value()) { // held at stop(): no data frame arrived to carry it
-            ++nTimestampsUnused;
-            _pendingTimestamp.reset();
-        }
+        // SchedulerBase::stop() calls changeStateTo(REQUESTED_STOP) on whichever thread requested the stop, and that
+        // reaches here while this block's worker may still be inside processBulk. The pending stamp belongs to that
+        // worker, so the counters are left complete after every call and this reports them.
         std::string report;
         const auto  append = [&report](std::string_view label, std::uint64_t count) {
             if (count > 0ULL) {
@@ -174,6 +178,7 @@ struct KissDecode : Block<KissDecode> {
             ++made;
         }
 
+        countUnusedTimestamps(); // a stamp still held is one no data frame carried, and only this thread may look
         std::ignore = inSpan.consume(consumed);
         outSpan.publish(made);
         if (made == 0UZ && consumed == 0UZ) {
@@ -183,6 +188,9 @@ struct KissDecode : Block<KissDecode> {
     }
 
 private:
+    /// @brief Leaves `nTimestampsUnused` complete: what is retired, plus the stamp still waiting for a data frame.
+    void countUnusedTimestamps() noexcept { nTimestampsUnused = _timestampsUnusedBanked + (_pendingTimestamp.has_value() ? 1ULL : 0ULL); }
+
     /// @brief Reads a command-9 frame into the pending stamp, or counts it malformed. Never throws.
     void readTimestampFrame(const DataSet<std::uint8_t>& record) {
         if (record.signal_values.size() != kTimestampBytes) {
@@ -198,7 +206,7 @@ private:
             return;
         }
         if (_pendingTimestamp.has_value()) { // superseded before any data frame consumed it
-            ++nTimestampsUnused;
+            ++_timestampsUnusedBanked;
         }
         _pendingTimestamp = static_cast<std::int64_t>(milliseconds) * 1'000'000LL;
         ++nTimestampsRead;
