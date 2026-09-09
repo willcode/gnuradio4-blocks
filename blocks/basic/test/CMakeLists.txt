@@ -38,6 +38,7 @@ add_basic_test(qa_PacketToDataSet)
 # the gate's chain criterion runs the converted records into CrcCheck, so it needs the digital headers too
 target_link_libraries(qa_PacketToDataSet PRIVATE gr-digital)
 add_basic_test(qa_ChunkReassembler)
+add_basic_test(qa_RecordMerge)
 add_basic_test(qa_RecordUtils)
 add_basic_test(qa_SyncBlock)
 

@@ -13,6 +13,7 @@ set(GrBasicBlocks_HDRS
     include/gnuradio-4.0/basic/IqTap.hpp
     include/gnuradio-4.0/basic/MovingAverage.hpp
     include/gnuradio-4.0/basic/PacketToDataSet.hpp
+    include/gnuradio-4.0/basic/RecordMerge.hpp
     include/gnuradio-4.0/basic/RecordUtils.hpp
     include/gnuradio-4.0/basic/SampleDelay.hpp
     include/gnuradio-4.0/basic/Selector.hpp
