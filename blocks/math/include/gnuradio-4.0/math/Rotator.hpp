@@ -75,7 +75,6 @@ is attached to.
         // while the kernel rotates then advances, so the phasor is held one increment ahead throughout. Keeping
         // the offset in the phase rather than stepping the phasor per call is what lets the kernel's lane state
         // run unbroken across calls, which is where its bit-identical chunk independence comes from.
-        // a new 'initial_phase' re-anchors the accumulation there; re-writing the one in force moves nothing
         if (newSettings.contains("initial_phase")) {
             seedPhase();
         } else if (newIncrement != previousIncrement) {
