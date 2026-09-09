@@ -146,3 +146,9 @@ rather than against itself. One criterion carries a decoded record through
 `basic::DataSetToPacket` and `basic::PacketToDataSet` and through the metadata encoder the
 transports share, and checks every field back at its own type. `test/qa_AdsbPrinter` asserts the
 lines the pair renders, because the line is the printer's whole contract.
+
+`test/qa_AdsbRecording` runs the whole road — `fileio::BasicFileSource`, `basic::Convert`,
+`basic::InterleavedToComplex`, `basic::Abs`, `digital::PpmFramer`, `ModeSDecode`, `AdsbPrinter` —
+over the tree's 1090 MHz capture and asserts the three lines it decodes. It skips with exit 77
+where `GR4_RECORDINGS_DIR` names no such file. It reads 60.7 million samples and takes 3.2 s in a
+release build, so it stays inside the family's budget rather than needing one of its own.
