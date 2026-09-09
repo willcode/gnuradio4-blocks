@@ -12,6 +12,8 @@ add_subdirectory(digital)
 add_subdirectory(electrical)
 add_subdirectory(fec)
 add_subdirectory(fileio)
+# after digital and fileio, whose targets the ADS-B module's recorded-air leg links against
+add_subdirectory(adsb)
 add_subdirectory(filter)
 add_subdirectory(fourier)
 add_subdirectory(http)
