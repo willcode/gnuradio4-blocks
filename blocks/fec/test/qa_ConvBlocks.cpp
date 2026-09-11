@@ -224,7 +224,10 @@ int main() {
     using namespace boost::ut;
 
     "the code settings are required and are checked before anything runs"_test = [] {
-        expect(throws([] { std::ignore = make<ConvEncode>({{"constraint_length", gr::Size_t{0U}}, {"polynomials", std::vector<gr::Size_t>{}}}); })) << "a convolutional code has no default";
+        expect(throws([] {
+            auto block = make<ConvEncode>({}); // the defaults name no code; no setting changes, so no settings pass runs and start() is where it refuses
+            block.start();
+        })) << "a convolutional code has no default";
         expect(throws([] { std::ignore = make<ViterbiDecode>({{"constraint_length", gr::Size_t{2U}}, {"polynomials", std::vector<gr::Size_t>{03U, 02U}}}); })) << "below three there is no code";
         expect(throws([] { std::ignore = make<ViterbiDecode>({{"constraint_length", gr::Size_t{10U}}, {"polynomials", std::vector<gr::Size_t>{01151U, 01753U}}}); })) << "above nine the family stops";
         expect(throws([] { std::ignore = make<ConvEncode>({{"constraint_length", gr::Size_t{7U}}, {"polynomials", std::vector<gr::Size_t>{0171U}}}); })) << "one generator is not a rate the family carries";
