@@ -272,7 +272,7 @@ void runGraph(gr::Graph flow, TCollect&& collect) {
 /// The HDLC profile of the delimiter blocks: the flag, bit stuffing, and each payload byte unpacked least significant bit first.
 [[nodiscard]] gr::property_map hdlcFraming() {
     return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"stuff_after_ones", gr::Size_t{5}}, {"abort_ones", gr::Size_t{7}}, //
-        {"bits_per_item", gr::Size_t{1}}, {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("lsb_first")}};
+        {"bits_per_item", gr::Size_t{1}}, {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("LsbFirst")}};
 }
 
 /// CRC-16/IBM-SDLC, the AX.25 frame check sequence, with its two bytes least significant first on the wire.

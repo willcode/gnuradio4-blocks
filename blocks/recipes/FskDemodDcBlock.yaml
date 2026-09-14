@@ -71,8 +71,8 @@ blocks:
         doc: "closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate"
       - name: detector
         type: string
-        default: "mueller_muller"
-        doc: "timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"
+        default: "MuellerMuller"
+        doc: "timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl"
     graph:
       blocks:
         - id: "gr::blocks::filter::DesignedFilter<complex<float32>, float32>"

@@ -22,7 +22,7 @@ struct FskDemodAudio {
         float symbol_rate; // symbol rate in hertz; required
         double lowpass_bandwidth = 0.5; // cutoff of the post-detection lowpass, as a multiple of the symbol rate
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
-        std::string detector = std::string("mueller_muller"); // timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml
+        std::string detector = std::string("MuellerMuller"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -65,8 +65,8 @@ struct FskDemodAudio {
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"));
-            m13[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("mueller_muller"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl"));
+            m13[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("MuellerMuller"));
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("detector"));
             e12 = gr::pmt::Value(std::move(m13));
