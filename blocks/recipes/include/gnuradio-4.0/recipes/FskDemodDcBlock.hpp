@@ -25,7 +25,7 @@ struct FskDemodDcBlock {
         double lowpass_bandwidth = 0.5; // cutoff of the post-discriminator lowpass, as a multiple of the symbol rate
         std::uint32_t dc_block_length = std::uint32_t{128}; // boxcar length D of the DC blocker; its notch corner is about sample_rate/D and must stay well under the symbol rate
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
-        std::string detector = std::string("mueller_muller"); // timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml
+        std::string detector = std::string("MuellerMuller"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -91,8 +91,8 @@ struct FskDemodDcBlock {
             t3.push_back(std::move(e16));
             gr::pmt::Value e18;
             gr::property_map m19;
-            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"));
-            m19[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("mueller_muller"));
+            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl"));
+            m19[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("MuellerMuller"));
             m19[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m19[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("detector"));
             e18 = gr::pmt::Value(std::move(m19));
