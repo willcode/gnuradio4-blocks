@@ -666,7 +666,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             const auto detector = timing->settings().get("detector");
             expect(detector.has_value());
             if (detector.has_value()) {
-                expect(eq(stringOf(*detector), std::string("mueller_muller"))) << "a string parameter left at its default is substituted like any other";
+                expect(eq(stringOf(*detector), std::string("MuellerMuller"))) << "a string parameter left at its default is substituted like any other";
             }
         }
 
@@ -722,7 +722,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         }
         gr::property_map change;
         change["modulation_index"] = 1.0;
-        change["detector"]         = std::pmr::string("gardner");
+        change["detector"]         = std::pmr::string("Gardner");
         const auto applied         = wrapper->applyRecipeParameters(change);
         expect(applied.has_value()) << (applied.has_value() ? "" : applied.error().message);
         if (discriminator != nullptr) {
@@ -738,7 +738,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             const auto detectorIt = staged.find("detector");
             expect(detectorIt != staged.end()) << "the re-substituted detector is staged";
             if (detectorIt != staged.end()) {
-                expect(eq(stringOf(detectorIt->second), std::string("gardner"))) << "a string parameter re-substitutes live, like a derived number";
+                expect(eq(stringOf(detectorIt->second), std::string("Gardner"))) << "a string parameter re-substitutes live, like a derived number";
             }
         }
     };
@@ -750,7 +750,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         parameters["sample_rate"]      = 48000.f;
         parameters["symbol_rate"]      = 4800.f;
         parameters["modulation_index"] = 0.5;
-        parameters["detector"]         = std::pmr::string("zero_crossing");
+        parameters["detector"]         = std::pmr::string("ZeroCrossing");
         auto composite                 = loader.instantiate("gr::recipes::FskDemod", parameters);
         expect(composite != nullptr) << "a named detector must instantiate";
         if (composite == nullptr) {
@@ -763,7 +763,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             const auto detector = timing->settings().get("detector");
             expect(detector.has_value());
             if (detector.has_value()) {
-                expect(eq(stringOf(*detector), std::string("zero_crossing"))) << "the interior block takes the spelling the caller gave";
+                expect(eq(stringOf(*detector), std::string("ZeroCrossing"))) << "the interior block takes the spelling the caller gave";
             }
         }
     };

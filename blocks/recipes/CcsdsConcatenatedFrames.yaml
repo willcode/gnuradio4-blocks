@@ -109,7 +109,7 @@ blocks:
             name: packer
             bits_in: !!uint32 1
             bits_out: !!uint32 8
-            output_bit_order: "msb_first"
+            output_bit_order: "MsbFirst"
         - id: "gr::blocks::fec::RsDecode"
           parameters:
             name: rs

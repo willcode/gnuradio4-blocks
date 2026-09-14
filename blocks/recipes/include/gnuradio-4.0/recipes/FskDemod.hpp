@@ -24,7 +24,7 @@ struct FskDemod {
         double channel_bandwidth = 0.6; // cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate
         double lowpass_bandwidth = 0.5; // cutoff of the post-discriminator lowpass, as a multiple of the symbol rate
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
-        std::string detector = std::string("mueller_muller"); // timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml
+        std::string detector = std::string("MuellerMuller"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
         std::uint32_t preamble_symbols = std::uint32_t{0}; // alternating training symbols a burst opens with, which the timing preset is measured over; 0 disables the preset and the stream passes the stage through
     };
 
@@ -83,8 +83,8 @@ struct FskDemod {
             t3.push_back(std::move(e14));
             gr::pmt::Value e16;
             gr::property_map m17;
-            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"));
-            m17[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("mueller_muller"));
+            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl"));
+            m17[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("MuellerMuller"));
             m17[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m17[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("detector"));
             e16 = gr::pmt::Value(std::move(m17));

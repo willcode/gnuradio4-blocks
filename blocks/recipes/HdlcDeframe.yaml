@@ -17,7 +17,7 @@
 #
 # `payload_bit_order` is the order the pack stage assembles a de-stuffed octet in. HDLC transmits each octet least
 # significant bit first, which is the default here and what the AX.25 chain runs at. A protocol whose own parser
-# reads the frame as one most-significant-bit-first bit string states `msb_first` instead; the choice belongs to
+# reads the frame as one most-significant-bit-first bit string states `MsbFirst` instead; the choice belongs to
 # that parser and not to the framing, which is why it is a parameter.
 #
 # `max_payload_items` is the extractor contract's own bound and has no default by that contract: without it a frame
@@ -50,7 +50,7 @@ blocks:
         doc: "line code ahead of the framing: 'nrzi', or 'differential' for a link coded the other way round"
       - name: payload_bit_order
         type: string
-        default: "lsb_first"
+        default: "LsbFirst"
         doc: "order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first"
     graph:
       blocks:

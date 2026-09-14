@@ -26,7 +26,7 @@ struct BpskDemod {
         double rolloff = 0.35; // excess bandwidth of the transmit shaping filter, in [0, 1]
         double fll_noise_bandwidth = 0.01; // closed-loop noise bandwidth of the frequency-locked loop, normalized: Bn*T per sample
         std::uint32_t fll_filter_length = std::uint32_t{45}; // taps in each band-edge filter
-        std::string timing_detector = std::string("gardner"); // timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: gardner, zero_crossing or early_late
+        std::string timing_detector = std::string("Gardner"); // timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: Gardner, ZeroCrossing or EarlyLate
         double timing_noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
         double costas_noise_bandwidth = 0.01; // closed-loop noise bandwidth of the carrier phase loop, normalized to the symbol rate
         double agc_reference_db = 0.0; // target output level of the front end's AGC, in decibels
@@ -106,8 +106,8 @@ struct BpskDemod {
             t3.push_back(std::move(e18));
             gr::pmt::Value e20;
             gr::property_map m21;
-            m21[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: gardner, zero_crossing or early_late"));
-            m21[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("gardner"));
+            m21[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: Gardner, ZeroCrossing or EarlyLate"));
+            m21[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("Gardner"));
             m21[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m21[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("timing_detector"));
             e20 = gr::pmt::Value(std::move(m21));

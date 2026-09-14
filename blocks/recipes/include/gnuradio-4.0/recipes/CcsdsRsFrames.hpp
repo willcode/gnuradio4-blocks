@@ -247,7 +247,7 @@ struct CcsdsRsFrames {
             gr::property_map m77;
             m77[std::pmr::string("bits_out")] = gr::pmt::Value(std::uint32_t{8});
             m77[std::pmr::string("bits_in")] = gr::pmt::Value(std::uint32_t{1});
-            m77[std::pmr::string("output_bit_order")] = gr::pmt::Value(std::pmr::string("msb_first"));
+            m77[std::pmr::string("output_bit_order")] = gr::pmt::Value(std::pmr::string("MsbFirst"));
             m77[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("packer"));
             m76[std::pmr::string("parameters")] = gr::pmt::Value(std::move(m77));
             m76[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::digital::RecordRepackBits"));

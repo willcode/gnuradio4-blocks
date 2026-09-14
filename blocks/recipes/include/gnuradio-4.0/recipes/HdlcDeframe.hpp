@@ -20,7 +20,7 @@ struct HdlcDeframe {
         Parameters(std::uint32_t max_payload_items_) : max_payload_items(std::move(max_payload_items_)) {}
         std::uint32_t max_payload_items; // largest payload a frame may carry, in octets; required, there is no default — the extractor contract admits none
         std::string coding = std::string("nrzi"); // line code ahead of the framing: 'nrzi', or 'differential' for a link coded the other way round
-        std::string payload_bit_order = std::string("lsb_first"); // order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first
+        std::string payload_bit_order = std::string("LsbFirst"); // order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -49,7 +49,7 @@ struct HdlcDeframe {
             gr::pmt::Value e8;
             gr::property_map m9;
             m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first"));
-            m9[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("lsb_first"));
+            m9[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("LsbFirst"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("payload_bit_order"));
             e8 = gr::pmt::Value(std::move(m9));
