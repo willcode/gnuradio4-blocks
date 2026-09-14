@@ -15,7 +15,9 @@
 #include <vector>
 
 #include <gnuradio-4.0/DataSet.hpp>
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/RuntimeTest.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/algorithm/dataset/DataSetHelper.hpp>
