@@ -28,7 +28,7 @@
 #include <gnuradio-4.0/annotated.hpp>
 
 #include <gnuradio-4.0/algorithm/network/PacketEnvelope.hpp>
-#include <gnuradio-4.0/basic/RecordMetadata.hpp>
+#include <gnuradio-4.0/network/RecordVocabulary.hpp>
 #include <gnuradio-4.0/network/ZmqEnvelopeIo.hpp>
 #include <gnuradio-4.0/network/ZmqTransport.hpp>
 
@@ -86,7 +86,7 @@ struct CarriedTag {
 /// key, so both are read. A value at another type is not a sample rate and is left alone — it still crosses inside
 /// the tag it belongs to, where the far end sees exactly what the near end did.
 [[nodiscard]] inline std::optional<float> sampleRateOf(const property_map& map) noexcept {
-    using gr::blocks::basic::detail::packet::shortKey;
+    using gr::blocks::network::detail::shortKey;
     for (const auto& [key, value] : map) {
         if (shortKey(std::string_view(key)) == gr::tag::SAMPLE_RATE.shortKey()) {
             if (const float* rate = value.get_if<float>(); rate != nullptr) {
@@ -878,7 +878,7 @@ private:
             std::memcpy(arrival.samples.data(), parts[3UZ].data(), header->payload_bytes);
         }
 
-        const std::uint64_t mistyped  = gr::blocks::basic::detail::packet::countMistypedKeys(map);
+        const std::uint64_t mistyped  = detail::countMistypedKeys(map);
         const std::uint64_t malformed = decodeTags(map, arrival);
         {
             std::lock_guard lock(_mutex);
