@@ -733,7 +733,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         // The receive filter has to be one whose impulse response does not ring: a windowed-sinc channel filter
         // rings at fs/(2 fc), and that period, not the symbol period, is what its own envelope autocorrelation
         // reports. A Gaussian filter has no ringing, so what is left in the envelope is the signal's.
-        constexpr std::array<std::pair<double, int>, 4> kBandwidths{{{6250., 21}, {5000., 25}, {4000., 31}, {3000., 41}}};
+        constexpr std::array<std::pair<double, std::size_t>, 4> kBandwidths{{{6250., 21UZ}, {5000., 25UZ}, {4000., 31UZ}, {3000., 41UZ}}};
         for (const auto& [bandwidth, taps] : kBandwidths) {
             const std::vector<float> channel  = gr::filter::fir::design::gaussianPulse(taps, static_cast<double>(sps), bandwidth / 4800.);
             const std::vector<CF>    filtered = applyFir(std::span<const CF>(scene), std::span<const float>(channel));
