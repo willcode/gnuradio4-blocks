@@ -44,6 +44,12 @@ set(GR4_INSTALLED_PREFIX
     ""
     CACHE PATH "Prefix this tree is installed into; enables the legs that configure a consumer against the export")
 
+# Recorded captures a recording leg reads. Such a leg stands beside a synthetic case and never instead of one, so an
+# empty directory is not an error: the leg prints the path it wanted and exits 77, which CTest registers as a skip.
+set(GR4_RECORDINGS_DIR
+    ""
+    CACHE PATH "Directory holding the recorded captures the recording legs read; empty makes those tests skip")
+
 # Test executables check correctness, not performance; a lower optimization level roughly halves their compile time and
 # peak RSS. Benchmarks pin their own level and are unaffected. Empty keeps the build type's default.
 set(GR_QA_OPTIMIZATION_LEVEL
