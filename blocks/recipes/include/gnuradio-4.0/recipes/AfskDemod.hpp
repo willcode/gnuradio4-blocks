@@ -27,7 +27,7 @@ struct AfskDemod {
         double channel_bandwidth = 0.9167; // cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate; half of Carson's bandwidth, |h|/2 + 0.5
         double lowpass_bandwidth = 0.5; // cutoff of the post-discriminator lowpass, as a multiple of the symbol rate
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
-        std::string detector = std::string("gardner"); // timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml
+        std::string detector = std::string("Gardner"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -108,8 +108,8 @@ struct AfskDemod {
             t3.push_back(std::move(e20));
             gr::pmt::Value e22;
             gr::property_map m23;
-            m23[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_slope_ml or signum_slope_ml"));
-            m23[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("gardner"));
+            m23[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl"));
+            m23[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("Gardner"));
             m23[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m23[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("detector"));
             e22 = gr::pmt::Value(std::move(m23));

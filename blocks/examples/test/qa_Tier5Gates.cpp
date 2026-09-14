@@ -94,7 +94,7 @@ using Record = gr::DataSet<std::uint8_t>;
 /// bit first. One map configures the framer and the extractor, which is what makes them a pair.
 [[nodiscard]] gr::property_map hdlc() {
     return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"stuff_after_ones", gr::Size_t{5}}, {"abort_ones", gr::Size_t{7}}, //
-        {"bits_per_item", gr::Size_t{1}}, {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("lsb_first")}};
+        {"bits_per_item", gr::Size_t{1}}, {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("LsbFirst")}};
 }
 
 /// CRC-16/IBM-SDLC, the AX.25 frame check sequence, with its two bytes least significant first on the wire.
@@ -474,18 +474,18 @@ struct FskConfig {
  * line to steer by does better the less it tries to steer.
  */
 constexpr std::array<FskConfig, 12UZ> kG3ruhConfigs{{
-    {0.5, 0.002, "mueller_muller"},
-    {0.5, 0.002, "gardner"},
-    {0.5, 0.0005, "mueller_muller"},
-    {0.5, 0.0005, "gardner"},
-    {0.5, 0.0001, "mueller_muller"},
-    {0.5, 0.0001, "gardner"},
-    {0.75, 0.002, "mueller_muller"},
-    {0.75, 0.002, "gardner"},
-    {0.75, 0.0005, "mueller_muller"},
-    {0.75, 0.0005, "gardner"},
-    {0.75, 0.0001, "mueller_muller"},
-    {0.75, 0.0001, "gardner"},
+    {0.5, 0.002, "MuellerMuller"},
+    {0.5, 0.002, "Gardner"},
+    {0.5, 0.0005, "MuellerMuller"},
+    {0.5, 0.0005, "Gardner"},
+    {0.5, 0.0001, "MuellerMuller"},
+    {0.5, 0.0001, "Gardner"},
+    {0.75, 0.002, "MuellerMuller"},
+    {0.75, 0.002, "Gardner"},
+    {0.75, 0.0005, "MuellerMuller"},
+    {0.75, 0.0005, "Gardner"},
+    {0.75, 0.0001, "MuellerMuller"},
+    {0.75, 0.0001, "Gardner"},
 }};
 
 /// How many captures of each sweep this chain decodes a frame from. The collection's README says every file holds a

@@ -516,7 +516,7 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
         const gr::property_map fcs{{"width", gr::Size_t{16}}, {"poly", std::uint64_t{0x1021}}, {"initial_value", std::uint64_t{0xFFFF}}, {"final_xor", std::uint64_t{0xFFFF}}, //
             {"input_reflected", true}, {"result_reflected", true}, {"crc_byte_order", std::string("little")}};
         const gr::property_map framing{{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"bits_per_item", gr::Size_t{1}}, //
-            {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("lsb_first")}};
+            {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("LsbFirst")}};
 
         auto loader  = recipeLoader();
         auto deframe = loader.instantiate("gr::recipes::HdlcDeframe", {{"max_payload_items", std::uint32_t{1024U}}});

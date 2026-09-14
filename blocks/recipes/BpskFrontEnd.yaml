@@ -83,8 +83,8 @@ blocks:
         doc: "taps in each band-edge filter; 30 to 70 is the useful range"
       - name: timing_detector
         type: string
-        default: "gardner"
-        doc: "timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: gardner, zero_crossing or early_late"
+        default: "Gardner"
+        doc: "timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: Gardner, ZeroCrossing or EarlyLate"
       - name: timing_noise_bandwidth
         type: float64
         default: !!float64 0.002
