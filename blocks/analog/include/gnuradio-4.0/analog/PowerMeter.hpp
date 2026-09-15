@@ -23,8 +23,6 @@
 #include <gnuradio-4.0/algorithm/MeasurementRecord.hpp>
 #include <gnuradio-4.0/algorithm/MeasurementSlot.hpp>
 
-#include <gnuradio-4.0/analog/NamespaceCompatibility.hpp>
-
 namespace gr::blocks::analog {
 
 GR_REGISTER_BLOCK(gr::blocks::analog::PowerMeter, [T], [ float, std::complex<float> ])

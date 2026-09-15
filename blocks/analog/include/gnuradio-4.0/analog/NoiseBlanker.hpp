@@ -18,7 +18,6 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
-#include <gnuradio-4.0/analog/NamespaceCompatibility.hpp>
 #include <gnuradio-4.0/analog/detail/Averager.hpp>
 
 namespace gr::blocks::analog {
