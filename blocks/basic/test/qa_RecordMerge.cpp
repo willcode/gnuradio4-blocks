@@ -24,7 +24,7 @@
  * mock spans drive processBulk directly, so a full output span is reachable on purpose rather than by luck, and one
  * graph test runs the same properties through the scheduler and real ports.
  */
-namespace {
+namespace qa_record_merge {
 
 using gr::blocks::basic::RecordMerge;
 using Record = gr::DataSet<std::uint8_t>;
@@ -194,7 +194,9 @@ struct RecordCollector : gr::Block<RecordCollector> {
     }
 };
 
-} // namespace
+} // namespace qa_record_merge
+
+using namespace qa_record_merge;
 
 int main() {
     using namespace boost::ut;

@@ -819,16 +819,16 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
 
         /// @brief The chain of the reader: the estimate, then a peak detector reading the margin the record states.
         const auto detect = [](gr::property_map settings, std::vector<CF> samples, double thresholdDb) {
-            gr::test::RuntimeTest test;
-            auto&                 source   = test.emplace<BurstSource<CF>>();
-            auto&                 acf      = test.emplace<Autocorrelation<CF>>(std::move(settings));
-            auto&                 detector = test.emplace<PeakDetect>({{"threshold_db", thresholdDb}, {"reference", std::string("above_median")}, {"min_distance_hz", 0.0}});
-            auto&                 sink     = test.emplace<RecordSink>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source   = runtimeTest.emplace<BurstSource<CF>>();
+            auto&                 acf      = runtimeTest.emplace<Autocorrelation<CF>>(std::move(settings));
+            auto&                 detector = runtimeTest.emplace<PeakDetect>({{"threshold_db", thresholdDb}, {"reference", std::string("above_median")}, {"min_distance_hz", 0.0}});
+            auto&                 sink     = runtimeTest.emplace<RecordSink>();
             source.samples                 = std::move(samples);
-            expect(test.connect(source, "out", acf, "in").has_value());
-            expect(test.connect(acf, "out", detector, "in").has_value());
-            expect(test.connect(detector, "out", sink, "in").has_value());
-            std::ignore = test.run();
+            expect(runtimeTest.connect(source, "out", acf, "in").has_value());
+            expect(runtimeTest.connect(acf, "out", detector, "in").has_value());
+            expect(runtimeTest.connect(detector, "out", sink, "in").has_value());
+            std::ignore = runtimeTest.run();
             return sink.records;
         };
 

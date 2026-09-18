@@ -232,36 +232,36 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
             // the default max_step_fraction = 0.9 sets the threshold at 0.9*pi; at 0.6 fs the observed step is
             // 0.8*pi, under it, so the hook does not fire — recorded rather than asserted per criterion 10's original
             // text, since F14 found no fraction-of-pi threshold separates the two sides of Nyquist here.
-            gr::test::RuntimeTest test;
-            auto&                 source    = test.emplace<ToneSource>();
-            auto&                 block     = test.emplace<PhaseUnwrap>();
-            auto&                 sink      = test.emplace<Collector<std::int64_t>>();
-            auto&                 phaseSink = test.emplace<Collector<float>>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source    = runtimeTest.emplace<ToneSource>();
+            auto&                 block     = runtimeTest.emplace<PhaseUnwrap>();
+            auto&                 sink      = runtimeTest.emplace<Collector<std::int64_t>>();
+            auto&                 phaseSink = runtimeTest.emplace<Collector<float>>();
             source.cyclesPerSample          = 0.6;
             source.total                    = 2000UZ;
             source.burst                    = 4096UZ;
-            std::ignore                     = test.connect(source, "out", block, "in");
-            std::ignore                     = test.connect(block, "cycles", sink, "in");
-            std::ignore                     = test.connect(block, "phase", phaseSink, "in");
-            std::ignore                     = test.run();
+            std::ignore                     = runtimeTest.connect(source, "out", block, "in");
+            std::ignore                     = runtimeTest.connect(block, "cycles", sink, "in");
+            std::ignore                     = runtimeTest.connect(block, "phase", phaseSink, "in");
+            std::ignore                     = runtimeTest.run();
             std::println("criterion 10 (F14): nSuspectSteps() at 0.6 fs = {} (the step there is 0.8*pi, under the default 0.9*pi threshold)", block.nSuspectSteps());
             expect(eq(block.nSuspectSteps(), std::uint64_t{0ULL})) << "F14: the hook does not fire at 0.6 fs, which is why the criterion moved to 0.47 fs";
         }
         {
             // 0.47 cycles/sample: the step is 0.94*pi, over the default 0.9*pi threshold, so this is where the
             // observability hook does fire, per F14's amendment to criterion 10.
-            gr::test::RuntimeTest test;
-            auto&                 source    = test.emplace<ToneSource>();
-            auto&                 block     = test.emplace<PhaseUnwrap>();
-            auto&                 sink      = test.emplace<Collector<std::int64_t>>();
-            auto&                 phaseSink = test.emplace<Collector<float>>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source    = runtimeTest.emplace<ToneSource>();
+            auto&                 block     = runtimeTest.emplace<PhaseUnwrap>();
+            auto&                 sink      = runtimeTest.emplace<Collector<std::int64_t>>();
+            auto&                 phaseSink = runtimeTest.emplace<Collector<float>>();
             source.cyclesPerSample          = 0.47;
             source.total                    = 2000UZ;
             source.burst                    = 4096UZ;
-            std::ignore                     = test.connect(source, "out", block, "in");
-            std::ignore                     = test.connect(block, "cycles", sink, "in");
-            std::ignore                     = test.connect(block, "phase", phaseSink, "in");
-            std::ignore                     = test.run();
+            std::ignore                     = runtimeTest.connect(source, "out", block, "in");
+            std::ignore                     = runtimeTest.connect(block, "cycles", sink, "in");
+            std::ignore                     = runtimeTest.connect(block, "phase", phaseSink, "in");
+            std::ignore                     = runtimeTest.run();
             std::println("criterion 10 (F14): nSuspectSteps() at 0.47 fs = {}", block.nSuspectSteps());
             expect(block.nSuspectSteps() > 0ULL) << "0.47 cycles/sample must cross the default suspect threshold, per F14's amendment to criterion 10";
         }
@@ -290,37 +290,37 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(std::abs(withoutReset.cycles[kDropAt] - withReset.cycles[kDropAt - 1UZ]) <= std::int64_t{1LL}) << "without the flag, this sample's cycle count is the stream's own continuous value, unaffected by the tag";
 
         {
-            gr::test::RuntimeTest test;
-            auto&                 source    = test.emplace<ToneSource>();
-            auto&                 block     = test.emplace<PhaseUnwrap>(gr::property_map{{"reset_on_discontinuity", true}});
-            auto&                 sink      = test.emplace<Collector<std::int64_t>>();
-            auto&                 phaseSink = test.emplace<Collector<float>>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source    = runtimeTest.emplace<ToneSource>();
+            auto&                 block     = runtimeTest.emplace<PhaseUnwrap>(gr::property_map{{"reset_on_discontinuity", true}});
+            auto&                 sink      = runtimeTest.emplace<Collector<std::int64_t>>();
+            auto&                 phaseSink = runtimeTest.emplace<Collector<float>>();
             source.cyclesPerSample          = 0.1;
             source.total                    = kTotal;
             source.burst                    = 777UZ;
             source.tagDrop                  = true;
             source.dropAt                   = kDropAt;
-            std::ignore                     = test.connect(source, "out", block, "in");
-            std::ignore                     = test.connect(block, "cycles", sink, "in");
-            std::ignore                     = test.connect(block, "phase", phaseSink, "in");
-            std::ignore                     = test.run();
+            std::ignore                     = runtimeTest.connect(source, "out", block, "in");
+            std::ignore                     = runtimeTest.connect(block, "cycles", sink, "in");
+            std::ignore                     = runtimeTest.connect(block, "phase", phaseSink, "in");
+            std::ignore                     = runtimeTest.run();
             expect(eq(block.nResets(), std::uint64_t{1ULL})) << "reset_on_discontinuity: one dropped-sample tag raises nResets() by one";
         }
         {
-            gr::test::RuntimeTest test;
-            auto&                 source    = test.emplace<ToneSource>();
-            auto&                 block     = test.emplace<PhaseUnwrap>(gr::property_map{{"reset_on_discontinuity", false}});
-            auto&                 sink      = test.emplace<Collector<std::int64_t>>();
-            auto&                 phaseSink = test.emplace<Collector<float>>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source    = runtimeTest.emplace<ToneSource>();
+            auto&                 block     = runtimeTest.emplace<PhaseUnwrap>(gr::property_map{{"reset_on_discontinuity", false}});
+            auto&                 sink      = runtimeTest.emplace<Collector<std::int64_t>>();
+            auto&                 phaseSink = runtimeTest.emplace<Collector<float>>();
             source.cyclesPerSample          = 0.1;
             source.total                    = kTotal;
             source.burst                    = 777UZ;
             source.tagDrop                  = true;
             source.dropAt                   = kDropAt;
-            std::ignore                     = test.connect(source, "out", block, "in");
-            std::ignore                     = test.connect(block, "cycles", sink, "in");
-            std::ignore                     = test.connect(block, "phase", phaseSink, "in");
-            std::ignore                     = test.run();
+            std::ignore                     = runtimeTest.connect(source, "out", block, "in");
+            std::ignore                     = runtimeTest.connect(block, "cycles", sink, "in");
+            std::ignore                     = runtimeTest.connect(block, "phase", phaseSink, "in");
+            std::ignore                     = runtimeTest.run();
             expect(eq(block.nResets(), std::uint64_t{0ULL})) << "with the flag false, nResets() stays zero";
         }
     };

@@ -413,15 +413,15 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
 
         std::vector<std::size_t> offsets(kMarkers.size(), kAbsent);
         float                    declaredRate = 0.f;
-        for (const gr::Tag& tag : sink._tags) {
+        for (const gr::Tag& receivedTag : sink._tags) {
             for (std::size_t which = 0UZ; which < kMarkers.size(); ++which) {
-                const auto found = tag.map.find(gr::property_map::key_type{kMarkers[which].key});
-                if (found != tag.map.end() && found->second == kMarkers[which].value) {
-                    offsets[which] = tag.index;
+                const auto found = receivedTag.map.find(gr::property_map::key_type{kMarkers[which].key});
+                if (found != receivedTag.map.end() && found->second == kMarkers[which].value) {
+                    offsets[which] = receivedTag.index;
                 }
             }
-            if (tag.index == 200UZ) {
-                if (const auto found = tag.map.find(gr::property_map::key_type{"sample_rate"}); found != tag.map.end()) {
+            if (receivedTag.index == 200UZ) {
+                if (const auto found = receivedTag.map.find(gr::property_map::key_type{"sample_rate"}); found != receivedTag.map.end()) {
                     declaredRate = found->second.get_if<float>() != nullptr ? *found->second.get_if<float>() : 0.f;
                 }
             }

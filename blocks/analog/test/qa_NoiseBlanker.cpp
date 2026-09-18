@@ -569,11 +569,11 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         constexpr std::size_t    kMissing = std::numeric_limits<std::size_t>::max();
         std::vector<std::size_t> offsets(markers.size(), kMissing);
-        for (const gr::Tag& tag : sink._tags) {
+        for (const gr::Tag& receivedTag : sink._tags) {
             for (std::size_t which = 0UZ; which < markers.size(); ++which) {
-                const auto found = tag.map.find(gr::property_map::key_type{markers[which].key});
-                if (found != tag.map.end() && found->second == markers[which].value) {
-                    offsets[which] = tag.index;
+                const auto found = receivedTag.map.find(gr::property_map::key_type{markers[which].key});
+                if (found != receivedTag.map.end() && found->second == markers[which].value) {
+                    offsets[which] = receivedTag.index;
                 }
             }
         }

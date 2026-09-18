@@ -201,7 +201,7 @@ template<typename T, typename TBlock>
     for (std::size_t k = skip; k < x.size(); ++k) {
         const double         phase = kTwoPi * f0 * static_cast<double>(k);
         std::complex<double> reference{std::cos(phase), std::sin(phase)};
-        const double         wrapped = std::arg(std::complex<double>(x[k].real(), x[k].imag()) * std::conj(reference));
+        const double         wrapped = std::arg(std::complex<double>(static_cast<double>(x[k].real()), static_cast<double>(x[k].imag())) * std::conj(reference));
         if (k > skip) {
             const double step = wrapped - last;
             turns += (step > kPi) ? -kTwoPi : ((step < -kPi) ? kTwoPi : 0.);
@@ -281,11 +281,11 @@ int main() {
             signal[k] = static_cast<float>(0.6 * std::sin(0.031 * static_cast<double>(k)) + 0.3 * std::sin(0.007 * static_cast<double>(k)));
         }
         const auto        out   = runWhole<RangeDelay<float>, float>(*block, std::span<const float>(signal));
-        const std::size_t skip  = block->historySamples() + 64UZ;
+        const std::size_t nSkip = block->historySamples() + 64UZ;
         const auto        shift = static_cast<std::size_t>(std::llround(lag));
 
         double worst = 0.;
-        for (std::size_t k = skip; k + shift < signal.size(); ++k) {
+        for (std::size_t k = nSkip; k + shift < signal.size(); ++k) {
             worst = std::max(worst, static_cast<double>(std::abs(out[k + shift] - signal[k])));
         }
         const double bound = gr::filter::arbitraryInterpolationError(kBank, kRoll, 1);
@@ -313,13 +313,13 @@ int main() {
                 const double      delay   = 4. + static_cast<double>(step) / 32.;
                 auto              block   = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{delay, delay}}, {"sample_rate", 1.f}, {"order", arm.order}, {"bank_size", gr::Size_t{static_cast<std::uint32_t>(arm.bank)}}});
                 const double      latency = block->latencySamples();
-                const std::size_t skip    = block->historySamples() + 64UZ;
+                const std::size_t nSkip   = block->historySamples() + 64UZ;
 
                 for (const double f0 : {0.02, 0.10, 0.20, 0.30, 0.39}) { // across the passband, whose edge is (1 - rolloff)/2
                     block->start();
                     const auto in  = tone(f0, kSamples);
                     const auto out = runWhole<RangeDelay<C>, C>(*block, std::span<const C>(in));
-                    for (std::size_t k = skip; k < kSamples; ++k) {
+                    for (std::size_t k = nSkip; k < kSamples; ++k) {
                         const double phase = kTwoPi * f0 * (static_cast<double>(k) - latency - delay);
                         const C      ideal{static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase))};
                         worstAll = std::max(worstAll, static_cast<double>(std::abs(out[k] - ideal)));
@@ -350,8 +350,8 @@ int main() {
         auto       delayBlock = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, static_cast<std::int64_t>(seconds * 1e9)}}, {"schedule_delays_s", std::vector<double>{d0, d0 + slope * seconds}}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
         const auto delayed    = runWhole<RangeDelay<C>, C>(*delayBlock, std::span<const C>(tone(fb / fs, n)));
 
-        const std::size_t skip        = delayBlock->historySamples() + 1024UZ;
-        const auto        residual    = residualPhase(std::span<const C>(delayed), fb / fs, skip);
+        const std::size_t nSkip       = delayBlock->historySamples() + 1024UZ;
+        const auto        residual    = residualPhase(std::span<const C>(delayed), fb / fs, nSkip);
         const double      measuredEnv = slopeOf(std::span<const double>(residual)) / kTwoPi * fs;
 
         // the carrier's half: the same range rate through `offsetFor`, measured off the block rather than assumed
@@ -505,9 +505,9 @@ int main() {
             const auto delayed   = runWhole<RangeDelay<C>, C>(*first, signal);
             const auto recovered = runWhole<RangeDelay<C>, C>(*second, std::span<const C>(delayed));
 
-            const std::size_t skip  = first->historySamples() + second->historySamples() + 128UZ;
+            const std::size_t nSkip = first->historySamples() + second->historySamples() + 128UZ;
             double            worst = 0.;
-            for (std::size_t k = skip; k + lag < n; ++k) {
+            for (std::size_t k = nSkip; k + lag < n; ++k) {
                 worst = std::max(worst, static_cast<double>(std::abs(recovered[k + lag] - signal[k])));
             }
             return worst;
@@ -726,10 +726,10 @@ int main() {
         // The two streams are not bit-identical and cannot be: the trigger-armed block passes through until the
         // tag and restarts its phase there, so the pair differs by one constant rotation from the tag onward.
         // What is asserted is that the rotation is constant, which is the statement that the schedules agree.
-        const std::complex<double> reference = std::complex<double>(triggered.samples[at].real(), triggered.samples[at].imag()) * std::conj(std::complex<double>(hand.samples[at].real(), hand.samples[at].imag()));
+        const std::complex<double> reference = std::complex<double>(static_cast<double>(triggered.samples[at].real()), static_cast<double>(triggered.samples[at].imag())) * std::conj(std::complex<double>(static_cast<double>(hand.samples[at].real()), static_cast<double>(hand.samples[at].imag())));
         double                     worst     = 0.;
         for (std::size_t k = at; k < n; ++k) {
-            const std::complex<double> ratio = std::complex<double>(triggered.samples[k].real(), triggered.samples[k].imag()) * std::conj(std::complex<double>(hand.samples[k].real(), hand.samples[k].imag()));
+            const std::complex<double> ratio = std::complex<double>(static_cast<double>(triggered.samples[k].real()), static_cast<double>(triggered.samples[k].imag())) * std::conj(std::complex<double>(static_cast<double>(hand.samples[k].real()), static_cast<double>(hand.samples[k].imag())));
             worst                            = std::max(worst, std::abs(ratio - reference));
         }
         std::println("[range] criterion 9 (shift): the trigger-armed and hand-set streams differ by one fixed rotation of {:.4f} rad, held to {:.3e} over {} samples", std::arg(reference), worst, n - at);
@@ -780,8 +780,8 @@ int main() {
         expect(that % (every->nReanchors() == 1ULL)) << "the second tag is a re-anchoring, counted";
         expect(that % (every->anchorNs() == static_cast<std::int64_t>(tNs2))) << "and the anchor moved to it";
         expect(!std::ranges::equal(burst.samples, single.samples)) << "the two modes must actually differ for the comparison to mean anything";
-        expect(that % (std::abs(std::arg(std::complex<double>(burst.samples[at2].real(), burst.samples[at2].imag()))) < 0.02)) << "the phasor restarts at zero phase on the tag";
-        expect(that % (std::abs(std::arg(std::complex<double>(single.samples[at2].real(), single.samples[at2].imag()))) > 0.5)) << "where the continuous run has accumulated a phase by then";
+        expect(that % (std::abs(std::arg(std::complex<double>(static_cast<double>(burst.samples[at2].real()), static_cast<double>(burst.samples[at2].imag())))) < 0.02)) << "the phasor restarts at zero phase on the tag";
+        expect(that % (std::abs(std::arg(std::complex<double>(static_cast<double>(single.samples[at2].real()), static_cast<double>(single.samples[at2].imag())))) > 0.5)) << "where the continuous run has accumulated a phase by then";
 
         // a trigger time off the nanosecond axis, and one that is not a nanosecond count at all
         const std::vector<gr::Tag> offAxis{gr::Tag{at, gr::property_map{{gr::property_map::key_type(gr::tag::TRIGGER_TIME.shortKey()), std::uint64_t{1ULL << 63U}}}}};

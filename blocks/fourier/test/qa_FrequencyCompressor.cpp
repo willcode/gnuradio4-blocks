@@ -141,7 +141,7 @@ const boost::ut::suite<"FrequencyCompressor"> frequencyCompressorTests = [] {
     "refusals fire by name"_test = [] {
         const auto refused = [](gr::property_map settings) {
             return boost::ut::expect(throws([&settings] {
-                FrequencyCompressor block{gr::property_map(settings)};
+                FrequencyCompressor block(settings);
                 block.settings().init();
                 std::ignore = block.settings().applyStagedParameters();
                 block.start();

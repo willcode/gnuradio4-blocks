@@ -159,7 +159,7 @@ struct Reading {
         const std::span<const std::uint8_t> codeblockBits = std::span<const std::uint8_t>(decodedBits).subspan(26UZ, kWireBytes * 8UZ);
         std::vector<std::uint8_t>           rxBytes(kWireBytes, 0U);
         for (std::size_t i = 0UZ; i < codeblockBits.size(); ++i) {
-            rxBytes[i / 8UZ] = static_cast<std::uint8_t>((rxBytes[i / 8UZ] << 1U) | (codeblockBits[i] & 1U));
+            rxBytes[i / 8UZ] = static_cast<std::uint8_t>((static_cast<unsigned>(rxBytes[i / 8UZ]) << 1U) | (codeblockBits[i] & 1U));
         }
 
         gr::fec::deinterleaveCodewords(rxBytes, rxWords, 255UZ, kInterleave);

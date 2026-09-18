@@ -261,10 +261,10 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
             gr::DataSet<std::uint8_t> input;
             input.signal_values = record;
 
-            gr::test::RuntimeTest test;
-            auto&                 source = test.emplace<ItemSource<gr::DataSet<std::uint8_t>>>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source = runtimeTest.emplace<ItemSource<gr::DataSet<std::uint8_t>>>();
             source._items                = {input};
-            auto& reassembler            = test.emplace<gr::blocks::basic::ChunkReassembler>(gr::property_map{
+            auto& reassembler            = runtimeTest.emplace<gr::blocks::basic::ChunkReassembler>(gr::property_map{
                            {"chunk_format", std::string("indexed")},                      //
                            {"id_offset", gr::Size_t{0U}}, {"id_bytes", idBytes},          //
                            {"index_offset", idBytes}, {"index_bytes", gr::Size_t{4U}},    //
@@ -274,10 +274,10 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
                            {"max_open_files", gr::Size_t{4U}},                            //
                            {"max_file_bytes", std::uint64_t{1UZ << 16UZ}},                //
             });
-            auto& collected              = test.emplace<Collector<PacketU>>();
-            std::ignore                  = test.connect(source, "out", reassembler, "in");
-            std::ignore                  = test.connect(reassembler, "out", collected, "in");
-            std::ignore                  = test.run();
+            auto& collected              = runtimeTest.emplace<Collector<PacketU>>();
+            std::ignore                  = runtimeTest.connect(source, "out", reassembler, "in");
+            std::ignore                  = runtimeTest.connect(reassembler, "out", collected, "in");
+            std::ignore                  = runtimeTest.run();
 
             expect(eq(collected._items.size(), 1UZ)) << std::format("id_bytes {}", idBytes);
             if (collected._items.empty()) {

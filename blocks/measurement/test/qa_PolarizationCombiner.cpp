@@ -289,7 +289,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         // the same range. The envelope is the spec's two named contributions — the weight-estimation loss, under
         // 0.011 dB at M >= 512, and the ratio-measurement spread 4.343/sqrt(N), which over 57344 samples is
         // 0.018 dB.
-        const auto arm = [kWindow, kFrom](const Branches& b, double nominalGainDb, std::string_view what) {
+        const auto arm = [kWindow](const Branches& b, double nominalGainDb, std::string_view what) {
             const Run r = run({{"window", kWindow}}, b.r0, b.r1, 8192UZ);
             expect(r.endedOnItsOwn) << what;
             expect(eq(r.out.size(), b.s.size())) << what;

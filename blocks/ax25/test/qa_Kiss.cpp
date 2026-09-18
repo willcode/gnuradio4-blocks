@@ -31,7 +31,7 @@
  * home with its port intact; and the parameter frame proves that a controller announcing its own timing costs a count
  * rather than a frame either side of it.
  */
-namespace {
+namespace qa_kiss {
 
 using gr::blocks::ax25::Ax25Decode;
 using gr::blocks::ax25::Ax25Encode;
@@ -286,7 +286,9 @@ struct Chain {
     return result;
 }
 
-} // namespace
+} // namespace qa_kiss
+
+using namespace qa_kiss;
 
 const boost::ut::suite<"kiss"> kissTests = [] {
     using namespace boost::ut;

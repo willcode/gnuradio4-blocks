@@ -813,16 +813,16 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         gr::property_map settings{{"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
         gr::property_map moveTo{{"fft_size", gr::Size_t{static_cast<unsigned>(kSecond)}}};
 
-        gr::test::RuntimeTest test;
-        auto&                 source = test.emplace<BurstSource<CF>>();
-        auto&                 block  = test.emplace<WelchPsd<CF>>(std::move(settings));
-        auto&                 sink   = test.emplace<RecordSink>();
+        gr::test::RuntimeTest runtimeTest;
+        auto&                 source = runtimeTest.emplace<BurstSource<CF>>();
+        auto&                 block  = runtimeTest.emplace<WelchPsd<CF>>(std::move(settings));
+        auto&                 sink   = runtimeTest.emplace<RecordSink>();
         source.samples               = tone(8192UZ, 32., kFirst);
         source.burst                 = 512UZ;
         source.tags.push_back(gr::Tag{kAt, std::move(moveTo)});
 
-        expect(test.connect(source, "out", block, "in").has_value() && test.connect(block, "out", sink, "in").has_value()) << fatal;
-        std::ignore = test.run();
+        expect(runtimeTest.connect(source, "out", block, "in").has_value() && runtimeTest.connect(block, "out", sink, "in").has_value()) << fatal;
+        std::ignore = runtimeTest.run();
 
         const auto& records = sink.records;
         expect(records.size() > 4UZ) << "the run has to produce records at both lengths, made " << records.size();

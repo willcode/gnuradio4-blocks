@@ -22,7 +22,7 @@ using Record = gr::DataSet<std::uint8_t>;
 using gr::blocks::testing::span::InputSpan;
 using gr::blocks::testing::span::OutputSpan;
 
-namespace {
+namespace qa_ccsds_time_code_blocks {
 
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
@@ -144,7 +144,9 @@ void runGraph(gr::Graph flow, TCollect&& collect) {
     collect();
 }
 
-} // namespace
+} // namespace qa_ccsds_time_code_blocks
+
+using namespace qa_ccsds_time_code_blocks;
 
 const boost::ut::suite<"CcsdsTimeCodeBlocks"> ccsdsTimeCodeBlocksTests = [] {
     using namespace boost::ut;
