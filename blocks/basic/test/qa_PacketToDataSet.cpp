@@ -34,7 +34,7 @@
 // this direction: `signal_min` and `signal_max` are `float` while a `Range<T>` holds `T`, so the lift back into the
 // record's own field is a cast that is undefined outside `T`'s range for a value that came off a wire.
 
-namespace {
+namespace qa_packet_to_dataset {
 
 using gr::blocks::basic::DataSetToPacket;
 using gr::blocks::basic::PacketToDataSet;
@@ -291,7 +291,9 @@ struct PacketCorrupter : gr::Block<PacketCorrupter> {
     }
 };
 
-} // namespace
+} // namespace qa_packet_to_dataset
+
+using namespace qa_packet_to_dataset;
 
 const boost::ut::suite<"PacketToDataSet"> packetToDataSetTests = [] {
     using namespace boost::ut;
@@ -965,7 +967,7 @@ const boost::ut::suite<"PacketToDataSet under the scheduler"> schedulerTests = [
 
 // ─── under the scheduler: the boundary in a real graph, with fewer records of room than the run produces ──────────
 
-namespace {
+namespace qa_packet_to_dataset {
 
 /// @brief Emits its items one output span at a time, publishing each staged tag with the item it belongs to.
 template<typename TItem>
@@ -1016,7 +1018,7 @@ struct ItemCollector : gr::Block<ItemCollector<TItem>> {
     }
 };
 
-} // namespace
+} // namespace qa_packet_to_dataset
 
 const boost::ut::suite<"PacketToDataSet boundary under the scheduler"> boundarySchedulerTests = [] {
     using namespace boost::ut;

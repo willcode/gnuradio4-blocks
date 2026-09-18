@@ -71,7 +71,7 @@
  * spacecraft. The transmitter facts each graph is configured with -- modulation, rate, tones, deviation, framing --
  * come from the collection's own satellite descriptions and are read as a vendor document is read.
  */
-namespace {
+namespace qa_tier5_gates {
 
 using gr::blocks::ax25::Ax25Decode;
 using gr::blocks::ax25::Ax25Encode;
@@ -1397,7 +1397,9 @@ enum class PassChannel { none, noiseOnly, passOnly, corrected, uncorrected };
         bits.coded);
 }
 
-} // namespace
+} // namespace qa_tier5_gates
+
+using namespace qa_tier5_gates;
 
 const boost::ut::suite<"Tier5Gates"> tier5Gates = [] {
     using namespace boost::ut;

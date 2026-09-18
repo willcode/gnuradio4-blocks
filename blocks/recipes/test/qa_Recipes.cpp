@@ -55,7 +55,7 @@
 
 #include "RecipeHeaderEmitter.hpp"
 
-namespace {
+namespace qa_recipes {
 
 gr::PluginLoader makeRecipeLoader() {
     static gr::SchedulerRegistry          schedulerRegistry;
@@ -438,7 +438,9 @@ struct Agreement {
     return out;
 }
 
-} // namespace
+} // namespace qa_recipes
+
+using namespace qa_recipes;
 
 const boost::ut::suite<"recipes"> RecipeTests = [] {
     using namespace boost::ut;
@@ -1200,8 +1202,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
 
         // an order-2 Costas loop has a 180-degree ambiguity, so the recovered stream may be the transmitted one
         // inverted; resolving that is a framing question and not this recipe's
-        const std::size_t skip  = soft.size() / 4UZ;
-        const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(skip), std::span<const int>(bits).subspan(skip), 0UZ, 40UZ, true);
+        const std::size_t nSkip = soft.size() / 4UZ;
+        const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(nSkip), std::span<const int>(bits).subspan(nSkip), 0UZ, 40UZ, true);
         expect(ge(found.fraction, 0.99)) << std::format("{:.4f} of symbols recovered at lag {}, {}", found.fraction, found.lag, found.inverted ? "inverted" : "upright");
     };
 
@@ -1232,8 +1234,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             const std::vector<float>               soft = runRecipe<std::complex<float>, float>("gr::recipes::DbpskDemod", parameters, wave);
             expect(ge(soft.size(), kSymbols / 2UZ)) << std::format("phase {:.3f}: soft symbols {}", phase0, soft.size()) << boost::ut::fatal;
 
-            const std::size_t skip  = soft.size() / 4UZ;
-            const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(skip), std::span<const int>(bits).subspan(skip), 0UZ, 40UZ, false);
+            const std::size_t nSkip = soft.size() / 4UZ;
+            const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(nSkip), std::span<const int>(bits).subspan(nSkip), 0UZ, 40UZ, false);
             expect(ge(found.fraction, 0.99)) << std::format("phase {:.3f}: {:.4f} recovered at lag {}", phase0, found.fraction, found.lag);
             fractions.push_back(found.fraction);
         }
@@ -1278,9 +1280,9 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             plainSoft[k] = plain[k] != 0U ? 1.f : -1.f;
         }
 
-        const std::size_t skip      = 40UZ;
-        const Agreement   withoutDc = bestAgreement(std::span<const float>(plainSoft), std::span<const int>(bits), skip, 40UZ, true);
-        const Agreement   withDc    = bestAgreement(std::span<const float>(fixed), std::span<const int>(bits), skip, 40UZ, true);
+        const std::size_t nSkip     = 40UZ;
+        const Agreement   withoutDc = bestAgreement(std::span<const float>(plainSoft), std::span<const int>(bits), nSkip, 40UZ, true);
+        const Agreement   withDc    = bestAgreement(std::span<const float>(fixed), std::span<const int>(bits), nSkip, 40UZ, true);
         expect(ge(withDc.fraction, 0.99)) << std::format("with the blocker: {:.4f} recovered", withDc.fraction);
         expect(gt(withDc.fraction, withoutDc.fraction + 0.05)) << std::format("without it: {:.4f}; the offset is {:.0f} Hz against a {:.0f} Hz deviation", withoutDc.fraction, kOffset, kDeviation);
     };

@@ -11,7 +11,7 @@
 
 #include <gnuradio-4.0/basic/ClockedDataSetToStream.hpp>
 
-namespace {
+namespace qa_clocked_dataset_to_stream {
 
 using gr::blocks::basic::ClockedDataSetToStream;
 
@@ -103,7 +103,9 @@ struct StreamSink : gr::Block<StreamSink> {
     return std::move(sink._samples);
 }
 
-} // namespace
+} // namespace qa_clocked_dataset_to_stream
+
+using namespace qa_clocked_dataset_to_stream;
 
 int main() {
     using namespace boost::ut;

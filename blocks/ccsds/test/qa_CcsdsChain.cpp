@@ -28,7 +28,7 @@ using Record = gr::DataSet<std::uint8_t>;
 using gr::blocks::testing::span::InputSpan;
 using gr::blocks::testing::span::OutputSpan;
 
-namespace {
+namespace qa_ccsds_chain {
 
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
@@ -174,7 +174,9 @@ void runGraph(gr::Graph flow, TCollect&& collect) {
     return payloads;
 }
 
-} // namespace
+} // namespace qa_ccsds_chain
+
+using namespace qa_ccsds_chain;
 
 const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
     using namespace boost::ut;

@@ -35,7 +35,7 @@
 #include <gnuradio-4.0/sync/SymbolSync.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
-namespace {
+namespace qa_hdlc_bursts {
 
 using gr::blocks::ax25::Ax25Decode;
 using gr::blocks::ax25::Ax25Encode;
@@ -488,7 +488,9 @@ struct Sliced {
 /// The AX.25 anchor's information field, and the addressing that frames it.
 constexpr std::array<std::uint8_t, 5UZ> kInfo{{0x3AU, 0x54U, 0x45U, 0x53U, 0x54U}};
 
-} // namespace
+} // namespace qa_hdlc_bursts
+
+using namespace qa_hdlc_bursts;
 
 const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
     using namespace boost::ut;

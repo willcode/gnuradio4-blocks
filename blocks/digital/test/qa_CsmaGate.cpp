@@ -28,7 +28,7 @@
  * call. The last test in the file is that measurement and is the one place here that reads a clock: what it is
  * about is what a held gate costs a machine, which no synthetic count can stand in for.
  */
-namespace {
+namespace qa_csma_gate {
 
 using gr::blocks::digital::CsmaGate;
 using gr::blocks::testing::span::InputSpan;
@@ -300,7 +300,9 @@ template<typename TAddSense>
     return run;
 }
 
-} // namespace
+} // namespace qa_csma_gate
+
+using namespace qa_csma_gate;
 
 const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
     using namespace boost::ut;

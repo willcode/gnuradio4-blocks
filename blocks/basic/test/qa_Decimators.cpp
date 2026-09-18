@@ -107,8 +107,8 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
 
         std::vector<gr::Size_t>          order;
         const gr::property_map::key_type key{"probe"};
-        for (const gr::Tag& tag : result.tags) {
-            order.push_back(gr::test::get_value_or_fail<gr::Size_t>(tag.map.at(key)));
+        for (const gr::Tag& outputTag : result.tags) {
+            order.push_back(gr::test::get_value_or_fail<gr::Size_t>(outputTag.map.at(key)));
         }
         expect(that % (order == std::vector<gr::Size_t>{0U, 1U, 2U, 3U, 4U})) << "and in input order";
     };
