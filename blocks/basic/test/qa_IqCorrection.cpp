@@ -135,15 +135,18 @@ struct Marker {
 };
 
 /// Six keys at five offsets; `t0` is not in `gr::tag::kDefaultTags` and both blocks keep it, being pass-all.
-const std::array<Marker, 7UZ> kMarkers{{
-    {"trigger_name", 0UZ, gr::pmt::Value(std::string("alpha"))},
-    {"trigger_time", 1UZ, gr::pmt::Value(std::uint64_t{111})},
-    {"trigger_offset", 1UZ, gr::pmt::Value(0.5f)},
-    {"num_channels", 37UZ, gr::pmt::Value(gr::Size_t{3})},
-    {"rx_overflow", 512UZ, gr::pmt::Value(true)},
-    {"signal_name", 900UZ, gr::pmt::Value(std::string("iq"))},
-    {"t0", 1200UZ, gr::pmt::Value(std::string("private"))},
-}};
+/// Built per call: the suite runs at process exit, when namespace-scope objects are already destroyed.
+[[nodiscard]] std::array<Marker, 7UZ> markers() {
+    return {{
+        {"trigger_name", 0UZ, gr::pmt::Value(std::string("alpha"))},
+        {"trigger_time", 1UZ, gr::pmt::Value(std::uint64_t{111})},
+        {"trigger_offset", 1UZ, gr::pmt::Value(0.5f)},
+        {"num_channels", 37UZ, gr::pmt::Value(gr::Size_t{3})},
+        {"rx_overflow", 512UZ, gr::pmt::Value(true)},
+        {"signal_name", 900UZ, gr::pmt::Value(std::string("iq"))},
+        {"t0", 1200UZ, gr::pmt::Value(std::string("private"))},
+    }};
+}
 
 constexpr std::size_t kAbsent = std::numeric_limits<std::size_t>::max();
 
@@ -387,8 +390,9 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
     };
 
     "every key rides through both blocks, the private one included"_test = [] {
-        gr::Graph graph;
-        auto&     source = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 4000U}, {"mark_tag", false}});
+        const std::array<Marker, 7UZ> kMarkers = markers();
+        gr::Graph                     graph;
+        auto&                         source = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 4000U}, {"mark_tag", false}});
         for (const Marker& marker : kMarkers) {
             source._tags.emplace_back(marker.at, gr::property_map{{gr::property_map::key_type{marker.key}, marker.value}});
         }
