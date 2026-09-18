@@ -167,7 +167,7 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
             const std::size_t at     = duidTransmittedDibits(kDuids[0]);
             for (unsigned i = 0U; i < 12U; ++i) {
                 const std::size_t j = at + kFrameSyncDibits + i;
-                stream[j]           = static_cast<std::uint8_t>(~stream[j] & 0x3U);
+                stream[j]           = static_cast<std::uint8_t>(~static_cast<unsigned>(stream[j]) & 0x3U);
             }
             const Caught c        = run(stream);
             bool         reported = false;

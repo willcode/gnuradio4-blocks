@@ -52,7 +52,7 @@ template<typename TBlock>
     const std::size_t    first = centre - width / 2UZ;
     std::complex<double> accumulated{0., 0.};
     for (std::size_t k = first; k < first + width; ++k) {
-        accumulated += std::complex<double>(x[k + 1UZ].real(), x[k + 1UZ].imag()) * std::conj(std::complex<double>(x[k].real(), x[k].imag()));
+        accumulated += std::complex<double>(static_cast<double>(x[k + 1UZ].real()), static_cast<double>(x[k + 1UZ].imag())) * std::conj(std::complex<double>(static_cast<double>(x[k].real()), static_cast<double>(x[k].imag())));
     }
     return std::arg(accumulated) / kTwoPi * fs;
 }
@@ -342,9 +342,9 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
             expect(scheduler.runAndWait().has_value());
 
             std::size_t seen = 0UZ;
-            for (const gr::Tag& tag : sink._tags) {
-                const auto found = tag.map.find(gr::tag::FREQUENCY.shortKey());
-                if (found == tag.map.end()) {
+            for (const gr::Tag& receivedTag : sink._tags) {
+                const auto found = receivedTag.map.find(gr::tag::FREQUENCY.shortKey());
+                if (found == receivedTag.map.end()) {
                     continue;
                 }
                 ++seen;

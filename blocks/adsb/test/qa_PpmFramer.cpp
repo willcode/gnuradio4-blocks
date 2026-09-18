@@ -23,7 +23,7 @@
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
-namespace {
+namespace qa_ppm_framer {
 
 using gr::blocks::adsb::PpmFramer;
 using gr::blocks::testing::span::InputSpan;
@@ -409,7 +409,9 @@ constexpr float kCarrier = 0.7F;
 /// @brief The eight sub-sample offsets a `phase_steps` of eight searches, which is the grid the renderer is swept on.
 [[nodiscard]] constexpr float offsetOf(std::size_t step) noexcept { return -0.5F + static_cast<float>(step) / 8.F; }
 
-} // namespace
+} // namespace qa_ppm_framer
+
+using namespace qa_ppm_framer;
 
 const boost::ut::suite<"ppm framer"> ppmFramerTests = [] {
     using namespace boost::ut;

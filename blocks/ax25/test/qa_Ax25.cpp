@@ -34,7 +34,7 @@
  * stream, and the chain proves that what leaves an encoder over a bit-stuffed link with a frame check sequence in
  * front of it comes back the same frame.
  */
-namespace {
+namespace qa_ax25 {
 
 using gr::blocks::ax25::Ax25AddressFilter;
 using gr::blocks::ax25::Ax25Decode;
@@ -325,7 +325,9 @@ struct Chain {
     return result;
 }
 
-} // namespace
+} // namespace qa_ax25
+
+using namespace qa_ax25;
 
 const boost::ut::suite<"ax25"> ax25Tests = [] {
     using namespace boost::ut;

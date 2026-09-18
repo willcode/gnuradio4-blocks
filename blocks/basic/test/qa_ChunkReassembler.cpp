@@ -780,16 +780,16 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
 
         // fed through the landed PacketToDataSet in one scheduler graph: a real port is what that block's own tag
         // handling needs, which a bare span mock does not supply.
-        gr::test::RuntimeTest test;
-        auto&                 source = test.emplace<ItemSource<PacketU>>();
+        gr::test::RuntimeTest runtimeTest;
+        auto&                 source = runtimeTest.emplace<ItemSource<PacketU>>();
         source._items                = capture.out;
-        auto& convert                = test.emplace<gr::blocks::basic::PacketToDataSet<std::uint8_t>>(gr::property_map{});
-        auto& admitted               = test.emplace<GraphCollector<gr::DataSet<std::uint8_t>>>();
-        auto& refused                = test.emplace<GraphCollector<PacketU>>();
-        std::ignore                  = test.connect(source, "out", convert, "in");
-        std::ignore                  = test.connect(convert, "out", admitted, "in");
-        std::ignore                  = test.connect(convert, "reject", refused, "in");
-        std::ignore                  = test.run();
+        auto& convert                = runtimeTest.emplace<gr::blocks::basic::PacketToDataSet<std::uint8_t>>(gr::property_map{});
+        auto& admitted               = runtimeTest.emplace<GraphCollector<gr::DataSet<std::uint8_t>>>();
+        auto& refused                = runtimeTest.emplace<GraphCollector<PacketU>>();
+        std::ignore                  = runtimeTest.connect(source, "out", convert, "in");
+        std::ignore                  = runtimeTest.connect(convert, "out", admitted, "in");
+        std::ignore                  = runtimeTest.connect(convert, "reject", refused, "in");
+        std::ignore                  = runtimeTest.run();
 
         expect(eq(admitted._items.size(), capture.out.size())) << "every packet admitted";
         expect(eq(refused._items.size(), 0UZ)) << "none on reject";
@@ -903,15 +903,15 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         // graph seven records at a time; 'incomplete' and 'reject' are left unconnected, which is a graph a
         // recipe would build
         {
-            gr::test::RuntimeTest test;
-            auto&                 source = test.emplace<ItemSource<Record>>();
+            gr::test::RuntimeTest runtimeTest;
+            auto&                 source = runtimeTest.emplace<ItemSource<Record>>();
             source._items                = records;
             source._maxPerCall           = 7UZ;
-            auto& reassembler            = test.emplace<ChunkReassembler>(basicSettings());
-            auto& collected              = test.emplace<GraphCollector<PacketU>>();
-            std::ignore                  = test.connect(source, "out", reassembler, "in");
-            std::ignore                  = test.connect(reassembler, "out", collected, "in");
-            std::ignore                  = test.run();
+            auto& reassembler            = runtimeTest.emplace<ChunkReassembler>(basicSettings());
+            auto& collected              = runtimeTest.emplace<GraphCollector<PacketU>>();
+            std::ignore                  = runtimeTest.connect(source, "out", reassembler, "in");
+            std::ignore                  = runtimeTest.connect(reassembler, "out", collected, "in");
+            std::ignore                  = runtimeTest.run();
 
             expect(eq(collected._items.size(), 1UZ)) << "under the scheduler";
             if (!collected._items.empty() && !referenceCapture.out.empty()) {
