@@ -39,7 +39,7 @@
 #include <gnuradio-4.0/basic/ConverterBlocks.hpp>
 #include <gnuradio-4.0/fileio/BasicFileIo.hpp>
 
-namespace {
+namespace qa_adsb_recording {
 
 using Record = gr::DataSet<std::uint8_t>;
 
@@ -80,7 +80,9 @@ struct LineSink : gr::Block<LineSink> {
     }
 };
 
-} // namespace
+} // namespace qa_adsb_recording
+
+using namespace qa_adsb_recording;
 
 int main() {
     const char* const           configured = std::getenv("GR4_RECORDINGS_DIR");

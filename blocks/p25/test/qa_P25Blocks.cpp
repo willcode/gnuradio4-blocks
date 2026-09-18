@@ -19,7 +19,7 @@
 #include <gnuradio-4.0/p25/PayloadGen.hpp>
 #include <gnuradio-4.0/vocoder/ImbeDecode.hpp>
 
-namespace {
+namespace qa_p25_blocks {
 
 using gr::blocks::p25::P25Deframer;
 using gr::blocks::p25::P25PayloadDecode;
@@ -166,7 +166,9 @@ template<typename V>
     return stream;
 }
 
-} // namespace
+} // namespace qa_p25_blocks
+
+using namespace qa_p25_blocks;
 
 int main() {
     using namespace boost::ut;

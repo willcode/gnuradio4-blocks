@@ -41,7 +41,7 @@ using gr::test::lte::makeDownlink;
 using gr::test::lte::Scene;
 using gr::test::lte::SceneConfig;
 
-namespace {
+namespace qa_lte_cell_scan {
 
 using Complex = std::complex<float>;
 
@@ -257,7 +257,9 @@ struct ScanRun {
     return graph;
 }
 
-} // namespace
+} // namespace qa_lte_cell_scan
+
+using namespace qa_lte_cell_scan;
 
 const boost::ut::suite<"LteCellScan"> _lteCellScan = [] {
     "a record names the input sample the detection sits on"_test = [] {

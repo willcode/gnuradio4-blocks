@@ -406,7 +406,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             std::print("{:.1f} us: {:.4f}   ", 0.5 * static_cast<double>(lag), ungatedArm.magnitude[lag]);
         }
         std::println("");
-        const double flatSpread = *std::ranges::max_element(ungatedArm.magnitude.begin() + 1, ungatedArm.magnitude.begin() + 7) - *std::ranges::min_element(ungatedArm.magnitude.begin() + 1, ungatedArm.magnitude.begin() + 7);
+        const double flatSpread = static_cast<double>(*std::ranges::max_element(ungatedArm.magnitude.begin() + 1, ungatedArm.magnitude.begin() + 7)) - static_cast<double>(*std::ranges::min_element(ungatedArm.magnitude.begin() + 1, ungatedArm.magnitude.begin() + 7));
         std::println("    no lag between 0.5 and 3.0 us is distinguishable: the whole run spans {:.4f} on a curve that never falls to the scatter", flatSpread);
         expect(static_cast<double>(ungatedArm.magnitude[2UZ]) > 20. * ungatedArm.scatter) << "the derived null at 1 us is nowhere to be seen in an ungated window";
 

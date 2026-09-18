@@ -39,7 +39,7 @@
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
-namespace {
+namespace qa_mode_s_decode {
 
 using gr::blocks::adsb::ModeSDecode;
 using gr::blocks::testing::span::InputSpan;
@@ -298,7 +298,9 @@ constexpr std::array<std::string_view, 2UZ> kIntegerKeys{"adsb_altitude_ft", "ad
     return compared;
 }
 
-} // namespace
+} // namespace qa_mode_s_decode
+
+using namespace qa_mode_s_decode;
 
 const boost::ut::suite<"adsb"> modeSTests = [] {
     using namespace boost::ut;

@@ -169,7 +169,7 @@ inline void imbePackUVector(const ImbeParameters& p, std::uint8_t* bytes) noexce
         std::uint16_t  value = 0U;
         for (unsigned b = 0U; b < width; ++b, ++at) {
             const unsigned bit = (bytes[at / 8U] >> (7U - (at % 8U))) & 1U;
-            value              = static_cast<std::uint16_t>((value << 1U) | bit);
+            value              = static_cast<std::uint16_t>((static_cast<unsigned>(value) << 1U) | bit);
         }
         p.u[w] = value;
     }

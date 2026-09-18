@@ -14,7 +14,7 @@
 #include <gnuradio-4.0/algorithm/vocoder/Imbe.hpp>
 #include <gnuradio-4.0/vocoder/ImbeDecode.hpp>
 
-namespace {
+namespace qa_imbe_decode {
 
 using gr::blocks::vocoder::ImbeDecode;
 
@@ -121,7 +121,9 @@ struct RecordSink : gr::Block<RecordSink> {
     return samples;
 }
 
-} // namespace
+} // namespace qa_imbe_decode
+
+using namespace qa_imbe_decode;
 
 int main() {
     using namespace boost::ut;

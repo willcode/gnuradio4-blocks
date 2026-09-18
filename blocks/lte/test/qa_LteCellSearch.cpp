@@ -37,7 +37,7 @@ using gr::test::lte::makeDownlink;
 using gr::test::lte::Scene;
 using gr::test::lte::SceneConfig;
 
-namespace {
+namespace qa_lte_cell_search {
 
 using Complex = std::complex<float>;
 
@@ -303,7 +303,9 @@ constexpr float kOffsetToleranceHz = 600.f;
     return wrong;
 }
 
-} // namespace
+} // namespace qa_lte_cell_search
+
+using namespace qa_lte_cell_search;
 
 const boost::ut::suite<"LteCellSearch"> _lteCellSearch = [] {
     "a clean downlink identifies exactly, under every structure"_test = [] {
