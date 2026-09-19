@@ -87,8 +87,11 @@ struct RecordSink : gr::Block<RecordSink> {
         for (const auto& record : inSpan) {
             _records.push_back(record);
         }
-        std::ignore = inSpan.consume(inSpan.size());
-        return gr::work::Status::OK;
+        // Waiting for the next record is not work: OK with nothing consumed is what the runtime reads as a block
+        // the scheduler cannot make progress on, and a sink between two dwells is exactly short of input.
+        const std::size_t taken = inSpan.size();
+        std::ignore             = inSpan.consume(taken);
+        return taken == 0UZ ? gr::work::Status::INSUFFICIENT_INPUT_ITEMS : gr::work::Status::OK;
     }
 };
 
