@@ -14,7 +14,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/digital/OffsetWordFraming.hpp>
 
-namespace {
+namespace qa_offset_word_framing {
 
 using gr::blocks::digital::GroupAssembler;
 using gr::blocks::digital::OffsetWordSync;
@@ -107,7 +107,9 @@ struct RecordSink : gr::Block<RecordSink> {
     return finished ? sink._records : std::vector<gr::DataSet<std::uint16_t>>{};
 }
 
-} // namespace
+} // namespace qa_offset_word_framing
+
+using namespace qa_offset_word_framing;
 
 const boost::ut::suite<"OffsetWordFraming"> offsetWordFramingTests = [] {
     using namespace boost::ut;
@@ -149,7 +151,7 @@ const boost::ut::suite<"OffsetWordFraming"> offsetWordFramingTests = [] {
     "refusals fire by name"_test = [] {
         const auto refused = [](gr::property_map settings) {
             return boost::ut::expect(throws([&settings] {
-                OffsetWordSync block{gr::property_map(settings)};
+                OffsetWordSync block(settings);
                 block.settings().init();
                 std::ignore = block.settings().applyStagedParameters();
                 block.start();
@@ -161,12 +163,12 @@ const boost::ut::suite<"OffsetWordFraming"> offsetWordFramingTests = [] {
         refused(std::move(badOffset)) << "an offset word past the checkword width";
 
         expect(throws([] {
-            GroupAssembler block{{{"group_size", gr::Size_t(4)}, {"min_good", gr::Size_t(5)}, {"protocol", std::string("rds")}}};
+            GroupAssembler block({{"group_size", gr::Size_t(4)}, {"min_good", gr::Size_t(5)}, {"protocol", std::string("rds")}});
             block.settings().init();
             std::ignore = block.settings().applyStagedParameters();
         })) << "min_good past the group size";
         expect(throws([] {
-            GroupAssembler block{{{"group_size", gr::Size_t(4)}, {"min_good", gr::Size_t(4)}}}; // both are the defaults, so the batch moves nothing and the refusal comes at start
+            GroupAssembler block({{"group_size", gr::Size_t(4)}, {"min_good", gr::Size_t(4)}}); // both are the defaults, so the batch moves nothing and the refusal comes at start
             block.settings().init();
             std::ignore = block.settings().applyStagedParameters();
             block.start();
