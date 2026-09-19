@@ -7,6 +7,11 @@
  *
  * The directory arrives as GR4_RECORDINGS_DIR. With the directory or a file absent the run prints the path it
  * looked for and exits 77, which CTest is told is a skip.
+ *
+ * Every leg reads the head of its capture and sweeps coarsely, which is what each criterion needs and no more.
+ * ENABLE_LONG_TESTS restores the spans and the sweep steps the criteria were first recorded over: whole captures,
+ * one-megahertz and 2.5-kilohertz offset grids, and both FM stations. The values a leg asserts are the same in
+ * either arm, since each is a peak position or a closed form computed from the run's own averages.
  */
 
 #include <algorithm>
@@ -50,6 +55,8 @@ constexpr std::string_view kFmSecond = "20260726_102407_100600000_2048000_fc.raw
 constexpr std::string_view kLte      = "20260730_182327_757000000_25000000_fc.sigmf-meta";
 constexpr std::string_view kAdsb     = "ADSB_20260812_182544_1090000000_2000000_cs16.sigmf-data";
 constexpr std::string_view kP25      = "wpd_20260811_152707_483125000_125000_cf32.sigmf-data";
+
+[[nodiscard]] bool longRun() { return std::getenv("ENABLE_LONG_TESTS") != nullptr; }
 
 [[nodiscard]] std::string recordingsDirectory() {
     const char* fromEnvironment = std::getenv("GR4_RECORDINGS_DIR");
@@ -258,13 +265,16 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
     };
 
     "criterion 17: the FM leg, the 19 kHz pilot at 52.632 us"_test = [] {
-        constexpr double      rate     = 2.048e6;
-        constexpr std::size_t length   = 16384UZ;
-        constexpr std::size_t lags     = 300UZ;
-        constexpr std::size_t windows  = 300UZ;
-        constexpr double      period   = 1. / 19000.;
-        const double          expected = period * rate; // 107.79 samples
-        const auto            near     = static_cast<std::size_t>(std::llround(expected));
+        constexpr double      rate   = 2.048e6;
+        constexpr std::size_t length = 16384UZ;
+        constexpr std::size_t lags   = 300UZ;
+        constexpr double      period = 1. / 19000.;
+        // Both spans buy confidence rather than the peak's position: the pilot is a steady tone, the averages set
+        // how far the estimate's own threshold sits below it, and the station search only ranks ten offsets.
+        const std::size_t windows     = longRun() ? 300UZ : 40UZ;
+        const std::size_t probeLength = longRun() ? 262144UZ : 65536UZ;
+        const double      expected    = period * rate; // 107.79 samples
+        const auto        near        = static_cast<std::size_t>(std::llround(expected));
 
         const std::vector<float> narrow = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 100000., .transitionWidth = 40000., .attenuationDb = 60.});
         const std::vector<float> wide   = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 200000., .transitionWidth = 40000., .attenuationDb = 60.});
@@ -279,7 +289,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             // pilot is worth looking for.
             double                    bestOffset = 100000.;
             double                    bestPower  = -1.;
-            const std::span<const CF> probeSpan(raw.data(), std::min<std::size_t>(raw.size(), 262144UZ));
+            const std::span<const CF> probeSpan(raw.data(), std::min<std::size_t>(raw.size(), probeLength));
             for (int step = -5; step <= 4; ++step) {
                 const double          offset = static_cast<double>(step) * 200000. + 100000.;
                 const std::vector<CF> probe  = applyFir(std::span<const CF>(tune(probeSpan, offset, rate)), std::span<const float>(narrow));
@@ -336,9 +346,11 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         constexpr double      rate   = 25.0e6;
         constexpr std::size_t length = 32768UZ;
         constexpr std::size_t lags   = 2000UZ;
-        constexpr std::size_t full   = 300UZ;
         constexpr std::size_t tunedK = 50UZ;
         constexpr double      closed = 1024. / 15360.;
+        // the whole-span estimate is a reading, not an assertion; the span it takes has only to hold the averages
+        // the tuned sweep below then reads from its head
+        const std::size_t full = longRun() ? 300UZ : 56UZ;
 
         const std::vector<CF> samples = readThroughSigMf(capturePath(kLte), full * length);
         expect(fatal(ge(samples.size(), full * length))) << "the SigMF source delivered the whole span the leg asks for";
@@ -360,7 +372,11 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         std::println("criterion 18: the offset sweep, N={} K={}, +/-4.5 MHz channel filter ({} taps)", length, tunedK, channel.size());
         double bestHeight = -1.;
         double bestOffset = 0.;
-        for (int step = -10; step <= 10; ++step) {
+        // the arm the criterion asserts is at +4 MHz, which both grids land on; the finer one resolves how flat the
+        // sweep is between the carriers
+        const int reach  = longRun() ? 10 : 4;
+        const int stride = longRun() ? 1 : 4;
+        for (int step = -reach; step <= reach; step += stride) {
             const double          offset   = static_cast<double>(step) * 1.0e6;
             const std::vector<CF> filtered = applyFir(std::span<const CF>(tune(head, offset, rate)), std::span<const float>(channel));
             const Estimate        arm      = estimate<CF>(config, std::span<const CF>(filtered));
@@ -380,11 +396,14 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
     };
 
     "criterion 19: the ADS-B leg, 0.5 us and 1 us, gated and ungated"_test = [] {
-        constexpr std::size_t ungatedLength  = 8192UZ;
-        constexpr std::size_t ungatedWindows = 900UZ;
-        constexpr std::size_t frameLength    = 240UZ;
-        constexpr std::size_t frameLags      = 16UZ;
-        constexpr std::size_t gateSpan       = 40'000'000UZ;
+        constexpr std::size_t ungatedLength = 8192UZ;
+        constexpr std::size_t frameLength   = 240UZ;
+        constexpr std::size_t frameLags     = 16UZ;
+        // The ungated curve is flat, so its averages buy confidence and nothing else, and the crude gate's median is
+        // taken over whatever span it opens over. The framer's own pass reads the capture whole in either arm: it
+        // yields about one long frame per second of air and the case asks for five of them.
+        const std::size_t ungatedWindows = longRun() ? 900UZ : 150UZ;
+        const std::size_t gateSpan       = longRun() ? 40'000'000UZ : 8'000'000UZ;
 
         // the ungated window, which is arithmetic rather than analysis: a burst at a 1.3e-4 duty cycle contributes
         // 1.3e-4 of a window's variance, and what the estimate reads instead is the receiver's own envelope wander
