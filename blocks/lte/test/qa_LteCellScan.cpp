@@ -45,22 +45,30 @@ namespace qa_lte_cell_scan {
 
 using Complex = std::complex<float>;
 
-/// The wideband rate the scan is written against, and the capture's own.
-constexpr double      kWideRate    = 25'000'000.;
-constexpr double      kWideCenter  = 757'000'000.;
-constexpr const char* kCaptureName = "20260730_182327_757000000_25000000_fc.sigmf-meta";
-/// A wideband rate that is a power-of-two multiple of the identifier's own, so that a primary symbol at it is an
-/// exact 1024-point transform of the same 62 subcarriers and a test can say where one is in a span without asking
-/// the resampler under test where it put it.
+/// The center the synthetic spans are reported against; a station's absolute carrier is this plus its position.
+constexpr double kWideCenter = 757'000'000.;
+/// The wideband rate every synthetic span is built at. It is a power-of-two multiple of the identifier's own, so
+/// that a primary symbol at it is an exact 1024-point transform of the same 62 subcarriers and a test can say where
+/// one is in a span without asking the resampler under test where it put it. One rate throughout also means one
+/// polyphase prototype: the design's cost is a function of the rate ratio and is paid once per distinct ratio.
 constexpr std::size_t kExactMultiple = 8UZ;
 constexpr double      kExactRate     = static_cast<double>(kExactMultiple) * 1'920'000.;
 constexpr std::size_t kExactSymbol   = kExactMultiple * gr::lte::kSymbolSamples;
-/// Sweeps of the capture the gate takes. The whole file is about 27 of them at half a minute a sweep; the gate
-/// takes one, which already visits every position, and the full run is a measurement rather than a gate.
-constexpr std::uint32_t kCapturePasses = 1U;
-/// Radio frames per cell of the synthetic span. A dwell consumes about 258 000 input samples, so the span has to be
-/// long enough for the sweep to reach the highest carrier on it and come round again.
-constexpr std::size_t kSpanFrames = 40UZ;
+/// The rate the graph case's stand-in is written at: twice the identifier's own, which is the cheapest ratio a
+/// scan can be asked for and all that a case about whether a graph file loads and runs needs.
+constexpr double kStandInRate = 2. * 1'920'000.;
+
+/// Whether the long arm of the cases that sweep runs. Each of them states below what its two arms differ in; the
+/// short arm is the one the committed binary runs, and it pins the same relationships over a smaller sweep.
+[[nodiscard]] bool longRun() { return std::getenv("ENABLE_LONG_TESTS") != nullptr; }
+
+/// Spacing of the dwell positions of the swept span. Every carrier on that span sits on a position under either
+/// spacing; the finer one visits the positions between them as well, which is a sweep rather than a gate.
+[[nodiscard]] float sweepStepHz() { return longRun() ? 1'000'000.f : 2'000'000.f; }
+
+/// Radio frames per cell of the synthetic span. A dwell is 10.4 ms of input whatever the rate, so the span has to
+/// be long enough for the sweep to reach the highest carrier on it; the long arm carries it round a second time.
+[[nodiscard]] std::size_t spanFrames() { return longRun() ? 30UZ : 8UZ; }
 
 /// A source that hands the graph a fixed stream and finishes.
 struct VectorSource : gr::Block<VectorSource> {
@@ -126,7 +134,7 @@ struct RecordSink : gr::Block<RecordSink> {
  * interpolates, and its own prototype is the reconstruction filter. The result is added into @p span, which is what
  * one antenna sees when two carriers share a band.
  */
-void placeCell(std::vector<Complex>& span, const SceneConfig& config, double offsetHz, float amplitude, double wideRate = kWideRate, std::size_t limit = ~0UZ) {
+void placeCell(std::vector<Complex>& span, const SceneConfig& config, double offsetHz, float amplitude, double wideRate = kExactRate, std::size_t limit = ~0UZ) {
     const Scene scene = makeDownlink(config);
 
     const double                            rate   = wideRate / static_cast<double>(gr::lte::kSampleRate);
@@ -232,12 +240,6 @@ struct ScanRun {
     return ScanRun{scanner.stations(), sink._records, scanner.nPositions, scanner.nDwells, scanner.nPrimary, scanner.nSssRejected, scanner.nDetections, scanner.nBelowConfirmations, scanner.nPasses, seconds};
 }
 
-/// The directory the recording legs read, or empty when the build was configured without one.
-[[nodiscard]] std::string recordingsDirectory() {
-    const char* fromEnvironment = std::getenv("GR4_RECORDINGS_DIR");
-    return fromEnvironment == nullptr ? std::string{} : std::string(fromEnvironment);
-}
-
 [[nodiscard]] std::string readGraph() {
     std::ifstream      file(std::format("{}/lte_scan.yaml", EXAMPLE_GRAPHS_PATH), std::ios::binary);
     std::ostringstream content;
@@ -245,12 +247,19 @@ struct ScanRun {
     return content.str();
 }
 
-/// Rewrite the graph's one editable line, which is how the same file serves a capture and a synthetic stand-in.
-[[nodiscard]] std::string withCapture(std::string graph, const std::string& path, std::uint32_t passes) {
+/// Rewrite the graph's editable lines, which is how the same file serves a capture and a synthetic stand-in: the
+/// recording it names, the rate that recording is at, and how many sweeps of it to take.
+[[nodiscard]] std::string withCapture(std::string graph, const std::string& path, double rate, std::uint32_t passes) {
     const std::size_t at = graph.find("file_name:");
     boost::ut::expect(at != std::string::npos) << "the graph names a capture";
     const std::size_t end = graph.find('\n', at);
     graph.replace(at, end - at, std::format("file_name: {}", path));
+
+    const std::size_t rated = graph.find("sample_rate: !!float32 ");
+    if (rated != std::string::npos) {
+        const std::size_t lineEnd = graph.find('\n', rated);
+        graph.replace(rated, lineEnd - rated, std::format("sample_rate: !!float32 {:.1f}", rate));
+    }
 
     const std::size_t bounded = graph.find("passes: !!uint32 ");
     if (bounded != std::string::npos) {
@@ -352,29 +361,32 @@ const boost::ut::suite<"LteCellScan"> _lteCellScan = [] {
     };
 
     "a synthetic span is swept and every cell on it named"_test = [] {
-        // Three carriers across the span, two of them sharing the +2 MHz center with different groups, and a fourth
-        // 6 dB below one of those two on the same root: the pair that shares a root is what F4's limit acts on.
+        // Four carriers across the span under three structures, and on one of the four centers a second cell 6 dB
+        // below the first on the same root: the pair that shares a root is what F4's limit acts on, and it is the
+        // only center a cell is asserted on without one of its own. Each carrier sits on a whole number of
+        // megahertz from the center, which is a dwell position under either step the arms sweep at.
+        const std::size_t    frames = spanFrames();
         std::vector<Complex> span;
         SceneConfig          low;
         low.nId1   = 30U;
         low.nId2   = 0U;
-        low.frames = kSpanFrames;
+        low.frames = frames;
         low.seed   = 0x11ULL;
-        placeCell(span, low, -8'000'000., 1.f);
+        placeCell(span, low, -6'000'000., 1.f);
 
         SceneConfig middle;
         middle.nId1   = 100U;
         middle.nId2   = 1U;
         middle.duplex = gr::lte::DuplexMode::Tdd;
-        middle.frames = kSpanFrames;
+        middle.frames = frames;
         middle.seed   = 0x22ULL;
-        placeCell(span, middle, 2'000'000., 1.f);
+        placeCell(span, middle, 4'000'000., 1.f);
 
         SceneConfig beside;
         beside.nId1         = 7U;
         beside.nId2         = 2U;
         beside.cyclicPrefix = gr::lte::CyclicPrefix::Extended;
-        beside.frames       = kSpanFrames;
+        beside.frames       = frames;
         beside.seed         = 0x33ULL;
         placeCell(span, beside, 2'000'000., 1.f);
 
@@ -383,7 +395,7 @@ const boost::ut::suite<"LteCellScan"> _lteCellScan = [] {
         shadowed.nId2         = 2U; // the same root as `beside`, and 6 dB below it
         shadowed.duplex       = gr::lte::DuplexMode::Tdd;
         shadowed.cyclicPrefix = gr::lte::CyclicPrefix::Extended;
-        shadowed.frames       = kSpanFrames;
+        shadowed.frames       = frames;
         shadowed.seed         = 0x44ULL;
         placeCell(span, shadowed, 2'000'000., std::pow(10.f, -6.f / 20.f));
 
@@ -391,18 +403,23 @@ const boost::ut::suite<"LteCellScan"> _lteCellScan = [] {
         high.nId1         = 167U;
         high.nId2         = 0U;
         high.cyclicPrefix = gr::lte::CyclicPrefix::Extended;
-        high.frames       = kSpanFrames;
+        high.frames       = frames;
         high.seed         = 0x55ULL;
-        placeCell(span, high, 9'000'000., 1.f);
+        placeCell(span, high, 6'000'000., 1.f);
 
-        addNoise(span, 0.1, 0x66ULL);
+        // What a carrier sees is the noise inside the 1.92 MHz it occupies, not the noise across the whole span, so
+        // the per-sample power is the in-band ratio scaled by how much wider the span is than that band. Stating it
+        // the other way round would make the same number a different ratio at every wideband rate.
+        constexpr double kInBandSnrDb = 21.;
+        addNoise(span, std::pow(10., -kInBandSnrDb / 10.) * kExactRate / static_cast<double>(gr::lte::kSampleRate), 0x66ULL);
 
-        // A megahertz step over a 19 MHz span puts every carrier on a position of its own in 19 dwells, and the
-        // scene is long enough for the sweep to come round again; the frequency search, the thresholds and the
-        // reporting rule are the application's own defaults. The persistence gate is set to one sighting, because
-        // what this case measures is the sweep, the raster and the first-sighting mark rather than that gate, which
-        // has an arm of its own; a dwell of two half-frames would otherwise decide the answer.
-        const ScanRun run = scan(span, {{"sample_rate", static_cast<float>(kWideRate)}, {"center_frequency", static_cast<float>(kWideCenter)}, {"span_hz", 19'000'000.f}, {"step_hz", 1'000'000.f}, {"dwell_half_frames", gr::Size_t(2)}, {"min_confirmations", gr::Size_t(1)}, {"report", std::string("all")}});
+        // A two-megahertz step over a 13 MHz span puts every carrier on a position of its own in seven dwells; the
+        // long arm halves the step, so the sweep also visits the six positions between them, and its scene is long
+        // enough to carry the sweep round a second time. The frequency search, the thresholds and the reporting
+        // rule are the application's own defaults. The persistence gate is set to one sighting, because what this
+        // case measures is the sweep, the raster and the first-sighting mark rather than that gate, which has an
+        // arm of its own; a dwell of two half-frames would otherwise decide the answer.
+        const ScanRun run = scan(span, {{"sample_rate", static_cast<float>(kExactRate)}, {"center_frequency", static_cast<float>(kWideCenter)}, {"span_hz", 13'000'000.f}, {"step_hz", sweepStepHz()}, {"dwell_half_frames", gr::Size_t(2)}, {"min_confirmations", gr::Size_t(1)}, {"report", std::string("all")}});
 
         std::println("criterion 17: {} positions, {} dwells, {} passes, {} primary detections of which {} unconfirmed, {} confirmed, {} stations", run.positions, run.dwells, run.passes, run.primary, run.rejected, run.detections, run.stations.size());
         for (const LteCellScanner::Station& station : run.stations) {
@@ -413,12 +430,12 @@ const boost::ut::suite<"LteCellScan"> _lteCellScan = [] {
             const auto at = static_cast<std::int64_t>(std::llround(centerMHz * 1e6));
             return std::ranges::any_of(run.stations, [at, nId1, nId2, tdd, extended](const LteCellScanner::Station& s) { return s.centerHz == at && s.nId1 == nId1 && s.nId2 == nId2 && s.tdd == tdd && s.extended == extended; });
         };
-        expect(found(749.0, 30U, 0U, false, false)) << "the cell 8 MHz below center";
-        expect(found(759.0, 100U, 1U, true, false)) << "the unpaired cell 2 MHz above center";
-        // The two carriers the criterion puts on one center are joined there by its own fourth cell, so that
-        // center carries three at once and what a root's single peak resolves to is measured, not assumed.
-        std::println("criterion 17: the extended-prefix cell sharing the +2 MHz center was {}", found(759.0, 7U, 2U, false, true) ? "identified" : "never identified");
-        expect(found(766.0, 167U, 0U, false, true)) << "the cell 9 MHz above center";
+        expect(found(751.0, 30U, 0U, false, false)) << "the cell 6 MHz below center";
+        expect(found(761.0, 100U, 1U, true, false)) << "the unpaired cell 4 MHz above center";
+        expect(found(763.0, 167U, 0U, false, true)) << "the cell 6 MHz above center";
+        // The +2 MHz center carries two cells on one root, so what a root's single peak resolves to there is
+        // measured rather than assumed: the stronger is the one that can be named at all.
+        std::println("criterion 17: the stronger of the two cells sharing the +2 MHz center was {}", found(759.0, 7U, 2U, false, true) ? "identified" : "never identified");
 
         for (const LteCellScanner::Station& station : run.stations) {
             expect(eq(station.centerHz % 100'000, std::int64_t{0})) << std::format("station at {} sits on the 100 kHz raster", station.centerHz);
@@ -441,98 +458,37 @@ const boost::ut::suite<"LteCellScan"> _lteCellScan = [] {
     };
 
     "the scan graph loads and runs"_test = [] {
-        const std::string directory = recordingsDirectory();
-        const std::string capture   = directory.empty() ? std::string{} : std::format("{}/{}", directory, kCaptureName);
+        // What this case is about is the graph file: that its block ids resolve, its settings are accepted and it
+        // runs to the end of its input. It is therefore pointed at a four-frame stand-in written here, at the
+        // cheapest rate a scan can be asked for, rather than at a recording: scanning one is a unit of its own, and
+        // a second sweep of a wideband capture here would cost minutes and say nothing this case asks.
+        std::vector<Complex> span;
+        SceneConfig          one;
+        one.nId1   = 42U;
+        one.nId2   = 1U;
+        one.frames = 4UZ;
+        one.seed   = 0x77ULL;
+        placeCell(span, one, 400'000., 1.f, kStandInRate);
+        addNoise(span, 0.1, 0x88ULL);
 
-        std::string path = capture;
-        if (path.empty() || !std::filesystem::exists(path)) {
-            // No capture: the graph still has to load and run, so it is pointed at a stand-in written here. The
-            // recording leg below is what skips; this one never does.
-            std::vector<Complex> span;
-            SceneConfig          one;
-            one.nId1   = 42U;
-            one.nId2   = 1U;
-            one.frames = 4UZ;
-            one.seed   = 0x77ULL;
-            placeCell(span, one, 1'000'000., 1.f);
-            addNoise(span, 0.1, 0x88ULL);
-
-            const std::filesystem::path base = std::filesystem::temp_directory_path() / "gr4_lte_scan_stand_in";
-            std::ofstream               data(std::format("{}.sigmf-data", base.string()), std::ios::binary);
-            for (const Complex& sample : span) {
-                const std::array<std::int16_t, 2UZ> pair{static_cast<std::int16_t>(std::lround(std::clamp(sample.real(), -1.f, 1.f) * 32000.f)), static_cast<std::int16_t>(std::lround(std::clamp(sample.imag(), -1.f, 1.f) * 32000.f))};
-                data.write(reinterpret_cast<const char*>(pair.data()), static_cast<std::streamsize>(sizeof(pair)));
-            }
-            data.close();
-            std::ofstream meta(std::format("{}.sigmf-meta", base.string()));
-            meta << std::format(R"({{"global":{{"core:datatype":"ci16_le","core:version":"1.2.0","core:num_channels":1,"core:sample_rate":{}}},"captures":[{{"core:sample_start":0,"core:frequency":{}}}],"annotations":[]}})", kWideRate, kWideCenter);
-            meta.close();
-            path = std::format("{}.sigmf-meta", base.string());
+        const std::filesystem::path base = std::filesystem::temp_directory_path() / "gr4_lte_scan_stand_in";
+        std::ofstream               data(std::format("{}.sigmf-data", base.string()), std::ios::binary);
+        for (const Complex& sample : span) {
+            const std::array<std::int16_t, 2UZ> pair{static_cast<std::int16_t>(std::lround(std::clamp(sample.real(), -1.f, 1.f) * 32000.f)), static_cast<std::int16_t>(std::lround(std::clamp(sample.imag(), -1.f, 1.f) * 32000.f))};
+            data.write(reinterpret_cast<const char*>(pair.data()), static_cast<std::streamsize>(sizeof(pair)));
         }
+        data.close();
+        std::ofstream meta(std::format("{}.sigmf-meta", base.string()));
+        meta << std::format(R"({{"global":{{"core:datatype":"ci16_le","core:version":"1.2.0","core:num_channels":1,"core:sample_rate":{}}},"captures":[{{"core:sample_start":0,"core:frequency":{}}}],"annotations":[]}})", kStandInRate, kWideCenter);
+        meta.close();
 
-        const std::string text = withCapture(readGraph(), path, 1U);
+        const std::string text = withCapture(readGraph(), std::format("{}.sigmf-meta", base.string()), kStandInRate, 1U);
         expect(nothrow([&text] {
             auto                    graph = gr::loadGrc(gr::globalPluginLoader(), text);
             gr::scheduler::Simple<> scheduler;
             expect(scheduler.exchange(std::move(*graph)).has_value());
             expect(scheduler.runAndWait().has_value());
         })) << "lte_scan.yaml loads and runs to the end of its input";
-    };
-
-    "the capture is scanned and its stations named"_test = [] {
-        const std::string directory = recordingsDirectory();
-        const std::string capture   = directory.empty() ? std::string{} : std::format("{}/{}", directory, kCaptureName);
-        if (capture.empty() || !std::filesystem::exists(capture)) {
-            std::println("SKIP: no capture at '{}'; configure with -DGR4_RECORDINGS_DIR=<dir> holding {}", capture.empty() ? std::string("<GR4_RECORDINGS_DIR unset>") : capture, kCaptureName);
-            std::fflush(nullptr);
-            std::_Exit(77);
-        }
-
-        gr::Graph flow;
-        auto&     source  = flow.emplaceBlock<gr::blocks::fileio::SigMfSource<Complex>>({{"file_name", capture}});
-        auto&     scanner = flow.emplaceBlock<LteCellScanner>({{"sample_rate", static_cast<float>(kWideRate)}, {"center_frequency", static_cast<float>(kWideCenter)}, {"passes", gr::Size_t(kCapturePasses)}, {"report", std::string("all")}});
-        auto&     sink    = flow.emplaceBlock<RecordSink>();
-        expect(flow.connect<"out", "in">(source, scanner).has_value());
-        expect(flow.connect<"out", "in">(scanner, sink).has_value());
-
-        gr::scheduler::Simple<> scheduler;
-        expect(scheduler.exchange(std::move(flow)).has_value());
-        const auto started = std::chrono::steady_clock::now();
-        expect(scheduler.runAndWait().has_value());
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-
-        const std::vector<LteCellScanner::Station> stations = scanner.stations();
-        std::println("criterion 16: {} passes over {} positions, {} dwells, {} detections, {} stations, {:.1f} s ({:.1f} s per pass)", scanner.nPasses, scanner.nPositions, scanner.nDwells, scanner.nDetections, stations.size(), seconds, scanner.nPasses == 0ULL ? seconds : seconds / static_cast<double>(scanner.nPasses));
-        std::vector<LteCellScanner::Station> ordered = stations;
-        std::ranges::sort(ordered, [](const auto& a, const auto& b) { return a.centerHz != b.centerHz ? a.centerHz < b.centerHz : a.cellId < b.cellId; });
-        for (const LteCellScanner::Station& station : ordered) {
-            std::println("  {:.4f} MHz cell {:3} ({:3},{}) {} {} pss {:.1f} sss {:.3f} seen {:5} first pass {} position {}", static_cast<double>(station.centerHz) * 1e-6, station.cellId, station.nId1, station.nId2, station.tdd ? "tdd" : "fdd", station.extended ? "extended" : "normal", static_cast<double>(station.bestPss), static_cast<double>(station.bestSss), station.detections, station.firstPass, station.firstPosition);
-        }
-
-        std::vector<std::int64_t> centers;
-        for (const LteCellScanner::Station& station : ordered) {
-            expect(eq(station.centerHz % 100'000, std::int64_t{0})) << "every center sits on the 100 kHz raster";
-            if (centers.empty() || centers.back() != station.centerHz) {
-                centers.push_back(station.centerHz);
-            }
-        }
-        expect(centers.size() >= 2UZ) << std::format("at least two distinct centers, got {}", centers.size());
-
-        // The band plan's two carriers are what one pass at the default gate must name, and it must name them with
-        // metrics two orders of magnitude clear of the thresholds rather than at them; a station admitted by a
-        // single sighting is a draw of a very large search and is what the persistence gate exists to refuse.
-        const auto carrier = [&ordered](std::int64_t centerHz, std::uint32_t cellId) {
-            const auto at = std::ranges::find_if(ordered, [centerHz, cellId](const LteCellScanner::Station& s) { return s.centerHz == centerHz && s.cellId == cellId; });
-            if (at == ordered.end()) {
-                return false;
-            }
-            expect(at->bestPss > 100.f) << std::format("cell {} at {} MHz: primary metric {:.1f}", cellId, static_cast<double>(centerHz) * 1e-6, static_cast<double>(at->bestPss));
-            expect(at->bestSss > 0.8f) << std::format("cell {} at {} MHz: secondary quality {:.3f}", cellId, static_cast<double>(centerHz) * 1e-6, static_cast<double>(at->bestSss));
-            expect(at->detections >= 2ULL) << std::format("cell {} at {} MHz: seen {} times", cellId, static_cast<double>(centerHz) * 1e-6, at->detections);
-            return true;
-        };
-        expect(carrier(751'000'000, 19U)) << "band 13's downlink, cell 19, at 751.0 MHz";
-        expect(carrier(763'000'000, 52U)) << "band 14's downlink, cell 52, at 763.0 MHz";
     };
 };
 

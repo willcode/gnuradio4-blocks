@@ -20,8 +20,14 @@ target_compile_definitions(qa_LteCellScan
 # builds its wideband scenes through the library resampler and sweeps the correlator over them, so it needs the inliner
 # depth -O2 provides
 gr_pin_test_optimization(qa_LteCellScan -O2)
+
+# the recording leg is a unit of its own: a sweep of a wideband capture costs a polyphase design at the capture's own
+# rate, which is most of a test binary's budget by itself
+add_ut_test(qa_LteScanRecording)
+target_link_libraries(qa_LteScanRecording PRIVATE gnuradio-core gr-lte gnuradio4::gr-fileio)
+gr_pin_test_optimization(qa_LteScanRecording -O2)
 set_property(
-  TEST qa_LteCellScan
+  TEST qa_LteScanRecording
   APPEND
   PROPERTY ENVIRONMENT_MODIFICATION "GR4_RECORDINGS_DIR=set:${GR4_RECORDINGS_DIR}")
-set_property(TEST qa_LteCellScan PROPERTY SKIP_RETURN_CODE 77)
+set_property(TEST qa_LteScanRecording PROPERTY SKIP_RETURN_CODE 77)
