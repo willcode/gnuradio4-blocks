@@ -123,7 +123,26 @@ endfunction()
 # target. Pinning also takes the target off the shared precompiled header, which was built at GR_QA_OPTIMIZATION_LEVEL:
 # gr_qa_attach_shared_pch sees the changed options and leaves the target parsing the headers, which is cheaper than a
 # header of its own for the few tests that pin a level.
+#
+# A sanitizer is asked for in the flags the configuration was given and nowhere else, and it is asked for on top of a
+# Debug build, whose whole point elsewhere is that nothing is optimized away. The two purposes part here: the tests that
+# pin a level are the ones whose run time depends on it, and unoptimized under instrumentation they run some sixty times
+# slower and are killed by their timeout, so such a build reports nothing about them at all. The pin therefore also
+# holds where a sanitizer is present, and only a plain Debug build is left unoptimized for stepping.
+set(GR_QA_INSTRUMENTED_BUILD OFF)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _gr_qa_config)
+foreach(_gr_qa_flags IN ITEMS "${CMAKE_CXX_FLAGS}" "${CMAKE_CXX_FLAGS_${_gr_qa_config}}")
+  if(_gr_qa_flags MATCHES "-fsanitize=")
+    set(GR_QA_INSTRUMENTED_BUILD ON)
+  endif()
+endforeach()
+
 function(gr_pin_test_optimization TEST_NAME LEVEL)
-  target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${LEVEL}>)
+  if(GR_QA_INSTRUMENTED_BUILD)
+    # the level, and the frame pointer a sanitizer's own unwinder walks to put a stack under its report
+    target_compile_options(${TEST_NAME} PRIVATE ${LEVEL} -fno-omit-frame-pointer)
+  else()
+    target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${LEVEL}>)
+  endif()
   set_target_properties(${TEST_NAME} PROPERTIES GR_QA_REDUCED_OPTIMIZATION OFF)
 endfunction()
