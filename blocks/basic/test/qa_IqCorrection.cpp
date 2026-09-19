@@ -18,6 +18,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/IqCorrection.hpp>
+#include <gnuradio-4.0/testing/Instrumentation.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -513,6 +514,14 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
     };
 
     "the cost floor"_test = [] {
+        // Every bound below is a per-sample cost of generated code, two of them stated against a span copy taken in
+        // the same run. An unoptimized or sanitizer-instrumented build generates different code and charges a block's
+        // call more than a copy, so neither the ratios nor the absolute figure describe it.
+        if (!gr::blocks::testing::kCostMeasurable) {
+            std::println("the per-sample cost is measured only in an optimized build without a sanitizer");
+            return;
+        }
+
         using Clock                   = std::chrono::steady_clock;
         constexpr std::size_t kLength = 1UZ << 22;
         constexpr int         kRuns   = 7;
