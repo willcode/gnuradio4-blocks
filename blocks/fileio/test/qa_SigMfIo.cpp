@@ -49,7 +49,10 @@ namespace keys = gr::blocks::fileio::sigmf_keys;
 template<typename T>
 using TagSinkFor = gr::blocks::testing::TagSink<T, gr::blocks::testing::ProcessFunction::USE_PROCESS_BULK>;
 
-std::string gProgramName = "qa_SigMfIo";
+/// The binary's own name, which names the workspace directory. It is a view: the suite runs from the test runner's
+/// destructor at process exit, when a namespace-scope string would already have been destroyed, and the storage
+/// `argv` points at lasts as long as the process.
+std::string_view gProgramName = "qa_SigMfIo"sv;
 
 /// A temporary directory named for this binary, removed when the test that owns it ends. A fixed path under /tmp is
 /// a parallel-ctest hazard, so nothing here uses one.
