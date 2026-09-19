@@ -22,6 +22,7 @@
 
 #include <gnuradio-4.0/analog/PowerMeter.hpp>
 
+#include <gnuradio-4.0/testing/Instrumentation.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
@@ -485,6 +486,14 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
     };
 
     "the logarithm is not on the sample path"_test = [] {
+        // What this case states is a property of the code the compiler generates for the meter, read as a ratio
+        // against the accumulation the meter cannot avoid. An unoptimized or sanitizer-instrumented build generates
+        // different code and charges the two arms differently, so there the ratio is not the meter's.
+        if (!gr::blocks::testing::kCostMeasurable) {
+            std::println("the per-sample cost is measured only in an optimized build without a sanitizer");
+            return;
+        }
+
         using Clock                   = std::chrono::steady_clock;
         constexpr std::size_t kLength = 1UZ << 22;
         constexpr std::size_t kChunk  = 4096UZ;
