@@ -44,6 +44,9 @@ target_link_libraries(qa_Manchester PRIVATE gr-digital gr-testing)
 add_ut_test(qa_ManchesterCombine)
 target_link_libraries(qa_ManchesterCombine PRIVATE gr-digital gr-testing)
 
+add_ut_test(qa_OffsetWordFraming)
+target_link_libraries(qa_OffsetWordFraming PRIVATE gr-digital gr-testing)
+
 add_ut_test(qa_PacketFramer)
 target_link_libraries(qa_PacketFramer PRIVATE gr-digital gr-testing)
 
