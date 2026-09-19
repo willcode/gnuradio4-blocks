@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <limits>
 #include <numbers>
@@ -274,6 +275,14 @@ constexpr float kOffsetToleranceHz = 600.f;
 /// The noise power a stated per-sample signal-to-noise ratio implies against the scene's unit mean power.
 [[nodiscard]] double noisePowerFor(double snrDb) { return std::pow(10., -snrDb / 10.); }
 
+/// Whether the long arm of the cases that sweep runs. Each of them states below what its two arms differ in; the
+/// short arm is the one the committed binary runs, and it pins the same relationships over a smaller scene.
+[[nodiscard]] bool longRun() { return std::getenv("ENABLE_LONG_TESTS") != nullptr; }
+
+/// Radio frames of the scenes whose length only buys draws: a hundred half-frames instead of forty measures the
+/// same error and the same identification rate more finely, and says nothing the shorter scene does not.
+[[nodiscard]] std::size_t sweepFrames() { return longRun() ? 50UZ : 20UZ; }
+
 /// Check one record against the scene it came from; returns the empty string when everything matched.
 [[nodiscard]] std::string mismatch(const gr::DataSet<float>& record, const Scene& scene, const SceneConfig& config, float toleranceHz) {
     const std::uint64_t position = metaU64(record, "pss_position");
@@ -313,48 +322,70 @@ using namespace qa_lte_cell_search;
 const boost::ut::suite<"LteCellSearch"> _lteCellSearch = [] {
     "a clean downlink identifies exactly, under every structure"_test = [] {
         // Twelve groups spread over the range, including the two either side of the closed form's first fold and
-        // both ends, against all three roots: 36 cells under each of the four structures.
+        // both ends. The short arm takes one cell per group with the root and the structure advancing beside it:
+        // twelve is the least common multiple of the three roots and the four structures, so every group, every
+        // root, every structure and every one of the twelve root-and-structure pairs is driven exactly once. The
+        // long arm is the whole cross, 36 cells under each of the four structures.
         const std::array<std::uint32_t, 12UZ> groups{0U, 1U, 17U, 29U, 30U, 31U, 60U, 83U, 100U, 137U, 166U, 167U};
-        gr::rng::Xoshiro256pp                 rng(0xc0ffeeULL);
-        std::size_t                           runs          = 0UZ;
-        std::size_t                           records       = 0UZ;
-        float                                 worstOffset   = 0.f;
-        double                                squaredOffset = 0.;
 
-        for (const gr::lte::FrameGeometry& geometry : gr::lte::kStructures) {
-            for (const std::uint32_t group : groups) {
-                for (std::uint32_t root = 0U; root < 3U; ++root) {
-                    SceneConfig config;
-                    config.nId1         = group;
-                    config.nId2         = root;
-                    config.duplex       = geometry.duplex;
-                    config.cyclicPrefix = geometry.cyclicPrefix;
-                    config.frames       = 2UZ;
-                    config.timingOffset = rng() % gr::lte::kFrameSamples;
-                    config.seed         = 0x1000ULL + group * 3U + root;
-
-                    const Scene scene = makeDownlink(config);
-                    const Run   run   = drive(scene.samples, {}, Impairments{0., noisePowerFor(30.), config.seed, {}, {}});
-
-                    // Two radio frames carry four primary symbols and the block reports all four: the positions the
-                    // whole windows leave over are examined as one short window rather than dropped.
-                    const std::size_t expected = reachablePrimaries(scene, scene.samples.size());
-                    expect(eq(expected, scene.pss.size())) << "a two-frame scene puts every primary symbol inside the stream";
-                    expect(eq(run.records.size(), expected)) << std::format("cell ({},{}) offset {}: one record per primary symbol the stream carries", config.nId1, config.nId2, config.timingOffset);
-                    expect(eq(run.positions, evaluatedPositions(scene.samples.size()))) << std::format("cell ({},{}) offset {}: every position evaluated exactly once", config.nId1, config.nId2, config.timingOffset);
-                    for (const gr::DataSet<float>& record : run.records) {
-                        const std::string wrong = mismatch(record, scene, config, kOffsetToleranceHz);
-                        expect(wrong.empty()) << std::format("cell ({},{}) offset {}: {}", config.nId1, config.nId2, config.timingOffset, wrong);
-                        const float reported = metaFloat(record, "frequency_offset_hz");
-                        worstOffset          = std::max(worstOffset, std::abs(reported));
-                        squaredOffset += static_cast<double>(reported) * static_cast<double>(reported);
-                        ++records;
+        struct Cell {
+            std::size_t   structure{0UZ};
+            std::uint32_t group{0U};
+            std::uint32_t root{0U};
+        };
+        std::vector<Cell> cells;
+        if (longRun()) {
+            for (std::size_t structure = 0UZ; structure < gr::lte::kStructures.size(); ++structure) {
+                for (const std::uint32_t group : groups) {
+                    for (std::uint32_t root = 0U; root < 3U; ++root) {
+                        cells.push_back(Cell{structure, group, root});
                     }
-                    ++runs;
                 }
             }
+        } else {
+            for (std::size_t index = 0UZ; index < groups.size(); ++index) {
+                cells.push_back(Cell{index % gr::lte::kStructures.size(), groups[index], static_cast<std::uint32_t>(index % 3UZ)});
+            }
         }
-        expect(eq(runs, 4UZ * 36UZ)) << "36 cells under each of the four structures";
+
+        gr::rng::Xoshiro256pp rng(0xc0ffeeULL);
+        std::size_t           runs          = 0UZ;
+        std::size_t           records       = 0UZ;
+        float                 worstOffset   = 0.f;
+        double                squaredOffset = 0.;
+
+        for (const Cell& cell : cells) {
+            const gr::lte::FrameGeometry& geometry = gr::lte::kStructures[cell.structure];
+
+            SceneConfig config;
+            config.nId1         = cell.group;
+            config.nId2         = cell.root;
+            config.duplex       = geometry.duplex;
+            config.cyclicPrefix = geometry.cyclicPrefix;
+            config.frames       = 2UZ;
+            config.timingOffset = rng() % gr::lte::kFrameSamples;
+            config.seed         = 0x1000ULL + cell.group * 3U + cell.root;
+
+            const Scene scene = makeDownlink(config);
+            const Run   run   = drive(scene.samples, {}, Impairments{0., noisePowerFor(30.), config.seed, {}, {}});
+
+            // Two radio frames carry four primary symbols and the block reports all four: the positions the whole
+            // windows leave over are examined as one short window rather than dropped.
+            const std::size_t expected = reachablePrimaries(scene, scene.samples.size());
+            expect(eq(expected, scene.pss.size())) << "a two-frame scene puts every primary symbol inside the stream";
+            expect(eq(run.records.size(), expected)) << std::format("cell ({},{}) offset {}: one record per primary symbol the stream carries", config.nId1, config.nId2, config.timingOffset);
+            expect(eq(run.positions, evaluatedPositions(scene.samples.size()))) << std::format("cell ({},{}) offset {}: every position evaluated exactly once", config.nId1, config.nId2, config.timingOffset);
+            for (const gr::DataSet<float>& record : run.records) {
+                const std::string wrong = mismatch(record, scene, config, kOffsetToleranceHz);
+                expect(wrong.empty()) << std::format("cell ({},{}) offset {}: {}", config.nId1, config.nId2, config.timingOffset, wrong);
+                const float reported = metaFloat(record, "frequency_offset_hz");
+                worstOffset          = std::max(worstOffset, std::abs(reported));
+                squaredOffset += static_cast<double>(reported) * static_cast<double>(reported);
+                ++records;
+            }
+            ++runs;
+        }
+        expect(eq(runs, cells.size())) << "every cell of the arm was driven";
         std::println("criterion 2: {} records over {} scenes at 30 dB, reported carrier offset {:.1f} Hz rms and {:.1f} Hz at the extreme", records, runs, records == 0UZ ? 0. : std::sqrt(squaredOffset / static_cast<double>(records)), worstOffset);
     };
 
@@ -469,38 +500,53 @@ const boost::ut::suite<"LteCellSearch"> _lteCellSearch = [] {
     };
 
     "the primary position and the frame start keep the structure's own distance"_test = [] {
-        for (const gr::lte::FrameGeometry& geometry : gr::lte::kStructures) {
-            for (const std::size_t offset : {0UZ, 1UZ, 959UZ, 9599UZ, 13337UZ}) {
-                SceneConfig config;
-                config.nId1         = 55U;
-                config.nId2         = 2U;
-                config.duplex       = geometry.duplex;
-                config.cyclicPrefix = geometry.cyclicPrefix;
-                config.frames       = 2UZ;
-                config.timingOffset = offset;
-                config.seed         = 0x2000ULL + offset;
+        // Five timing offsets either side of a slot and a half-frame boundary. The short arm advances the structure
+        // with the offset, so each of the four is driven and each offset is seen once; the long arm crosses them.
+        constexpr std::array<std::size_t, 5UZ> offsets{0UZ, 1UZ, 959UZ, 9599UZ, 13337UZ};
 
-                const Scene scene = makeDownlink(config);
-                const Run   run   = drive(scene.samples, {}, Impairments{0., noisePowerFor(30.), config.seed, {}, {}});
-                expect(!run.records.empty()) << std::format("offset {} produced records", offset);
-                for (const gr::DataSet<float>& record : run.records) {
-                    const std::string wrong = mismatch(record, scene, config, kOffsetToleranceHz);
-                    expect(wrong.empty()) << std::format("offset {}: {}", offset, wrong);
-                    const std::int64_t distance = static_cast<std::int64_t>(metaU64(record, "pss_position")) - static_cast<std::int64_t>(metaU64(record, "frame_start"));
-                    expect(eq(distance, -geometry.frameStartOffset(metaSize(record, "half_frame")))) << std::format("offset {}: the primary symbol sits the structure's own distance into the frame", offset);
+        std::vector<std::pair<std::size_t, std::size_t>> arms; // structure, offset
+        for (std::size_t index = 0UZ; index < offsets.size(); ++index) {
+            if (longRun()) {
+                for (std::size_t structure = 0UZ; structure < gr::lte::kStructures.size(); ++structure) {
+                    arms.emplace_back(structure, offsets[index]);
                 }
+            } else {
+                arms.emplace_back(index % gr::lte::kStructures.size(), offsets[index]);
+            }
+        }
+
+        for (const auto& [structure, offset] : arms) {
+            const gr::lte::FrameGeometry& geometry = gr::lte::kStructures[structure];
+
+            SceneConfig config;
+            config.nId1         = 55U;
+            config.nId2         = 2U;
+            config.duplex       = geometry.duplex;
+            config.cyclicPrefix = geometry.cyclicPrefix;
+            config.frames       = 2UZ;
+            config.timingOffset = offset;
+            config.seed         = 0x2000ULL + offset;
+
+            const Scene scene = makeDownlink(config);
+            const Run   run   = drive(scene.samples, {}, Impairments{0., noisePowerFor(30.), config.seed, {}, {}});
+            expect(!run.records.empty()) << std::format("offset {} produced records", offset);
+            for (const gr::DataSet<float>& record : run.records) {
+                const std::string wrong = mismatch(record, scene, config, kOffsetToleranceHz);
+                expect(wrong.empty()) << std::format("offset {}: {}", offset, wrong);
+                const std::int64_t distance = static_cast<std::int64_t>(metaU64(record, "pss_position")) - static_cast<std::int64_t>(metaU64(record, "frame_start"));
+                expect(eq(distance, -geometry.frameStartOffset(metaSize(record, "half_frame")))) << std::format("offset {}: the primary symbol sits the structure's own distance into the frame", offset);
             }
         }
     };
 
     "a carrier offset inside one hypothesis is read back"_test = [] {
-        // The hundred draws are a hundred half-frames of one continuous stream rather than a hundred graphs: the
-        // noise is drawn afresh for each of them either way, and a graph costs more to build than a half-frame
-        // costs to search.
+        // The draws are half-frames of one continuous stream rather than one graph each: the noise is drawn afresh
+        // for each of them either way, and a graph costs more to build than a half-frame costs to search. Forty
+        // draws settle the error well inside the bound below; the long arm takes a hundred.
         SceneConfig config;
         config.nId1                = 12U;
         config.nId2                = 0U;
-        config.frames              = 50UZ;
+        config.frames              = sweepFrames();
         config.seed                = 0x3000ULL;
         const Scene       scene    = makeDownlink(config);
         const std::size_t expected = reachablePrimaries(scene, scene.samples.size());
@@ -546,26 +592,29 @@ const boost::ut::suite<"LteCellSearch"> _lteCellSearch = [] {
     };
 
     "noise alone reports nothing"_test = [] {
-        // Ten seconds of noise, driven through the kernel so that the largest metric the search saw can be
-        // reported: the block publishes records, not the statistic it rejected them on.
-        const std::size_t             total = 10UZ * static_cast<std::size_t>(gr::lte::kSampleRate);
+        // Noise alone, driven through the kernel so that the largest metric the search saw can be reported: the
+        // block publishes records, not the statistic it rejected them on. A maximum of exponentially distributed
+        // correlation powers grows as the logarithm of how many were drawn, and the expectation below is computed
+        // from the number this leg actually drew, so a shorter leg asserts the same relationship at its own
+        // expectation rather than a weaker claim. The wide search draws thirteen powers per position, so it takes
+        // a proportionally shorter run for the same count. The long arm is ten seconds and one.
+        const std::size_t second     = static_cast<std::size_t>(gr::lte::kSampleRate);
+        const std::size_t narrowSpan = (longRun() ? 10UZ : 1UZ) * second;
+        const std::size_t wideSpan   = longRun() ? second : second / 10UZ;
+
         gr::rng::Xoshiro256pp         rng(0x5000ULL);
         gr::rng::GaussianNoise<float> draw(rng);
-        std::vector<Complex>          noise(total);
+        std::vector<Complex>          noise(narrowSpan);
         for (Complex& sample : noise) {
             sample = draw.complexSample();
         }
 
-        // The wide search takes a shorter run: a maximum of exponentially distributed correlation powers grows as
-        // the logarithm of how many were drawn, so ten seconds of it is its one-second figure plus ln(10) = 2.3,
-        // and thirteen times the arithmetic to watch that happen buys nothing the arithmetic does not already say.
-        for (const auto& [width, seconds] : {std::pair{0.f, 10UZ}, std::pair{45'000.f, 1UZ}}) {
+        for (const auto& [width, span] : {std::pair{0.f, narrowSpan}, std::pair{45'000.f, wideSpan}}) {
             gr::lte::PssCorrelator correlator(width);
             constexpr std::size_t  window   = gr::lte::kMaxSecondaryLookBehind + gr::lte::kHalfFrameSamples + gr::lte::kSymbolSamples - 1UZ;
-            const std::size_t      span     = std::min(noise.size(), seconds * static_cast<std::size_t>(gr::lte::kSampleRate));
             float                  worst    = 0.f;
             std::size_t            examined = 0UZ;
-            for (std::size_t at = 0UZ; at + window <= span; at += gr::lte::kHalfFrameSamples) {
+            for (std::size_t at = 0UZ; at + window <= std::min(noise.size(), span); at += gr::lte::kHalfFrameSamples) {
                 const std::span<const Complex>               positions(noise.data() + at + gr::lte::kMaxSecondaryLookBehind, window - gr::lte::kMaxSecondaryLookBehind);
                 const std::array<gr::lte::PssDetection, 3UZ> found = correlator.search(positions, gr::lte::kHalfFrameSamples);
                 for (const gr::lte::PssDetection& detection : found) {
@@ -575,24 +624,26 @@ const boost::ut::suite<"LteCellSearch"> _lteCellSearch = [] {
             }
             const double drawn    = static_cast<double>(examined) * 3. * static_cast<double>(gr::lte::kHalfFrameSamples) * static_cast<double>(correlator.hypotheses());
             const double expected = std::log(drawn) + 0.5772;
-            std::println("criterion 5: {} hypotheses, {} s, {} half-frames, {:.3g} correlation powers drawn, largest metric {:.2f} against the ln(N)+gamma expectation {:.2f}", correlator.hypotheses(), seconds, examined, drawn, worst, expected);
+            std::println("criterion 5: {} hypotheses, {:.2f} s, {} half-frames, {:.3g} correlation powers drawn, largest metric {:.2f} against the ln(N)+gamma expectation {:.2f}", correlator.hypotheses(), static_cast<double>(span) / static_cast<double>(gr::lte::kSampleRate), examined, drawn, worst, expected);
             expect(static_cast<double>(worst) < expected + 6.) << std::format("the largest metric sits where the extreme-value expectation puts it, got {:.2f} against {:.2f}", worst, expected);
         }
 
-        // and the block itself publishes nothing over a second of the same noise, through the whole path
-        const std::vector<Complex> second(noise.begin(), noise.begin() + static_cast<std::ptrdiff_t>(gr::lte::kSampleRate));
-        const Run                  narrow = drive(second, {}, {});
+        // and the block itself publishes nothing over the same noise, through the whole path
+        const std::vector<Complex> stretch(noise.begin(), noise.begin() + static_cast<std::ptrdiff_t>(wideSpan));
+        const Run                  narrow = drive(stretch, {}, {});
         expect(eq(narrow.published, 0ULL)) << "nothing published over noise at one hypothesis";
         expect(eq(narrow.records.size(), 0UZ));
-        const Run wide = drive(second, {{"frequency_search_hz", 45'000.f}}, {});
+        const Run wide = drive(stretch, {{"frequency_search_hz", 45'000.f}}, {});
         expect(eq(wide.published, 0ULL)) << "nor over thirteen";
     };
 
     "the sweep says where identification holds"_test = [] {
+        // Every half-frame of the scene is one trial at each ratio; forty of them already separate the regimes the
+        // sweep prints, and the long arm takes a hundred for a finer reading of the ones below 0 dB.
         SceneConfig config;
         config.nId1                = 88U;
         config.nId2                = 2U;
-        config.frames              = 50UZ;
+        config.frames              = sweepFrames();
         config.seed                = 0x6000ULL;
         const Scene       scene    = makeDownlink(config);
         const gr::Size_t  identity = gr::lte::cellIdentity(88U, 2U);
