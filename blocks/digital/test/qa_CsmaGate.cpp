@@ -19,6 +19,7 @@
 
 #include <gnuradio-4.0/digital/CsmaGate.hpp>
 
+#include <gnuradio-4.0/testing/Instrumentation.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 /*
@@ -517,8 +518,16 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         // gate does. Measured here: 0.014 s of CPU against 0.150 s of wall idle, 0.151 s against 0.151 s
         // publishing. The bound is half a core, five times the idle arm's measured cost and half the publishing
         // arm's, so machine load does not decide it.
-        expect(that % (quiet.cpuSeconds < 0.5 * quiet.wallSeconds)) << std::format("idle sense: cpu={:.3f}s wall={:.3f}s", quiet.cpuSeconds, quiet.wallSeconds);
-        expect(that % (productive.cpuSeconds > 4.0 * quiet.cpuSeconds)) << std::format("the two arms must really differ: idle sense cpu={:.4f}s, publishing sense cpu={:.4f}s", quiet.cpuSeconds, productive.cpuSeconds);
+        //
+        // What both bounds rest on is that a traversal is short against the interval, which is true of the code a
+        // receiver runs and not of an unoptimized or sanitizer-instrumented build: there a single traversal can fill
+        // the interval, the back-off never gets a turn, and the idle arm reads a whole core like the other one.
+        if (gr::blocks::testing::kCostMeasurable) {
+            expect(that % (quiet.cpuSeconds < 0.5 * quiet.wallSeconds)) << std::format("idle sense: cpu={:.3f}s wall={:.3f}s", quiet.cpuSeconds, quiet.wallSeconds);
+            expect(that % (productive.cpuSeconds > 4.0 * quiet.cpuSeconds)) << std::format("the two arms must really differ: idle sense cpu={:.4f}s, publishing sense cpu={:.4f}s", quiet.cpuSeconds, productive.cpuSeconds);
+        } else {
+            std::println("what a held gate costs is measured only in an optimized build without a sanitizer");
+        }
     };
 };
 
