@@ -360,9 +360,11 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         constexpr std::size_t kSpacing  = 20UZ;
 
         for (const auto& [inrDb, want] : kCases) {
+            // The stream runs nine samples past the last impulse: each impulse is looked for in the output, which is
+            // the input delayed by nine.
             const double      amplitude = std::sqrt(std::pow(10.0, inrDb / 10.0));
             const std::size_t count     = kImpulses * kSpacing;
-            std::vector<CF>   x         = noise(count, 0x9216d5d98979fb1bULL + static_cast<std::uint64_t>(inrDb));
+            std::vector<CF>   x         = noise(count + 9UZ, 0x9216d5d98979fb1bULL + static_cast<std::uint64_t>(inrDb));
             for (std::size_t k = 1UZ; k <= kImpulses; ++k) {
                 const std::size_t at = k * kSpacing - 1UZ;
                 x[at] += CF(static_cast<float>(amplitude), 0.f);
