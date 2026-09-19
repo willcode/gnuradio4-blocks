@@ -50,19 +50,24 @@ Caught run(const std::vector<std::uint8_t>& dibits, unsigned maxSync = 4U, P25Fr
     return c;
 }
 
-const std::uint16_t             kNac = 0x692U;
-const std::vector<std::uint8_t> kDuids{
-    static_cast<std::uint8_t>(P25Duid::Hdu),
-    static_cast<std::uint8_t>(P25Duid::Ldu1),
-    static_cast<std::uint8_t>(P25Duid::Ldu2),
-    static_cast<std::uint8_t>(P25Duid::Ldu1),
-    static_cast<std::uint8_t>(P25Duid::Ldu2),
-    static_cast<std::uint8_t>(P25Duid::Tdu15),
-    static_cast<std::uint8_t>(P25Duid::Tdu),
-    static_cast<std::uint8_t>(P25Duid::Tdu),
-    static_cast<std::uint8_t>(P25Duid::Tsbk),
-    static_cast<std::uint8_t>(P25Duid::Tdu),
-};
+const std::uint16_t kNac = 0x692U;
+
+/// The sequence every case is built from. Built per call: the suite runs at process exit, when namespace-scope
+/// objects are already destroyed.
+[[nodiscard]] std::vector<std::uint8_t> duids() {
+    return {
+        static_cast<std::uint8_t>(P25Duid::Hdu),
+        static_cast<std::uint8_t>(P25Duid::Ldu1),
+        static_cast<std::uint8_t>(P25Duid::Ldu2),
+        static_cast<std::uint8_t>(P25Duid::Ldu1),
+        static_cast<std::uint8_t>(P25Duid::Ldu2),
+        static_cast<std::uint8_t>(P25Duid::Tdu15),
+        static_cast<std::uint8_t>(P25Duid::Tdu),
+        static_cast<std::uint8_t>(P25Duid::Tdu),
+        static_cast<std::uint8_t>(P25Duid::Tsbk),
+        static_cast<std::uint8_t>(P25Duid::Tdu),
+    };
+}
 
 } // namespace
 
@@ -71,6 +76,8 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
     using namespace gr::p25;
 
     "a clean stream gives back exactly the frames it was built from"_test = [] {
+        const std::vector<std::uint8_t> kDuids = duids();
+
         const auto   stream = p25FrameStream(kNac, kDuids, 777U);
         const Caught c      = run(stream);
 
@@ -105,6 +112,8 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
     };
 
     "the status symbol's value is immaterial: what matters is that it is removed"_test = [] {
+        const std::vector<std::uint8_t> kDuids = duids();
+
         auto stream = p25FrameStream(kNac, kDuids, 777U);
         for (std::size_t i = 0U; i < stream.size(); ++i) {
             if (isStatusSymbol(i)) {
@@ -116,6 +125,8 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
     };
 
     "damage inside a sync is tolerated up to the limit, and the frame still identifies"_test = [] {
+        const std::vector<std::uint8_t> kDuids = duids();
+
         for (unsigned k = 0U; k <= 6U; ++k) {
             auto stream = p25FrameStream(kNac, kDuids, 31337U);
             // Damage only the second frame's sync, so the rest of the census stays a control.
@@ -141,6 +152,8 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
     };
 
     "damage inside the identifier is what the BCH is there for"_test = [] {
+        const std::vector<std::uint8_t> kDuids = duids();
+
         // Wrong bits inside the identifier still identify the frame, up to the accepted
         // radius. Damaging whole dibits is the honest way to do it, since a wrong symbol is
         // what actually happens, and it costs two bits at a time.
@@ -207,6 +220,8 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
     };
 
     "acting on a retune request costs nothing at any frame spacing TIA-102 defines"_test = [] {
+        const std::vector<std::uint8_t> kDuids = duids();
+
         const auto   stream = p25FrameStream(kNac, kDuids, 909U);
         const Caught plain  = run(stream, 4U, P25FrameAction::Continue);
         const Caught moved  = run(stream, 4U, P25FrameAction::Retune);
@@ -221,6 +236,8 @@ const boost::ut::suite<"P25FrameLayer"> p25FrameLayerTests = [] {
     };
 
     "and the discard itself really discards: a frame straddling it is not reported"_test = [] {
+        const std::vector<std::uint8_t> kDuids = duids();
+
         const auto            stream = p25FrameStream(kNac, kDuids, 5150U);
         P25FrameLayer         layer;
         std::vector<P25Frame> got;
