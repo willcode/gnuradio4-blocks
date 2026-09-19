@@ -134,9 +134,10 @@ struct DropNth : gr::Block<DropNth> {
     }
 };
 
+/// Run @p flow to completion on @p scheduler, then call @p collect. The scheduler owns the graph and destroys its
+/// blocks with it, so a caller that reads a block after the run gives a scheduler that outlives those reads.
 template<typename TCollect>
-void runGraph(gr::Graph flow, TCollect&& collect) {
-    gr::scheduler::Simple<> scheduler;
+void runGraph(gr::scheduler::Simple<>& scheduler, gr::Graph flow, TCollect&& collect) {
     boost::ut::expect(scheduler.exchange(std::move(flow)).has_value());
     std::atomic<bool> done{false};
     std::thread       runner([&scheduler, &done] {
@@ -242,8 +243,9 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
             expect(flow.connect<"out", "in">(extract, pktDecode).has_value());
             expect(flow.connect<"out", "in">(pktDecode, sink).has_value());
 
-            std::vector<Record> received;
-            runGraph(std::move(flow), [&received, &sink] { received = sink._records; });
+            std::vector<Record>     received;
+            gr::scheduler::Simple<> scheduler;
+            runGraph(scheduler, std::move(flow), [&received, &sink] { received = sink._records; });
 
             expect(eq(received.size(), payloads.size())) << "every packet arrives, chunk size " << chunk;
             std::array<gr::Size_t, 3> counts{}; // the encoder's own per-APID sequence count, one per APID it emitted
@@ -303,8 +305,9 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         expect(flow.connect<"out", "in">(extract, pktDecode).has_value());
         expect(flow.connect<"out", "in">(pktDecode, sink).has_value());
 
-        std::vector<Record> received;
-        runGraph(std::move(flow), [&received, &sink] { received = sink._records; });
+        std::vector<Record>     received;
+        gr::scheduler::Simple<> scheduler;
+        runGraph(scheduler, std::move(flow), [&received, &sink] { received = sink._records; });
         expect(gt(received.size(), 0UZ));
 
         // the pointer read is the M_PDU's, and has_fhec grows the primary header by two octets
@@ -354,8 +357,9 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         expect(flow.connect<"out", "in">(frameDecode, extract).has_value());
         expect(flow.connect<"out", "in">(extract, sink).has_value());
 
-        std::vector<Record> received;
-        runGraph(std::move(flow), [&received, &sink] { received = sink._records; });
+        std::vector<Record>     received;
+        gr::scheduler::Simple<> scheduler;
+        runGraph(scheduler, std::move(flow), [&received, &sink] { received = sink._records; });
 
         expect(gt(frameDecode.nFramesLost, std::uint64_t{0}));
         expect(eq(extract.frames_lost, std::uint64_t{1})) << "one frame deleted from the wire is one frame lost";
