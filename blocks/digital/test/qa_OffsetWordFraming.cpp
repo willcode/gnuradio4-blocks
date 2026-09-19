@@ -19,9 +19,12 @@ namespace {
 using gr::blocks::digital::GroupAssembler;
 using gr::blocks::digital::OffsetWordSync;
 
-// EN 50067's constants, stated once for every leg.
-const gr::property_map kRdsSync{{"polynomial", gr::Size_t(0x5B9)}, {"check_bits", gr::Size_t(10)}, {"data_bits", gr::Size_t(16)}, //
-    {"offsets", std::vector<gr::Size_t>{0x0FCU, 0x198U, 0x168U, 0x1B4U}}, {"alternate_position", gr::Size_t(2)}, {"alternate_word", gr::Size_t(0x350)}};
+/// EN 50067's constants, stated once for every leg. Built per call: the suite runs at process exit, when
+/// namespace-scope objects are already destroyed.
+[[nodiscard]] gr::property_map rdsSync() {
+    return {{"polynomial", gr::Size_t(0x5B9)}, {"check_bits", gr::Size_t(10)}, {"data_bits", gr::Size_t(16)}, //
+        {"offsets", std::vector<gr::Size_t>{0x0FCU, 0x198U, 0x168U, 0x1B4U}}, {"alternate_position", gr::Size_t(2)}, {"alternate_word", gr::Size_t(0x350)}};
+}
 
 /// The framer conformance vector: 446 bits msb-first, four transmitted groups of which the
 /// middle-of-the-air's one flipped bit drops exactly one — an oracle this tree did not compute.
@@ -42,7 +45,8 @@ constexpr std::size_t      kVectorBits = 446UZ;
     return bits;
 }
 
-const std::vector<std::uint16_t> kVectorWords{0x5babU, 0x09e0U, 0x5babU, 0x5445U, 0x5babU, 0x09e1U, 0x5babU, 0x5354U, 0x5babU, 0x29e0U, 0x5babU, 0x4869U};
+/// The words the conformance vector carries, in order; built per call for the reason the settings above are.
+[[nodiscard]] std::vector<std::uint16_t> vectorWords() { return {0x5babU, 0x09e0U, 0x5babU, 0x5445U, 0x5babU, 0x09e1U, 0x5babU, 0x5354U, 0x5babU, 0x29e0U, 0x5babU, 0x4869U}; }
 
 template<typename T>
 struct FiniteSource : gr::Block<FiniteSource<T>> {
@@ -77,7 +81,7 @@ struct RecordSink : gr::Block<RecordSink> {
     gr::Graph flow;
     auto&     src = flow.emplaceBlock<FiniteSource<std::uint8_t>>();
     src._data     = std::move(bits);
-    auto& sync    = flow.emplaceBlock<OffsetWordSync>(gr::property_map(kRdsSync));
+    auto& sync    = flow.emplaceBlock<OffsetWordSync>(rdsSync());
     auto& asm_    = flow.emplaceBlock<GroupAssembler>({{"group_size", gr::Size_t(4)}, {"min_good", minGood}, {"protocol", std::string("rds")}});
     auto& sink    = flow.emplaceBlock<RecordSink>();
     boost::ut::expect(flow.connect<"out", "in">(src, sync).has_value());
@@ -120,7 +124,7 @@ const boost::ut::suite<"OffsetWordFraming"> offsetWordFramingTests = [] {
             expect(that % meta.at("crc_ok").value_or(false)) << "an accepted group is clean at min_good 4";
             expect(that % (meta.at("protocol").value_or(std::string{}) == std::string("rds")));
         }
-        expect(that % (words == kVectorWords)) << "the words, exactly as the vector states them";
+        expect(that % (words == vectorWords())) << "the words, exactly as the vector states them";
     };
 
     "acquisition does not depend on where in the stream the lock begins"_test = [] {
@@ -152,7 +156,7 @@ const boost::ut::suite<"OffsetWordFraming"> offsetWordFramingTests = [] {
             }));
         };
         refused({}) << "no offset cycle";
-        gr::property_map badOffset(kRdsSync);
+        gr::property_map badOffset = rdsSync();
         badOffset.insert_or_assign("offsets", std::vector<gr::Size_t>{0x0FCU, 0x1198U});
         refused(std::move(badOffset)) << "an offset word past the checkword width";
 
