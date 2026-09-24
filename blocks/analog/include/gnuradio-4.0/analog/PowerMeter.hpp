@@ -142,6 +142,10 @@ what it had.
     /// @brief The same reading without the logarithm, for a caller that wants a ratio rather than decibels.
     [[nodiscard]] double linear_power() const noexcept { return read().first; }
 
+    /// @brief Fold the input into the window and publish the records it closes. The framework also calls this on an
+    /// empty input, because the async `records` port counts as ready whenever it has room or is unconnected. A call
+    /// that moves nothing answers `INSUFFICIENT_INPUT_ITEMS` on an empty input and `INSUFFICIENT_OUTPUT_ITEMS` when a
+    /// record has no room.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::span<const T> input(inSpan);
         std::size_t              made = drain(outSpan, 0UZ);
@@ -156,7 +160,10 @@ what it had.
 
         outSpan.publish(made);
         std::ignore = inSpan.consume(take);
-        return take == 0UZ && made == 0UZ && !input.empty() ? work::Status::INSUFFICIENT_OUTPUT_ITEMS : work::Status::OK;
+        if (take > 0UZ || made > 0UZ) {
+            return work::Status::OK;
+        }
+        return input.empty() ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::INSUFFICIENT_OUTPUT_ITEMS;
     }
 
     /// @brief End of stream: fold the trailing samples, then emit what has accumulated since the last record. That
