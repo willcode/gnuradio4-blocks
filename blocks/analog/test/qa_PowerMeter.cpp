@@ -7,15 +7,20 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <future>
 #include <iterator>
+#include <memory>
 #include <numbers>
 #include <print>
 #include <span>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <unistd.h>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
@@ -166,6 +171,101 @@ struct Random {
 }
 
 [[nodiscard]] bool longTestsEnabled() { return std::getenv("ENABLE_LONG_TESTS") != nullptr; }
+
+/// @brief Sends file descriptor 2 to a temporary file until `release()`; `text()` reads what arrived.
+class StderrCapture {
+    std::FILE* _file  = std::tmpfile();
+    int        _saved = -1;
+
+public:
+    StderrCapture() {
+        if (_file != nullptr) {
+            std::fflush(stderr);
+            _saved = ::dup(STDERR_FILENO);
+            ::dup2(::fileno(_file), STDERR_FILENO);
+        }
+    }
+    StderrCapture(const StderrCapture&)            = delete;
+    StderrCapture& operator=(const StderrCapture&) = delete;
+    ~StderrCapture() {
+        release();
+        if (_file != nullptr) {
+            std::fclose(_file);
+        }
+    }
+
+    void release() {
+        if (_saved >= 0) {
+            std::fflush(stderr);
+            ::dup2(_saved, STDERR_FILENO);
+            ::close(_saved);
+            _saved = -1;
+        }
+    }
+
+    [[nodiscard]] std::string text() const {
+        std::string out;
+        if (_file == nullptr) {
+            return out;
+        }
+        std::fflush(stderr);
+        std::array<char, 4096UZ> chunk{};
+        for (off_t at = 0;;) {
+            const ssize_t n = ::pread(::fileno(_file), chunk.data(), chunk.size(), at);
+            if (n <= 0) {
+                return out;
+            }
+            out.append(chunk.data(), static_cast<std::size_t>(n));
+            at += n;
+        }
+    }
+};
+
+/// Shared between a `HeldSource` and the test thread.
+struct Hold {
+    std::atomic<std::size_t> calls{0UZ};
+    std::atomic<bool>        released{false};
+};
+
+/// @brief Publishes nothing and answers `OK` until released, then `count` samples of unit power and `DONE`. While
+/// held it draws the runtime's report of a block that answers `OK` for a second without moving a sample.
+struct HeldSource : gr::Block<HeldSource> {
+    gr::PortOut<CF> out;
+    GR_MAKE_REFLECTABLE(HeldSource, out);
+
+    std::shared_ptr<Hold> hold;
+    std::size_t           count = 0UZ;
+    std::size_t           _sent = 0UZ;
+
+    gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        hold->calls.fetch_add(1UZ);
+        if (!hold->released.load()) {
+            outSpan.publish(0UZ);
+            return gr::work::Status::OK;
+        }
+        const std::size_t n = std::min(outSpan.size(), count - _sent);
+        for (std::size_t k = 0UZ; k < n; ++k) {
+            outSpan[k] = CF(1.f, 0.f);
+        }
+        _sent += n;
+        outSpan.publish(n);
+        return _sent >= count ? gr::work::Status::DONE : gr::work::Status::OK;
+    }
+};
+
+/// @brief Counts the records that reach it.
+struct RecordCounter : gr::Block<RecordCounter> {
+    gr::PortIn<gr::DataSet<float>> in;
+    GR_MAKE_REFLECTABLE(RecordCounter, in);
+
+    std::size_t received = 0UZ;
+
+    gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
+        received += inSpan.size();
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
 
 } // namespace
 
@@ -674,6 +774,98 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         expect(approx(static_cast<double>(block.level()), -60.0, 1e-6)) << "the reader clamps at floor_db";
         expect(eq(records.front().signal_values[0UZ], block.level())) << "and the record states the same number rather than an unclamped one";
         expect(records.front().signal_values[1UZ] < 1e-9f) << "while the linear channel carries the raw ratio, unclamped";
+    };
+
+    "an empty input answers INSUFFICIENT_INPUT_ITEMS and moves nothing"_test = [] {
+        namespace test = gr::blocks::testing::span;
+        PowerMeter<CF> block({{"sample_rate", kRate}});
+        init(block);
+
+        for (const bool connected : {true, false}) {
+            std::vector<gr::DataSet<float>>      made(4UZ);
+            test::InputSpan<CF>                  inSpan{std::span<const CF>{}};
+            test::OutputSpan<gr::DataSet<float>> outSpan{std::span<gr::DataSet<float>>(made)};
+            outSpan.isConnected           = connected;
+            const gr::work::Status status = block.processBulk(inSpan, outSpan);
+            expect(status == gr::work::Status::INSUFFICIENT_INPUT_ITEMS) << std::format("records port {}: an empty input is a wait for input, answered {}", connected ? "connected" : "unconnected", static_cast<int>(status));
+            expect(eq(inSpan.consumed, 0UZ));
+            expect(eq(outSpan.count, 0UZ));
+        }
+        expect(eq(block.coverage(), 0.f)) << "and the window holds nothing";
+    };
+
+    "a record with no room holds the input back and answers INSUFFICIENT_OUTPUT_ITEMS"_test = [] {
+        namespace test = gr::blocks::testing::span;
+        PowerMeter<CF> block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", gr::Size_t{4U}}});
+        init(block);
+
+        const std::size_t     window = static_cast<std::size_t>(block.window_samples.value);
+        const std::vector<CF> x(window + 1UZ, CF(1.f, 0.f));
+        expect(drive(block, std::span<const CF>(x).first(window - 1UZ)).empty()) << "one sample short of the window's close";
+
+        std::vector<gr::DataSet<float>>      none;
+        test::InputSpan<CF>                  waiting{std::span<const CF>(x).subspan(window - 1UZ)};
+        test::OutputSpan<gr::DataSet<float>> full{std::span<gr::DataSet<float>>(none)};
+        expect(block.processBulk(waiting, full) == gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS) << "the next sample closes a window whose record has nowhere to go";
+        expect(eq(waiting.consumed, 0UZ));
+        expect(eq(full.count, 0UZ));
+
+        std::vector<gr::DataSet<float>>      made(4UZ);
+        test::InputSpan<CF>                  resumed{std::span<const CF>(x).subspan(window - 1UZ)};
+        test::OutputSpan<gr::DataSet<float>> room{std::span<gr::DataSet<float>>(made)};
+        expect(block.processBulk(resumed, room) == gr::work::Status::OK) << "with room the same input proceeds";
+        expect(eq(resumed.consumed, 1UZ));
+        expect(eq(room.count, 1UZ)) << "and the window's record goes out";
+    };
+
+    "a meter fed nothing for longer than the stall report's bound draws no report"_test = [] {
+        auto hold = std::make_shared<Hold>();
+
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<HeldSource>();
+        source.hold      = hold;
+        source.count     = 9600UZ;
+        auto& bare       = graph.emplaceBlock<PowerMeter<CF>>({{"sample_rate", kRate}});
+        auto& recorded   = graph.emplaceBlock<PowerMeter<CF>>({{"sample_rate", kRate}});
+        auto& records    = graph.emplaceBlock<RecordCounter>();
+        expect(graph.connect<"out", "in">(source, bare).has_value());
+        expect(graph.connect<"out", "in">(source, recorded).has_value());
+        expect(graph.connect<"records", "in">(recorded, records).has_value());
+        const std::string sourceLine   = std::format("'{}' keeps returning OK", source.unique_name);
+        const std::string bareLine     = std::format("'{}' keeps returning OK", bare.unique_name);
+        const std::string recordedLine = std::format("'{}' keeps returning OK", recorded.unique_name);
+
+        gr::scheduler::Simple scheduler;
+        expect(scheduler.exchange(std::move(graph)).has_value());
+
+        StderrCapture capture;
+        auto          finished = std::async(std::launch::async, [&scheduler] { return scheduler.runAndWait(); });
+
+        // The source's report marks a second in which it moved nothing and the meters received nothing. Two more of
+        // its calls complete a pass in which each meter has waited at least as long.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!capture.text().contains(sourceLine) && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        const std::size_t reportedAt = hold->calls.load();
+        while (hold->calls.load() < reportedAt + 2UZ && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        hold->released.store(true);
+        const bool        ran  = finished.get().has_value();
+        const std::string text = capture.text();
+        capture.release();
+
+        expect(ran);
+        expect(text.contains(sourceLine)) << "the capture sees the report the held source draws";
+        expect(!text.contains(bareLine)) << "records port unconnected:\n" << text;
+        expect(!text.contains(recordedLine)) << "records port connected:\n" << text;
+        for (const PowerMeter<CF>* meter : {&bare, &recorded}) {
+            expect(eq(meter->coverage(), 1.f)) << "each meter measures the stream that follows the wait";
+            expect(approx(static_cast<double>(meter->level()), 0.0, 1e-4));
+        }
+        expect(eq(records.received, 1UZ)) << "and the connected one publishes the window that closed after it";
     };
 };
 
