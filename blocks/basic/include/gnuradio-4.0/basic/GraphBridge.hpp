@@ -310,13 +310,15 @@ discards its input.)"">;
 
     // InputSpanLike rather than the auto-consume-all span form, so backpressure mode can
     // consume only what fit -- that partial consume is what stalls the upstream source.
+    /// Answers `INSUFFICIENT_OUTPUT_ITEMS` when a backpressured ring takes none of a non-empty
+    /// input, and `OK` otherwise.
     work::Status processBulk(InputSpanLike auto& inSpan) {
         std::size_t took = inSpan.size();
         if (bridge) {
             took = bridge->sink(std::span<const std::complex<float>>(inSpan.data(), inSpan.size()));
         }
         std::ignore = inSpan.consume(took);
-        return work::Status::OK;
+        return took == 0UZ && inSpan.size() > 0UZ ? work::Status::INSUFFICIENT_OUTPUT_ITEMS : work::Status::OK;
     }
 };
 
@@ -344,6 +346,9 @@ through `bridge_name` in the global bridge registry.)"">;
         }
     }
 
+    /// Answers `OK` when it published, `DONE` once the ring has drained after end-of-stream, and
+    /// `INSUFFICIENT_INPUT_ITEMS` when the wait ends on an empty ring. The scheduler keeps calling a
+    /// block that answers that status; the framework's zero-progress report counts only an `OK`.
     work::Status processBulk(OutputSpanLike auto& outSpan) {
         if (!bridge) {
             outSpan.publish(0);
@@ -355,7 +360,7 @@ through `bridge_name` in the global bridge registry.)"">;
         if (n == 0 && eos) { // drained and the producer finished: propagate EoS downstream
             return work::Status::DONE;
         }
-        return work::Status::OK;
+        return n == 0UZ ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::OK;
     }
 };
 
