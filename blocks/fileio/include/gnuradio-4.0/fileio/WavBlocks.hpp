@@ -236,6 +236,9 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
         _failed          = true;
     }
 
+    // Throws when there is nothing to read: in multi mode the directory is missing or no file name in it holds the
+    // base name; a local file is missing, not a regular file or does not open; the reader refuses the uri. A failure
+    // the reader meets later, and a header that is not valid WAV, end the stream with ERROR during the run.
     void start() {
         resetFileState();
         _currentFileIndex = 0U;
@@ -245,20 +248,27 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
 
         std::filesystem::path filePath(uri.value);
         if (mode.value == Mode::multi) {
-            if (std::filesystem::exists(detail::parentDirectory(filePath))) {
-                auto stem = filePath.filename().string();
-                for (const auto& entry : std::filesystem::directory_iterator(detail::parentDirectory(filePath))) {
-                    if (entry.is_regular_file() && entry.path().string().find(stem) != std::string::npos) {
-                        _filesToRead.push_back(entry.path());
-                    }
+            const auto directory = detail::parentDirectory(filePath);
+            const auto stem      = filePath.filename().string();
+            if (!std::filesystem::exists(directory)) {
+                throw gr::exception(std::format("directory '{}' for the file names containing '{}' does not exist", directory.string(), stem));
+            }
+            for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+                if (entry.is_regular_file() && entry.path().string().find(stem) != std::string::npos) {
+                    _filesToRead.push_back(entry.path());
                 }
-                std::sort(_filesToRead.begin(), _filesToRead.end());
+            }
+            std::sort(_filesToRead.begin(), _filesToRead.end());
+            if (_filesToRead.empty()) {
+                throw gr::exception(std::format("no file in '{}' has a name containing '{}'", directory.string(), stem));
             }
         } else {
             _filesToRead.push_back(filePath);
         }
 
-        openNextFile();
+        if (auto opened = openFile(); !opened) {
+            throw gr::exception(opened.error().message, opened.error().sourceLocation);
+        }
     }
 
     // Canceling wakes a header drain that is waiting inside the reader and ends the reader's own
@@ -468,7 +478,21 @@ private:
         if (_currentFileIndex >= _filesToRead.size()) {
             return;
         }
+        if (auto opened = openFile(); !opened) {
+            fail("WavSource::openNextFile()", opened.error());
+        }
+    }
+
+    // opens the file at _currentFileIndex, testing a local file before the reader starts on it
+    [[nodiscard]] std::expected<void, gr::Error> openFile() {
         resetFileState();
+
+        const std::string fileUri = _filesToRead[_currentFileIndex].string();
+        if (const auto localPath = gr::algorithm::fileio::detail::toLocalPath(fileUri); localPath) {
+            if (const auto reason = detail::unreadableFileReason(*localPath)) {
+                return std::unexpected(gr::Error(*reason));
+            }
+        }
 
         // the header scan buffers whole chunks, so the chunk must stay well under kMaxHeaderBytes and
         // must also fit one output span once decoding starts: size it from the actual ring, capped
@@ -481,16 +505,16 @@ private:
         const auto      physicalSize = std::filesystem::file_size(_filesToRead[_currentFileIndex], sizeError);
         _fileBytes                   = sizeError ? 0UZ : static_cast<std::size_t>(physicalSize);
 
-        auto readerExp = gr::algorithm::fileio::readAsync(_filesToRead[_currentFileIndex].string(), std::move(config));
+        auto readerExp = gr::algorithm::fileio::readAsync(fileUri, std::move(config));
         if (!readerExp) {
-            fail("WavSource::openNextFile()", readerExp.error());
-            return;
+            return std::unexpected(readerExp.error());
         }
         replaceReader(std::move(readerExp.value()));
         _readerActive = true;
         _currentFileIndex++;
 
         parseHeaderSync();
+        return {};
     }
 
     /// Drains the reader up to and including the `fmt ` and `data` chunks before returning, so `sample_rate`
@@ -759,10 +783,14 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
 
     using gr::Block<WavSink<T>>::Block;
 
+    // throws when the uri is empty or the file does not open; a rotation in multi mode that cannot open its next file
+    // ends the stream with ERROR during the run
     void start() {
         total_samples_written = 0U;
         _fileCounter          = 0U;
-        openNextFile();
+        if (auto opened = openNextFile(); !opened) {
+            throw gr::exception(opened.error().message, opened.error().sourceLocation);
+        }
     }
 
     void stop() { closeFile(); }
@@ -781,8 +809,8 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
         // rotate in multi mode
         if (remainingSamplesInFile() == 0UZ) {
             closeFile();
-            openNextFile();
-            if (!_file.is_open()) {
+            if (auto opened = openNextFile(); !opened) {
+                this->emitErrorMessage("WavSink::openNextFile()", opened.error());
                 std::ignore = inSpan.consume(0U);
                 return gr::work::Status::ERROR;
             }
@@ -829,14 +857,13 @@ private:
         return _fileSamplesWritten == 0UZ ? std::max(room, 1UZ) : room;
     }
 
-    void openNextFile() {
+    [[nodiscard]] std::expected<void, gr::Error> openNextFile() {
         _headerWritten        = false;
         _fileSamplesWritten   = 0U;
         _bytesSinceCheckpoint = 0U;
 
         if (uri.value.empty()) {
-            this->emitErrorMessage("WavSink::start()", gr::Error("uri is empty"));
-            return;
+            return std::unexpected(gr::Error("uri is empty"));
         }
 
         std::string actualPath;
@@ -855,8 +882,9 @@ private:
 
         _file.open(actualPath, std::ios::binary | std::ios::trunc);
         if (!_file.is_open()) {
-            this->emitErrorMessage("WavSink::openNextFile()", gr::Error(std::format("cannot open '{}' for writing", actualPath)));
+            return std::unexpected(gr::Error(std::format("cannot open '{}' for writing", actualPath)));
         }
+        return {};
     }
 
     void closeFile() {
