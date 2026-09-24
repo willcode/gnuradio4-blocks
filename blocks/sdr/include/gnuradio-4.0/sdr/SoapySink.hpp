@@ -89,6 +89,8 @@ the order the driver lists them, after the AGC state.)">;
     std::vector<StagingWriter>                  _stagingWriters;
     std::vector<StagingReader>                  _stagingReaders;
     std::vector<T>                              _lastTransmitted; // per-channel, for the shutdown ramp-down
+    std::atomic<bool>                           _activationFailed{false};
+    gr::Error                                   _activationError{}; // written before _activationFailed is set
     soapy::detail::DeviceRegistry::Registration _activation;
 
     // The io loop runs for as long as the block is active, so a teardown that never asked it to stop, which
@@ -104,17 +106,19 @@ the order the driver lists them, after the AGC state.)">;
     };
     IoThreadGuard _ioGuard{this};
 
+    // start() throws when the device cannot be opened or configured, or when it refuses to activate the stream.
+    // The framework calls no stop() after a start() that throws, and failStart() releases the device before it
+    // throws. A block that shares the device activates its stream once every user of the device has configured
+    // it, and that can be after start() has returned. work() reports a refusal found then as ERROR, and the
+    // scheduler ends the run on it.
     void start() {
         _underflowCount.store(0U, std::memory_order_relaxed);
         _stalledWrites.store(0UZ, std::memory_order_relaxed);
         _rampAbandoned.store(false, std::memory_order_relaxed);
         _ioThreadStarted.store(false, std::memory_order_relaxed);
+        _activationFailed.store(false, std::memory_order_relaxed);
         configureTaper();
         reinitDevice();
-        if (!_txStream.get()) {
-            _activation.reset(); // release the slot so the other users of this device can still activate
-            return;
-        }
 
         std::size_t nCh     = (nPorts != std::dynamic_extent) ? nPorts : static_cast<std::size_t>(num_channels.value);
         std::size_t bufSize = std::bit_ceil(static_cast<std::size_t>(max_chunk_size) * 4UZ);
@@ -132,14 +136,17 @@ the order the driver lists them, after the AGC state.)">;
 
         _activation.activate([this] {
             if (auto r = _txStream.activate(); !r) {
-                this->emitErrorMessage("start()", r.error());
-                this->requestStop();
+                _activationError = r.error();
+                _activationFailed.store(true, std::memory_order_release);
                 return;
             }
             _ioThreadStarted.store(true, std::memory_order_release);
             gr::atomic_ref(_ioThreadDone).store_release(false);
             thread_pool::Manager::defaultIoPool()->execute([this]() { ioWriteLoop(); });
         });
+        if (_activationFailed.load(std::memory_order_acquire)) {
+            failStart(_activationError.message);
+        }
     }
 
     void stop() {
@@ -154,9 +161,18 @@ the order the driver lists them, after the AGC state.)">;
         _device.reset();
     }
 
+    [[noreturn]] void failStart(std::string_view reason, std::source_location location = std::source_location::current()) {
+        stop();
+        throw gr::exception(reason, location);
+    }
+
     work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
+        }
+        if (_activationFailed.load(std::memory_order_acquire)) {
+            this->emitErrorMessage("start()", _activationError);
+            return {requestedWork, 0UZ, work::Status::ERROR};
         }
         if (this->disconnect_on_done && this->hasNoDownStreamConnectedChildren()) {
             this->requestStop();
@@ -665,18 +681,14 @@ the order the driver lists them, after the AGC state.)">;
 
         auto devResult = soapy::Device::make(_devKwargs);
         if (!devResult) {
-            this->emitErrorMessage("reinitDevice()", devResult.error());
-            this->requestStop();
-            return;
+            failStart(devResult.error().message);
         }
         _device = std::move(*devResult);
 
         std::size_t nChannelMax    = _device.getNumChannels(SOAPY_SDR_TX);
         std::size_t nChannelNeeded = (nPorts != std::dynamic_extent) ? nPorts : static_cast<std::size_t>(num_channels.value);
         if (nChannelMax < nChannelNeeded) {
-            this->emitErrorMessage("reinitDevice()", std::format("TX channel mismatch: need {} but device has {}", nChannelNeeded, nChannelMax));
-            this->requestStop();
-            return;
+            failStart(std::format("TX channel mismatch: need {} but device has {}", nChannelNeeded, nChannelMax));
         }
 
         // The order is what the drivers require: the frontend mapping decides which physical channel an
@@ -709,9 +721,7 @@ the order the driver lists them, after the AGC state.)">;
         auto        supportedFormats = _device.getStreamFormats(SOAPY_SDR_TX, 0);
         const char* requestedFormat  = soapy::detail::toSoapySDRFormat<T>();
         if (!supportedFormats.empty() && std::ranges::find(supportedFormats, std::string(requestedFormat)) == supportedFormats.end()) {
-            this->emitErrorMessage("reinitDevice()", std::format("TX format '{}' not supported (available: {})", requestedFormat, gr::join(supportedFormats, ", ")));
-            this->requestStop();
-            return;
+            failStart(std::format("TX format '{}' not supported (available: {})", requestedFormat, gr::join(supportedFormats, ", ")));
         }
 
         std::vector<gr::Size_t> channelIndices(num_channels);
@@ -719,9 +729,7 @@ the order the driver lists them, after the AGC state.)">;
         soapy::Kwargs parsedStreamArgs = stream_args->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(stream_args.value);
         auto          streamResult     = _device.setupStream<T, SOAPY_SDR_TX>(channelIndices, parsedStreamArgs);
         if (!streamResult) {
-            this->emitErrorMessage("reinitDevice()", std::format("{} (requested: {})", streamResult.error(), requestedFormat));
-            this->requestStop();
-            return;
+            failStart(std::format("{} (requested: {})", streamResult.error(), requestedFormat));
         }
         _txStream = std::move(*streamResult);
     }
