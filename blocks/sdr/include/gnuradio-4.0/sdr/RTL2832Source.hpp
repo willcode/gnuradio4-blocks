@@ -5,7 +5,10 @@
 #include <complex>
 #include <cstdint>
 #include <cstring>
+#include <expected>
+#include <format>
 #include <print>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -102,6 +105,9 @@ Operating modes:
     };
     IoThreadGuard _ioGuard{_ioThreadDone};
 
+    // Opens and configures the device outside the browser build, then starts the io thread. A refused open or setting
+    // closes the device and throws the reason, which fails the run. The framework skips stop() after a start() that
+    // throws. The io thread reopens a device lost during the run.
     void start() {
         _clockOffsetNs    = 0;
         _clockOffsetValid = false;
@@ -113,8 +119,39 @@ Operating modes:
         _ppmLastEmitted         = 0.0f;
         rebuildDcFilter();
         rebuildRateEstimator();
+        // The browser build leaves the open to the io thread, which retries a refused open every 2 s. WebUSB grants the
+        // device only after the run has started.
+#if !defined(__EMSCRIPTEN__)
+        if (auto opened = _device.open(device_index); !opened) {
+            throw gr::exception(std::format("RTL2832Source::start(): open failed: {}", opened.error()));
+        }
+        device_name = _device._deviceName;
+        if (auto configured = configureOpenDevice(); !configured) {
+            _device.close();
+            throw gr::exception(std::format("RTL2832Source::start(): {}", configured.error()));
+        }
+#endif
         gr::atomic_ref(_ioThreadDone).store_release(false);
         thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
+    }
+
+    // applies the settings to the open device and resets its buffer; returns the first refusal
+    std::expected<void, std::string> configureOpenDevice() {
+        auto check = [](auto&& result, std::string_view operation) -> std::expected<void, std::string> {
+            if (!result) {
+                return std::unexpected(std::format("{} failed: {}", operation, result.error()));
+            }
+            return {};
+        };
+        std::expected<void, std::string> configured = check(_device.setSampleRate(sample_rate), "setSampleRate");
+        configured                                  = configured.and_then([&] { return check(_device.setCenterFrequency(frequency), "setCenterFrequency"); });
+        configured                                  = configured.and_then([&] { return check(_device.setGainMode(auto_gain), "setGainMode"); });
+        configured                                  = configured.and_then([&] { return check(_device.setAgcMode(auto_gain), "setAgcMode"); });
+        if (!auto_gain) {
+            configured = configured.and_then([&] { return check(_device.setTunerGain(gain), "setTunerGain"); });
+        }
+        configured = configured.and_then([&] { return check(_device.setFreqCorrection(ppm_correction), "setFreqCorrection"); });
+        return configured.and_then([&] { return check(_device.resetBuffer(), "resetBuffer"); });
     }
 
     void stop() {
@@ -195,6 +232,7 @@ Operating modes:
         constexpr std::size_t                     kReadBufferSize = 64UZ * 1024UZ;
         std::array<std::uint8_t, kReadBufferSize> readBuf{};
         const auto                                minDelay = std::chrono::milliseconds(polling_period);
+        bool                                      announce = _device.isOpen(); // set by each open, cleared once streaming is announced
 
         while (lifecycle::isActive(this->state())) {
             this->applyChangedSettings();
@@ -214,31 +252,17 @@ Operating modes:
                     std::this_thread::sleep_for(std::chrono::seconds(2));
                     continue;
                 }
-                device_name          = _device._deviceName;
-                auto configureDevice = [this, &minDelay](auto&& configResult, std::string_view operation) {
-                    if (!configResult) {
-                        this->emitErrorMessage("ioReadLoop()", std::format("{} failed: {}", operation, configResult.error()));
-                        _device.close();
-                        std::this_thread::sleep_for(minDelay);
-                        return false;
-                    }
-                    return true;
-                };
-                if (!configureDevice(_device.setSampleRate(sample_rate), "setSampleRate") || !configureDevice(_device.setCenterFrequency(frequency), "setCenterFrequency")) {
+                device_name = _device._deviceName;
+                if (auto configured = configureOpenDevice(); !configured) {
+                    this->emitErrorMessage("ioReadLoop()", configured.error());
+                    _device.close();
+                    std::this_thread::sleep_for(minDelay);
                     continue;
                 }
-                if (auto_gain) {
-                    if (!configureDevice(_device.setGainMode(true), "setGainMode") || !configureDevice(_device.setAgcMode(true), "setAgcMode")) {
-                        continue;
-                    }
-                } else {
-                    if (!configureDevice(_device.setGainMode(false), "setGainMode") || !configureDevice(_device.setAgcMode(false), "setAgcMode") || !configureDevice(_device.setTunerGain(gain), "setTunerGain")) {
-                        continue;
-                    }
-                }
-                if (!configureDevice(_device.setFreqCorrection(ppm_correction), "setFreqCorrection") || !configureDevice(_device.resetBuffer(), "resetBuffer")) {
-                    continue;
-                }
+                announce = true;
+            }
+            if (announce) {
+                announce        = false;
                 _firstEmission  = true;
                 _lastTagTimeNs  = 0UL;
                 _ppmLastEmitted = 0.0f;
