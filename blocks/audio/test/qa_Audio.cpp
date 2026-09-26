@@ -305,6 +305,48 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(eq(source.dropped_samples.value, gr::Size_t(0))) << std::format("{}: a keeping-up consumer must not lose samples, dropped {}", caseName, source.dropped_samples.value);
     };
 
+    "AudioSource answers the samples its io thread published since the last call"_test = [] {
+        constexpr std::string_view caseName = "AudioSource work answer";
+
+        gr::PortIn<float> tap; // holds what the source publishes until the case consumes it
+        gr::Graph         graph;
+        auto&             source        = graph.emplaceBlock<gr::blocks::audio::AudioSource<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}});
+        source._useDummyBackendForTests = true;
+        expect(fatal(source.out.connect(tap).has_value())) << caseName;
+        expect(fatal(source.changeStateTo(gr::lifecycle::State::RUNNING).has_value())) << caseName;
+
+        // the source leaves one frame of its output ring free and publishes nothing into a ring with one free slot
+        const auto& writer          = source.out.streamWriter();
+        const auto  waitForFullRing = [&writer] {
+            const auto deadline = std::chrono::steady_clock::now() + 3s;
+            while (writer.available() > 1UZ && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(1ms);
+            }
+            return writer.available() <= 1UZ;
+        };
+        expect(fatal(waitForFullRing())) << std::format("{}: the capture must fill the output ring", caseName);
+
+        const std::size_t filled = tap.streamReader().available();
+        const auto        first  = source.work();
+        expect(first.status == gr::work::Status::OK) << caseName;
+        expect(eq(first.performed_work, filled)) << std::format("{}: the answer counts every sample published since start", caseName);
+
+        const auto idle = source.work();
+        expect(idle.status == gr::work::Status::OK) << caseName;
+        expect(eq(idle.performed_work, 0UZ)) << std::format("{}: a full ring leaves the io thread nothing to publish", caseName);
+
+        constexpr std::size_t kConsumed = 1024UZ;
+        {
+            auto consumed = tap.streamReader().get(kConsumed);
+            expect(fatal(consumed.consume(kConsumed))) << caseName;
+        }
+        expect(fatal(waitForFullRing())) << std::format("{}: the capture must refill the output ring", caseName);
+        const std::size_t refilled = tap.streamReader().available() - (filled - kConsumed);
+        expect(eq(source.work().performed_work, refilled)) << std::format("{}: the answer counts the samples published since the last call", caseName);
+
+        expect(source.changeStateTo(gr::lifecycle::State::REQUESTED_STOP).has_value()) << caseName;
+    };
+
     "AudioSource accounts for the losses the backend reports"_test = [] {
         constexpr std::string_view caseName = "AudioSource backend loss accounting";
 
