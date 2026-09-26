@@ -133,6 +133,8 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
     std::uint64_t                _seq          = 0;
     bool                         _ioThreadDone = true;
 
+    std::size_t _publishedSinceWork = 0UZ;
+
     struct IoThreadGuard {
         bool& done;
         ~IoThreadGuard() { gr::atomic_ref(done).wait(false); }
@@ -159,11 +161,12 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
         _ppsFd = {};
     }
 
+    // performed_work is the number of samples the io thread published since the previous call, 0 when it published none.
     work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return {requestedWork, 1UZ, work::Status::OK};
+        return {requestedWork, gr::atomic_ref(_publishedSinceWork).exchange(0UZ), work::Status::OK};
     }
 
     void publishPpsTick(std::uint64_t nominalUtcNs, std::int64_t wakeupOffsetNs, const KernelDiscipline& discipline) {
@@ -202,6 +205,7 @@ Linux only — uses clock_nanosleep, adjtimex, /dev/ptpN, and /dev/ppsN kernel i
             tag::put(tagMap, tag::CONTEXT, context.value);
         }
         out.publishTag(std::move(tagMap), 0UZ);
+        gr::atomic_ref(_publishedSinceWork).fetch_add(span.size());
         span.publish(span.size());
 
         this->progress->incrementAndGet();

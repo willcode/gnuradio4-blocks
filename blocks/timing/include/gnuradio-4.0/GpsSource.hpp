@@ -44,6 +44,8 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
     NMEAParser _parser;
     bool       _ioThreadDone = true; // true until start() launches the IO thread
 
+    std::size_t _publishedSinceWork = 0UZ;
+
     struct IoThreadGuard { // must be last member — destroyed first, ensuring IO thread exits before _serialPort/_parser
         bool& done;
         explicit IoThreadGuard(bool& done_) noexcept : done(done_) {}
@@ -67,11 +69,12 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
         _serialPort.close();
     }
 
+    // performed_work is the number of samples the io thread published since the previous call, 0 when it published none.
     work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
         if (!lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, work::Status::DONE};
         }
-        return {requestedWork, 1UZ, work::Status::OK};
+        return {requestedWork, gr::atomic_ref(_publishedSinceWork).exchange(0UZ), work::Status::OK};
     }
 
     void publishPps(const GpsFix& fix, std::uint64_t localTimeNs) {
@@ -111,6 +114,7 @@ for synchronising otherwise undisciplined SDRs using their PPS)">;
             tag::put(tagMap, tag::CONTEXT, context.value);
         }
         out.publishTag(std::move(tagMap), 0UZ);
+        gr::atomic_ref(_publishedSinceWork).fetch_add(span.size());
         span.publish(span.size());
 
         this->progress->incrementAndGet();

@@ -249,6 +249,43 @@ const boost::ut::suite<"GpsSource"> gpsSourceTests = [] {
         expect(foundUnlocked) << "trigger_name contains 'unlocked' for no-fix data";
     };
 
+    "GpsSource answers the samples its io thread published since the last call"_test = [] {
+        auto pty = PtyPair::create();
+        expect(fatal(pty.has_value())) << "PTY creation must succeed";
+
+        PortIn<std::uint8_t> tap; // sees what the source publishes and consumes nothing
+        Graph                testGraph;
+        auto&                gps = testGraph.emplaceBlock<GpsSource>({{"device_path", std::string(pty->slaveName)}, {"update_rate_ms", std::uint32_t{100U}}});
+        expect(fatal(gps.out.connect(tap).has_value()));
+        // the open flushes the port's input; the case opens the port before start() and before the first sentence
+        expect(fatal(gps.tryOpenSerialPort())) << "the pseudo-terminal opens as the source's serial port";
+        expect(fatal(gps.changeStateTo(lifecycle::State::RUNNING).has_value()));
+
+        // a silent serial port gives the io thread nothing to publish
+        const auto idle = gps.work();
+        expect(idle.status == work::Status::OK);
+        expect(eq(idle.performed_work, 0UZ)) << "an active source whose thread published nothing performed no work";
+
+        // one RMC sentence per UTC second; each second after the first is one PPS boundary and one sample
+        constexpr std::size_t kBoundaries = 3UZ;
+        for (std::size_t second = 0UZ; second <= kBoundaries; ++second) {
+            pty->writeLine(nmea(std::format("$GPRMC,1200{:02d}.00,A,5001.1900,N,00840.6570,E,0.5,45.0,110326,,,A", second)));
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (tap.streamReader().available() < kBoundaries && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const std::size_t published = tap.streamReader().available();
+        expect(fatal(eq(published, kBoundaries))) << "the io thread publishes one sample per PPS boundary";
+
+        const auto busy = gps.work();
+        expect(busy.status == work::Status::OK);
+        expect(eq(busy.performed_work, published)) << "the answer counts every sample published since the last call";
+        expect(eq(gps.work().performed_work, 0UZ)) << "a published sample is counted once";
+
+        expect(gps.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value());
+    };
+
     "GpsSource real device smoke test"_test = [] {
         auto device = selectNMEADevice({}, false);
         if (!device) {
