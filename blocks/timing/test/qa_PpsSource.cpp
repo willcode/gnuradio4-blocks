@@ -124,6 +124,33 @@ const boost::ut::suite<"PpsSource"> ppsSourceTests = [] {
         expect(ge(sink._nSamplesProduced, 1UZ)) << "Auto mode produces at least 1 PPS";
     };
 
+    "PpsSource answers the samples its io thread published since the last call"_test = [] {
+        PortIn<std::uint8_t> tap; // sees what the source publishes and consumes nothing
+        Graph                testGraph;
+        auto&                pps = testGraph.emplaceBlock<PpsSource>({{"clock_mode", std::string("NTP")}, {"emit_mode", std::string("clock")}, {"sample_rate", 10.f}});
+        expect(fatal(pps.out.connect(tap).has_value()));
+        expect(fatal(pps.changeStateTo(lifecycle::State::RUNNING).has_value()));
+
+        // the io thread publishes sample_rate samples at each UTC second boundary
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
+        while (tap.streamReader().available() == 0UZ && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const std::size_t published = tap.streamReader().available();
+        expect(fatal(gt(published, 0UZ))) << "the io thread publishes at the next second boundary";
+
+        const auto tick = pps.work();
+        expect(tick.status == work::Status::OK);
+        expect(eq(tick.performed_work, published)) << "the answer counts every sample published since the last call";
+
+        // the next boundary is most of a second away
+        const auto idle = pps.work();
+        expect(idle.status == work::Status::OK);
+        expect(eq(idle.performed_work, 0UZ)) << "an active source whose thread published nothing performed no work";
+
+        expect(pps.changeStateTo(lifecycle::State::REQUESTED_STOP).has_value());
+    };
+
     "KernelDiscipline default values"_test = [] {
         KernelDiscipline d;
         expect(!d.synchronised);
