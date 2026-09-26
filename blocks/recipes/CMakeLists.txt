@@ -31,7 +31,7 @@ endif()
 # the generator: reads the catalog, writes the typed headers; run by hand (or by name via ninja) after editing a recipe,
 # then commit the result
 add_executable(gr4-recipe-gen tools/gr4-recipe-gen.cpp)
-target_link_libraries(gr4-recipe-gen PRIVATE gnuradio-core)
+target_link_libraries(gr4-recipe-gen PRIVATE gnuradio-core gnuradio-blocklib-core)
 
 if(ENABLE_TESTING)
   add_subdirectory(test)

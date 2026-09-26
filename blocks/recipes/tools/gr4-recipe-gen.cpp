@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include <gnuradio-4.0/BlockRegistry.hpp>
+
 #include "RecipeHeaderEmitter.hpp"
 
 int main(int argc, char** argv) {
@@ -18,7 +20,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::vector<std::string>    paths{std::string(argv[1])};
-    gr::detail::YamlDefinitionsLoader catalog{std::span<const std::string>(paths)};
+    gr::detail::YamlDefinitionsLoader catalog{std::span<const std::string>(paths), gr::globalBlockRegistry()};
     const std::filesystem::path       outDir = std::filesystem::path(argv[2]) / "gnuradio-4.0" / "recipes";
     std::error_code                   ec;
     std::filesystem::create_directories(outDir, ec);
