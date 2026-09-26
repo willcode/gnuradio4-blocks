@@ -76,6 +76,7 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
 
     BackendImpl                    _backendImpl{};
     bool                           _ioThreadDone{true};
+    std::size_t                    _publishedSinceWork{0U};
     bool                           _failed{false};
     bool                           _formatTagPending{true};
     detail::AudioDeviceConfig      _activeConfig{};
@@ -117,6 +118,7 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
         _backendImpl.shutdown();
     }
 
+    // performed_work is the number of samples the io thread published since the previous call, 0 when it published none.
     gr::work::Result work(std::size_t requestedWork = std::numeric_limits<std::size_t>::max()) noexcept {
         if (!gr::lifecycle::isActive(this->state())) {
             return {requestedWork, 0UZ, gr::work::Status::DONE};
@@ -125,7 +127,7 @@ Publishes timing tags with estimated sample rate and optional GPS/PPS clock disc
             this->requestStop();
             return {requestedWork, 0UZ, gr::work::Status::DONE};
         }
-        return {requestedWork, 1UZ, gr::work::Status::OK};
+        return {requestedWork, gr::atomic_ref(_publishedSinceWork).exchange(0UZ), gr::work::Status::OK};
     }
 
     void ioReadLoop() {
@@ -266,6 +268,7 @@ private:
             _lastReportedOverflows = overflows;
         }
 
+        gr::atomic_ref(_publishedSinceWork).fetch_add(nProduced);
         outSpan.publish(nProduced);
         this->progress->incrementAndGet();
         this->progress->notify_all();
