@@ -850,7 +850,59 @@ const suite<"SigMF sink"> _sink = [] {
         expect(eq(readText(workspace.base("narrowed") + ".sigmf-meta"), expectedMetadata)) << "the metadata differs only in core:datatype";
     };
 
-    "a rate that changes cannot be recorded, and the sink says so"_test = [] {
+    "a rate that changes once opens a segment, and the recording states the last rate"_test = [] {
+        const Workspace workspace{"rate_change_once"};
+
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<ScriptedSource<std::complex<float>>>();
+        source._values.assign(kAnchorSamples.begin(), kAnchorSamples.end());
+        source._tags.emplace_back(0UZ, anchorIndexZeroTag());
+        for (const auto& [index, rate] : std::array<std::pair<std::size_t, float>, 2>{std::pair<std::size_t, float>{4UZ, 96000.f}, std::pair<std::size_t, float>{6UZ, 96000.f}}) {
+            gr::property_map map;
+            gr::tag::put(map, gr::tag::SAMPLE_RATE, rate);
+            source._tags.emplace_back(index, std::move(map));
+        }
+        auto& sink = flow.emplaceBlock<SigMfSink<std::complex<float>>>({{"file_name", workspace.base("rates")}});
+        expect(flow.connect<"out", "in">(source, sink).has_value());
+        const GraphRun run = runGraph(std::move(flow));
+        expect(run.ok()) << run.message();
+        expect(eq(sink.nSampleRateChanges, std::uint64_t{1U})) << "the repeated 96000 at sample 6 is no change";
+        expect(eq(sink.nCapturesWritten, std::uint64_t{2U}));
+
+        constexpr std::string_view kExpected = R"({
+  "global": {
+    "core:datatype": "cf32_le",
+    "core:version": "1.2.6",
+    "core:sample_rate": 96000,
+    "core:recorder": "gnuradio4",
+    "core:extensions": [
+      {
+        "name": "gnuradio4",
+        "version": "1.0.0",
+        "optional": true
+      }
+    ],
+    "gnuradio4:sample_rate_changes": 1
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 433921337,
+      "core:datetime": "2026-08-26T12:00:00.000000Z",
+      "gnuradio4:sample_rate": 48000
+    },
+    {
+      "core:sample_start": 4,
+      "gnuradio4:sample_rate": 96000
+    }
+  ],
+  "annotations": []
+}
+)"sv;
+        expect(eq(readText(workspace.base("rates") + ".sigmf-meta"), std::string(kExpected))) << "the metadata as written";
+    };
+
+    "every rate change opens a segment and is counted"_test = [] {
         const Workspace workspace{"rate_changes"};
 
         gr::Graph flow;
@@ -865,9 +917,21 @@ const suite<"SigMF sink"> _sink = [] {
         expect(flow.connect<"out", "in">(source, sink).has_value());
         const GraphRun run = runGraph(std::move(flow));
         expect(run.ok()) << run.message();
-        expect(eq(sink.nSampleRateChangesIgnored, std::uint64_t{2U}));
+        expect(eq(sink.nSampleRateChanges, std::uint64_t{2U}));
+        expect(eq(sink.nCapturesWritten, std::uint64_t{3U}));
 
-        expect(mentions(readText(workspace.base("rates") + ".sigmf-meta"), R"("core:sample_rate": 48000)")) << "the recording keeps the first rate and means it";
+        const std::string metadata = readText(workspace.base("rates") + ".sigmf-meta");
+        expect(mentions(metadata, R"("core:sample_rate": 192000)")) << "the recording states the rate in force at the end";
+        expect(mentions(metadata, R"("gnuradio4:sample_rate_changes": 2)"));
+        expect(mentions(metadata, R"("core:extensions": [
+      {
+        "name": "gnuradio4",
+        "version": "1.0.0",
+        "optional": true
+      }
+    ])")) << "the namespace the recording uses is declared";
+        expect(mentions(metadata, R"("core:sample_start": 6,
+      "gnuradio4:sample_rate": 192000)"));
     };
 
     "every sink refusal leaves the directory as it found it"_test = [] {

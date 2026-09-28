@@ -797,15 +797,34 @@ struct SigMfSink : gr::Block<SigMfSink<T>> {
 The reserved `sample_rate`, `num_channels`, `frequency`, `trigger_time` and `n_dropped_samples` keys
 become the recording's global fields and capture segments; the `sigmf_annotation_*` keys become its
 annotation list; the `sigmf_*_extra` documents are written back verbatim. `core:sha512` is never
-written, because a hash of another file's bytes would be a false statement about these. A sample rate
-that changes mid-run cannot be expressed in one recording: the first rate is kept and every later
-change is counted and named.)"">;
+written, because a hash of another file's bytes would be a false statement about these.
+
+SigMF states one `core:sample_rate` per recording, in `global`, and none per capture segment. A
+`sample_rate` tag that changes the rate in force opens a capture segment at its sample, and the
+recording's `core:sample_rate` is the rate in force at the end. A recording whose rate changed also
+carries `gnuradio4:sample_rate_changes` in `global`, the count of changes, and `gnuradio4:sample_rate`
+in its first segment and in each segment a change opened, the rate from that segment's first sample
+on. A segment without that field runs at the rate of the last segment before it that states one. SigMF
+requires every namespace outside `core` to be declared, so such a recording lists `gnuradio4` in
+`core:extensions` with version 1.0.0 and `optional` true.)"">;
 
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
 
     using Component                              = gr::sigmf::ComponentOf<T>;
     static constexpr std::size_t kComponentCount = gr::sigmf::componentsPerItem<T>;
+
+    /// The `global` field counting the rate changes, and the capture field stating the rate from a segment on.
+    static constexpr std::string_view kRateChangesField = "gnuradio4:sample_rate_changes";
+    static constexpr std::string_view kSegmentRateField = "gnuradio4:sample_rate";
+    static constexpr std::string_view kExtensionName    = "gnuradio4";
+    static constexpr std::string_view kExtensionVersion = "1.0.0";
+
+    /// A rate taking effect at a sample.
+    struct RateChange {
+        std::uint64_t sampleStart{0U};
+        float         rate{0.f};
+    };
 
     gr::PortIn<T> in;
 
@@ -838,7 +857,7 @@ change is counted and named.)"">;
     std::uint64_t nAnnotationsWritten{0U};
     std::uint64_t nCapturesDropped{0U};
     std::uint64_t nAnnotationsDropped{0U};
-    std::uint64_t nSampleRateChangesIgnored{0U};
+    std::uint64_t nSampleRateChanges{0U};
     std::uint64_t nDatatypeChangesIgnored{0U};
     std::uint64_t nCarriedRateSuperseded{0U};
     std::uint64_t nMetaKeysOverridden{0U};
@@ -856,10 +875,10 @@ change is counted and named.)"">;
     std::uint64_t                      _droppedTotal{0U};
     bool                               _anyDropSeen{false};
     bool                               _finished{false};
-    std::optional<float>               _observedRate{};
+    std::optional<float>               _observedRate{}; ///< the rate in force
+    std::vector<RateChange>            _rateSegments{}; ///< the first rate at sample 0, then each change
     std::optional<gr::Size_t>          _observedChannels{};
     std::optional<double>              _carriedRate{};
-    float                              _lastRate{0.f};
     std::uint64_t                      _itemsSinceRewrite{0U};
     bool                               _started{false};
     std::vector<gr::sigmf::Capture>    _captures{};
@@ -985,18 +1004,18 @@ private:
     [[noreturn]] void refuse(std::string_view code, std::string_view detail) const { throw gr::exception(std::format("SigMfSink: {}: {}", code, detail)); }
 
     void resetRunState() {
-        nSamplesWritten           = 0U;
-        nSamplesClipped           = 0U;
-        nCapturesWritten          = 0U;
-        nAnnotationsWritten       = 0U;
-        nCapturesDropped          = 0U;
-        nAnnotationsDropped       = 0U;
-        nSampleRateChangesIgnored = 0U;
-        nDatatypeChangesIgnored   = 0U;
-        nCarriedRateSuperseded    = 0U;
-        nMetaKeysOverridden       = 0U;
-        nMetaKeysDropped          = 0U;
-        nExtrasUnparsable         = 0U;
+        nSamplesWritten         = 0U;
+        nSamplesClipped         = 0U;
+        nCapturesWritten        = 0U;
+        nAnnotationsWritten     = 0U;
+        nCapturesDropped        = 0U;
+        nAnnotationsDropped     = 0U;
+        nSampleRateChanges      = 0U;
+        nDatatypeChangesIgnored = 0U;
+        nCarriedRateSuperseded  = 0U;
+        nMetaKeysOverridden     = 0U;
+        nMetaKeysDropped        = 0U;
+        nExtrasUnparsable       = 0U;
         _captures.clear();
         _annotations.clear();
         _globalExtra = gr::sigmf::json::Value::makeObject();
@@ -1010,9 +1029,9 @@ private:
         _anyDropSeen   = false;
         _finished      = false;
         _observedRate.reset();
+        _rateSegments.clear();
         _observedChannels.reset();
         _carriedRate.reset();
-        _lastRate          = 0.f;
         _itemsSinceRewrite = 0U;
         _started           = false;
         _summary.clear();
@@ -1089,12 +1108,14 @@ private:
 
         if (const pmt::Value* rate = sigmf_detail::findTag(map, gr::tag::SAMPLE_RATE.shortKey()); rate != nullptr) {
             if (const float* value = rate->get_if<float>(); value != nullptr) {
-                if (!_observedRate) {
+                if (!_observedRate) { // the first rate supersedes the fallback from sample 0
                     _observedRate = *value;
-                    _lastRate     = *value;
+                    _rateSegments.push_back({0U, *value});
                 } else if (*value != *_observedRate) {
-                    ++nSampleRateChangesIgnored;
-                    _lastRate = *value;
+                    ++nSampleRateChanges;
+                    _observedRate = *value;
+                    _rateSegments.push_back({itemIndex, *value});
+                    opensSegment = true;
                 }
             }
         }
@@ -1313,6 +1334,16 @@ private:
         for (gr::sigmf::Capture& segment : metadata.captures) {
             liftCarried(segment.extra, gr::sigmf::detail::kCaptureKnownKeys, segment, countReconciliation);
         }
+        if (nSampleRateChanges != 0U) {
+            declareExtension(metadata.global.extra);
+            metadata.global.extra.set(kRateChangesField, gr::sigmf::json::Value::fromUnsigned(nSampleRateChanges));
+            for (const RateChange& change : _rateSegments) {
+                const auto segment = std::ranges::lower_bound(metadata.captures, change.sampleStart, {}, &gr::sigmf::Capture::sampleStart);
+                if (segment != metadata.captures.end() && segment->sampleStart == change.sampleStart) { // absent when dropped at max_captures
+                    segment->extra.set(kSegmentRateField, gr::sigmf::json::Value::fromDouble(static_cast<double>(change.rate)));
+                }
+            }
+        }
         metadata.annotations = _annotations;
         for (gr::sigmf::Annotation& annotation : metadata.annotations) {
             dropKnown(annotation.extra, gr::sigmf::detail::kAnnotationKnownKeys, countReconciliation);
@@ -1320,10 +1351,30 @@ private:
         return metadata;
     }
 
+    /// Lists this block's namespace in `core:extensions`, after every entry a carried document declared.
+    static void declareExtension(gr::sigmf::json::Value& globalExtra) {
+        gr::sigmf::json::Value declared = gr::sigmf::json::Value::makeArray();
+        if (const gr::sigmf::json::Value* carried = globalExtra.find("core:extensions"); carried != nullptr && carried->isArray()) {
+            for (std::size_t i = 0UZ; i < carried->size(); ++i) {
+                const gr::sigmf::json::Value& entry = carried->at(i);
+                if (const gr::sigmf::json::Value* name = entry.isObject() ? entry.find("name") : nullptr; name != nullptr && name->isString() && name->str() == kExtensionName) {
+                    return;
+                }
+                declared.push(entry);
+            }
+        }
+        gr::sigmf::json::Value entry = gr::sigmf::json::Value::makeObject();
+        entry.append("name", gr::sigmf::json::Value::fromString(std::string(kExtensionName)));
+        entry.append("version", gr::sigmf::json::Value::fromString(std::string(kExtensionVersion)));
+        entry.append("optional", gr::sigmf::json::Value::fromBool(true));
+        declared.push(std::move(entry));
+        globalExtra.set("core:extensions", std::move(declared));
+    }
+
     /// Distribute the carried global document: a derived field wins, a never-written field is
     /// dropped, an operator setting wins when it is non-empty, and everything else is written back.
     void applyCarriedGlobal(gr::sigmf::Metadata& metadata, bool countReconciliation) {
-        static constexpr std::array<std::string_view, 5> kDerived{"core:datatype", "core:version", "core:num_channels", "core:offset", "core:recorder"};
+        static constexpr std::array<std::string_view, 6> kDerived{"core:datatype", "core:version", "core:num_channels", "core:offset", "core:recorder", kRateChangesField};
         static constexpr std::array<std::string_view, 4> kNeverWritten{"core:sha512", "core:dataset", "core:trailing_bytes", "core:metadata_only"};
 
         gr::sigmf::json::Value remaining = gr::sigmf::json::Value::makeObject();
@@ -1373,6 +1424,12 @@ private:
         for (std::size_t i = 0UZ; i < extra.size(); ++i) {
             const std::string&            key   = extra.keyAt(i);
             const gr::sigmf::json::Value& value = extra.valueAt(i);
+            if (key == kSegmentRateField) {
+                if (countReconciliation) {
+                    ++nMetaKeysOverridden;
+                }
+                continue;
+            }
             if (std::ranges::find(known, key) == known.end()) {
                 remaining.append(key, value);
                 continue;
@@ -1450,8 +1507,8 @@ private:
         if (nAnnotationsDropped != 0U) {
             note(std::format(", {} annotations dropped at the bound", nAnnotationsDropped));
         }
-        if (nSampleRateChangesIgnored != 0U) {
-            note(std::format(", {} sample-rate changes ignored (kept {}, last seen {})", nSampleRateChangesIgnored, static_cast<double>(_observedRate.value_or(0.f)), static_cast<double>(_lastRate)));
+        if (nSampleRateChanges != 0U) {
+            note(std::format(", {} sample-rate changes (first {}, last {})", nSampleRateChanges, static_cast<double>(_rateSegments.front().rate), static_cast<double>(_observedRate.value_or(0.f))));
         }
         if (nDatatypeChangesIgnored != 0U) {
             note(std::format(", {} datatype changes ignored", nDatatypeChangesIgnored));
