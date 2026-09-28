@@ -225,3 +225,10 @@ add_test(NAME qa_DcBlocker COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURR
 add_executable(qa_Saturate qa_Saturate.cpp)
 target_link_libraries(qa_Saturate PRIVATE gnuradio-options gr-sdr ut)
 add_test(NAME qa_Saturate COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_Saturate)
+
+# the settled rate estimate is a plain header, driven with sample counts and arrival times, so this one needs neither a
+# device nor SoapySDR and runs on every leg
+add_executable(qa_SettledRateEstimate qa_SettledRateEstimate.cpp)
+target_link_libraries(qa_SettledRateEstimate PRIVATE gnuradio-options gr-sdr ut)
+add_test(NAME qa_SettledRateEstimate COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
+                                             ${CMAKE_CURRENT_BINARY_DIR}/qa_SettledRateEstimate)

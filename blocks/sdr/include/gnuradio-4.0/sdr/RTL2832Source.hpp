@@ -7,6 +7,7 @@
 #include <cstring>
 #include <expected>
 #include <format>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -17,10 +18,9 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
-#include <gnuradio-4.0/algorithm/SampleRateEstimator.hpp>
-
 #include <gnuradio-4.0/sdr/DcBlocker.hpp>
 #include <gnuradio-4.0/sdr/RTL2832Device.hpp>
+#include <gnuradio-4.0/sdr/SettledRateEstimate.hpp>
 
 #include <gnuradio-4.0/sdr/NamespaceCompatibility.hpp>
 
@@ -54,7 +54,13 @@ Native: Linux USB ioctl (zero-dependency). WASM: WebUSB via thin JS shims.
 
 Operating modes:
   clk_in connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
-  clk_in disconnected: emits best-effort wall-clock timestamps on every chunk)">;
+  clk_in disconnected: emits best-effort wall-clock timestamps on every chunk
+
+Every timing tag carries `frequency`, the tuner frequency the device reported for its last tune; a tag carries no
+`frequency` until the device has reported one. The first timing tag after the device opens carries the configured
+`sample_rate`. A later tag carries the estimated `sample_rate` and `ppm_error` only while the estimate is settled: it
+has held within 1000 ppm of the configured rate for five time constants of `ppm_estimator_cutoff`, and for at least
+1 s.)">;
 
     gr::PortIn<std::uint8_t, Optional> clk_in;
     gr::PortOut<T>                     out;
@@ -79,28 +85,30 @@ Operating modes:
 #else
         0.1f; // native: USB transfer timestamps have ~100 us jitter
 #endif
-    Annotated<float, "ppm_tag_threshold", Doc<"emit corrected frequency/rate when ppm drift exceeds this">> ppm_tag_threshold = 0.1f;
+    Annotated<float, "ppm_tag_threshold", Doc<"smallest ppm change between published rate estimates">> ppm_tag_threshold = 0.1f;
 
     GR_MAKE_REFLECTABLE(RTL2832Source, clk_in, out, frequency, sample_rate, gain, auto_gain, device_index, device_name, ppm_correction, polling_period, trigger_name, emit_timing_tags, emit_meta_info, tag_interval, dc_blocker_enabled, dc_blocker_cutoff, ppm_estimator_cutoff, ppm_tag_threshold);
 
-    RTL2832Device                  _device;
-    bool                           _ioThreadDone     = true;
-    std::int64_t                   _clockOffsetNs    = 0;
-    bool                           _clockOffsetValid = false;
-    std::string                    _clockTriggerName;
-    double                         _prevFrequency  = 0.0;
-    float                          _prevSampleRate = 0.f;
-    float                          _prevGain       = 0.f;
-    bool                           _prevAutoGain   = false;
-    std::string                    _prevDeviceName;
-    bool                           _firstEmission          = true;
-    std::uint64_t                  _lastTagTimeNs          = 0UL;
-    bool                           _retuneRequested        = false;
-    std::uint8_t                   _postRetuneDiscardCount = 0;
-    DcBlocker                      _dcFilterI;
-    DcBlocker                      _dcFilterQ;
-    algorithm::SampleRateEstimator _rateEstimator;
-    float                          _ppmLastEmitted = 0.0f;
+    RTL2832Device         _device;
+    std::optional<double> _confirmedFrequency; // the tuner frequency the device reported for its last tune
+    bool                  _ioThreadDone     = true;
+    std::int64_t          _clockOffsetNs    = 0;
+    bool                  _clockOffsetValid = false;
+    std::string           _clockTriggerName;
+    double                _prevFrequency  = 0.0;
+    float                 _prevSampleRate = 0.f;
+    float                 _prevGain       = 0.f;
+    bool                  _prevAutoGain   = false;
+    std::string           _prevDeviceName;
+    bool                  _firstEmission          = true;
+    bool                  _configuredRatePending  = true; // the next timing tag carries the configured rate
+    std::uint64_t         _lastTagTimeNs          = 0UL;
+    bool                  _retuneRequested        = false;
+    std::uint8_t          _postRetuneDiscardCount = 0;
+    DcBlocker             _dcFilterI;
+    DcBlocker             _dcFilterQ;
+    SettledRateEstimate   _rateEstimate;
+    float                 _ppmLastEmitted = 0.0f;
 
     std::size_t _publishedSinceWork = 0UZ;
 
@@ -122,7 +130,9 @@ Operating modes:
         _clockOffsetNs    = 0;
         _clockOffsetValid = false;
         _clockTriggerName.clear();
+        _confirmedFrequency.reset();
         _firstEmission          = true;
+        _configuredRatePending  = true;
         _lastTagTimeNs          = 0UL;
         _retuneRequested        = false;
         _postRetuneDiscardCount = 0;
@@ -153,8 +163,9 @@ Operating modes:
             }
             return {};
         };
+        _confirmedFrequency.reset();
         std::expected<void, std::string> configured = check(_device.setSampleRate(sample_rate), "setSampleRate");
-        configured                                  = configured.and_then([&] { return check(_device.setCenterFrequency(frequency), "setCenterFrequency"); });
+        configured                                  = configured.and_then([&] { return confirmTune(_device.setCenterFrequency(frequency)).transform([](double) {}); });
         configured                                  = configured.and_then([&] { return check(_device.setGainMode(auto_gain), "setGainMode"); });
         configured                                  = configured.and_then([&] { return check(_device.setAgcMode(auto_gain), "setAgcMode"); });
         if (!auto_gain) {
@@ -162,6 +173,16 @@ Operating modes:
         }
         configured = configured.and_then([&] { return check(_device.setFreqCorrection(ppm_correction), "setFreqCorrection"); });
         return configured.and_then([&] { return check(_device.resetBuffer(), "resetBuffer"); });
+    }
+
+    // keeps the tuner frequency the device reports for a tune, and forgets the last one when the tune fails
+    std::expected<double, std::string> confirmTune(RTL2832Device::ValueResult tuned) {
+        if (!tuned) {
+            _confirmedFrequency.reset();
+            return std::unexpected(std::format("setCenterFrequency failed: {}", tuned.error()));
+        }
+        _confirmedFrequency = *tuned;
+        return *tuned;
     }
 
     void stop() {
@@ -197,11 +218,13 @@ Operating modes:
             return true;
         };
         if (newSettings.contains("frequency")) {
-            if (!reportError(_device.setCenterFrequency(frequency), "setCenterFrequency")) {
+            const auto tuned = confirmTune(_device.setCenterFrequency(frequency));
+            if (!tuned) {
+                this->emitErrorMessage("settingsChanged()", tuned.error());
                 return;
             }
             _retuneRequested = true;
-            forwardSettings.insert_or_assign(std::pmr::string("frequency"), frequency.value);
+            forwardSettings.insert_or_assign(std::pmr::string("frequency"), *tuned);
             forwardSettings.insert_or_assign(std::pmr::string("retune"), true);
         }
         if (newSettings.contains("gain") || newSettings.contains("auto_gain")) {
@@ -228,8 +251,7 @@ Operating modes:
             rebuildDcFilter();
         }
         if (newSettings.contains("ppm_estimator_cutoff")) {
-            _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
-            _rateEstimator.rebuildFilter();
+            _rateEstimate.setCutoff(ppm_estimator_cutoff);
         }
     }
 
@@ -253,7 +275,7 @@ Operating modes:
                 _postRetuneDiscardCount = kPostRetuneDiscardReads;
                 _dcFilterI.reset();
                 _dcFilterQ.reset();
-                _rateEstimator.resetPhase();
+                _rateEstimate.resetPhase();
             }
 
             if (!_device.isOpen()) {
@@ -273,10 +295,11 @@ Operating modes:
                 announce = true;
             }
             if (announce) {
-                announce        = false;
-                _firstEmission  = true;
-                _lastTagTimeNs  = 0UL;
-                _ppmLastEmitted = 0.0f;
+                announce               = false;
+                _firstEmission         = true;
+                _configuredRatePending = true;
+                _lastTagTimeNs         = 0UL;
+                _ppmLastEmitted        = 0.0f;
                 rebuildRateEstimator();
                 this->emitMessage("ioReadLoop()", {{"state", "streaming"}, {"device", device_name.value}});
             }
@@ -301,7 +324,7 @@ Operating modes:
             auto        tWallNs        = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
             std::size_t nOutputSamples = std::is_same_v<T, std::uint8_t> ? *result : *result / 2UZ;
             double      tObsSeconds    = static_cast<double>(tWallNs) * 1e-9;
-            _rateEstimator.update(tObsSeconds, nOutputSamples);
+            _rateEstimate.update(tObsSeconds, nOutputSamples);
 
             drainClockInput(clkReader, clkTagRdr);
             publishSamples(outWriter, readBuf.data(), *result, tWallNs);
@@ -452,12 +475,17 @@ Operating modes:
             tag::put(tagMap, tag::TRIGGER_META_INFO, std::move(metaInfo));
         }
 
-        if (_rateEstimator._initialised) {
-            float ppmNow = _rateEstimator.estimatedPpm();
-            tag::put(tagMap, "sample_rate", static_cast<float>(_rateEstimator.estimatedRate()));
-            tag::put(tagMap, "frequency", frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6));
+        if (const auto rate = _rateEstimate.settledRate(); rate) {
+            const float ppmNow = _rateEstimate.settledPpm().value_or(0.f);
+            tag::put(tagMap, "sample_rate", static_cast<float>(*rate));
             tag::put(tagMap, "ppm_error", ppmNow);
             _ppmLastEmitted = ppmNow;
+        } else if (_configuredRatePending) {
+            tag::put(tagMap, "sample_rate", sample_rate.value);
+        }
+        _configuredRatePending = false;
+        if (_confirmedFrequency) {
+            tag::put(tagMap, "frequency", *_confirmedFrequency);
         }
 
         out.publishTag(std::move(tagMap), 0UZ);
@@ -488,34 +516,22 @@ Operating modes:
     }
 
     void emitPpmTagIfNeeded() {
-        if (!_rateEstimator._initialised) {
+        const auto rate   = _rateEstimate.settledRate();
+        const auto ppmNow = _rateEstimate.settledPpm();
+        if (!rate || !ppmNow || std::abs(*ppmNow - _ppmLastEmitted) < ppm_tag_threshold) {
             return;
         }
-        float ppmNow = _rateEstimator.estimatedPpm();
-        if (std::abs(ppmNow) > 1000.f) {
-            return; // estimator still in warm-up — real crystal drift is < ~100 ppm
-        }
-        if (std::abs(ppmNow - _ppmLastEmitted) < ppm_tag_threshold) {
-            return;
-        }
-
-        float  correctedRate = static_cast<float>(_rateEstimator.estimatedRate());
-        double correctedFreq = frequency.value * (1.0 + static_cast<double>(ppmNow) * 1e-6);
-
         auto tagMap = out.makeTagMap();
-        tag::put(tagMap, "sample_rate", correctedRate);
-        tag::put(tagMap, "frequency", correctedFreq);
-        tag::put(tagMap, "ppm_error", ppmNow);
+        tag::put(tagMap, "sample_rate", static_cast<float>(*rate));
+        tag::put(tagMap, "ppm_error", *ppmNow);
         out.publishTag(std::move(tagMap), 0UZ);
-
-        _ppmLastEmitted = ppmNow;
+        _ppmLastEmitted = *ppmNow;
     }
 
     void rebuildRateEstimator() {
-        double nomRate                  = static_cast<double>(sample_rate.value);
-        double updateHz                 = (nomRate > 0.0) ? (nomRate / (64.0 * 1024.0 / (std::is_same_v<T, std::uint8_t> ? 1.0 : 2.0))) : 250.0;
-        _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
-        _rateEstimator.reset(nomRate, updateHz);
+        double nomRate  = static_cast<double>(sample_rate.value);
+        double updateHz = (nomRate > 0.0) ? (nomRate / (64.0 * 1024.0 / (std::is_same_v<T, std::uint8_t> ? 1.0 : 2.0))) : 250.0;
+        _rateEstimate.reset(nomRate, updateHz, ppm_estimator_cutoff);
     }
 
     void rebuildDcFilter() {
