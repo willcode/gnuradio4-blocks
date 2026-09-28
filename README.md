@@ -77,6 +77,17 @@ Useful configuration options are:
 - `GR4_PKG_VERSION` (default: `4.0.0-git`): version recorded in the installed
   `gnuradio4Blocks.pc` metadata
 
+Two environment variables decide how a test run treats a figure measured on the
+wall clock. `DISABLE_SENSITIVE_TESTS` marks a run whose timing is not
+representative, such as continuous integration or a sanitizer build: the tests
+tagged `benchmarks` and `visual` do not run, and a test that measures a cost
+prints the figure and asserts nothing on it. `ENABLE_BENCHMARK_TESTS` marks a
+run on a machine whose CPU placement and clock speed the caller controls: the
+throughput sweeps run, and a cost test asserts its tight bound. With neither
+variable set, a cost test asserts a loose bound that still catches a change in
+the shape of the cost, or prints its figure where it has no loose bound. When
+both are set, `DISABLE_SENSITIVE_TESTS` decides.
+
 ## Using the Blocks
 
 An installation exports the camel-case `gnuradio4Blocks` CMake package and

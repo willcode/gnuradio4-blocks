@@ -4,6 +4,7 @@
 #include <chrono>
 #include <complex>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <functional>
 #include <numeric>
@@ -442,15 +443,22 @@ const boost::ut::suite<"SampleDelay"> sampleDelayTests = [] {
             }
         }
 
-        // The tight 1.5x bound is asserted under ENABLE_BENCHMARK_TESTS, where the harness controls placement. The
-        // loose 3x holds otherwise and still catches a shifted line, which costs 5.6x.
-        const double bound = std::getenv("ENABLE_BENCHMARK_TESTS") != nullptr ? 1.5 : 3.0;
+        // With DISABLE_SENSITIVE_TESTS set the test prints the figures and asserts nothing, with ENABLE_BENCHMARK_TESTS
+        // set it asserts the tight 1.5x bound, and otherwise it asserts the loose 3x bound. The tight bound needs a
+        // harness that controls placement; the loose bound still catches a shifted line, which costs 5.6x.
+        const bool   asserted = std::getenv("DISABLE_SENSITIVE_TESTS") == nullptr;
+        const double bound    = std::getenv("ENABLE_BENCHMARK_TESTS") != nullptr ? 1.5 : 3.0;
 
         std::println("span copy {:.3f} ns/sample (spread {:.3f})", best[0UZ], worst[0UZ] - best[0UZ]);
         for (std::size_t arm = 1UZ; arm <= std::size(kDelays); ++arm) {
             const double ratio = best[arm] / best[0UZ];
             std::println("delay {:>6} {:.3f} ns/sample (spread {:.3f}), {:.2f}x the copy", kDelays[arm - 1UZ], best[arm], worst[arm] - best[arm], ratio);
-            expect(lt(ratio, bound)) << std::format("delay {} costs {:.2f}x a span copy; a shifted line reaches 5.6x here", kDelays[arm - 1UZ], ratio);
+            if (asserted) {
+                expect(lt(ratio, bound)) << std::format("delay {} costs {:.2f}x a span copy; a shifted line reaches 5.6x here", kDelays[arm - 1UZ], ratio);
+            }
+        }
+        if (!asserted) {
+            std::println("DISABLE_SENSITIVE_TESTS is set: the figures are printed and not asserted on");
         }
     };
 };

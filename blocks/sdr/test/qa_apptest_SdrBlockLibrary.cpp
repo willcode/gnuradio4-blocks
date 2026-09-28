@@ -45,6 +45,11 @@ int main() {
     std::vector<std::string> missing;
     std::ranges::set_difference(desired, known, std::back_inserter(missing));
     if (!missing.empty()) {
+        if (const char* directories = std::getenv("GNURADIO4_PLUGIN_DIRECTORIES"); directories == nullptr) {
+            std::println(stderr, "GNURADIO4_PLUGIN_DIRECTORIES is not set: the loader scanned only {}. ctest sets the variable to the directory holding the SDR block library.", gr::installedPluginDirectory());
+        } else if (std::ranges::none_of(known, [](const std::string& name) { return name.contains("::sdr::"); })) {
+            std::println(stderr, "no SDR block library was mapped from GNURADIO4_PLUGIN_DIRECTORIES={}", directories);
+        }
         for (const auto& name : missing) {
             std::println(stderr, "missing block registration: {}", name);
         }
