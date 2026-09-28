@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <limits>
 #include <numbers>
@@ -579,8 +580,13 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             std::println("{:<26} {:7.3f} ns/sample (spread {:.3f})", arms[arm].first, best[arm], worst[arm] - best[arm]);
         }
 
-        // ENABLE_BENCHMARK_TESTS selects the tight bounds, for runs under a harness that controls placement and
-        // clock speed. The loose bounds hold otherwise and still catch a regression that changes the shape.
+        // With DISABLE_SENSITIVE_TESTS set the test prints the figures and asserts nothing, with ENABLE_BENCHMARK_TESTS
+        // set it asserts the tight bounds, and otherwise it asserts the loose bounds. The tight bounds need a harness
+        // that controls placement and clock speed; the loose bounds still catch a regression that changes the shape.
+        if (std::getenv("DISABLE_SENSITIVE_TESTS") != nullptr) {
+            std::println("DISABLE_SENSITIVE_TESTS is set: the figures are printed and not asserted on");
+            return;
+        }
         const bool   pinned    = std::getenv("ENABLE_BENCHMARK_TESTS") != nullptr;
         const double copyBound = pinned ? 2.0 : 3.0;
 

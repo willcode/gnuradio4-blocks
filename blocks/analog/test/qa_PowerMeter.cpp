@@ -648,9 +648,15 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         }
         std::println("[checksum {:g}]", sink);
 
-        // The tight 1.5x bound holds only under ENABLE_BENCHMARK_TESTS, where the harness controls the run; an
-        // ordinary ctest run measures the scheduler as much as this code, so the bound is 3.0 there. Either bound
-        // still catches a per-sample log10, which costs tens of times the accumulation rather than tens of percent.
+        // With DISABLE_SENSITIVE_TESTS set the test prints the figures and asserts nothing, with ENABLE_BENCHMARK_TESTS
+        // set it asserts the tight 1.5x bound, and otherwise it asserts the loose 3.0x bound. The tight bound needs a
+        // harness that controls the run; an ordinary ctest run measures the scheduler as much as this code. Either
+        // bound still catches a per-sample log10, which costs tens of times the accumulation rather than tens of
+        // percent.
+        if (std::getenv("DISABLE_SENSITIVE_TESTS") != nullptr) {
+            std::println("DISABLE_SENSITIVE_TESTS is set: the figures are printed and not asserted on");
+            return;
+        }
         const double bound = std::getenv("ENABLE_BENCHMARK_TESTS") != nullptr ? 1.5 : 3.0;
 
         expect(lt(best[1UZ] / best[0UZ], bound)) << "the 96 kHz window costs what accumulating |x|^2 costs";
