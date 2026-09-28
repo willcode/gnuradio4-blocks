@@ -596,12 +596,10 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         // do, because its state lives in an object the compiler cannot promote to registers: about half as much again
         // per sample, which is the margin these bounds leave.
         //
-        // These are -O1 figures, the level GR_QA_OPTIMIZATION_LEVEL pins for test executables, and -O1 charges the
-        // subnormal flush's two compares and two conditional stores about 3.7 ns of the enabled arm: the reference
-        // measurement went from 5.26 to 9.0 when the flush was added, with the arithmetic alone at 3.24. That is a
-        // property of the level, not of the block. bm_IqCorrection, built at the level the block ships at, has the
-        // same flush costing 0.7 ns of 3.8, and it is the figure to read for what a receiver pays.
-        expect(lt(best[4UZ], pinned ? 11.0 : 18.0)) << std::format("DcOffsetCorrect enabled at {:.3f} ns/sample; the reference measurement is 9.0 with the flush and 5.26 without it", best[4UZ]);
+        // The test builds at the build type's optimization level, the level bm_IqCorrection builds at. The bounds on
+        // the enabled arm carry the margins set for an -O1 build of this test, where the subnormal flush's two compares
+        // and two conditional stores cost about 3.7 ns of the arm.
+        expect(lt(best[4UZ], pinned ? 11.0 : 18.0)) << std::format("DcOffsetCorrect enabled at {:.3f} ns/sample", best[4UZ]);
     };
 };
 

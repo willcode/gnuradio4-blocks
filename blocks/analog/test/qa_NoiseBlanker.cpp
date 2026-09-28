@@ -706,12 +706,10 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             }
         }
         std::println("NoiseBlanker<complex<float>> {:.3f} ns/sample (spread {:.3f}), span copy {:.3f}", best, worst - best, floorBest);
-        // The 3.94 and 7.8 this bound was first written from are bm_NoiseBlanker's figures, and bm_NoiseBlanker builds
-        // at the build type's level; a test executable builds at -O1, where the same block reads 16.66 pinned, so the
-        // bound never held here. It is re-anchored at what this binary measures: 17.31 pinned with the subnormal
-        // flush, 16.66 without it, against 9.51 and 7.76 for the same pair at -O3. Read bm_NoiseBlanker for the cost a
-        // receiver pays; this bound only has to catch a change of shape.
-        expect(lt(best, 22.0)) << std::format("the block measures 17.31 at -O1 and 9.51 at -O3; this run reads {:.3f}", best);
+        // The test builds at the build type's optimization level, the level bm_NoiseBlanker builds at. The bound
+        // carries the margin set for an -O1 build of this test. It catches a change of shape, and bm_NoiseBlanker gives
+        // the cost a receiver pays.
+        expect(lt(best, 22.0)) << std::format("the block reads {:.3f} ns/sample", best);
     };
 };
 
