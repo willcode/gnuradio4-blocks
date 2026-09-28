@@ -4,6 +4,10 @@
 # shares a single header instead, held by an anchor target that carries the compile options add_ut_test gives its tests.
 option(GR_QA_PCH "Share one precompiled header across the test executables" ON)
 
+# The compile option add_ut_test gives a test target for GR_QA_OPTIMIZATION_LEVEL. gr_pin_test_optimization removes this
+# exact item to leave a target at the build type's own level.
+set(GR_QA_OPTIMIZATION_OPTION "$<$<NOT:$<CONFIG:Debug>>:${GR_QA_OPTIMIZATION_LEVEL}>")
+
 # Builds the anchor target that owns the shared precompiled header. It compiles one trivial translation unit, so the
 # header is its only real output. Its options mirror what add_ut_test gives a test target, because GCC refuses a
 # precompiled header built under different settings -- the optimization level among them -- and CMake pairs the header
@@ -24,7 +28,7 @@ function(gr_qa_add_pch_anchor ANCHOR)
   add_executable(${ANCHOR} EXCLUDE_FROM_ALL "${_stub}")
   if(GR_QA_OPTIMIZATION_LEVEL)
     set_target_properties(${ANCHOR} PROPERTIES GR_QA_REDUCED_OPTIMIZATION ON)
-    target_compile_options(${ANCHOR} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${GR_QA_OPTIMIZATION_LEVEL}>)
+    target_compile_options(${ANCHOR} PRIVATE ${GR_QA_OPTIMIZATION_OPTION})
   endif()
   if(CMAKE_GENERATOR MATCHES "Ninja")
     set_property(TARGET ${ANCHOR} PROPERTY JOB_POOL_COMPILE gr4_heavy_compile)
@@ -92,7 +96,7 @@ function(add_ut_test TEST_NAME)
     # GCC's null-dereference analysis false-positives in libstdc++'s inlined string code below -O2; the warning battery
     # reads this property.
     set_target_properties(${TEST_NAME} PROPERTIES GR_QA_REDUCED_OPTIMIZATION ON)
-    target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${GR_QA_OPTIMIZATION_LEVEL}>)
+    target_compile_options(${TEST_NAME} PRIVATE ${GR_QA_OPTIMIZATION_OPTION})
   endif()
   if(CMAKE_GENERATOR MATCHES "Ninja")
     # Test TUs instantiate whole graphs per file and are the build's memory-heavy class; the width-limited pool keeps
@@ -129,6 +133,12 @@ endfunction()
 # pin a level are the ones whose run time depends on it, and unoptimized under instrumentation they run some sixty times
 # slower and are killed by their timeout, so such a build reports nothing about them at all. The pin therefore also
 # holds where a sanitizer is present, and only a plain Debug build is left unoptimized for stepping.
+#
+# LEVEL is a compiler option such as -O2, or BUILD_TYPE for the build type's own level: the target drops
+# GR_QA_OPTIMIZATION_LEVEL and adds no level of its own. A test that asserts a tight cost bound under
+# ENABLE_BENCHMARK_TESTS pins BUILD_TYPE, because the bound describes the block as the build type compiles it. A plain
+# Debug build leaves such a test unoptimized too. In a Debug build under a sanitizer BUILD_TYPE compiles the test at
+# -O2, the level the other pins use, because the build type's own -O0 leaves it too slow to finish.
 set(GR_QA_INSTRUMENTED_BUILD OFF)
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _gr_qa_config)
 foreach(_gr_qa_flags IN ITEMS "${CMAKE_CXX_FLAGS}" "${CMAKE_CXX_FLAGS_${_gr_qa_config}}")
@@ -138,7 +148,16 @@ foreach(_gr_qa_flags IN ITEMS "${CMAKE_CXX_FLAGS}" "${CMAKE_CXX_FLAGS_${_gr_qa_c
 endforeach()
 
 function(gr_pin_test_optimization TEST_NAME LEVEL)
-  if(GR_QA_INSTRUMENTED_BUILD)
+  if(LEVEL STREQUAL "BUILD_TYPE")
+    get_target_property(_options ${TEST_NAME} COMPILE_OPTIONS)
+    if(_options)
+      list(REMOVE_ITEM _options "${GR_QA_OPTIMIZATION_OPTION}")
+      set_target_properties(${TEST_NAME} PROPERTIES COMPILE_OPTIONS "${_options}")
+    endif()
+    if(GR_QA_INSTRUMENTED_BUILD)
+      target_compile_options(${TEST_NAME} PRIVATE $<$<CONFIG:Debug>:-O2> -fno-omit-frame-pointer)
+    endif()
+  elseif(GR_QA_INSTRUMENTED_BUILD)
     # the level, and the frame pointer a sanitizer's own unwinder walks to put a stack under its report
     target_compile_options(${TEST_NAME} PRIVATE ${LEVEL} -fno-omit-frame-pointer)
   else()
