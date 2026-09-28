@@ -212,7 +212,7 @@ std::array<std::vector<CF32>, nChannels> transmitThroughLoopback(const std::stri
     using Source = gr::blocks::testing::TagSource<CF32, ProcessFunction::USE_PROCESS_BULK>;
 
     auto probe = soapy::Device::make(loopbackKwargs("loopback", parameters));
-    expect(fatal(probe.has_value())) << "the probe must open the device the sink will open";
+    expect(probe.has_value()) << [&] { return std::format("the probe must open the device the sink will open: {}", probe.error().message); } << fatal;
 
     settings.insert_or_assign(std::pmr::string("device"), std::string("loopback"));
     settings.insert_or_assign(std::pmr::string("device_parameter"), parameters);
@@ -238,7 +238,7 @@ std::array<std::vector<CF32>, nChannels> transmitThroughLoopback(const std::stri
     std::vector<gr::Size_t> channels(nChannels);
     std::iota(channels.begin(), channels.end(), gr::Size_t{0});
     auto receiver = probe->setupStream<CF32, SOAPY_SDR_RX>(channels);
-    expect(fatal(receiver.has_value()));
+    expect(receiver.has_value()) << [&] { return std::format("the receive stream was not set up: {}", receiver.error().message); } << fatal;
     expect(receiver->activate().has_value());
 
     std::array<std::vector<CF32>, nChannels> received;
@@ -696,16 +696,16 @@ const boost::ut::suite<"SoapySink + SoapySource shared device"> txRxTests = [] {
     "shared device handle verified via Device::make()"_test = [] {
         auto dev1 = soapy::Device::make({{"driver", "loopback"}});
         auto dev2 = soapy::Device::make({{"driver", "loopback"}});
-        expect(dev1.has_value());
-        expect(dev2.has_value());
+        expect(dev1.has_value()) << [&] { return std::format("the loopback device did not open: {}", dev1.error().message); } << fatal;
+        expect(dev2.has_value()) << [&] { return std::format("the loopback device did not open: {}", dev2.error().message); } << fatal;
         expect(eq(dev1->get(), dev2->get())) << "same kwargs should return same device handle";
     };
 
     "device handle survives after one user resets"_test = [] {
         auto dev1 = soapy::Device::make({{"driver", "loopback"}});
         auto dev2 = soapy::Device::make({{"driver", "loopback"}});
-        expect(dev1.has_value());
-        expect(dev2.has_value());
+        expect(dev1.has_value()) << [&] { return std::format("the loopback device did not open: {}", dev1.error().message); } << fatal;
+        expect(dev2.has_value()) << [&] { return std::format("the loopback device did not open: {}", dev2.error().message); } << fatal;
         auto* rawPtr = dev1->get();
         dev1->reset();
         expect(eq(dev1->get(), static_cast<SoapySDRDevice*>(nullptr)));
@@ -1297,7 +1297,7 @@ const boost::ut::suite<"SoapySource device configuration"> configurationTests = 
 
     auto runSource = [](const std::string& driver, const std::string& parameters, property_map extraSettings) {
         auto probe = soapy::Device::make(loopbackKwargs(driver, parameters));
-        expect(probe.has_value()) << "the probe must open the device the block will open";
+        expect(probe.has_value()) << [&] { return std::format("the probe must open the device the block will open: {}", probe.error().message); } << fatal;
         std::ignore = probe->writeSetting("call_log", "");
 
         gr::Graph    flow;
@@ -1374,7 +1374,7 @@ const boost::ut::suite<"SoapySource device configuration"> configurationTests = 
 
     "a setting written while the block runs reaches the device"_test = [&] {
         auto probe = soapy::Device::make(loopbackKwargs("loopback", "device_mode=rx_only"));
-        expect(probe.has_value());
+        expect(probe.has_value()) << [&] { return std::format("the loopback device did not open: {}", probe.error().message); } << fatal;
         std::ignore = probe->writeSetting("call_log", "");
         expect(!probe->isAutomaticGainControl(SOAPY_SDR_RX, 0)) << "the device starts with its AGC off";
 
@@ -1457,7 +1457,7 @@ const boost::ut::suite<"SoapySource device configuration"> configurationTests = 
 
     "frequency_correction=0 resets a device that holds one"_test = [&] {
         auto probe = soapy::Device::make(loopbackKwargs("loopback", "device_mode=rx_only"));
-        expect(probe.has_value());
+        expect(probe.has_value()) << [&] { return std::format("the loopback device did not open: {}", probe.error().message); } << fatal;
         std::ignore = probe->setFrequencyCorrection(SOAPY_SDR_RX, 0, 12.0);
 
         gr::Graph flow;

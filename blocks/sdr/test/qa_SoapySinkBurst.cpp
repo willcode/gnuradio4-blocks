@@ -105,7 +105,7 @@ std::vector<Write> transmit(std::string parameters, std::size_t nSamples, std::v
     soapy::Kwargs kwargs{{"driver", "loopback"}};
     kwargs.merge(soapy::parseKwargsString(parameters));
     auto probe = soapy::Device::make(kwargs);
-    expect(fatal(probe.has_value())) << "the probe must open the device the block will open";
+    expect(probe.has_value()) << [&] { return std::format("the probe must open the device the block will open: {}", probe.error().message); } << fatal;
     std::ignore = probe->writeSetting("write_log", "");
 
     gr::Graph flow;
@@ -231,7 +231,7 @@ const boost::ut::suite<"SoapySink transmit bursts"> burstTests = [] {
         soapy::Kwargs         kwargs{{"driver", "loopback"}};
         kwargs.merge(soapy::parseKwargsString(parameters));
         auto probe = soapy::Device::make(kwargs);
-        expect(fatal(probe.has_value()));
+        expect(probe.has_value()) << [&] { return std::format("the loopback device did not open: {}", probe.error().message); } << fatal;
         std::ignore = probe->writeSetting("write_log", "");
 
         gr::Graph flow;
