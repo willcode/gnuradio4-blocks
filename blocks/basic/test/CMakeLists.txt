@@ -9,6 +9,7 @@ add_basic_test(qa_Selector)
 add_basic_test(qa_sources)
 add_basic_test(qa_DataSink)
 add_basic_test(qa_SampleDelay)
+gr_pin_test_optimization(qa_SampleDelay BUILD_TYPE)
 add_basic_test(qa_GraphBridge)
 
 # the two halves are loaded by block id through the global registry, so the shared library carrying the basic blocks has
@@ -18,6 +19,7 @@ target_link_libraries(qa_GraphBridgeRegistry PRIVATE gnuradio4::GrBasicBlocksSha
 set_tests_properties(qa_GraphBridgeRegistry PROPERTIES TIMEOUT 60)
 
 add_basic_test(qa_IqCorrection)
+gr_pin_test_optimization(qa_IqCorrection BUILD_TYPE)
 add_basic_test(qa_IqTap)
 add_basic_test(qa_TriggerBlocks)
 add_basic_test(qa_Decimators)
