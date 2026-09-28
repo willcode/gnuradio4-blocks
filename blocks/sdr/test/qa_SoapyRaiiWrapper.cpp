@@ -2,6 +2,7 @@
 
 #include <complex>
 #include <cstdlib>
+#include <format>
 #include <string>
 #include <vector>
 
@@ -77,14 +78,14 @@ const boost::ut::suite<"SoapyRaiiWrapper Device"> deviceTests = [] {
 
     "Device RAII cleanup on reset"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         result->reset();
         expect(eq(result->get(), static_cast<SoapySDRDevice*>(nullptr)));
     };
 
     "Device move semantics"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto dev2 = std::move(*result);
         expect(neq(dev2.get(), static_cast<SoapySDRDevice*>(nullptr)));
         expect(eq(result->get(), static_cast<SoapySDRDevice*>(nullptr)));
@@ -94,7 +95,7 @@ const boost::ut::suite<"SoapyRaiiWrapper Device"> deviceTests = [] {
 const boost::ut::suite<"SoapyRaiiWrapper channel + frontend"> channelTests = [] {
     "getNumChannels and getFullDuplex"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         expect(eq(dev.getNumChannels(SOAPY_SDR_RX), 1UZ));
         expect(eq(dev.getNumChannels(SOAPY_SDR_TX), 1UZ));
@@ -103,7 +104,7 @@ const boost::ut::suite<"SoapyRaiiWrapper channel + frontend"> channelTests = [] 
 
     "frontend mapping round-trip"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         dev.setFrontendMapping(SOAPY_SDR_RX, "0:0");
         expect(eq(dev.getFrontendMapping(SOAPY_SDR_RX), std::string("0:0")));
@@ -111,7 +112,7 @@ const boost::ut::suite<"SoapyRaiiWrapper channel + frontend"> channelTests = [] 
 
     "channel info"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto info = result->getChannelInfo(SOAPY_SDR_RX, 0);
         // loopback returns empty channel info, just verify no crash
         (void)info;
@@ -121,7 +122,7 @@ const boost::ut::suite<"SoapyRaiiWrapper channel + frontend"> channelTests = [] 
 const boost::ut::suite<"SoapyRaiiWrapper antenna + gain"> antennaGainTests = [] {
     "antenna list, set, get"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev      = *result;
         auto  antennas = dev.listAvailableAntennas(SOAPY_SDR_RX, 0);
         expect(!antennas.empty());
@@ -132,7 +133,7 @@ const boost::ut::suite<"SoapyRaiiWrapper antenna + gain"> antennaGainTests = [] 
 
     "gain elements and AGC"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev   = *result;
         auto  gains = dev.listAvailableGainElements(SOAPY_SDR_RX, 0);
         expect(!gains.empty());
@@ -144,7 +145,7 @@ const boost::ut::suite<"SoapyRaiiWrapper antenna + gain"> antennaGainTests = [] 
 
     "gain set and get (overall + element)"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         auto  r   = dev.setGain(SOAPY_SDR_RX, 0, 30.0);
         expect(r.has_value());
@@ -158,7 +159,7 @@ const boost::ut::suite<"SoapyRaiiWrapper antenna + gain"> antennaGainTests = [] 
 const boost::ut::suite<"SoapyRaiiWrapper frequency + sample rate + bandwidth"> tuningTests = [] {
     "frequency set, get, range"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         auto  r   = dev.setCenterFrequency(SOAPY_SDR_RX, 0, 433.92e6);
         expect(r.has_value());
@@ -169,7 +170,7 @@ const boost::ut::suite<"SoapyRaiiWrapper frequency + sample rate + bandwidth"> t
 
     "sample rate set, get, list"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev   = *result;
         auto  rates = dev.listSampleRates(SOAPY_SDR_RX, 0);
         expect(!rates.empty());
@@ -180,7 +181,7 @@ const boost::ut::suite<"SoapyRaiiWrapper frequency + sample rate + bandwidth"> t
 
     "bandwidth set, get, list"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         auto  bws = dev.listAvailableBandwidths(SOAPY_SDR_RX, 0);
         expect(!bws.empty());
@@ -193,7 +194,7 @@ const boost::ut::suite<"SoapyRaiiWrapper frequency + sample rate + bandwidth"> t
 const boost::ut::suite<"SoapyRaiiWrapper frontend corrections"> correctionTests = [] {
     "DC offset mode and value"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         expect(dev.hasDCOffsetMode(SOAPY_SDR_RX, 0));
         auto r = dev.setDCOffsetMode(SOAPY_SDR_RX, 0, true);
@@ -209,7 +210,7 @@ const boost::ut::suite<"SoapyRaiiWrapper frontend corrections"> correctionTests 
 
     "IQ balance"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         expect(dev.hasIQBalance(SOAPY_SDR_RX, 0));
         auto r = dev.setIQBalance(SOAPY_SDR_RX, 0, 0.98, 0.01);
@@ -221,7 +222,7 @@ const boost::ut::suite<"SoapyRaiiWrapper frontend corrections"> correctionTests 
 
     "frequency correction (ppm)"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         expect(dev.hasFrequencyCorrection(SOAPY_SDR_RX, 0));
         auto r = dev.setFrequencyCorrection(SOAPY_SDR_RX, 0, 1.5);
@@ -233,7 +234,7 @@ const boost::ut::suite<"SoapyRaiiWrapper frontend corrections"> correctionTests 
 const boost::ut::suite<"SoapyRaiiWrapper clock + time"> clockTests = [] {
     "master clock rate"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         auto  r   = dev.setMasterClockRate(40e6);
         expect(r.has_value());
@@ -244,7 +245,7 @@ const boost::ut::suite<"SoapyRaiiWrapper clock + time"> clockTests = [] {
 
     "reference clock rate"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev = *result;
         auto  r   = dev.setReferenceClockRate(10e6);
         expect(r.has_value());
@@ -253,7 +254,7 @@ const boost::ut::suite<"SoapyRaiiWrapper clock + time"> clockTests = [] {
 
     "clock sources"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev     = *result;
         auto  sources = dev.listClockSources();
         expect(!sources.empty());
@@ -264,7 +265,7 @@ const boost::ut::suite<"SoapyRaiiWrapper clock + time"> clockTests = [] {
 
     "time sources"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev     = *result;
         auto  sources = dev.listAvailableTimeSources();
         expect(!sources.empty());
@@ -276,7 +277,7 @@ const boost::ut::suite<"SoapyRaiiWrapper clock + time"> clockTests = [] {
 const boost::ut::suite<"SoapyRaiiWrapper sensors"> sensorTests = [] {
     "device-level sensors"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev     = *result;
         auto  sensors = dev.listSensors();
         expect(eq(sensors.size(), 2UZ));
@@ -288,7 +289,7 @@ const boost::ut::suite<"SoapyRaiiWrapper sensors"> sensorTests = [] {
 
     "per-channel sensors"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev     = *result;
         auto  sensors = dev.listChannelSensors(SOAPY_SDR_RX, 0);
         expect(eq(sensors.size(), 1UZ));
@@ -301,7 +302,7 @@ const boost::ut::suite<"SoapyRaiiWrapper sensors"> sensorTests = [] {
 const boost::ut::suite<"SoapyRaiiWrapper GPIO + register"> gpioRegTests = [] {
     "GPIO read/write with masking"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev   = *result;
         auto  banks = dev.listGPIOBanks();
         expect(!banks.empty());
@@ -325,7 +326,7 @@ const boost::ut::suite<"SoapyRaiiWrapper GPIO + register"> gpioRegTests = [] {
 
     "register interfaces and read/write"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev    = *result;
         auto  ifaces = dev.listRegisterInterfaces();
         expect(!ifaces.empty());
@@ -340,7 +341,7 @@ const boost::ut::suite<"SoapyRaiiWrapper GPIO + register"> gpioRegTests = [] {
 const boost::ut::suite<"SoapyRaiiWrapper settings"> settingsTests = [] {
     "device-level settings info, write, read"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev   = *result;
         auto  infos = dev.getSettingInfo();
         expect(ge(infos.size(), 2UZ));
@@ -353,7 +354,7 @@ const boost::ut::suite<"SoapyRaiiWrapper settings"> settingsTests = [] {
 
     "per-channel settings info, write, read"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev   = *result;
         auto  infos = dev.getChannelSettingInfo(SOAPY_SDR_RX, 0);
         expect(ge(infos.size(), 2UZ));
@@ -366,7 +367,7 @@ const boost::ut::suite<"SoapyRaiiWrapper settings"> settingsTests = [] {
 const boost::ut::suite<"SoapyRaiiWrapper streaming"> streamTests = [] {
     "stream formats"_test = [] {
         auto result = soapy::Device::make({{"driver", "loopback"}});
-        expect(result.has_value());
+        expect(result.has_value()) << [&] { return std::format("the loopback device did not open: {}", result.error().message); } << fatal;
         auto& dev     = *result;
         auto  formats = dev.getStreamFormats(SOAPY_SDR_RX, 0);
         expect(eq(formats.size(), 3UZ));
@@ -420,7 +421,7 @@ const boost::ut::suite<"SoapyRaiiWrapper streaming"> streamTests = [] {
 
         // set up RX via wrapper
         auto rxResult = dev.setupStream<CF32, SOAPY_SDR_RX>();
-        expect(rxResult.has_value());
+        expect(rxResult.has_value()) << [&] { return std::format("the receive stream was not set up: {}", rxResult.error().message); } << fatal;
         auto& rxStream = *rxResult;
         expect(rxStream.activate().has_value());
 
