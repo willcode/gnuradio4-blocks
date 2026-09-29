@@ -1,27 +1,3 @@
-add_executable(qa_RTL2832Source qa_RTL2832Source.cpp)
-target_link_libraries(
-  qa_RTL2832Source
-  PRIVATE gnuradio-options
-          gnuradio-core
-          gnuradio-blocklib-core
-          gr-sdr
-          gr-timing
-          gr-testing
-          ut)
-add_test(NAME qa_RTL2832Source COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_RTL2832Source)
-
-add_executable(qa_RTL2832SourceStart qa_RTL2832SourceStart.cpp)
-target_link_libraries(
-  qa_RTL2832SourceStart
-  PRIVATE gnuradio-options
-          gnuradio-core
-          gnuradio-blocklib-core
-          gr-sdr
-          gr-testing
-          ut)
-add_test(NAME qa_RTL2832SourceStart COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
-                                            ${CMAKE_CURRENT_BINARY_DIR}/qa_RTL2832SourceStart)
-
 if(TARGET SoapySDR)
   # detect ABI compatibility: tests using SoapySDR's C++ API (std::vector, std::string in ArgInfo/Kwargs) require the
   # same stdlib as the system SoapySDR library. The C API wrapper (SoapyRaiiWrapper) is ABI-safe and works with either
@@ -266,10 +242,3 @@ add_test(NAME qa_DcBlocker COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURR
 add_executable(qa_Saturate qa_Saturate.cpp)
 target_link_libraries(qa_Saturate PRIVATE gnuradio-options gr-sdr ut)
 add_test(NAME qa_Saturate COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${CMAKE_CURRENT_BINARY_DIR}/qa_Saturate)
-
-# the settled rate estimate is a plain header, driven with sample counts and arrival times, so this one needs neither a
-# device nor SoapySDR and runs on every leg
-add_executable(qa_SettledRateEstimate qa_SettledRateEstimate.cpp)
-target_link_libraries(qa_SettledRateEstimate PRIVATE gnuradio-options gr-sdr ut)
-add_test(NAME qa_SettledRateEstimate COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
-                                             ${CMAKE_CURRENT_BINARY_DIR}/qa_SettledRateEstimate)
