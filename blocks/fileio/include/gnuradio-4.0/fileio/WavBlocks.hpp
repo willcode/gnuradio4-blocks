@@ -238,8 +238,8 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     }
 
     // Throws when there is nothing to read: in multi mode the directory cannot be listed or no file name in it holds
-    // the base name; a local file does not open or its first read fails (a directory in its place); the reader refuses
-    // the uri. A failure the reader meets later, and a header that is not valid WAV, end the stream with ERROR during the run.
+    // the base name; the reader refuses the uri or cannot open a local file. A failure the reader meets later, any
+    // failure of an HTTP read and a header that is not valid WAV end the stream with ERROR during the run.
     void start() {
         resetFileState();
         sample_rate  = 0.f;
@@ -306,33 +306,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
         bool                       justParsedHeader = false;
 
         if (!_headerParsed) {
-            _reader.poll(
-                [&](const auto& res) {
-                    if (res.isFinal) {
-                        _readerFinalSeen = true;
-                    }
-
-                    if (res.requiredOutputSize) {
-                        requiredOutputSize = res.requiredOutputSize;
-                    }
-
-                    if (!res.data) {
-                        if (!res.requiredOutputSize) {
-                            error = res.data.error();
-                        }
-                        return;
-                    }
-
-                    const auto chunk = res.data.value();
-                    if (!chunk.empty()) {
-                        _headerBuffer.insert(_headerBuffer.end(), chunk.begin(), chunk.end());
-                        if (_headerBuffer.size() > kMaxHeaderBytes) {
-                            error = gr::Error("WAV header exceeds 1MB");
-                        }
-                    }
-                },
-                std::numeric_limits<std::size_t>::max(), false);
-
+            error = pollHeader(false);
             if (error) {
                 fail("WavSource::processBulk()", *error);
                 outSpan.publish(0U);
@@ -486,16 +460,12 @@ private:
         }
     }
 
-    // opens the next file of the set, reading a local file once itself so that one that cannot be read is reported here
+    // starts a reader on the next file of the set; the reader opens the file on the I/O thread pool
     [[nodiscard]] std::expected<void, gr::Error> openFile() {
         resetFileState();
 
-        const std::string fileUri = _nextFile->string();
-        if (const auto localPath = gr::algorithm::fileio::detail::toLocalPath(fileUri); localPath) {
-            if (const auto reason = detail::unreadableFileReason(*localPath)) {
-                return std::unexpected(gr::Error(*reason));
-            }
-        }
+        const std::string fileUri   = _nextFile->string();
+        const bool        localFile = gr::algorithm::fileio::detail::toLocalPath(fileUri).has_value();
 
         // the header scan buffers whole chunks, so the chunk must stay well under kMaxHeaderBytes and
         // must also fit one output span once decoding starts: size it from the actual ring, capped
@@ -516,8 +486,40 @@ private:
         _readerActive = true;
         ++_nextFile;
 
+        // the reader's first message for a local file follows its open; an error in it refuses the file with the
+        // reader's reason. An HTTP read reports its errors in the header drain.
+        if (localFile) {
+            if (const auto error = pollHeader(true)) {
+                return std::unexpected(*error);
+            }
+        }
         parseHeaderSync();
         return {};
+    }
+
+    // takes the reader's next message into the header buffer, waiting for one when asked, and returns the reader's error
+    [[nodiscard]] std::optional<gr::Error> pollHeader(bool wait) {
+        std::optional<gr::Error> error;
+        _reader.poll(
+            [&](const auto& res) {
+                if (res.isFinal) {
+                    _readerFinalSeen = true;
+                }
+                if (!res.data) {
+                    error = res.data.error();
+                    return;
+                }
+
+                const auto chunk = res.data.value();
+                if (!chunk.empty()) {
+                    _headerBuffer.insert(_headerBuffer.end(), chunk.begin(), chunk.end());
+                    if (_headerBuffer.size() > kMaxHeaderBytes) {
+                        error = gr::Error("WAV header exceeds 1MB");
+                    }
+                }
+            },
+            std::numeric_limits<std::size_t>::max(), wait);
+        return error;
     }
 
     /// Drains the reader up to and including the `fmt ` and `data` chunks before returning, so `sample_rate`
@@ -528,26 +530,7 @@ private:
     /// at once with nothing to poll, so the loop would otherwise spin for as long as the graph took to stop.
     void parseHeaderSync() {
         while (!_failed && !_headerParsed && !_reader.cancelRequested()) {
-            std::optional<gr::Error> error;
-
-            _reader.poll(
-                [&](const auto& res) {
-                    if (res.isFinal) {
-                        _readerFinalSeen = true;
-                    }
-                    if (!res.data) {
-                        error = res.data.error();
-                        return;
-                    }
-                    const auto chunk = res.data.value();
-                    if (!chunk.empty()) {
-                        _headerBuffer.insert(_headerBuffer.end(), chunk.begin(), chunk.end());
-                        if (_headerBuffer.size() > kMaxHeaderBytes) {
-                            error = gr::Error("WAV header exceeds 1MB");
-                        }
-                    }
-                },
-                std::numeric_limits<std::size_t>::max(), true);
+            const auto error = pollHeader(true);
 
             // a cancel that lands while this poll is waiting drops the reader's queued bytes and ends it
             // with an empty final message, which is indistinguishable here from a file that stops before
