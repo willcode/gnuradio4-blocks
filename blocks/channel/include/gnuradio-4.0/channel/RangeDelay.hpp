@@ -45,15 +45,17 @@ GR_REGISTER_BLOCK(gr::blocks::channel::RangeDelay, [T], [ std::complex<float>, f
  * baseband rate. A chain that models the shift without the delay misses a real effect.
  *
  * The table is a `(time, delay)` schedule. It comes from `schedule_times_ns` with `schedule_delays_s`, or from a
- * `#!gr4-trajectory 1` file whose `range_m` column gives `range/c` per knot. It is piecewise linear between knots
- * and held at the ends. The loader never converts a delay table into a frequency table, or the reverse. Delay and
- * frequency are separate inputs to separate blocks.
+ * `#!gr4-trajectory 1` file whose `range_m` column gives `range/c` per knot. Staging both the paired vectors and
+ * `schedule_file` is refused. The table is piecewise linear between knots and held at the ends. The loader never
+ * converts a delay table into a frequency table, or the reverse. Delay and frequency are separate inputs to separate
+ * blocks.
  *
  * A delay line is causal and reaches only into the past. `apply` puts the trajectory's delay on a clean signal.
- * `correct` removes it. `correct` would command a negative delay where the trajectory delay is least. A `bias_s`
- * shifts the whole schedule into the reachable past and makes `correct` causal. The bias defaults to zero for
- * `apply` and to the schedule's maximum for `correct`. Staging refuses a commanded delay outside the fractional-delay
- * line's reach. It also refuses a schedule whose slope reaches one sample per sample. The refusal names the knot.
+ * `correct` removes it. `correct` would command a negative delay where the trajectory delay is least. A `bias_s` shifts
+ * the whole schedule into the reachable past and makes `correct` causal. The bias defaults to zero for `apply` and to
+ * the schedule's maximum for `correct`. Staging refuses a commanded delay outside the fractional-delay line's reach. It
+ * also refuses a schedule whose slope reaches one sample per sample. The refusal names the knot. `bank_size` 0 derives
+ * the bank from `attenuation_db`, `rolloff` and `order`.
  *
  * The anchor and trigger handling match `DopplerShift`. `anchor_source` is setting, first_trigger or
  * every_trigger. The block honors `trigger_offset` where set. It ignores and counts a second first-trigger tag. It
@@ -136,8 +138,8 @@ vocabulary moves with the sample it marks.
 
     /// @brief Stages the schedule and builds the bank from the members.
     ///
-    /// It is idempotent and rebuilds only what differs from the members. `start()` can run it after a settings batch
-    /// that changed no value and made no call.
+    /// It is idempotent and rebuilds only what differs from the members. The framework calls settingsChanged() only
+    /// for a batch that changes a value. `start()` runs it when no such call has built the bank.
     void rebuild() {
         if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
             throw gr::exception(std::format("RangeDelay: 'sample_rate' must be positive and finite, got {}", sample_rate.value));
@@ -189,7 +191,7 @@ vocabulary moves with the sample it marks.
     }
 
     void start() {
-        if (!_line) { // a settings batch that changed no value made no call, and the bank may not exist yet
+        if (!_line) { // settingsChanged() runs only for a batch that changes a value, and the bank may not exist yet
             rebuild();
         }
         _position = 0ULL;

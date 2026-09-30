@@ -322,7 +322,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             }
         }
 
-        // The surveyed behavior lays the surviving zones end to end and splits them by the declared lengths alone.
+        // A naive reader lays the surviving zones end to end and splits them by the declared lengths alone.
         // The arms differ by the pointer, and this arm gets the same octets and none of the pointers.
         std::vector<std::vector<std::uint8_t>> naive;
         {
@@ -352,8 +352,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
     };
 
     "criterion 3: the minus-one's second half, through the blocks"_test = [] {
-        // Three packets built with the surveyed convention data_length = payload_octets. Each is 106 octets on the
-        // wire and claims 107. The header octets for APID 100, unsegmented, count 0 are 00 64 C0 00 00 64.
+        // Three packets built with the common mistake data_length = payload_octets. Each is 106 octets on the wire
+        // and claims 107. The header octets for APID 100, unsegmented, count 0 are 00 64 C0 00 00 64.
         const auto wrongPacket = [] {
             const std::array<std::uint8_t, 6UZ> header{0x00U, 0x64U, 0xC0U, 0x00U, 0x00U, 0x64U};
             std::vector<std::uint8_t>           packet(106UZ, 0xAAU);
@@ -362,7 +362,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         };
         const auto rightPacket = [](std::uint16_t sequence) { return packetOf(106UZ, 100U, sequence); };
 
-        { // the record is one octet short of what its own header claims, and §4.5 refuses it without trimming
+        { // the record is one octet short of what its own header claims, and SpacePacketDecode refuses it untrimmed
             auto                      decode = make<SpacePacketDecode>({});
             const std::vector<Record> in{recordOf(wrongPacket()), recordOf(wrongPacket()), recordOf(wrongPacket())};
             const std::vector<Record> out = drive1(decode, in);

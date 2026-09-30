@@ -21,19 +21,17 @@
 #include <gnuradio-4.0/fec/PolarBlocks.hpp>
 
 /*
- * The coded-loopback gate for the two wrapped families. Each leg encodes, passes a seeded
+ * The coded loopback for the two wrapped families. Each leg encodes, passes a seeded
  * additive white Gaussian noise channel and decodes. The information bit-error rate is read
  * against the rate that the pinned release's own reference tables publish for the same code,
  * decoder and iteration count.
  *
- * The operating points, the published readings, the envelope and the frame counts were fixed
- * before the first run and not changed after it. A fixed seed measures one realization, not an
- * ensemble. A frame error puts a burst of bits wrong at once. The estimator's spread at these frame
- * counts is therefore wide. The envelope is a factor of four either way, asserted in both
- * directions. A rate far below the published curve fails as loudly as one above it. A factor of
- * four still catches every way the adapter can be wrong. Examples are an inverted sign, a frozen
- * set that is not the standard's, and an ignored iteration count. Each of those lands orders of
- * magnitude away.
+ * A fixed seed measures one realization, not an ensemble. A frame error puts a burst of bits wrong
+ * at once. The estimator's spread at these frame counts is therefore wide. The envelope is a factor
+ * of four either way, asserted in both directions. A rate far below the published curve fails as
+ * loudly as one above it. A factor of four still catches every way the adapter can be wrong.
+ * Examples are an inverted sign, a frozen set that is not the standard's, and an ignored iteration
+ * count. Each of those lands orders of magnitude away.
  *
  * The channel is the channel module's `AwgnChannel<float>`, driven directly and not wired into the
  * graph. It is a stream block and these are record blocks. A graph would need a pair of

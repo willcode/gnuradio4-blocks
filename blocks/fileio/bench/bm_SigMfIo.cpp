@@ -20,10 +20,9 @@
 
 // The end-to-end cost per item of a SigMF source and sink over a real file, at three buffer sizes.
 //
-// `algorithm/benchmarks/bm_SigMfCodec.cpp` measures the codec's own cost. This benchmark gives the difference
-// between that figure and the block's, which is the file I/O and the tag-schedule scan. Both blocks hold their own
-// handle and read and write inline. The measured cost is a `read(2)` or `write(2)` against the page cache plus one
-// indirect call into the selected conversion. There is no thread hand-off.
+// The difference between the codec's own cost and the block's cost is the file I/O and the tag-schedule scan. Both
+// blocks hold their own handle and read and write inline. The measured cost is a `read(2)` or `write(2)` against the
+// page cache plus one indirect call into the selected conversion. There is no thread hand-off.
 //
 // No threshold is asserted. The target is EXCLUDE_FROM_ALL and is built by name when a measurement is wanted.
 

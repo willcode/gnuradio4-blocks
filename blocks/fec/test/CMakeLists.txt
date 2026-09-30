@@ -10,7 +10,7 @@ target_link_libraries(qa_PunctureBlocks PRIVATE gr-fec)
 add_ut_test(qa_InterleaveBlocks)
 target_link_libraries(qa_InterleaveBlocks PRIVATE gr-fec)
 
-# The acceptance gate for the CCSDS coding row, kernels only, judged against the published curve.
+# qa_CcsdsBer: the concatenated CCSDS code against the published curve, kernels only.
 add_ut_test(qa_CcsdsBer)
 target_link_libraries(qa_CcsdsBer PRIVATE gr-fec)
 

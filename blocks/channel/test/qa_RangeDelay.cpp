@@ -263,8 +263,8 @@ int main() {
 
     // A constant delay at an integral total lag is a plain shift, to the interpolation bound
     "a constant delay reduces to an integer sample shift, latency included"_test = [] {
-        // The line's own lag is fractional. A compare "after the group delay is removed" then cannot be whole-sample
-        // at an arbitrary commanded delay. The commanded delay is chosen to make the total lag integral instead.
+        // The line's own lag is fractional. A whole-sample compare after removing the group delay is not possible at
+        // an arbitrary commanded delay. The commanded delay is chosen to make the total lag integral instead.
         // The interpolator runs at a fraction of an arm. The comparison against `out[n] = in[n - delay]` is exact.
         // That formula is the integer shift that defines `SampleDelay`.
         constexpr std::size_t kBank = 32UZ;

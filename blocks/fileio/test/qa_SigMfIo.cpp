@@ -501,7 +501,7 @@ template<typename T>
 /// Start a block the way the framework does and report the refusal it names, or "ok".
 ///
 /// The refusal is read here and not from `runAndWait`. The scheduler logs a block whose `start()` threw and carries on.
-/// The graph's own result therefore does not name the reason. A separate case below asserts the graph-driven half. A
+/// The graph's own result therefore does not name the reason. A separate case below runs the graph and asserts that a
 /// refused block reaches the ERROR state, emits nothing and leaves no file.
 template<typename TBlock>
 [[nodiscard]] std::string startRefusal(gr::property_map settings) {

@@ -26,9 +26,9 @@
 /**
  * @brief The space packet extraction block, the packet decoder, and both transmit-side blocks.
  *
- * 133.0-B-2 packets lie end to end through the data fields of a virtual channel. `SpacePacketExtract` runs one
- * `gr::ccsds::PacketExtractor` per virtual channel (132.0-B-3 4.3.2.1 NOTE). Its required `virtual_channel` setting
- * enforces one instance per channel. `SpacePacketDecode` reads the primary header of a whole packet into metadata.
+ * 133.0-B-2 packets lie end to end through the data fields of a virtual channel. Each `SpacePacketExtract` runs one
+ * `gr::ccsds::PacketExtractor` for the virtual channel its required `virtual_channel` setting names (132.0-B-3
+ * 4.3.2.1 NOTE). `SpacePacketDecode` reads the primary header of a whole packet into metadata.
  * `SpacePacketEncode` and `SpacePacketSegment` form the transmit side.
  */
 namespace gr::blocks::ccsds {
@@ -484,7 +484,7 @@ its APID.
 A setting left at `true` does not turn every call into a padded zone. While `flush` is set, the end of the stream
 also sends whatever is still buffered. The framework's end-of-stream hook runs over a span the block left
 unconsumed. A call therefore keeps the last record of its input while `flush` is set. It asks for two records at a
-time, and keeping one back cannot stall the steady state.
+time. Keeping one back then cannot stall the steady state.
 
 The buffered octets survive a settings change. A `zone_length` or `fill` change is a property of the link, not of
 the packets already received. The accumulated starts are offsets into the buffer, and every zone length in the
@@ -506,7 +506,7 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
     Annotated<gr::Size_t, "zone_length", Doc<"required octets per emitted data field or packet zone, 1 to 2046">, Visible> zone_length{0U};
     Annotated<gr::Size_t, "idle_apid", Doc<"the APID for a generated idle packet, 0 to 2047, 4.1.3.3.4.4">>                idle_apid{static_cast<gr::Size_t>(gr::ccsds::kIdleApid)};
     Annotated<std::string, "fill", Doc<"empty-buffer flush output, 'oid' (4.1.4.6.2 PN sequence) or 'idle_packet'">>       fill{std::string("oid")};
-    Annotated<bool, "flush", Doc<"on raise, emit the buffer once, and at stream end while set">>                           flush = false;
+    Annotated<bool, "flush", Doc<"emit the buffer once when raised, and at stream end while set">>                         flush = false;
 
     GR_MAKE_REFLECTABLE(SpacePacketSegment, in, out, zone_length, idle_apid, fill, flush);
 

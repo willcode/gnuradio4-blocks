@@ -707,9 +707,8 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             }
         }
         std::println("NoiseBlanker<complex<float>> {:.3f} ns/sample (spread {:.3f}), span copy {:.3f}", best, worst - best, floorBest);
-        // The test builds at the build type's optimization level, as bm_NoiseBlanker does. The bound carries the
-        // margin set for an -O1 build of this test. It catches a change of shape. bm_NoiseBlanker measures the cost
-        // in a receiver.
+        // The test builds at the build type's optimization level. The bound carries the margin set for an -O1 build
+        // of this test. It catches a change of shape.
         expect(lt(best, 22.0)) << std::format("the block reads {:.3f} ns/sample", best);
     };
 };

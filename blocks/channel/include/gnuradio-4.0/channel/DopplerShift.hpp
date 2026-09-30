@@ -37,7 +37,7 @@ namespace detail {
 /// The direction of the schedule. `apply` puts the trajectory's shift on a clean signal. `correct` removes it.
 enum class DopplerDirection : std::uint8_t { Apply = 0, Correct };
 
-/// The direction @p name selects. A refusal starts with the name @p block.
+/// The direction @p name selects. A refusal message starts with @p block.
 [[nodiscard]] inline DopplerDirection parseDopplerDirection(std::string_view name, std::string_view block) {
     if (name == "apply") {
         return DopplerDirection::Apply;
@@ -112,13 +112,11 @@ GR_REGISTER_BLOCK(gr::blocks::channel::DopplerShift, [T], [std::complex<float>])
  * `gr::timing::offsetFor(v_radial, f_carrier)` converts a radial velocity to a schedule offset. A closing pass reads
  * high.
  *
- * `apply` models propagation. `correct` removes it with the same table and the sign flipped. `IqImbalance` uses the
- * same argument for the transmitter and receiver sides of one impairment. The negation happens once, when the table
- * is built. `correct` costs the same as `apply`, and the two are exact inverses.
+ * `apply` models propagation. `correct` removes it with the same table and the sign flipped. The negation happens
+ * once, when the table is built. `correct` costs the same as `apply`, and the two are exact inverses.
  *
- * A passing `gr::tag::FREQUENCY` tag is forwarded unchanged in both directions, as in `FrequencyOffset`. A Doppler
- * shift does not change the frequency the stream is tuned to. `Rotator` retunes the tag because retuning is its
- * purpose.
+ * A passing `gr::tag::FREQUENCY` tag is forwarded unchanged in both directions. A Doppler shift does not change the
+ * frequency the stream is tuned to.
  *
  * Staging refuses an offset at or past `+/-sample_rate/2`, since such an offset aliases. The refusal names the knot.
  * The kernel refuses unpaired vectors, non-monotonic times and non-finite offsets, and names the knot too.

@@ -47,7 +47,7 @@ template<typename TBlock>
 ///
 /// The window is symmetric. A linear frequency ramp puts its phase steps symmetrically about the center step. The
 /// argument of the vector sum is then that center step exactly. The estimate therefore measures the phasor's own
-/// error, the resolution of the criterion.
+/// error.
 [[nodiscard]] double instantaneousFrequency(std::span<const C> x, std::size_t centre, std::size_t width, double fs) {
     const std::size_t    first = centre - width / 2UZ;
     std::complex<double> accumulated{0., 0.};

@@ -810,7 +810,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
         expect(eq(other.nFailed, std::uint64_t{2ULL}));
         expect(eq(other.nMissingKey, std::uint64_t{1ULL})) << "only the record carrying neither key is a missing key";
 
-        // metadata is identical on both ports, because the decoder wrote the frame's keys
+        // metadata is identical on both ports, because the filter writes no keys
         Ax25AddressFilter split  = make<Ax25AddressFilter>({{"address", std::string("APRS")}, {"direction", std::string("destination")}});
         const Filtered    routed = runFilter(split, std::span<const Record>(std::vector<Record>{anchorA[0UZ], neither}));
         expect(eq(routed.ok.size(), 1UZ));

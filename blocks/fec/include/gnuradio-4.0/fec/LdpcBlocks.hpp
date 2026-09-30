@@ -24,16 +24,14 @@
  * configuration. `standard` names one of the matrices the pinned release ships, or `alist_path`
  * names one on disk. The other setting stays empty. Neither has a default. A matrix is the code,
  * and a default matrix would assume an interoperability nobody chose. The decoder objects are
- * built once and reused for every record. A settings change needs a new object, which a graph
- * rebuild provides.
+ * built once and reused for every record. A settings change builds new ones in `rebuild()`.
  *
- * The encoder carries bits and the decoder carries soft values, as in every soft-decision family
- * in this module. `LdpcEncode` takes a `DataSet<std::uint8_t>` of information bits and publishes a
- * `DataSet<std::uint8_t>` of coded bits, one item per bit. `LdpcDecode` takes a `DataSet<float>`
- * of log-likelihood ratios in this module's sense and publishes the information bits. A positive
- * value carries a one, the magnitude is confidence, and zero is an erasure. A hard-decision
- * receiver presents its bits to the decoder as saturated values of that sign. `ViterbiDecodeSoft`
- * takes the same approach, and no second port is needed.
+ * The encoder carries bits and the decoder carries soft values, as in every soft-decision family in
+ * this module. `LdpcEncode` takes a `DataSet<std::uint8_t>` of information bits and publishes a
+ * `DataSet<std::uint8_t>` of coded bits, one item per bit. `LdpcDecode` takes a `DataSet<float>` of
+ * log-likelihood ratios in this module's sense and publishes the information bits. A positive value
+ * carries a one, the magnitude is confidence, and zero is an erasure. A hard-decision receiver
+ * presents its bits to the decoder as saturated values of that sign. No second port is needed.
  *
  * A record holds a whole number of frames. Its length must be a nonzero multiple of the code's
  * `k` on the way in and of its `n` on the way back. A record that fails that test is dropped,

@@ -779,7 +779,7 @@ struct TmFrameEncode : Block<TmFrameEncode> {
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(frame_length.value, std::uint8_t{0U});
             if (gr::ccsds::writeTmPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
-                ++nRefusedHeader; // an unwritable header drops and counts the record, and no frame goes out with a zeroed header
+                ++nRefusedHeader; // the block drops and counts a record whose header cannot be written, and no frame goes out with a zeroed header
                 continue;
             }
             std::size_t at = gr::ccsds::kTmPrimaryHeaderSize;
@@ -925,7 +925,7 @@ struct AosFrameEncode : Block<AosFrameEncode> {
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(frame_length.value, std::uint8_t{0U});
             if (gr::ccsds::writeAosPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
-                ++nRefusedHeader; // an unwritable header drops and counts the record, and no frame goes out with a zeroed header
+                ++nRefusedHeader; // the block drops and counts a record whose header cannot be written, and no frame goes out with a zeroed header
                 continue;
             }
             std::size_t at = _primaryHeaderOctets + std::size_t{insert_zone_length.value};
@@ -1052,7 +1052,7 @@ struct TcFrameEncode : Block<TcFrameEncode> {
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(totalOctets, std::uint8_t{0U});
             if (gr::ccsds::writeTcPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
-                ++nRefusedHeader; // an unwritable header drops and counts the record, and no frame goes out with a zeroed header
+                ++nRefusedHeader; // the block drops and counts a record whose header cannot be written, and no frame goes out with a zeroed header
                 continue;
             }
             std::ranges::copy(record.signal_values, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(gr::ccsds::kTcPrimaryHeaderSize));

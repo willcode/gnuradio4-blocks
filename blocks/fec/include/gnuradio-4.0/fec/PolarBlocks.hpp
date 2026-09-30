@@ -44,8 +44,7 @@
  * received frame and the frame re-encoded from the decode differ. `uncorrectable_errors` counts
  * the frames whose delivered answer fails the CRC. Under `ca_scl` that is exactly the case where
  * no path survived and the decoder fell back to its best one. Under `sc` and `scl` there is no
- * CRC and therefore no refusal to report. `ViterbiDecode` takes the same position for the same
- * reason.
+ * CRC and therefore no refusal to report.
  */
 namespace gr::blocks::fec {
 

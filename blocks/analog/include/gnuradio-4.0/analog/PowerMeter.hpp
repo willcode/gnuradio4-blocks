@@ -35,7 +35,8 @@ struct PowerMeter : Block<PowerMeter<T>> {
 
 A sink. 0 dBFS is a mean power of exactly 1.0. The window is a boxcar, not a pole. `level()` is that reading in dBFS.
 `linear_power()` is the same reading without the logarithm. `coverage()` is the fraction of the nominal window
-accumulated so far. A partial window is reported and not suppressed.
+accumulated so far. A partial window is reported and not suppressed. A change of `sample_rate` or `window_time` rebuilds
+the window. The reading refreshes once per segment.
 
 The optional `records` port carries the same reading as one `DataSet<float>` per completed window, for a consumer
 outside C++. Each record is stamped with the window's first input sample. A stream that ends mid-window emits a final
@@ -44,15 +45,15 @@ record covering what it had.
 
     PortIn<T> in;
     /// One record per completed window, for a consumer outside C++. The port is optional. An unconnected port has
-    /// no cost. A polling graph calls the readers below.
+    /// no cost. A caller that polls reads level(), linear_power() and coverage().
     PortOut<DataSet<float>, Async, Optional> records;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate, rebuilding the window on change">>                   sample_rate     = 96000.f;
-    Annotated<double, "window_time", Unit<"s">, Doc<"length of the rolling average, rebuilding the window on change">> window_time     = 0.100;
-    Annotated<gr::Size_t, "segments", Doc<"pieces of the window, each refreshing the reading once">>                   segments        = 16U;
-    Annotated<double, "floor_db", Unit<"dBFS">, Doc<"what level() returns at or below 10^(floor_db/10)">>              floor_db        = -200.0;
-    Annotated<gr::Size_t, "segment_samples", Doc<"observable realized segment length, at least one sample">>           segment_samples = 600U;
-    Annotated<gr::Size_t, "window_samples", Doc<"observable realized window, segments * segment_samples">>             window_samples  = 9600U;
+    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate">>                                          sample_rate     = 96000.f;
+    Annotated<double, "window_time", Unit<"s">, Doc<"length of the rolling average">>                        window_time     = 0.100;
+    Annotated<gr::Size_t, "segments", Doc<"pieces of the window">>                                           segments        = 16U;
+    Annotated<double, "floor_db", Unit<"dBFS">, Doc<"what level() returns at or below 10^(floor_db/10)">>    floor_db        = -200.0;
+    Annotated<gr::Size_t, "segment_samples", Doc<"observable realized segment length, at least one sample">> segment_samples = 600U;
+    Annotated<gr::Size_t, "window_samples", Doc<"observable realized window, segments * segment_samples">>   window_samples  = 9600U;
 
     GR_MAKE_REFLECTABLE(PowerMeter, in, records, sample_rate, window_time, segments, floor_db, segment_samples, window_samples);
 
@@ -74,8 +75,8 @@ record covering what it had.
     std::atomic<double>         _floorLinear{1e-20};
     std::atomic<double>         _floorDb{-200.0};
 
-    /// The window is sized from the members. A settings batch that changes no value makes no call. A block
-    /// constructed at its declared defaults therefore starts with the window its settings describe.
+    /// The window is sized from the members. The framework calls settingsChanged() only for a batch that changes a
+    /// value. A block constructed at its declared defaults therefore starts with the window its settings describe.
     explicit PowerMeter(property_map init = {}) : Block<PowerMeter<T>>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
@@ -116,7 +117,7 @@ record covering what it had.
         in.min_samples = 2UZ;
     }
 
-    /// @brief Zero the window. It is not thread-safe against a running scheduler. The owning thread calls it between stop() and start().
+    /// @brief Zero the window. It is not thread-safe against a running scheduler. Call it only from the owning thread, between stop() and start().
     void reset() {
         _lanes.fill(0.0);
         std::ranges::fill(_segments, 0.0);
@@ -184,7 +185,7 @@ record covering what it had.
         return work::Status::OK;
     }
 
-    /// @brief The reading as a record, on the tier's measurement conventions.
+    /// @brief The reading as a measurement record.
     ///
     /// It holds the power the window closed at, in the clamped form `level()` returns, beside the raw ratio and the
     /// coverage.

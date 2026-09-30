@@ -352,10 +352,10 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         std::println("criterion 4, phase noise of {} Hz against a 1 Hz spacing over {} symbols: cpe EVM {:.1f} dB with {} symbol errors, no tracking EVM {:.1f} dB with {} errors; the last symbol was turned by {:+.3f} rad", //
             kLinewidth, kFrame, trackedEvm, trackedWrong, untrackedEvm, untrackedWrong, lastCpe);
 
-        // The strict inequality applies to the symbol count and not to the error vector. Once the phase has turned
-        // past a decision boundary, the nearest point is a different point. The error vector then stops growing while
-        // every decision under it is wrong. cpe leaves the phase noise inside a symbol, not between symbols. That
-        // noise turns each carrier against its neighbors, and no common phase can remove it.
+        // The symbol errors decide the comparison. Once the phase has turned past a decision boundary, the nearest
+        // point is a different point. The error vector then stops growing while every decision under it is wrong. cpe
+        // leaves the phase noise inside a symbol, not between symbols. That noise turns each carrier against its
+        // neighbors, and no common phase can remove it.
         expect(lt(trackedEvm, untrackedEvm)) << "tracking lowers the error vector";
         expect(eq(trackedWrong, 0UZ)) << "cpe holds the constellation";
         expect(gt(untrackedWrong, kFrame * dataCarriers().size() / 4UZ)) << "and without it the frame provably loses lock";
