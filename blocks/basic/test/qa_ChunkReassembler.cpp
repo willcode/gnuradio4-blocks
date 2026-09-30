@@ -25,8 +25,9 @@
 // only its two formats. Each format requires its defining field, the index for "indexed" and the offset for
 // "offset". The block's settings cannot produce a descriptor with neither. Only pushDescriptor() can, the hook a
 // protocol-specific format uses. Most tests drive the block span to span, as qa_DataSetToPacket.cpp does.
-// processBulk alone decides what happens to a chunk. Two tests also run it in a scheduler graph, where a real port is
-// needed.
+// processBulk alone decides what happens to a chunk. One test also runs the block in a scheduler graph. Another
+// passes its output through PacketToDataSet in a scheduler graph, because that block's tag handling needs a real
+// port.
 
 namespace {
 

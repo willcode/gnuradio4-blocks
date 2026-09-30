@@ -143,8 +143,8 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::PeakDetect)
  * level. A single emitter's shoulder then does not appear as a second signal.
  *
  * A record that yields no detection emits no record. An empty `DataSet` has no positive extent and is not a valid
- * record, so the block emits none. A missing output record for a PSD input means nothing was found.
- * `nEmptyResults()` counts those cases beside `nRecords()`. A graph can then tell "nothing found" from "nothing ran".
+ * record. A missing output record for a PSD input means nothing was found. `nEmptyResults()` counts those cases beside
+ * `nRecords()`. A graph can then tell "nothing found" from "nothing ran".
  */
 struct PeakDetect : Block<PeakDetect, NoTagPropagation> {
     using Description = Doc<"Detects peaks in a spectral density record. It reports local maxima above a threshold, with a three-point parabolic sub-bin frequency and a half-power width. A record that finds nothing emits no record and is counted by nEmptyResults().">;

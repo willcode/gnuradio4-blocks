@@ -85,9 +85,9 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
     double _real          = 0.0;
     double _imag          = 0.0;
 
-    /// `alpha`, the pole `1 - alpha` and `corner_hz` derive from the members. A settings batch that changes no value
-    /// does not call settingsChanged(). The constructor derives them too. A block built at its declared defaults starts
-    /// with the corner its settings describe.
+    /// `alpha`, the pole `1 - alpha` and `corner_hz` derive from the members. The framework calls settingsChanged()
+    /// only for a batch that changes a value. The constructor derives them too. A block built at its declared defaults
+    /// starts with the corner its settings describe.
     explicit DcOffsetCorrect(property_map init = {}) : Block<DcOffsetCorrect<T>, UnfilteredTagPropagation>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }

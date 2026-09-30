@@ -34,11 +34,11 @@ GR_REGISTER_BLOCK(gr::blocks::ccsds::FieldRouter)
 /*!
 @brief Routes a `DataSet<std::uint8_t>` by `ccsds_apid` or `ccsds_vcid`, one output port per named value.
 
-A record whose value equals `values[i]` goes to `outputs[i]`. Any other record goes to `other` and is counted in
-`nOther`. That includes a record whose key is absent or holds a type other than `gr::Size_t`. A value of the wrong
-type reads as absent. A record that has crossed a network can carry anything under a key, and the block assigns it
-no guessed value. With `other` unconnected, the block drops an unmatched record and counts it in `nOther`. `values`
-is refused when it is empty, holds duplicates or holds a value wider than the field.
+A record whose value equals `values[i]` goes to `outputs[i]`. Any other record goes to `other`. A record whose key is
+absent or holds a type other than `gr::Size_t` is counted in `nMissingKey`. Any other unmatched record is counted in
+`nOther`. A value of the wrong type reads as absent. A record that has crossed a network can carry anything under a key,
+and the block assigns it no guessed value. With `other` unconnected, the block drops an unmatched record and still
+counts it. `values` is refused when it is empty, holds duplicates or holds a value wider than the field.
 */
 struct FieldRouter : Block<FieldRouter> {
     using Description = Doc<"Routes a CCSDS record by APID or virtual channel identifier, one output port per named value plus an `other` catch-all">;

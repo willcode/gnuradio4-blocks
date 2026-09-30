@@ -461,7 +461,7 @@ int main() {
             const char* name;
             gr::Size_t  syncItems;
             gr::Size_t  stride;
-            std::size_t frameItems; //!< the survey's own figure for the form, checked against the product
+            std::size_t frameItems; //!< the published frame length of the form, checked against the product
         };
         constexpr std::array<Form, 2UZ> forms{{{"long", 65U, 80U, 5200UZ}, {"short", 52U, 51U, 2652UZ}}};
         for (const Form& form : forms) {

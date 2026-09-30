@@ -65,9 +65,9 @@ uncompensated. The first `length - 1` outputs are partial-window sums over a zer
     std::uint64_t             _offset   = 0ULL;
     bool                      _reseed   = true;
 
-    /// The window is sized from the members. A settings batch that changes no value does not call settingsChanged().
-    /// The constructor sizes the window too. A block built at its declared defaults starts with the history and the
-    /// accumulator its settings describe.
+    /// The window is sized from the members. The framework calls settingsChanged() only for a batch that changes a
+    /// value. The constructor sizes the window too. A block built at its declared defaults starts with the history and
+    /// the accumulator its settings describe.
     explicit MovingAverage(property_map init = {}) : Block<MovingAverage<T>>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }

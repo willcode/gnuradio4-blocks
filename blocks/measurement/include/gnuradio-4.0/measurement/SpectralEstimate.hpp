@@ -527,15 +527,16 @@ struct WelchPsd : Block<WelchPsd<T>, NoTagPropagation> {
     /**
      * @brief Keeps the no-record-lost invariant.
      *
-     * A sample is consumed only once it is in the accumulator. A segment is folded only while the output span has
-     * room for the record it might complete. When the output fills, the call publishes what it made, consumes what it
-     * took and reports that it stopped for want of output room. A slow consumer then stalls the input, and no backlog
-     * grows inside this block. `pending` holds at most one segment.
+     * A sample is consumed only once it is in the accumulator. A segment is folded only while the output span has room
+     * for the record it might complete. When the output fills, the call publishes what it made and consumes what it
+     * took. A slow consumer then stalls the input, and no backlog grows inside this block. `pending` holds at most one
+     * segment.
      *
      * A call that moves nothing reports why. `in.min_samples` does not stop the framework from calling the block with
      * an empty span. The framework calls the block without input because the output is asynchronous. Those calls let
-     * the accumulation flush. A call with no input to take and nothing made returns `INSUFFICIENT_INPUT_ITEMS`. An `OK`
-     * would report progress and leave the scheduler spinning on the block.
+     * the accumulation flush. A call that moves nothing returns `INSUFFICIENT_OUTPUT_ITEMS` when the output is full and
+     * `INSUFFICIENT_INPUT_ITEMS` otherwise. An `OK` would report progress and leave the scheduler spinning on the
+     * block.
      */
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const detail::Progress progress = fold(inSpan, inSpan.size() > 0UZ ? inSpan.size() - 1UZ : 0UZ, outSpan);
