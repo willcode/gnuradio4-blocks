@@ -57,16 +57,16 @@ blocks:
         doc: "transfer frame octets kI - Q, a multiple of interleave (required)"
       - name: error_capability
         type: uint32
-        doc: "symbol-correction capability E per codeword, 16 or 8, agreeing with code"
+        doc: "symbol-correction capability E per codeword, 16 or 8, agreeing with code (required)"
       - name: code
         type: string
-        doc: "Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)"
+        doc: "Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8) (required)"
       - name: basis
         type: string
         doc: "symbol basis, conventional or dual (required)"
       - name: convolutional
         type: string
-        doc: "inner code convention, ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted"
+        doc: "inner code convention (required), ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted"
       - name: encoded_marker
         type: string
         doc: "the marker's 52 state-independent encoded symbols (required)"

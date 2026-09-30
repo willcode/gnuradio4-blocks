@@ -492,7 +492,7 @@ private:
 
     /// @brief Validates every setting into a local `Config` and returns it. The first failing check throws and names
     /// the setting and its value. No member changes before this returns. A refused configuration leaves the previous
-    /// one in force. A block without an accepted configuration has no engine and stays inert.
+    /// one in force. A block without an accepted configuration has no engine, and processBulk() returns ERROR.
     [[nodiscard]] gr::packet::ChunkReassembler::Config buildAndValidateConfig() const {
         if (chunk_format.value != "indexed" && chunk_format.value != "offset") {
             throw gr::exception(std::format("chunk_format is '{}'; it is required and must be 'indexed' or 'offset'", chunk_format.value));

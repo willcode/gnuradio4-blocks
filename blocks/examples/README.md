@@ -22,15 +22,13 @@ stand-ins and what to put in their place.
 - a **`SignalGenerator`** stands in for a `gr::blocks::sdr::SoapySource` (`-DGR4_ENABLE_SDR=ON`).
   It is paced to wall-clock time, and it delivers its stated rate as a radio does.
 - a **`DataSink`** or **`DataSetSink`** stands in for `gr::blocks::audio::AudioSink`
-  (`-DGR4_ENABLE_AUDIO=ON`) or for one of studio's `gr::studio::*` sinks. Those sinks are in
-  gnuradio4-studio and not here. Both stand-in sinks register under their `signal_name`. The
-  test and a host application read the stream through that name.
+  (`-DGR4_ENABLE_AUDIO=ON`) or for a display sink. Both stand-in sinks register under their
+  `signal_name`. The test and a host application read the stream through that name.
 
 ## Editing a graph
 
-A studio series or waterfall sink's `in` is a **port collection**. A bare `in` on one connects
-nothing and passes no data, with no error. Write those edges as `in#0`. The sinks in this
-repository have plain ports and are written plainly.
+A **port collection** is addressed by index. An edge to one is written `in#0`. The sinks in
+this repository have plain ports and are written plainly.
 
 `fm_radio_mono.yaml` writes out the chain of `gr::recipes::WbfmMonoDemod` and states the
 numbers the recipe derives.

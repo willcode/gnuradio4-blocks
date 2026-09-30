@@ -14,7 +14,7 @@
 #   bits per item    8
 #
 # `endpoint` and `queue_bytes` are `TcpByteSink`'s own required settings. The recipe forwards them with no default of
-# its own. An endpoint nobody stated binds to nothing. A queue with no bound is not a bound. `bind` keeps the sink's own
+# its own. Neither has a usable default. A sink needs an address and a finite queue. `bind` keeps the sink's own
 # default of true, as a KISS server normally listens. `overflow` is exported with the sink's own default. The two
 # values differ in kind for a framed stream. `drop_oldest` drops bytes from the middle of a frame. SLIP resynchronizes
 # after the gap, and that frame is lost. `backpressure` stalls the chain instead and loses nothing. A server that must

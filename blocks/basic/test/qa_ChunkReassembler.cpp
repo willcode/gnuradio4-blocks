@@ -24,8 +24,9 @@
 // The degenerate descriptor test drives the engine, gr::packet::ChunkReassembler, directly. The block configures
 // only its two formats. Each format requires its defining field, the index for "indexed" and the offset for
 // "offset". The block's settings cannot produce a descriptor with neither. Only pushDescriptor() can, the hook a
-// protocol-specific format uses. Every other test drives the block span to span, as qa_DataSetToPacket.cpp does.
-// processBulk alone decides what happens to a chunk, and a scheduler graph adds nothing to that.
+// protocol-specific format uses. Most tests drive the block span to span, as qa_DataSetToPacket.cpp does.
+// processBulk alone decides what happens to a chunk. Two tests also run it in a scheduler graph, where a real port is
+// needed.
 
 namespace {
 
@@ -894,7 +895,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         }
 
         // The records also pass once through a scheduler graph with real ports and buffers. The source emits seven
-        // records at a time. 'incomplete' and 'reject' are left unconnected, as in a typical recipe.
+        // records at a time. 'incomplete' and 'reject' are left unconnected.
         {
             gr::test::RuntimeTest runtimeTest;
             auto&                 source = runtimeTest.emplace<ItemSource<Record>>();

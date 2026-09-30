@@ -4,7 +4,7 @@
 # attached sync marker of section 9. The chain finds the ASM in the bit stream and cuts the codeblock behind it. It
 # removes the randomizer, packs the bits into symbols and decodes. One record is one codeblock end to end. The
 # derandomizer's epoch is therefore the record itself. That follows 10.4.3, where the generator initializes at the
-# start of each codeblock. No reset tag can reach the wrong detector.
+# start of each codeblock. The derandomizer needs no reset tag.
 #
 # The input is one soft value per channel bit, positive for a one. Reed-Solomon is a hard-decision code. The chain
 # slices the soft values before any block reads them. The correlator's comparison slices at zero in any case. Slicing
@@ -50,10 +50,10 @@ blocks:
         doc: "transfer frame octets kI - Q, a multiple of interleave (required)"
       - name: error_capability
         type: uint32
-        doc: "symbol-correction capability E per codeword, 16 or 8, agreeing with code"
+        doc: "symbol-correction capability E per codeword, 16 or 8, agreeing with code (required)"
       - name: code
         type: string
-        doc: "Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)"
+        doc: "Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8) (required)"
       - name: basis
         type: string
         doc: "symbol basis, conventional or dual (required)"

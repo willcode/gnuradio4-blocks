@@ -65,7 +65,7 @@ blocks:
       - name: decimation
         type: uint32
         default: !!uint32 1
-        doc: "channel filter decimation giving about eight samples per symbol"
+        doc: "channel filter decimation, chosen for about eight samples per symbol"
       - name: hilbert_taps
         type: uint32
         default: !!uint32 127

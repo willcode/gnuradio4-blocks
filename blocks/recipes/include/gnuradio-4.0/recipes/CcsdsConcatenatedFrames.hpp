@@ -19,10 +19,10 @@ struct CcsdsConcatenatedFrames {
         // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t frame_length_, std::uint32_t error_capability_, std::string code_, std::string basis_, std::string convolutional_, std::string encoded_marker_, std::uint32_t sync_errors_) : frame_length(std::move(frame_length_)), error_capability(std::move(error_capability_)), code(std::move(code_)), basis(std::move(basis_)), convolutional(std::move(convolutional_)), encoded_marker(std::move(encoded_marker_)), sync_errors(std::move(sync_errors_)) {}
         std::uint32_t frame_length; // transfer frame octets kI - Q, a multiple of interleave (required)
-        std::uint32_t error_capability; // symbol-correction capability E per codeword, 16 or 8, agreeing with code
-        std::string code; // Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)
+        std::uint32_t error_capability; // symbol-correction capability E per codeword, 16 or 8, agreeing with code (required)
+        std::string code; // Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8) (required)
         std::string basis; // symbol basis, conventional or dual (required)
-        std::string convolutional; // inner code convention, ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted
+        std::string convolutional; // inner code convention (required), ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted
         std::string encoded_marker; // the marker's 52 state-independent encoded symbols (required)
         std::uint32_t sync_errors; // correlator max_errors in raw channel symbols of the 52-symbol word (required)
         std::uint32_t interleave = std::uint32_t{1}; // codewords I per codeblock, 1, 2, 3, 4, 5 or 8
@@ -45,14 +45,14 @@ struct CcsdsConcatenatedFrames {
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol-correction capability E per codeword, 16 or 8, agreeing with code"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol-correction capability E per codeword, 16 or 8, agreeing with code (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("error_capability"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8) (required)"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("code"));
             e8 = gr::pmt::Value(std::move(m9));
@@ -66,7 +66,7 @@ struct CcsdsConcatenatedFrames {
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("inner code convention, ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("inner code convention (required), ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted"));
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("convolutional"));
             e12 = gr::pmt::Value(std::move(m13));

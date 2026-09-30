@@ -7,8 +7,8 @@
 #   discriminator gain = 240000 / (2*pi*75000)  = 0.5092958
 #   audio ratio        = 48000 / 240000         = 0.2
 #
-# Change the front-end rate and all three numbers move together. The recipe derives all three from
-# the rate.
+# All three follow from the front-end rate. A new rate here needs all three recomputed.
+# WbfmMonoDemod derives them from the rate.
 #
 # Substitute these blocks for a real receiver.
 #
@@ -17,13 +17,11 @@
 #                 hardware. It is paced to wall-clock time and delivers 1.92 MS/s as a radio does.
 #                 Its tone is 15 kHz above center. That is a carrier at a fifth of full deviation,
 #                 and it demodulates to a steady 0.2.
-#   audio_sink -> gr::blocks::audio::AudioSink<float32> (-DGR4_ENABLE_AUDIO=ON) to hear it, or one
-#                 of studio's own gr::studio::* sinks, which are not in this repository. A headless
-#                 host reads the audio through DataSink, and the test does the same.
+#   audio_sink -> gr::blocks::audio::AudioSink<float32> (-DGR4_ENABLE_AUDIO=ON) to hear it. A
+#                 headless host reads the audio through DataSink, and the test does the same.
 #
-# Edges name their ports. A studio series or waterfall sink's `in` is a port collection. A bare `in`
-# on one connects nothing and passes no data, with no error. Write those edges as `in#0`. DataSink's
-# `in` is a plain port and is written as one.
+# Edges name their ports. A port collection is addressed by index. An edge to one is written
+# `in#0`. DataSink's `in` is a plain port and is written as one.
 blocks:
   - id: gr::blocks::basic::SignalGenerator<complex<float32>>
     parameters:

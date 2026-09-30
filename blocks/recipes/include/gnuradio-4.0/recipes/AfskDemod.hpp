@@ -22,7 +22,7 @@ struct AfskDemod {
         float symbol_rate; // symbol rate in hertz (required)
         double mark_hz; // tone carrying a one, in hertz (required)
         double space_hz; // tone carrying a zero, in hertz (required)
-        std::uint32_t decimation = std::uint32_t{1}; // channel filter decimation giving about eight samples per symbol
+        std::uint32_t decimation = std::uint32_t{1}; // channel filter decimation, chosen for about eight samples per symbol
         std::uint32_t hilbert_taps = std::uint32_t{127}; // length of the Hilbert transformer, odd
         double channel_bandwidth = 0.9167; // pre-discriminator filter cutoff as a multiple of the symbol rate
         double lowpass_bandwidth = 0.5; // post-discriminator lowpass cutoff in multiples of the symbol rate
@@ -68,7 +68,7 @@ struct AfskDemod {
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel filter decimation giving about eight samples per symbol"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel filter decimation, chosen for about eight samples per symbol"));
             m13[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("decimation"));

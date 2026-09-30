@@ -13,8 +13,8 @@ target_link_libraries(
           gnuradio4::GrMeasurementBlocksShared)
 target_compile_definitions(qa_ExampleGraphs PRIVATE EXAMPLE_GRAPHS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../graphs")
 
-# The acceptance graphs use blocks from most families and instantiate recipes through the generated recipe headers. The
-# shared library of each family a graph names must be loaded. The ids inside a recipe then resolve in the global
+# The composed-graph test uses blocks from most families and instantiates recipes through the generated recipe headers.
+# The shared library of each family a graph names must be loaded. The ids inside a recipe then resolve in the global
 # registry.
 add_ut_test(qa_Tier5Gates)
 target_link_libraries(
