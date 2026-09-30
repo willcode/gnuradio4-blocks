@@ -19,16 +19,16 @@
 #include <gnuradio-4.0/basic/ChunkReassembler.hpp>
 #include <gnuradio-4.0/fileio/PacketFileSink.hpp>
 
-// Criteria 15-16 of spec-chunk-reassembly.md §10. PacketFileSink's directory check runs at start(), so
-// these scenes go through a real gr::test::RuntimeTest graph (as blocks/fileio/test/qa_BasicFileIo.cpp does for
-// BasicFileSink) rather than a bare span harness — a span harness alone never invokes the block's lifecycle.
+// PacketFileSink checks its directory at start(). These scenes therefore run through a real gr::test::RuntimeTest
+// graph, as blocks/fileio/test/qa_BasicFileIo.cpp does for BasicFileSink. A bare span harness never invokes the
+// block's lifecycle.
 
 namespace {
 
 using gr::blocks::fileio::PacketFileSink;
 using PacketU = gr::Packet<std::uint8_t>;
 
-/// @brief A temp directory this qa scene owns; removed unconditionally on destruction.
+/// @brief A temp directory this qa scene owns, removed unconditionally on destruction.
 struct TempDir {
     std::filesystem::path path;
 
@@ -96,8 +96,9 @@ struct Collector : gr::Block<Collector<TItem>> {
     return data;
 }
 
-/// @brief The counters `runSink` reports; a plain, copyable summary, since Block types are move-only and the
-/// RuntimeTest that owns the live PacketFileSink does not outlive the function that ran it.
+/// @brief The counters `runSink` reports, as a plain copyable summary.
+///
+/// Block types are move-only, and the RuntimeTest that owns the live PacketFileSink ends with the function that ran it.
 struct SinkResult {
     std::uint64_t nFilesWritten  = 0ULL;
     std::uint64_t nBytesWritten  = 0ULL;
@@ -108,8 +109,9 @@ struct SinkResult {
     std::uint64_t nWriteFailures = 0ULL;
 };
 
-/// @brief Run one PacketFileSink over @p packets under @p settings (plus 'directory') to completion and report its
-/// counters; the filesystem itself is inspected separately, from the temp directory the caller owns.
+/// @brief Runs one PacketFileSink over @p packets under @p settings plus 'directory' and reports its counters.
+///
+/// The caller inspects the filesystem separately, in the temp directory it owns.
 [[nodiscard]] SinkResult runSink(const std::filesystem::path& directory, std::vector<PacketU> packets, gr::property_map settings = {}) {
     settings["directory"] = directory.string();
     gr::test::RuntimeTest test;
@@ -121,8 +123,9 @@ struct SinkResult {
     return SinkResult{.nFilesWritten = sink.nFilesWritten, .nBytesWritten = sink.nBytesWritten, .nRefusedName = sink.nRefusedName, .nRefusedNoId = sink.nRefusedNoId, .nRefusedEmpty = sink.nRefusedEmpty, .nRefusedExists = sink.nRefusedExists, .nWriteFailures = sink.nWriteFailures};
 }
 
-/// @brief A sink with @p settings staged and applied, the way a graph's own lifecycle would, so a refused setting
-/// is refused here rather than inside a running graph.
+/// @brief A sink with @p settings staged and applied as a graph's lifecycle would.
+///
+/// A refused setting is refused here and not inside a running graph.
 [[nodiscard]] PacketFileSink makeSink(gr::property_map settings) {
     PacketFileSink sink(std::move(settings));
     sink.settings().init();
@@ -135,14 +138,14 @@ struct SinkResult {
 const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
     using namespace boost::ut;
 
-    // criterion 15 — the sink writes once and never seeks
+    // The sink writes once and does not seek
     "the sink writes once and never seeks"_test = [] {
-        // The sink reaches the filesystem through one call, which opens the file truncating and writes the payload
-        // in one go; no code path in it issues a seek. What that rules out is asserted rather than described: a
-        // writer that seeked to a position and wrote would leave whatever the file held beyond its payload, and a
-        // payload beginning with zero bytes would be indistinguishable from a sparse hole. Both are checked below —
-        // the file's size equals the payload's after a shorter payload replaces a longer file, and the bytes of a
-        // payload that starts with zeros are on disk as zeros.
+        // The sink reaches the filesystem through one call. The call opens the file truncating and writes the
+        // payload in one go. No code path in the sink issues a seek. The test asserts what that rules out. A writer
+        // that seeked to a position and wrote would leave the file's old bytes beyond its payload. A payload
+        // beginning with zero bytes would look like a sparse hole. Both cases are checked below. The file's size
+        // equals the payload's after a shorter payload replaces a longer file. A payload that starts with zeros has
+        // those zeros on disk.
         TempDir                         dir;
         const std::vector<std::uint8_t> payload{0U, 0U, 0U, 1U, 2U, 3U, 4U, 5U}; // begins with zero bytes: a seek-based
                                                                                  // writer and a whole-write are otherwise indistinguishable
@@ -192,7 +195,7 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
         }
     };
 
-    // criterion 16 — traversal and naming
+    // Traversal and naming
     "traversal and naming"_test = [] {
         TempDir                                                dir;
         const std::vector<std::pair<std::string, std::string>> badIdentifiers{
@@ -208,13 +211,13 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
             expect(eq(sink.nRefusedName, 1ULL)) << label;
             expect(eq(sink.nFilesWritten, 0ULL)) << label;
         }
-        { // an identifier containing a NUL byte: still outside [A-Za-z0-9._-], not a C-string truncation
+        { // an identifier containing a NUL byte is outside [A-Za-z0-9._-] and is not truncated as a C string
             const std::string nulIdentifier{'a', 'b', '\0', 'c', 'd'};
             expect(eq(nulIdentifier.size(), 5UZ));
             SinkResult sink = runSink(dir.path, {makePacket(nulIdentifier, {1U, 2U, 3U})});
             expect(eq(sink.nRefusedName, 1ULL));
         }
-        { // a prefix of "../" with an otherwise valid identifier: refused after concatenation
+        { // a prefix of "../" with an otherwise valid identifier is refused after concatenation
             SinkResult sink = runSink(dir.path, {makePacket("valid123", {1U, 2U, 3U})}, {{"prefix", std::string("../")}});
             expect(eq(sink.nRefusedName, 1ULL));
             expect(eq(sink.nFilesWritten, 0ULL));
@@ -224,7 +227,7 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
             expect(eq(sink.nRefusedName, 1ULL)) << "the check is on the whole name, after concatenation";
             expect(eq(sink.nFilesWritten, 0ULL));
         }
-        { // no id_key at all, and a packet with no payload: each its own counted refusal
+        { // no id_key at all, and a packet with no payload, each a separately counted refusal
             SinkResult noId = runSink(dir.path, {makePacket(std::nullopt, {1U, 2U, 3U})});
             expect(eq(noId.nRefusedNoId, 1ULL));
             expect(eq(noId.nFilesWritten, 0ULL));
@@ -247,16 +250,16 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
             std::filesystem::remove(dir.path / "byotherkey", ec);
         }
 
-        // a packet produced by ChunkReassembler at every id_bytes in [1,8] passes: §8.3's claim that the traversal
-        // class is unreachable for this block's own output. A tiny scheduler graph produces the packet (the
-        // reassembler's own lifecycle has to run for it to be configured at all), fed straight into a second sink.
+        // A packet produced by ChunkReassembler passes at every id_bytes in [1,8]. The traversal class is
+        // unreachable for the reassembler's own output. A small scheduler graph produces the packet, since the
+        // reassembler's lifecycle must run to configure it. The packet feeds a second sink directly.
         for (gr::Size_t idBytes = 1U; idBytes <= 8U; ++idBytes) {
             std::vector<std::uint8_t> record(static_cast<std::size_t>(idBytes) + 8UZ + 16UZ, 0U);
-            for (std::size_t i = 0UZ; i < idBytes; ++i) { // identifier: all-0xFF, the widest lowercase-hex spelling
+            for (std::size_t i = 0UZ; i < idBytes; ++i) { // an all-0xFF identifier, the widest lowercase-hex spelling
                 record[i] = 0xFFU;
             }
-            // index is left at 0 (the buffer is already zero-filled); total_size = 16, big-endian in the last byte
-            // of its 4-byte field, so this single 16-byte chunk (chunk_size = 16) completes the file on arrival
+            // index stays 0 in the zero-filled buffer. total_size = 16, big-endian in the last byte of its 4-byte
+            // field. This single 16-byte chunk (chunk_size = 16) completes the file on arrival.
             record[idBytes + 7U] = 16U;
             gr::DataSet<std::uint8_t> input;
             input.signal_values = record;
@@ -322,7 +325,7 @@ const boost::ut::suite<"PacketFileSink"> packetFileSinkTests = [] {
 
     "a write the filesystem refuses costs that one file and not the graph"_test = [] {
         TempDir dir;
-        // A directory standing where the file would go: the open fails, whatever the payload is.
+        // A directory stands where the file would go. The open fails, whatever the payload is.
         std::filesystem::create_directories(dir.path / "blocked");
 
         SinkResult sink = runSink(dir.path, {makePacket("blocked", {1U, 2U, 3U}), makePacket("after", {4U, 5U})}, {{"on_exists", std::string("overwrite")}});

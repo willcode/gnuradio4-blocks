@@ -26,10 +26,10 @@ namespace gr::blocks::fileio {
 
 namespace detail::packet_file_sink {
 
-/// @brief `[A-Za-z0-9._-]{1,64}`, not `.` or `..`, not beginning with `.` or `-`. Applied to `prefix + identifier +
-/// suffix` after concatenation, so a `prefix` of `"../"` is refused exactly as an identifier carrying a separator
-/// would be: the settings are as attacker-shaped as the metadata when a graph is built from a description file, and
-/// both spellings draw from the same closed character set or they are rejected.
+/// @brief True when @p name matches `[A-Za-z0-9._-]{1,64}`, is not `.` or `..`, and begins with neither `.` nor `-`.
+///
+/// The check applies to the concatenated `prefix + identifier + suffix`. Settings of a graph built from a
+/// description file are as untrusted as the metadata. Both must draw from the same closed character set.
 [[nodiscard]] inline bool isValidFileName(std::string_view name) noexcept {
     if (name.empty() || name.size() > 64UZ) {
         return false;
@@ -49,9 +49,11 @@ namespace detail::packet_file_sink {
     return true;
 }
 
-/// @brief A name rendered for a log line: printable ASCII passes through, every other byte becomes `\xNN`, and a long
-/// name is cut short. The identifier arrives as metadata and may carry an escape sequence, a NUL or a kilobyte of
-/// text, and a refusal message is not a place to hand a terminal control bytes.
+/// @brief A name rendered for a log line.
+///
+/// Printable ASCII passes through, every other byte becomes `\xNN`, and a long name is cut short. The identifier
+/// arrives as metadata and may carry an escape sequence, a NUL or a kilobyte of text. A refusal message must not
+/// pass control bytes to a terminal.
 [[nodiscard]] inline std::string escaped(std::string_view name) {
     constexpr std::size_t kMaxShown = 96UZ;
     std::string           out;
@@ -93,35 +95,34 @@ struct PacketFileSink : Block<PacketFileSink> {
     using Description = Doc<R""(
 @brief Writes each completed gr::Packet<uint8_t> to its own whole file, named from its metadata.
 
-Off the hot path, and the reason is its rate: one open, one write and one close per *completed file* — an image every
-tens of seconds on a good pass, not a sample rate. What the arrangement buys is safety rather than speed: **the sink
-never seeks.** A packet's payload is written once, contiguous, in one write call,
-which never issues a seek — so a corrupted offset has no code path into the filesystem, unlike a receiver that seeks
-to a header-supplied position and can produce a sparse file of arbitrary length from one bad header.
+The block runs off the hot path. Its rate is one open, one write and one close per completed file. On a good pass
+that is an image every tens of seconds. The design goal is safety, and **the sink never seeks.** It writes a
+packet's payload once, contiguous, in one write call. A corrupted offset therefore has no path into the filesystem.
+A receiver that seeks to a header-supplied position can produce a sparse file of arbitrary length from one bad
+header.
 
-The file name is `prefix + <identifier> + suffix`, the identifier read from the packet's `id_key` metadata key.
-`suffix` is a setting, never bytes off the wire, because a file's extension chosen by a received value is the
-survey's own defect: an operator cannot correlate an invented extension with the pass that produced it. The
-assembled name must match `[A-Za-z0-9._-]{1,64}`, must not be `.` or `..`, and must not begin with `.` or `-`, checked
-*after* `prefix`, the identifier and `suffix` are concatenated, so a `prefix` of `"../"` is refused exactly as an
-identifier carrying a separator would be. `on_exists` decides what happens when the name is already taken: `"refuse"`
-(default, counted) leaves the existing file untouched, `"overwrite"` replaces it, and `"unique"` appends `-1`, `-2`,
-… at the first free index — after the whole name, so a `suffix` spelling an extension lands as `name.bin-1`, and the
-64-character cap is the checked name's, not the uniqued one's.
+The file name is `prefix + <identifier> + suffix`. The identifier comes from the packet's `id_key` metadata key.
+`suffix` is a setting and never comes from received bytes. An operator cannot match an extension chosen by a
+received value to the pass that produced it. The assembled name must match `[A-Za-z0-9._-]{1,64}`. It must not be
+`.` or `..` and must not begin with `.` or `-`. The check runs *after* concatenation. A `prefix` of `"../"` is
+refused like an identifier with a separator. `on_exists` sets the action for a name already taken. `"refuse"` is
+the default. It leaves the existing file untouched and counts the refusal. `"overwrite"` replaces the file.
+`"unique"` appends `-1`, `-2`, … at the first free index, after the whole name. A `suffix` that spells an extension
+lands as `name.bin-1`. The 64-character cap applies to the checked name, not the uniqued one.
 
-`directory` is checked once, at `start()`, and a missing one refuses to start; a directory removed while the graph
-runs is re-created by the write rather than refused. Every refusal is a count and a `stop()` line, and so is a
-filesystem that refuses the write itself: that packet's file is lost, counted in `nWriteFailures` and named on
-stderr, and the graph keeps running, because the packets still arriving are the rest of the pass.
+`directory` is checked once, at `start()`, and a missing directory refuses the start. The write re-creates a
+directory removed while the graph runs. Every refusal is counted and reported in a line at `stop()`. A filesystem
+that refuses the write is handled the same way. That packet's file is lost, counted in `nWriteFailures` and named
+on stderr. The graph keeps running and writes the packets still arriving.
 )"">;
 
     PortIn<Packet<std::uint8_t>> in;
 
-    Annotated<std::string, "directory", Doc<"must exist at start(), where a missing one refuses to start; one removed later is re-created by the write">, Visible> directory{};
-    Annotated<std::string, "prefix", Doc<"prepended to the identifier">>                                                                                           prefix{""};
-    Annotated<std::string, "suffix", Doc<"appended after the identifier; the extension is a setting, never received bytes">>                                       suffix{""};
-    Annotated<std::string, "on_exists", Doc<"'refuse' (default), 'overwrite' or 'unique'">, Visible>                                                               on_exists{"refuse"};
-    Annotated<std::string, "id_key", Doc<"the metadata key naming the file">>                                                                                      id_key{"file_id"};
+    Annotated<std::string, "directory", Doc<"output directory, present at start() and re-created by a later write">, Visible> directory{};
+    Annotated<std::string, "prefix", Doc<"prepended to the identifier">>                                                      prefix{""};
+    Annotated<std::string, "suffix", Doc<"appended after the identifier">>                                                    suffix{""};
+    Annotated<std::string, "on_exists", Doc<"'refuse' (default), 'overwrite' or 'unique'">, Visible>                          on_exists{"refuse"};
+    Annotated<std::string, "id_key", Doc<"the metadata key naming the file">>                                                 id_key{"file_id"};
 
     GR_MAKE_REFLECTABLE(PacketFileSink, in, directory, prefix, suffix, on_exists, id_key);
 
@@ -176,8 +177,9 @@ stderr, and the graph keeps running, because the packets still arriving are the 
     }
 
 private:
-    /// @brief The identifier at `id_key`, or nothing where the map is absent, the key is missing, or it is not a
-    /// string — a value of the wrong type reads as absent rather than as an error, on this whole document's rule.
+    /// @brief The identifier at `id_key`, or nothing when the map is absent, the key is missing or the value is not a string.
+    ///
+    /// A value of the wrong type reads as absent and raises no error.
     [[nodiscard]] std::optional<std::string> readIdentifier(const Packet<std::uint8_t>& packet) const {
         if (packet.meta_information.empty()) {
             return std::nullopt;
@@ -230,9 +232,8 @@ private:
         const std::string fileName = prefix.value + *identifier + suffix.value;
         if (!detail::packet_file_sink::isValidFileName(fileName)) {
             ++nRefusedName;
-            // The rejected name is what lets an operator correlate the refusal with the pass that produced it, and
-            // it arrived as data: printed through the escaping rendering, so a control byte in it cannot reach a
-            // terminal as a control byte.
+            // The rejected name lets an operator match the refusal to the pass that produced it. The name arrived as
+            // data. The escaping rendering prints it, and a control byte in it cannot reach a terminal.
             std::println(stderr, "gr::blocks::fileio::PacketFileSink '{}': refusing name '{}' (identifier '{}')", this->name, detail::packet_file_sink::escaped(fileName), detail::packet_file_sink::escaped(*identifier));
             return;
         }
@@ -246,9 +247,8 @@ private:
         const std::span<const std::uint8_t> bytes(packet.signal_values);
         auto                                result = gr::algorithm::fileio::write(path->string(), bytes, gr::algorithm::fileio::WriterConfig{.mode = gr::algorithm::fileio::WriteMode::overwrite});
         if (!result.has_value()) {
-            // A full disk or a directory that went away between start() and now costs this one file. It is counted
-            // and named and the graph keeps running: the packets still arriving are the rest of the pass, and
-            // stopping the graph would lose those too.
+            // A full disk, or a directory removed after start(), costs this one file. The failure is counted and
+            // named, and the graph keeps running. Stopping the graph would also lose the packets still arriving.
             ++nWriteFailures;
             std::println(stderr, "gr::blocks::fileio::PacketFileSink '{}': {}", this->name, result.error().message);
             return;

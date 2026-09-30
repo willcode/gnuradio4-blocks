@@ -38,9 +38,9 @@ namespace gr::blocks::fileio {
 /**
  * @brief The stream mapping between a SigMF recording and a `Stream<T>`.
  *
- * A recording enters the graph as samples plus the tags and settings the framework already has a
- * vocabulary for. Six reserved keys carry the signal-processing facts; eleven `sigmf_`-prefixed keys
- * carry the annotation fields and the verbatim carriage of everything this tree does not consume.
+ * A recording enters the graph as samples plus tags and settings in the framework's own vocabulary.
+ * Six reserved keys carry the signal-processing facts. Eleven `sigmf_`-prefixed keys carry the
+ * annotation fields and, verbatim, every field these blocks do not consume.
  */
 namespace sigmf_keys {
 inline constexpr std::string_view kDatatype            = "sigmf_datatype";
@@ -86,8 +86,8 @@ struct ResolvedPath {
     bool        isArchive{false};
 };
 
-/// A recording is named by its base: `foo`, `foo.sigmf-meta` and `foo.sigmf-data` all name the same
-/// one. A `.sigmf` suffix names an archive and is reported so the caller can refuse it by name.
+/// A recording is named by its base. `foo`, `foo.sigmf-meta` and `foo.sigmf-data` all name the same
+/// one. A `.sigmf` suffix names an archive and is reported, and the caller can refuse it by name.
 [[nodiscard]] inline ResolvedPath resolveBase(std::string_view fileName) {
     if (fileName.ends_with(".sigmf-meta")) {
         return ResolvedPath{std::string(fileName.substr(0UZ, fileName.size() - 11UZ)), false};
@@ -101,7 +101,7 @@ struct ResolvedPath {
     return ResolvedPath{std::string(fileName), false};
 }
 
-/// Multiply two index terms, reporting the overflow rather than wrapping.
+/// Multiply two index terms, reporting an overflow without wrapping.
 [[nodiscard]] inline bool checkedMultiply(std::uint64_t lhs, std::uint64_t rhs, std::uint64_t& product) noexcept {
     if (rhs != 0U && lhs > std::numeric_limits<std::uint64_t>::max() / rhs) {
         return false;
@@ -113,7 +113,7 @@ struct ResolvedPath {
 /// Nanoseconds since the Unix epoch, from the host clock.
 [[nodiscard]] inline std::uint64_t hostTimeNs() { return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); }
 
-/// Read a `sigmf_*_extra` string back into a JSON object; an unparsable string is reported.
+/// Read a `sigmf_*_extra` string back into a JSON object. An unparsable string is reported.
 [[nodiscard]] inline std::optional<gr::sigmf::json::Value> parseExtras(std::string_view text) {
     auto document = gr::sigmf::json::parse(text);
     if (!document || !document->isObject()) {
@@ -136,21 +136,20 @@ GR_REGISTER_BLOCK(gr::blocks::fileio::SigMfSource, [T], [ uint8_t, int16_t, int3
 /**
  * @brief Reads a SigMF recording and emits its samples as a stream, with its facts as tags.
  *
- * The whole description is validated before one sample is emitted, so a recording this block cannot
- * read faithfully is one it refuses to read at all: `start()` throws, naming the refusal and the
- * offending value. The file handle is owned for the run and read inline, never through a shared I/O
- * pool, so the block cannot deadlock against a graph that also does socket or device work.
+ * The block validates the whole description before it emits one sample. It refuses a recording it
+ * cannot read faithfully. `start()` then throws and names the refusal and the offending value. The
+ * block owns the file handle for the run and reads it inline, not through a shared I/O pool. It
+ * cannot deadlock against a graph that also does socket or device work.
  */
 template<sigmf_detail::SigMfSample T>
 struct SigMfSource : gr::Block<SigMfSource<T>> {
     using Description = Doc<R""(Streams a SigMF recording (a `.sigmf-meta`/`.sigmf-data` pair) as `Stream<T>`.
 
 The recording's sample rate, center frequency, channel count, capture boundaries and dropped-sample
-counts become the framework's own reserved tag keys; its annotations and every field this reader does
-not consume travel under `sigmf_`-prefixed keys. Datatypes are read at 8, 16 and 32 bits, signed,
-unsigned or IEEE float, real or complex, in either byte order, which is every datatype the SigMF
-grammar defines. Archives (`.sigmf`) and non-conforming datasets with a per-capture header are not
-supported.)"">;
+counts become the framework's reserved tag keys. Its annotations and every field this reader does not
+consume travel under `sigmf_`-prefixed keys. The reader takes every datatype the SigMF grammar
+defines. These are 8, 16 and 32 bits, signed, unsigned or IEEE float, real or complex, in either byte
+order. Archives (`.sigmf`) and non-conforming datasets with a per-capture header are not supported.)"">;
 
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
@@ -160,37 +159,37 @@ supported.)"">;
 
     gr::PortOut<T> out;
 
-    A<std::string, "file_name", gr::Visible, Doc<"Path to the recording; a base name or a path ending .sigmf-meta or .sigmf-data">> file_name;
-    A<bool, "repeat", Doc<"Restart at the beginning when the recording is exhausted">>                                              repeat               = false;
-    A<gr::Size_t, "offset", gr::Visible, Doc<"Items to skip at the start of each pass">>                                            offset               = 0U;
-    A<gr::Size_t, "length", gr::Visible, Doc<"Maximum items to emit per pass (0 = all)">>                                           length               = 0U;
-    A<std::string, "scaling", Doc<"\"unit\": integers scale to [-1, 1); \"raw\": no scaling">>                                      scaling              = std::string("unit");
-    A<std::string, "truncation", Doc<"\"refuse\": a short dataset refuses the start; \"allow\": emit what exists">>                 truncation           = std::string("refuse");
-    A<bool, "emit_annotations", Doc<"Publish the recording's annotations as tags">>                                                 emit_annotations     = true;
-    A<bool, "carry_unknown_fields", Doc<"Carry every unconsumed metadata field verbatim under the sigmf_*_extra keys">>             carry_unknown_fields = true;
-    A<std::string, "capture_label", Doc<"Written under the reserved trigger_name key at every capture boundary">>                   capture_label        = std::string("sigmf:capture");
-    A<gr::Size_t, "max_metadata_bytes", Doc<"Largest metadata file this block reads">>                                              max_metadata_bytes   = 16777216U;
-    A<gr::Size_t, "max_captures", Doc<"Largest capture-segment count this block reads">>                                            max_captures         = 1048576U;
-    A<gr::Size_t, "max_annotations", Doc<"Largest annotation count this block reads">>                                              max_annotations      = 1048576U;
-    A<gr::Size_t, "max_extra_bytes", Doc<"Largest carried-extras document this block builds">>                                      max_extra_bytes      = 65536U;
+    A<std::string, "file_name", gr::Visible, Doc<"Base name, .sigmf-meta path or .sigmf-data path of the recording">>   file_name;
+    A<bool, "repeat", Doc<"Restart at the beginning when the recording is exhausted">>                                  repeat               = false;
+    A<gr::Size_t, "offset", gr::Visible, Doc<"Items to skip at the start of each pass">>                                offset               = 0U;
+    A<gr::Size_t, "length", gr::Visible, Doc<"Maximum items to emit per pass (0 = all)">>                               length               = 0U;
+    A<std::string, "scaling", Doc<"Integer scaling, \"unit\" to [-1, 1) or \"raw\"">>                                   scaling              = std::string("unit");
+    A<std::string, "truncation", Doc<"Short dataset handling, \"refuse\" the start or \"allow\" what exists">>          truncation           = std::string("refuse");
+    A<bool, "emit_annotations", Doc<"Publish the recording's annotations as tags">>                                     emit_annotations     = true;
+    A<bool, "carry_unknown_fields", Doc<"Carry every unconsumed metadata field verbatim under the sigmf_*_extra keys">> carry_unknown_fields = true;
+    A<std::string, "capture_label", Doc<"Written under the reserved trigger_name key at every capture boundary">>       capture_label        = std::string("sigmf:capture");
+    A<gr::Size_t, "max_metadata_bytes", Doc<"Largest metadata file this block reads">>                                  max_metadata_bytes   = 16777216U;
+    A<gr::Size_t, "max_captures", Doc<"Largest capture-segment count this block reads">>                                max_captures         = 1048576U;
+    A<gr::Size_t, "max_annotations", Doc<"Largest annotation count this block reads">>                                  max_annotations      = 1048576U;
+    A<gr::Size_t, "max_extra_bytes", Doc<"Largest carried-extras document this block builds">>                          max_extra_bytes      = 65536U;
 
     A<std::string, "datatype", gr::Visible, Doc<"Read-only, updated from the recording's core:datatype">> datatype;
     A<std::string, "sigmf_version", Doc<"Read-only, updated from the recording's core:version">>          sigmf_version;
     A<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, Doc<"Read-only, updated from the recording">>    sample_rate  = 0.f;
     A<gr::Size_t, "num_channels", gr::Visible, Doc<"Read-only, updated from the recording">>              num_channels = 1U;
-    A<std::uint64_t, "n_samples", Doc<"Read-only: items one pass of the recording emits">>                n_samples    = 0U;
+    A<std::uint64_t, "n_samples", Doc<"Read-only, items one pass of the recording emits">>                n_samples    = 0U;
     A<std::string, "sigmf_description", Doc<"Read-only, updated from the recording's core:description">>  sigmf_description;
     A<std::string, "author", Doc<"Read-only, updated from the recording's core:author">>                  author;
     A<std::string, "recorder", Doc<"Read-only, updated from the recording's core:recorder">>              recorder;
     A<std::string, "hardware", Doc<"Read-only, updated from the recording's core:hw">>                    hardware;
     A<std::string, "license", Doc<"Read-only, updated from the recording's core:license">>                license;
-    A<std::string, "sha512", Doc<"Read-only: the recording's core:sha512, reported and never verified">>  sha512;
+    A<std::string, "sha512", Doc<"Read-only core:sha512 of the recording, unverified">>                   sha512;
 
     GR_MAKE_REFLECTABLE(SigMfSource, out, file_name, repeat, offset, length, scaling, truncation, emit_annotations, carry_unknown_fields, capture_label, //
         max_metadata_bytes, max_captures, max_annotations, max_extra_bytes,                                                                              //
         datatype, sigmf_version, sample_rate, num_channels, n_samples, sigmf_description, author, recorder, hardware, license, sha512);
 
-    // counters — public, monotonic, per run; the stop() line names every non-zero one
+    // Public monotonic counters, reset per run. The stop() line names every non-zero one.
     std::uint64_t nSamplesEmitted{0U};
     std::uint64_t nCaptureBoundaries{0U};
     std::uint64_t nAnnotationsEmitted{0U};
@@ -326,7 +325,7 @@ private:
         _data.clear();
     }
 
-    /// The scalar components of a run of items; a real `T` is its own component type.
+    /// The scalar components of a run of items. A real `T` is its own component type.
     [[nodiscard]] static Component* componentsOf(T* items) noexcept {
         if constexpr (std::same_as<Component, T>) {
             return items;
@@ -471,11 +470,11 @@ private:
         }
     }
 
-    /// Build the carriage document for one object kind, refusing rather than truncating.
+    /// Build the carriage document for one object kind. An oversized document is refused, not truncated.
     ///
-    /// `core:sample_rate` and `core:frequency` are carried although this block consumes them: the
-    /// first loses precision narrowing to the reserved `float` key, so carrying the exact original
-    /// is what makes the round trip reconstructible.
+    /// `core:sample_rate` and `core:frequency` are carried although this block consumes them. The
+    /// sample rate loses precision when narrowed to the reserved `float` key. The carried exact
+    /// original makes the round trip reconstructible.
     [[nodiscard]] std::string carriageFor(const gr::sigmf::json::Value& extra, std::string_view consumedKey, std::optional<double> consumedValue) {
         if (!carry_unknown_fields) {
             return {};
@@ -596,7 +595,7 @@ private:
             std::vector<std::uint64_t> annotated;
             for (const gr::sigmf::Annotation& annotation : metadata.annotations) {
                 std::uint64_t index = 0U;
-                if (annotation.sampleStart < streamBase) { // inside the leading gap: it annotates items nobody emits
+                if (annotation.sampleStart < streamBase) { // inside the leading gap, annotating items that are not emitted
                     noteDroppedAnnotation(annotation.sampleStart);
                     continue;
                 }
@@ -658,8 +657,8 @@ private:
             }
         }
 
-        // one staging allocation for the whole run, sized from the port's own chunk bound with a floor that keeps a
-        // block driven outside a graph, where the port reports no size, from reading one item per call
+        // One staging allocation for the whole run, sized from the port's chunk bound. A floor keeps a block driven
+        // outside a graph, where the port reports no size, from reading one item per call.
         const std::size_t chunkItems = std::clamp(out.bufferSize(), 4096UZ, 65536UZ);
         _staging.assign(chunkItems * _bytesPerItem, std::byte{});
     }
@@ -707,12 +706,12 @@ private:
         return true;
     }
 
-    /// Shorten the produced range so that every tag inside it fits the span's own tag capacity. A recording whose
-    /// annotations are denser than one span can carry is emitted over more calls rather than losing tags, and the
-    /// placement is unchanged because every index is absolute.
+    /// Shorten the produced range until every tag inside it fits the span's tag capacity. A recording with
+    /// annotations denser than one span carries is emitted over more calls, and no tag is lost. The placement is
+    /// unchanged because every index is absolute.
     [[nodiscard]] std::size_t countFittingTagRoom(std::size_t count, std::size_t tagRoom) const {
         if (tagRoom == 0UZ) {
-            return count; // a span with no room to report tags still carries its samples rather than stalling
+            return count; // a span with no room for tags still carries its samples and does not stall
         }
         std::size_t admitted = 0UZ;
         for (std::size_t entry = _nextTag; entry < _schedule.size() && _schedule[entry].index < _itemIndex + count; ++entry) {
@@ -785,28 +784,28 @@ GR_REGISTER_BLOCK(gr::blocks::fileio::SigMfSink, [T], [ uint8_t, int16_t, int32_
 /**
  * @brief Writes a stream and the tags describing it as a conforming SigMF recording.
  *
- * The dataset is written inline on the scheduler thread through a handle owned for the run; the
- * metadata document is composed from the accumulated state and written once at `stop()`, after the
- * dataset is flushed and closed, so a reader that sees the metadata file knows the dataset behind it
- * is complete.
+ * The block writes the dataset inline on the scheduler thread through a handle it owns for the run.
+ * It composes the metadata document from the accumulated state and writes it once at `stop()`. The
+ * dataset is flushed and closed first. A reader that sees the metadata file sees a complete dataset
+ * behind it.
  */
 template<sigmf_detail::SigMfSample T>
 struct SigMfSink : gr::Block<SigMfSink<T>> {
     using Description = Doc<R""(Writes a `Stream<T>` as a SigMF recording (a `.sigmf-meta`/`.sigmf-data` pair).
 
 The reserved `sample_rate`, `num_channels`, `frequency`, `trigger_time` and `n_dropped_samples` keys
-become the recording's global fields and capture segments; the `sigmf_annotation_*` keys become its
-annotation list; the `sigmf_*_extra` documents are written back verbatim. `core:sha512` is never
-written, because a hash of another file's bytes would be a false statement about these.
+become the recording's global fields and capture segments. The `sigmf_annotation_*` keys become its
+annotation list. The `sigmf_*_extra` documents are written back verbatim. `core:sha512` is never
+written. A hash of another file's bytes would be a false statement about these bytes.
 
 SigMF states one `core:sample_rate` per recording, in `global`, and none per capture segment. A
 `sample_rate` tag that changes the rate in force opens a capture segment at its sample, and the
 recording's `core:sample_rate` is the rate in force at the end. A recording whose rate changed also
-carries `gnuradio4:sample_rate_changes` in `global`, the count of changes, and `gnuradio4:sample_rate`
-in its first segment and in each segment a change opened, the rate from that segment's first sample
-on. A segment without that field runs at the rate of the last segment before it that states one. SigMF
-requires every namespace outside `core` to be declared, so such a recording lists `gnuradio4` in
-`core:extensions` with version 1.0.0 and `optional` true.)"">;
+carries `gnuradio4:sample_rate_changes`, the count of changes, in `global`. It carries
+`gnuradio4:sample_rate` in its first segment and in each segment a change opened. That field is the
+rate from the segment's first sample on. A segment without that field runs at the rate of the last
+segment before it that states one. SigMF requires a declaration of every namespace outside `core`.
+Such a recording lists `gnuradio4` in `core:extensions` with version 1.0.0 and `optional` true.)"">;
 
     template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
     using A = gr::Annotated<U, description, Arguments...>;
@@ -828,14 +827,14 @@ requires every namespace outside `core` to be declared, so such a recording list
 
     gr::PortIn<T> in;
 
-    A<std::string, "file_name", gr::Visible, Doc<"Base path; the block writes <base>.sigmf-data and <base>.sigmf-meta">>    file_name;
+    A<std::string, "file_name", gr::Visible, Doc<"Base path of <base>.sigmf-data and <base>.sigmf-meta">>                   file_name;
     A<bool, "overwrite", Doc<"When false, an existing output file of either name refuses the start">>                       overwrite     = false;
     A<std::string, "datatype", gr::Visible, Doc<"A SigMF datatype spelling, or \"auto\" to follow the stream">>             datatype      = std::string("auto");
-    A<std::string, "scaling", Doc<"\"unit\": floats scale to the integer's full scale; \"raw\": no scaling">>               scaling       = std::string("unit");
+    A<std::string, "scaling", Doc<"Float scaling, \"unit\" to the integer's full scale or \"raw\"">>                        scaling       = std::string("unit");
     A<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, Doc<"Operator fallback, superseded by the first sample_rate tag">> sample_rate   = 0.f;
     A<gr::Size_t, "num_channels", gr::Visible, Doc<"Operator fallback, superseded by the first num_channels tag">>          num_channels  = 1U;
     A<std::string, "capture_label", Doc<"A trigger_name tag equal to this opens a capture segment">>                        capture_label = std::string("sigmf:capture");
-    A<std::string, "recorder", Doc<"Written as core:recorder; always this block's own value">>                              recorder      = std::string("gnuradio4");
+    A<std::string, "recorder", Doc<"Written as core:recorder, replacing a carried value">>                                  recorder      = std::string("gnuradio4");
     A<std::string, "sigmf_description", Doc<"Written as core:description when non-empty">>                                  sigmf_description;
     A<std::string, "author", Doc<"Written as core:author when non-empty">>                                                  author;
     A<std::string, "hardware", Doc<"Written as core:hw when non-empty">>                                                    hardware;
@@ -850,7 +849,7 @@ requires every namespace outside `core` to be declared, so such a recording list
     GR_MAKE_REFLECTABLE(SigMfSink, in, file_name, overwrite, datatype, scaling, sample_rate, num_channels, capture_label, recorder, sigmf_description, author, hardware, license, //
         carry_unknown_fields, emit_annotations, max_captures, max_annotations, max_bytes, meta_rewrite_period);
 
-    // counters — public, monotonic, per run; the stop() line names every non-zero one
+    // Public monotonic counters, reset per run. The stop() line names every non-zero one.
     std::uint64_t nSamplesWritten{0U};
     std::uint64_t nSamplesClipped{0U};
     std::uint64_t nCapturesWritten{0U};
@@ -1040,7 +1039,7 @@ private:
         _data.clear();
     }
 
-    /// The scalar components of a run of items; a real `T` is its own component type.
+    /// The scalar components of a run of items. A real `T` is its own component type.
     [[nodiscard]] static const Component* componentsOf(const T* items) noexcept {
         if constexpr (std::same_as<Component, T>) {
             return items;
@@ -1073,8 +1072,8 @@ private:
         _datatypeFixed = true;
     }
 
-    /// With `datatype = "auto"` the format is taken from the first span's `sigmf_datatype` tag, and
-    /// is fixed permanently by that call: a later tag cannot change a file already being written.
+    /// With `datatype = "auto"`, the first span's `sigmf_datatype` tag sets the format. That call
+    /// fixes the format permanently. A later tag cannot change a file already being written.
     void fixDatatypeFromStream(gr::InputSpanLike auto& inSpan) {
         std::string spelling(gr::sigmf::canonicalDatatypeFor<T>());
         for (const auto& [relIndex, tagMapRef] : inSpan.tags()) {
@@ -1189,8 +1188,8 @@ private:
         }
     }
 
-    /// Two tags at one index that both open a segment open one segment carrying both facts, because
-    /// a segment is identified by its index and two segments at one index cannot be ordered.
+    /// Two tags at one index that both open a segment open one segment with both facts. A segment is
+    /// identified by its index, and two segments at one index cannot be ordered.
     [[nodiscard]] gr::sigmf::Capture* openSegment(std::uint64_t itemIndex) {
         if (!_captures.empty() && _captures.back().sampleStart == itemIndex) {
             return &_captures.back();
@@ -1205,9 +1204,9 @@ private:
         return &_captures.back();
     }
 
-    /// This sink always states a segment at the dataset's first sample rather than leaving the array
-    /// empty for a reader to infer one. When no tag supplied that segment, its `core:datetime` is
-    /// this block's own clock at the first call, which is the one fact this sink invents.
+    /// The sink states a segment at the dataset's first sample in every recording. It does not leave
+    /// the array empty for a reader to infer. Without a tag for that segment, its `core:datetime` is
+    /// the host clock at the first call.
     void ensureFirstCapture() {
         if (!_captures.empty() && _captures.front().sampleStart == 0U) {
             return;
@@ -1371,8 +1370,8 @@ private:
         globalExtra.set("core:extensions", std::move(declared));
     }
 
-    /// Distribute the carried global document: a derived field wins, a never-written field is
-    /// dropped, an operator setting wins when it is non-empty, and everything else is written back.
+    /// Distribute the carried global document. A derived field wins. A field this block never writes
+    /// is dropped. A non-empty operator setting wins. Everything else is written back.
     void applyCarriedGlobal(gr::sigmf::Metadata& metadata, bool countReconciliation) {
         static constexpr std::array<std::string_view, 6> kDerived{"core:datatype", "core:version", "core:num_channels", "core:offset", "core:recorder", kRateChangesField};
         static constexpr std::array<std::string_view, 4> kNeverWritten{"core:sha512", "core:dataset", "core:trailing_bytes", "core:metadata_only"};
@@ -1417,7 +1416,7 @@ private:
         metadata.global.extra = std::move(remaining);
     }
 
-    /// Lift a carried capture field into its typed slot when the stream supplied none; a carried key
+    /// Lift a carried capture field into its typed slot when the stream supplied none. A carried key
     /// this block derives loses to the derived value and is counted.
     void liftCarried(gr::sigmf::json::Value& extra, std::span<const std::string_view> known, gr::sigmf::Capture& segment, bool countReconciliation) {
         gr::sigmf::json::Value remaining = gr::sigmf::json::Value::makeObject();
