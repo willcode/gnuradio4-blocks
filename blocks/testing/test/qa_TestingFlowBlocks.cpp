@@ -13,6 +13,8 @@
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<gr::blocks::testing::Delay<float>>, "passes the every-key predicate: no Resampling<> or Stride<>, no asynchronous port, no tag policy other than UnfilteredTagPropagation and no forwardTags() override");
+
 const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
     using namespace boost::ut;
     using namespace gr;
@@ -129,7 +131,7 @@ const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
             }
         }
         // the tag at 0 is the one the hold would republish on every polled call, so the multiplicity is the assertion
-        expect(that % (offsets == std::vector<std::size_t>{0UZ, 7UZ, 300UZ})) << "a pass-all pass-through neither drops, moves nor duplicates a private key";
+        expect(that % (offsets == std::vector<std::size_t>{0UZ, 7UZ, 300UZ})) << "the default forwarder neither drops, moves nor duplicates a private key";
     };
 
     // Tag::index is a std::size_t; a 32-bit target cannot record an index past 2^32

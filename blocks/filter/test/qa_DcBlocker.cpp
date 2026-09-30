@@ -141,6 +141,9 @@ template<typename TIn, typename TOut, typename TBlock>
 
 } // namespace
 
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<DcBlocker<float>>, "passes the every-key predicate: no Resampling<> or Stride<>, no asynchronous port, no tag policy other than UnfilteredTagPropagation and no forwardTags() override");
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<DcBlocker<CF>>);
+
 const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
     using namespace boost::ut;
 

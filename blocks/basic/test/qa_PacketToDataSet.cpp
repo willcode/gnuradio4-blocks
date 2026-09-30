@@ -879,8 +879,8 @@ const boost::ut::suite<"PacketToDataSet under the scheduler"> schedulerTests = [
         roundTrip.template operator()<float>();
     };
 
-    // The runtime half
-    "a rejection reason reaches a sink on reject and does not survive one ordinary block"_test = [] {
+    // The runtime half: discard_reason rides a tag beside the packet, across a direct connection and across one ordinary block
+    "a rejection reason reaches a sink on reject, directly and through one ordinary block"_test = [] {
         const auto rejections = [](bool intervening) {
             std::vector<gr::Packet<std::uint8_t>> packets;
             gr::Packet<std::uint8_t>              noMap = makePacket<std::uint8_t>(4UZ);
@@ -906,16 +906,16 @@ const boost::ut::suite<"PacketToDataSet under the scheduler"> schedulerTests = [
             }
 
             expect(test.run().has_value());
-            return std::pair<std::size_t, std::size_t>{refused._items.size(), offsetsOf(std::span<const Tag>(refused._tags), "discard_reason").size()};
+            return std::pair<std::size_t, std::vector<std::size_t>>{refused._items.size(), offsetsOf(std::span<const Tag>(refused._tags), "discard_reason")};
         };
 
         const auto [directPackets, directReasons] = rejections(false);
         expect(eq(directPackets, 1UZ)) << "the refused packet leaves by the reject port";
-        expect(eq(directReasons, 1UZ)) << "with its reason on a tag beside it";
+        expect(eq(directReasons.size(), 1UZ)) << "with its reason on a tag beside it";
 
         const auto [hoppedPackets, hoppedReasons] = rejections(true);
         expect(eq(hoppedPackets, 1UZ)) << "the packet itself survives the hop";
-        expect(eq(hoppedReasons, 0UZ)) << "discard_reason is not a reserved key, so the default forwarder drops it";
+        expect(that % (hoppedReasons == directReasons)) << "the default forwarder keeps discard_reason at its offset, a key the auto-forward set does not name";
     };
 
     // The full CRC chain in one process, from CrcAppend through a corrupted packet to CrcCheck

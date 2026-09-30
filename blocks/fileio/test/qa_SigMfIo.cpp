@@ -250,18 +250,20 @@ struct ScriptedSource : gr::Block<ScriptedSource<T>> {
     }
 };
 
-/// A 1:1 block forwarding through the framework's default forwarder, which filters to the reserved keys.
+/// A 1:1 block forwarding through the framework's default forwarder, which keeps every key of every tag at its offset.
 template<typename T>
-struct FilteringPassthrough : gr::Block<FilteringPassthrough<T>> {
+struct DefaultForwardingPassthrough : gr::Block<DefaultForwardingPassthrough<T>> {
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    GR_MAKE_REFLECTABLE(FilteringPassthrough, in, out);
+    GR_MAKE_REFLECTABLE(DefaultForwardingPassthrough, in, out);
 
-    using gr::Block<FilteringPassthrough<T>>::Block;
+    using gr::Block<DefaultForwardingPassthrough<T>>::Block;
 
     [[nodiscard]] constexpr T processOne(const T& value) const noexcept { return value; }
 };
+
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<DefaultForwardingPassthrough<std::complex<float>>>, "passes the every-key predicate: no Resampling<> or Stride<>, no asynchronous port, no tag policy and no forwardTags() override");
 
 /// A test block that acts as a rate changer. It republishes every tag with `sample_rate` rewritten. Anything that
 /// changes the rate must do the same.
@@ -1043,25 +1045,22 @@ const suite<"SigMF round trip"> _roundTrip = [] {
         expect(eq(readText(target + ".sigmf-meta"), std::string(kAnchorMetadata))) << "and the metadata byte-identical";
     };
 
-    "an intermediate block keeps the reserved six and loses the sigmf_ eleven"_test = [] {
+    "an intermediate block keeps every key, the sigmf_ ones included"_test = [] {
         const Workspace   workspace{"round_trip_chain"};
         const std::string source = writeAnchor(workspace, "in");
         const std::string target = workspace.base("out");
 
         gr::Graph flow;
         auto&     reader = flow.emplaceBlock<SigMfSource<std::complex<float>>>({{"file_name", source}});
-        auto&     middle = flow.emplaceBlock<FilteringPassthrough<std::complex<float>>>();
+        auto&     middle = flow.emplaceBlock<DefaultForwardingPassthrough<std::complex<float>>>();
         auto&     writer = flow.emplaceBlock<SigMfSink<std::complex<float>>>({{"file_name", target}});
         expect(flow.connect<"out", "in">(reader, middle).has_value());
         expect(flow.connect<"out", "in">(middle, writer).has_value());
         const GraphRun run = runGraph(std::move(flow));
         expect(run.ok()) << run.message();
 
-        const std::string metadata = readText(target + ".sigmf-meta");
-        expect(mentions(metadata, R"("core:sample_rate": 48000)")) << "the reserved keys survive the default forwarder";
-        expect(mentions(metadata, R"("core:frequency": 433921337)"));
-        expect(mentions(metadata, R"("core:datetime": "2026-08-26T12:00:00.000000Z")"));
-        expect(mentions(metadata, R"("annotations": [])")) << "and the sigmf_ keys do not, which is the contract until the retrofit reaches the block in between";
+        expect(eq(hexOf(readBytes(target + ".sigmf-data")), hexOf(anchorDataBytes()))) << "every sample bit-equal";
+        expect(eq(readText(target + ".sigmf-meta"), std::string(kAnchorMetadata))) << "and the metadata byte-identical: the default forwarder keeps every key at its offset";
     };
 
     "the rate reconciliation, both branches"_test = [] {

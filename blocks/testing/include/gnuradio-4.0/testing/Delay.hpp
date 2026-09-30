@@ -12,9 +12,9 @@ namespace gr::blocks::testing {
 
 GR_REGISTER_BLOCK(gr::blocks::testing::Delay, [T], [float])
 
-// UnfilteredTagPropagation: a pure pass-through forwards every input tag key, not just the auto-forward ones
+// A pure pass-through: the default forwarder keeps every input tag key at its own offset
 template<typename T>
-struct Delay : Block<Delay<T>, UnfilteredTagPropagation> {
+struct Delay : Block<Delay<T>> {
     using clock = std::chrono::steady_clock;
 
     PortIn<T>  in;
