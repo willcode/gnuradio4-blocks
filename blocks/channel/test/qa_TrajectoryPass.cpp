@@ -20,16 +20,16 @@
 #include <gnuradio-4.0/channel/RangeDelay.hpp>
 
 /*
- * The two-block pass: a trajectory's envelope delay and its carrier shift applied from one table, then taken off
- * again from the same table, around a modem that must not be able to tell. The chain is apply-delay, apply-shift,
- * noise, correct-shift, correct-delay — last applied, first removed — so each correcting block sees the sample
- * index its applying twin saw, and the only term that does not commute is the delay block reading its schedule
- * tau seconds late, which is far below a sample here.
+ * The two-block pass. A trajectory's envelope delay and carrier shift are applied from one table and removed with
+ * the same table. A modem sits around them and must decode as if there were no pass. The chain is apply-delay,
+ * apply-shift, noise, correct-shift, correct-delay. The last applied is the first removed. Each correcting block
+ * then sees the sample index its applying twin saw. The remaining non-commuting term is the delay block reading
+ * its schedule tau seconds late. That term is far below a sample here.
  *
- * The modem is band-limited on purpose. A fractional delay line interpolates inside its design band and does
- * something else to what lies beyond it, so a full-band stream through two of them would measure the bank's
- * stopband rather than the blocks' composition. Two samples a symbol under a root-raised-cosine pulse keeps the
- * occupied band at a third of the sample rate, inside the line's passband with margin.
+ * The modem is band-limited on purpose. A fractional delay line interpolates inside its design band and distorts
+ * what lies beyond it. A full-band stream through two lines would measure the bank's stopband and not the blocks'
+ * composition. Two samples a symbol under a root-raised-cosine pulse keep the occupied band at a third of the
+ * sample rate. That band is inside the line's passband with margin.
  */
 
 namespace {
@@ -48,7 +48,7 @@ constexpr double        kSpeed          = 7000.;
 constexpr std::size_t   kSps            = 2UZ;
 constexpr double        kRolloff        = 0.35;
 constexpr std::size_t   kSpanSymbols    = 6UZ;
-constexpr double        kNoise          = 0.35; // total complex noise power; BPSK at unit energy reads about 8e-3
+constexpr double        kNoise          = 0.35; // total complex noise power, at which BPSK of unit energy reads about 8e-3
 constexpr std::size_t   kChunk          = 65'536UZ;
 constexpr std::uint64_t kSeed           = 20260902ULL;
 
@@ -68,8 +68,9 @@ struct Trajectory {
     std::vector<double>       offsets{};
 };
 
-/// A pass over a flat ground track: slant range sqrt(R0^2 + (v (t - T/2))^2), whose rate is v (t - T/2) v / R —
-/// closing through the first half, receding through the second, steepest at the point of closest approach.
+/// A pass over a flat ground track. The slant range is sqrt(R0^2 + (v (t - T/2))^2), and its rate is
+/// v (t - T/2) v / R. The pass closes through the first half and recedes through the second. The rate changes
+/// fastest at the point of closest approach.
 [[nodiscard]] Trajectory leoPass() {
     Trajectory pass;
     const int  knots = static_cast<int>(std::llround(kSeconds / kKnotSeconds));
@@ -84,8 +85,8 @@ struct Trajectory {
     return pass;
 }
 
-/// The root-raised-cosine pulse at kSps samples a symbol, normalized to unit energy so a symbol's matched-filter
-/// peak reads 1 and the noise after the filter keeps the power it had per sample.
+/// The root-raised-cosine pulse at kSps samples a symbol, normalized to unit energy. A symbol's matched-filter peak
+/// reads 1. The noise after the filter keeps its power per sample.
 [[nodiscard]] std::vector<float> rrcTaps() {
     const std::size_t   taps = kSpanSymbols * kSps + 1UZ;
     std::vector<double> h(taps);
@@ -123,7 +124,7 @@ struct Bits {
     }
 };
 
-/// Bits at kSps samples a symbol through the pulse, produced a chunk at a time; every bit sent is kept.
+/// Bits at kSps samples a symbol through the pulse, produced a chunk at a time. Every sent bit is kept.
 struct Transmitter {
     std::vector<float>        h = rrcTaps();
     std::vector<std::uint8_t> bits{};
@@ -149,7 +150,7 @@ struct Transmitter {
     }
 };
 
-/// The matched filter and the hard decision, streamed: symbol m is decided on filtered sample m * kSps + lag.
+/// The streamed matched filter and hard decision. Symbol m is decided on filtered sample m * kSps + lag.
 struct Receiver {
     std::vector<float>               h = rrcTaps();
     std::vector<C>                   history{};
@@ -223,8 +224,9 @@ struct Outcome {
     auto noise        = configured<AwgnChannel<C>>({{"noise_power", kNoise}, {"seed", kSeed}});
     auto correctShift = configured<DopplerShift<C>>(settings("correct", {{"schedule_offsets_hz", pass.offsets}}));
 
-    // The correcting line's bias is chosen so the chain's whole lag — both commanded delays, which sum to the bias,
-    // plus both lines' latencies — is an integer number of samples, so the decision instant lands on a sample.
+    // The correcting line's bias makes the chain's whole lag an integer number of samples. The whole lag is both
+    // commanded delays, which sum to the bias, plus both lines' latencies. The decision instant then lands on a
+    // sample.
     auto         probe        = configured<RangeDelay<C>>(settings("correct", {{"schedule_delays_s", pass.delays}}));
     const double latency      = probe->latencySamples();
     const double maxDelay     = *std::max_element(pass.delays.begin(), pass.delays.end());
@@ -278,8 +280,8 @@ struct Outcome {
 const boost::ut::suite<"trajectory pass"> trajectoryPassTests = [] {
     using namespace boost::ut;
 
-    // The two blocks compose: a pass applied and corrected around a modem decodes as if there were no pass,
-    // and the same chain with the envelope delay left in does not decode at all
+    // The two blocks compose. A pass applied and corrected around a modem decodes as if there were no pass. The
+    // same chain with the envelope delay left in does not decode at all.
     "a corrected pass decodes at the clean error rate, and the delay left in destroys the link"_test = [] {
         const Trajectory pass = leoPass();
 
@@ -291,11 +293,11 @@ const boost::ut::suite<"trajectory pass"> trajectoryPassTests = [] {
         const auto    start     = std::chrono::steady_clock::now();
         const Outcome corrected = run(pass, Chain::corrected, kSeconds);
         const Outcome clean     = run(pass, Chain::clean, kSeconds);
-        const Outcome leftIn    = run(pass, Chain::delayLeftIn, 60.); // a minute is enough: the delay walks a sample every 0.9 s at the horizon
+        const Outcome leftIn    = run(pass, Chain::delayLeftIn, 60.); // a minute is enough, since the delay walks a sample every 0.9 s at the horizon
         const double  elapsed   = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 
-        // The correcting blocks rotate and interpolate the noise as well as the signal, so the two runs see the same noise
-        // distribution but not the same realization; the agreement is statistical and its own bound is the counting error.
+        // The correcting blocks rotate and interpolate the noise as well as the signal. The two runs see the same noise
+        // distribution but not the same realization. The agreement is statistical, and its bound is the counting error.
         const double sigma = std::sqrt(clean.ber * (1. - clean.ber) / static_cast<double>(clean.counted));
         std::println("[pass] criterion 14: {} symbols over a {} s pass at {} Hz — envelope delay moves {:.1f} samples ({:.1f} for a radial approach at {} m/s), chain lag {:.0f} samples "
                      "(bias {:.5f} + 2 x latency {:.5f} + filters), transient {} samples skipped",

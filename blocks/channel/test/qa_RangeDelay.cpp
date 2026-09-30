@@ -74,8 +74,8 @@ template<typename TBlock, typename T>
     return out;
 }
 
-// A ReaderSpanLike/OutputSpanLike pair, so the tag-aware overload can be driven at an exact chunk size and with
-// tags at exact indices without standing up a graph, which chooses its own chunking.
+// A ReaderSpanLike/OutputSpanLike pair. It drives the tag-aware overload at an exact chunk size, with tags at exact
+// indices, without a graph. A graph chooses its own chunking.
 struct TagReader : std::span<const gr::Tag> {
     using value_type = gr::Tag;
 
@@ -90,7 +90,7 @@ struct TagWriter : std::span<gr::Tag> {
     constexpr void publish(std::size_t) noexcept {}
 };
 
-/// The pair `tags()` yields: a signed offset against the span's own base, and a reference to the map.
+/// The pair `tags()` yields. It holds a signed offset against the span's base and a reference to the map.
 struct ToRelIndexMapRef {
     std::size_t base = 0UZ;
 
@@ -168,8 +168,8 @@ template<typename T, typename TBlock>
                               {gr::property_map::key_type(gr::tag::TRIGGER_OFFSET.shortKey()), offsetSeconds}}};
 }
 
-/// The prototype's delivered passband ripple and stopband as linear amplitudes: the two floors under the
-/// interpolation bound, which together are the envelope a realized bank can be held to.
+/// The prototype's delivered passband ripple and stopband as linear amplitudes. They are the two floors under the
+/// interpolation bound. Together they give the envelope a realized bank is held to.
 [[nodiscard]] double rippleFloor(double rippleDb) { return std::pow(10., rippleDb / 20.) - 1.; }
 [[nodiscard]] double stopbandFloor(double stopbandDb) { return std::pow(10., stopbandDb / 20.); }
 
@@ -232,7 +232,7 @@ template<typename T, typename TBlock>
     return signal;
 }
 
-/// The same amplitudes with no band limit at all: energy right up to Nyquist, where no interpolator is designed.
+/// The same amplitudes with no band limit. The energy reaches Nyquist, where no interpolator is designed.
 [[nodiscard]] std::vector<C> fullBand(std::size_t n) {
     std::vector<C> signal(n);
     std::uint64_t  state = 0x243f6a8885a308d3ULL;
@@ -263,16 +263,16 @@ int main() {
 
     // A constant delay at an integral total lag is a plain shift, to the interpolation bound
     "a constant delay reduces to an integer sample shift, latency included"_test = [] {
-        // The line's own lag is fractional, so the criterion's "after the group delay is removed" cannot be a
-        // whole-sample compare at an arbitrary commanded delay. The commanded delay is chosen instead to make the
-        // total lag integral, which leaves the interpolator running at a fraction of an arm and the comparison
-        // against `out[n] = in[n - delay]` — the integer shift `SampleDelay` is defined as — exact.
+        // The line's own lag is fractional. A compare "after the group delay is removed" then cannot be whole-sample
+        // at an arbitrary commanded delay. The commanded delay is chosen to make the total lag integral instead.
+        // The interpolator runs at a fraction of an arm. The comparison against `out[n] = in[n - delay]` is exact.
+        // That formula is the integer shift that defines `SampleDelay`.
         constexpr std::size_t kBank = 32UZ;
         const auto            probe = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1., 1.}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{kBank}}});
 
         const double latency   = probe->latencySamples();
         const double lag       = std::ceil(latency) + 7.; // an integer, and past the transient
-        const double commanded = lag - latency;           // fractional, so the bank interpolates rather than picks
+        const double commanded = lag - latency;           // fractional, and the bank interpolates between arms
 
         auto block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{commanded, commanded}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{kBank}}});
 
@@ -345,8 +345,8 @@ int main() {
         const double          carrier  = gr::timing::offsetFor(v, fc); // +10203.7257 Hz
         const double          ratio    = fb / fc;                      // 2.745995e-5
 
-        // the envelope's half: a linear range ramp of rate v is a delay ramp of rate v/c, and a tone through it
-        // emerges at f_b*(1 - v/c) exactly, the derivation being closed form rather than first order
+        // The envelope's half. A linear range ramp of rate v is a delay ramp of rate v/c. A tone through it emerges
+        // at f_b*(1 - v/c) exactly. The derivation is closed form, not first order.
         auto       delayBlock = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, static_cast<std::int64_t>(seconds * 1e9)}}, {"schedule_delays_s", std::vector<double>{d0, d0 + slope * seconds}}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
         const auto delayed    = runWhole<RangeDelay<C>, C>(*delayBlock, std::span<const C>(tone(fb / fs, n)));
 
@@ -354,7 +354,7 @@ int main() {
         const auto        residual    = residualPhase(std::span<const C>(delayed), fb / fs, nSkip);
         const double      measuredEnv = slopeOf(std::span<const double>(residual)) / kTwoPi * fs;
 
-        // the carrier's half: the same range rate through `offsetFor`, measured off the block rather than assumed
+        // The carrier's half. The same range rate goes through `offsetFor`, and the shift is measured off the block.
         const std::vector<C> unmodulated(n, C(1.f, 0.f));
         auto                 shiftBlock      = configured<DopplerShift<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, static_cast<std::int64_t>(seconds * 1e9)}}, {"schedule_offsets_hz", std::vector<double>{carrier, carrier}}, {"sample_rate", static_cast<float>(fs)}});
         const auto           shifted         = runWhole<DopplerShift<C>, C>(*shiftBlock, std::span<const C>(unmodulated));
@@ -481,9 +481,9 @@ int main() {
 
     // Apply then correct recover the signal, to the commutation term and nothing hidden
     "apply then correct through the same table recover the signal"_test = [] {
-        // The pair is not an exact inverse: the correcting block reads the schedule at its own stream position
-        // while the signal reaching it left the first block one lag earlier, so the two lookups differ by that
-        // lag times the table's slope. The number is arithmetic, printed below beside what was measured.
+        // The pair is not an exact inverse. The correcting block reads the schedule at its own stream position. The
+        // signal reaching it left the first block one lag earlier. The two lookups differ by that lag times the
+        // table's slope. The number is arithmetic and is printed below beside the measured value.
         constexpr double      fs = 100'000.;
         constexpr std::size_t n  = 8000UZ;
 
@@ -493,8 +493,8 @@ int main() {
 
         auto forward = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", delays}, {"direction", std::string("apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
 
-        // The two lines' latencies are fractional, so a whole-sample comparison needs the bias to make the total
-        // lag integral; the causal rule needs it at or above the table's own maximum, and this is both.
+        // The two lines' latencies are fractional. A whole-sample comparison needs a bias that makes the total lag
+        // integral. The causal rule needs a bias at or above the table's maximum. This bias meets both.
         const double latency     = forward->latencySamples();
         const double biasSamples = std::ceil(2. * latency) + 16. - 2. * latency;
         const auto   lag         = static_cast<std::size_t>(std::llround(2. * latency + biasSamples));
@@ -513,19 +513,19 @@ int main() {
             return worst;
         };
 
-        // The schedule-time mismatch the pair carries, in samples of delay, from the scene's own numbers: the
-        // correcting block looks the table up `lag + tau` seconds after the first one did, and over that gap the
-        // table has moved by its own slope.
+        // The schedule-time mismatch of the pair, in samples of delay, from the scene's numbers. The correcting
+        // block looks up the table `lag + tau` seconds after the first one. Over that gap the table moves by its
+        // slope.
         const double lookupApartSeconds = (static_cast<double>(lag) + delays[1] * fs) / fs;
         const double commutationSamples = lookupApartSeconds * slopePerSecond * fs;
-        // and what a misalignment of that many samples does to this signal: at most its own slope per sample
+        // and the effect of a misalignment of that many samples on this signal, at most its slope per sample
         const double signalSlope = 0.6 * 0.031 + 0.3 * 0.011 + 0.5 * 0.023 + 0.2 * 0.007;
 
-        // The control arm is the same pair over a table with no slope at all, where the commutation term is zero
-        // by construction: what it measures is the two passes' own interpolation error on this very signal, which
-        // is the other thing the moving arm's residual can be made of. It comes out the larger of the two, and
-        // that is the arms and not the arithmetic: a constant delay parks the bank on one arm and its error is
-        // systematic, while a delay that moves walks every arm and the worst of that walk is smaller.
+        // The control arm is the same pair over a table with no slope. Its commutation term is zero. It measures
+        // the two passes' own interpolation error on this signal. That error is the other possible part of the
+        // moving arm's residual. The control's error comes out the larger of the two. The cause is the bank's arms.
+        // A constant delay keeps the bank on one arm, and its error is systematic. A moving delay walks every arm,
+        // and the worst of that walk is smaller.
         const std::vector<C>      band = bandLimited(n);
         const std::vector<double> flat{delays[1], delays[1]};
         const double              floorWorst = pair(flat, std::span<const C>(band));
@@ -542,7 +542,7 @@ int main() {
         expect(that % (worstWhite > 10. * worstBand)) << "a full-band signal is a different measurement, not a wider tolerance";
     };
 
-    // the block against the number that is its reason to exist: a pass moves the envelope by hundreds of samples
+    // A pass moves the envelope by hundreds of samples
     "a low-orbit pass moves the envelope delay by 672 samples, through the block"_test = [] {
         constexpr double fs      = 48'000.;
         constexpr double seconds = 600.;
@@ -559,7 +559,7 @@ int main() {
         expect(that % (std::abs((atEnd->currentDelaySeconds() - atStart->currentDelaySeconds()) * 1e3 - 14.0097) < 1e-3)) << "the delay change is the pass geometry, read off the block";
         expect(that % (std::abs((atEnd->currentDelaySamples() - atStart->currentDelaySamples()) - 672.5) < 0.5)) << "672 samples is far past a symbol, so a chain without RangeDelay is visibly wrong";
 
-        // and the stream itself moves by it: one impulse at each end of the pass, and the outputs are that far apart
+        // and the stream moves by it too. One impulse sits at each end of the pass, and the outputs are that far apart.
         std::vector<float> impulse(2048UZ, 0.f);
         impulse[100UZ]        = 1.f;
         const auto   headOut  = runWhole<RangeDelay<float>, float>(*atStart, std::span<const float>(impulse));
@@ -651,8 +651,8 @@ int main() {
         const auto                 triggered = drive<C>(*fromTrigger, std::span<const C>(input), std::span<const gr::Tag>(tags), 512UZ);
         const auto                 hand      = drive<C>(*fromSetting, std::span<const C>(input), std::span<const gr::Tag>(tags), 512UZ);
 
-        // Before the tag the trigger-anchored block has no time and passes through, and its line has been fed
-        // nothing, so the two streams meet only once that line has filled: the transient is the history it holds.
+        // Before the tag, the trigger-anchored block has no time and passes through. Its line has been fed nothing.
+        // The two streams meet only after that line has filled. The transient is the history the line holds.
         const std::size_t settled = at + fromTrigger->historySamples();
         std::size_t       first   = 0UZ;
         for (std::size_t k = settled; k < n; ++k) {
@@ -695,7 +695,8 @@ int main() {
         expect(that % (ignoring->anchorNs() == static_cast<std::int64_t>(tNs))) << "and it is not read at all where honor_trigger_offset is off";
     };
 
-    // The shift's half: the phasor restarts at the tag, so the amendment is the schedule, not the phase
+    // The shift's half. The phasor restarts at the tag. The trigger anchor matches the setting on the schedule,
+    // not on the phase.
     "the shift's trigger anchor agrees with the setting on the schedule, and states the phase it restarts"_test = [] {
         constexpr double        fs  = 1'000.;
         constexpr std::size_t   n   = 4'000UZ;
@@ -723,9 +724,9 @@ int main() {
         expect(that % (fromTrigger->anchorNs() == fromSetting->anchorNs())) << "the two anchors name the same instant";
         expect(that % (fromTrigger->currentOffsetHz() == fromSetting->currentOffsetHz())) << "so the schedule is read at the same place at the same sample";
 
-        // The two streams are not bit-identical and cannot be: the trigger-armed block passes through until the
-        // tag and restarts its phase there, so the pair differs by one constant rotation from the tag onward.
-        // What is asserted is that the rotation is constant, which is the statement that the schedules agree.
+        // The two streams are not bit-identical. The trigger-armed block passes through until the tag and restarts
+        // its phase there. The pair differs by one constant rotation from the tag onward. The test asserts that the
+        // rotation is constant, which means the schedules agree.
         const std::complex<double> reference = std::complex<double>(static_cast<double>(triggered.samples[at].real()), static_cast<double>(triggered.samples[at].imag())) * std::conj(std::complex<double>(static_cast<double>(hand.samples[at].real()), static_cast<double>(hand.samples[at].imag())));
         double                     worst     = 0.;
         for (std::size_t k = at; k < n; ++k) {
@@ -737,7 +738,7 @@ int main() {
         expect(that % (std::abs(std::abs(reference) - 1.) < 1e-5)) << "and a rotation, not a gain";
     };
 
-    // A second tag does not move the world, and the counters say what happened to it
+    // A second tag moves no anchor, and the counters record it
     "a second trigger is ignored under first_trigger and re-anchors under every_trigger"_test = [] {
         constexpr double        fs   = 1'000.;
         constexpr std::size_t   n    = 4'000UZ;
@@ -747,8 +748,8 @@ int main() {
         constexpr std::uint64_t tNs2 = 900'000'000ULL;
 
         const std::vector<C> input(n, C(1.f, 0.f));
-        // 1.5 Hz over the 1500 samples between the two tags is 2.25 turns, so the continuous run's phase at the
-        // second tag is a quarter turn from zero and the restart at that sample is not a coincidence of the scene
+        // 1.5 Hz over the 1500 samples between the two tags is 2.25 turns. The continuous run's phase at the second
+        // tag is a quarter turn from zero. A restart at that sample therefore shows in the output.
         const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL, 4'000'000'000LL}}, {"schedule_offsets_hz", std::vector<double>{1.5, 1.5, 1.5}}, {"sample_rate", static_cast<float>(fs)}};
 
         const std::vector<gr::Tag> one{triggerTag(at, tNs)};
@@ -811,7 +812,7 @@ int main() {
         expect(that % (settingMode->nIgnoredAnchors() == 2ULL)) << "a hand-set anchor beside a tagged source is visible in the count";
     };
 
-    // §6.4 — a tag rides with the sample it marks, in the same fixed point the read cursor is kept in
+    // A tag moves with the sample it marks, in the fixed point of the read cursor
     "a tag moves to the output sample that carries its input sample"_test = [] {
         constexpr std::size_t n      = 512UZ;
         constexpr double      kDelay = 10.25; // samples, at a rate of one sample per second
@@ -838,7 +839,7 @@ int main() {
         }
     };
 
-    // §6.4 — a delay that shrinks fast enough skips an input index, and the tags that land together are counted
+    // A delay that shrinks fast enough skips an input index, and the tags that land together are counted
     "tags that reach one output sample are attached together and counted"_test = [] {
         constexpr std::size_t n = 256UZ;
         // the delay falls 0.9 s per second at one sample per second, so the read position advances 1.9 per output
@@ -852,12 +853,12 @@ int main() {
         }
         const auto driven = drive<float>(*block, std::span<const float>(input), std::span<const gr::Tag>(tags), 32UZ);
 
-        // the read position in closed form: `k - D(k) - latency`, with the table's own `D(k) = 100 - 0.9*k`
-        // seconds at one sample per second, held at its last value past the last knot
+        // The read position in closed form is `k - D(k) - latency`. The table gives `D(k) = 100 - 0.9*k` seconds at
+        // one sample per second, held at its last value past the last knot.
         const auto readPosition = [&](std::size_t k) { return static_cast<double>(k) - std::max(10., 100. - 0.9 * static_cast<double>(k)) - latency; };
         expect(that % (driven.tags.size() == tags.size())) << "every tag is emitted, none dropped by the skip";
 
-        std::size_t coalesced = 0UZ; // output samples carrying more than one tag, which is what the counter counts
+        std::size_t coalesced = 0UZ; // output samples carrying more than one tag, the quantity the counter counts
         std::size_t run       = 0UZ;
         std::size_t lastIndex = 0UZ;
         for (std::size_t t = 0UZ; t < driven.tags.size() && t < tags.size(); ++t) {
@@ -875,7 +876,7 @@ int main() {
         expect(that % (block->nTagsCoalesced() == static_cast<std::uint64_t>(coalesced))) << "and every such sample is counted once";
     };
 
-    // §7 — what the reserved keys say about the stream, counted rather than acted on
+    // The reserved keys' reports about the stream are counted and not acted on
     "a gap and a disagreeing rate are counted where they pass"_test = [] {
         constexpr std::size_t n     = 256UZ;
         auto                  block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"sample_rate", 1.e3f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
@@ -892,7 +893,7 @@ int main() {
         expect(that % (driven.tags[0].index == 50UZ && driven.tags[1].index == 100UZ && driven.tags[2].index == 150UZ));
     };
 
-    // §6.3 — a table, a rate or an anchor keeps the history; only the bank is allowed to cost it
+    // A table, a rate or an anchor keeps the history. Only a new bank drops it.
     "restaging a table keeps the line's history and the bank alone rebuilds it"_test = [] {
         constexpr std::size_t  n = 4'000UZ;
         const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.02}}, //
@@ -916,7 +917,7 @@ int main() {
         std::ignore = restaged->settings().applyStagedParameters();
         expect(that % (restaged->nBankRebuilds() == 1ULL)) << "a new bank is a new window, and the history it cost is counted";
 
-        // a deeper table grows the history rather than cutting a new bank
+        // a deeper table grows the history and keeps the bank
         auto              deeper = configured<RangeDelay<C>>(settings);
         const std::size_t held   = deeper->historySamples();
         std::ignore              = deeper->settings().setStaged({{"schedule_delays_s", std::vector<double>{0.01, 0.5}}});
@@ -925,7 +926,7 @@ int main() {
         expect(that % (deeper->nBankRebuilds() == 0ULL)) << "without the bank changing at all";
     };
 
-    // §4.3 and §5 — before its trigger the block has no time, so it neither delays nor feeds its line
+    // Before its trigger the block has no time. It neither delays nor feeds its line.
     "an unarmed block passes its input through and reads unarmed"_test = [] {
         constexpr std::size_t n     = 512UZ;
         auto                  block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, //

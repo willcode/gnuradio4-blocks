@@ -28,16 +28,16 @@
 
 namespace gr::blocks::channel {
 
-/// Where the stream stands against the schedule's own time span. `Unarmed` is a trigger-anchored
-/// block that has not seen its trigger yet: the stream has no time, so it has no position either.
+/// The position of the stream against the schedule's time span. `Unarmed` means a trigger-anchored
+/// block has not seen its trigger yet. The stream then has no time and no position.
 enum class SchedulePosition : std::uint8_t { Before = 0, Inside, After, Unarmed };
 
 namespace detail {
 
-/// Which way the schedule is taken: `apply` puts the trajectory's shift on a clean signal, `correct` removes it.
+/// The direction of the schedule. `apply` puts the trajectory's shift on a clean signal. `correct` removes it.
 enum class DopplerDirection : std::uint8_t { Apply = 0, Correct };
 
-/// The seat @p name selects, with the refusal opening on the @p block that raised it.
+/// The direction @p name selects. A refusal starts with the name @p block.
 [[nodiscard]] inline DopplerDirection parseDopplerDirection(std::string_view name, std::string_view block) {
     if (name == "apply") {
         return DopplerDirection::Apply;
@@ -48,7 +48,7 @@ enum class DopplerDirection : std::uint8_t { Apply = 0, Correct };
     throw gr::exception(std::format("{}: 'direction' must be 'apply' or 'correct', got '{}'", block, name));
 }
 
-/// The anchor mode @p name selects, with the refusal naming the three there are.
+/// The anchor mode @p name selects. A refusal names the three modes.
 [[nodiscard]] inline gr::timing::AnchorSource parseAnchorSource(std::string_view name, std::string_view block) {
     const std::optional<gr::timing::AnchorSource> source = gr::timing::anchorSourceFrom(name);
     if (!source.has_value()) {
@@ -57,19 +57,19 @@ enum class DopplerDirection : std::uint8_t { Apply = 0, Correct };
     return *source;
 }
 
-/// A trigger tag's time and offset, read with the reserved keys' own types; no time means no anchor event.
+/// A trigger tag's time and offset, read with the reserved keys' types. A tag without a time is no anchor event.
 struct TriggerRead {
     std::uint64_t timeNs{0ULL};
     float         offsetSeconds{0.f};
     bool          present{false};  ///< the tag carries a `trigger_time` key
-    bool          readable{false}; ///< and that key, with `trigger_offset` where it is honored, carries the reserved type
+    bool          readable{false}; ///< the key, and `trigger_offset` when honored, carry the reserved types
 };
 
-/// @brief Read a tag's anchor event with the reserved keys' own types, never through a substituted default.
+/// @brief Reads a tag's anchor event with the reserved keys' types and substitutes no default.
 ///
-/// A `trigger_time` that holds something other than a `std::uint64_t` states a time this block cannot read.
-/// Taking it as zero would anchor the pass at the Unix epoch and translate the whole schedule silently, so the
-/// key is reported present and unreadable and the caller counts it as the refusal it is.
+/// A `trigger_time` that is not a `std::uint64_t` is a time the block cannot read. Zero in its place would
+/// anchor the pass at the Unix epoch and move the whole schedule silently. The key is reported present and
+/// unreadable, and the caller counts it as a refusal.
 [[nodiscard]] inline TriggerRead readTrigger(const property_map& map, bool honorOffset) {
     TriggerRead read;
     const auto  time = map.find(property_map::key_type(gr::tag::TRIGGER_TIME.shortKey()));
@@ -101,69 +101,64 @@ struct TriggerRead {
 GR_REGISTER_BLOCK(gr::blocks::channel::DopplerShift, [T], [std::complex<float>])
 
 /**
- * @brief The frequency shift a trajectory puts on a stream, or the same shift taken back off it.
+ * @brief Applies a trajectory's Doppler frequency shift to a stream, or removes it.
  *
- * A satellite pass arrives as a handful of `(time, offset)` points and has to become one phase increment per sample.
- * `gr::timing::FrequencySchedule` is that map — piecewise linear between knots, holding the end values outside them,
- * and integrated across each sample's own interval so the accumulated phase is the schedule's true integral rather
- * than a sampled approximation. A coherent demodulator downstream rides the phase, not the frequency, which is why
- * that distinction is the kernel's contract and not a refinement.
+ * A satellite pass arrives as a few `(time, offset)` points. The block turns them into one phase increment per
+ * sample. `gr::timing::FrequencySchedule` does that mapping. It is piecewise linear between knots and holds the end
+ * values outside them. It integrates across each sample's interval, and the accumulated phase is the exact integral
+ * of the schedule. A coherent demodulator tracks the phase. The exact phase is therefore the kernel's contract.
  *
- * Orbit propagation stays outside. TLEs, SGP4 and station geometry belong to whatever produced the trajectory;
- * `gr::timing::offsetFor(v_radial, f_carrier)` is the one map from the common physical statement to a schedule knot,
- * and a closing pass reads high.
+ * The block does no orbit propagation. TLEs, SGP4 and station geometry are the job of the trajectory's producer.
+ * `gr::timing::offsetFor(v_radial, f_carrier)` converts a radial velocity to a schedule offset. A closing pass reads
+ * high.
  *
- * One block, both seats. `apply` models propagation and `correct` removes it — the same table with the sign flipped,
- * which is the argument `IqImbalance` makes for the transmitter and receiver seats of one impairment. The negation
- * happens once, when the table is built, so `correct` costs exactly what `apply` costs and the two are each other's
- * inverse by construction.
+ * `apply` models propagation. `correct` removes it with the same table and the sign flipped. `IqImbalance` uses the
+ * same argument for the transmitter and receiver sides of one impairment. The negation happens once, when the table
+ * is built. `correct` costs the same as `apply`, and the two are exact inverses.
  *
- * Like `FrequencyOffset`, a passing `gr::tag::FREQUENCY` is forwarded **untouched** in both directions: applying a
- * pass's Doppler models propagation and correcting it removes that model, and neither changes what the stream is
- * nominally tuned to. `Rotator` retunes the tag because retuning on purpose is what it is for; these two do not.
+ * A passing `gr::tag::FREQUENCY` tag is forwarded unchanged in both directions, as in `FrequencyOffset`. A Doppler
+ * shift does not change the frequency the stream is tuned to. `Rotator` retunes the tag because retuning is its
+ * purpose.
  *
- * Validation refuses what cannot be meant: an offset at or past `+/-sample_rate/2` would alias rather than shift, and
- * it is refused at staging with the offending knot named rather than wrapped silently. The kernel refuses the rest —
- * unpaired vectors, non-monotonic times, non-finite offsets — and names the knot too.
+ * Staging refuses an offset at or past `+/-sample_rate/2`, since such an offset aliases. The refusal names the knot.
+ * The kernel refuses unpaired vectors, non-monotonic times and non-finite offsets, and names the knot too.
  *
- * A schedule replacement is a staged settings change: the new table is built and swapped in whole, and the phasor is
- * never re-anchored, so the accumulated phase runs straight through the switch. What changes at the switch is the
- * increment, which is what a frequency change is; a block that reset the phase would put a step discontinuity in the
- * middle of the stream instead.
+ * A schedule replacement is a staged settings change. The block builds the new table and swaps it in whole. The
+ * phasor keeps its phase, and the accumulated phase continues across the switch. Only the phase increment changes.
+ * A phase reset would put a step in the middle of the stream.
  */
 template<typename T>
 requires std::is_same_v<T, std::complex<float>>
 struct DopplerShift : gr::Block<DopplerShift<T>> {
     using Description = Doc<R""(
-@brief Applies or corrects a Doppler frequency schedule: piecewise-linear knots in, one phase increment per sample.
+@brief Applies or removes a Doppler frequency schedule with one phase increment per sample.
 
-The table arrives as the paired `schedule_times_ns` / `schedule_offsets_hz` vectors, or as `schedule_file` naming a
-`#!gr4-trajectory 1` file whose `offset_hz` or `range_rate_m_s` column supplies the same knots — two spellings of one
-input, so supplying both refuses. `direction` is 'apply' or 'correct'; an offset at or past `sample_rate/2` is
-refused naming the knot.
+The knots arrive as the paired `schedule_times_ns` and `schedule_offsets_hz` vectors. They can also come from
+`schedule_file`, a `#!gr4-trajectory 1` file with an `offset_hz` or `range_rate_m_s` column. Supplying both refuses.
+`direction` is 'apply' or 'correct'. An offset at or past `sample_rate/2` is refused, and the refusal names the knot.
 
-The schedule's time axis meets the stream at an anchor. `anchor_source = 'setting'` reads it from `anchor_index` /
-`anchor_ns`; 'first_trigger' arms it from the first `trigger_time` tag that passes — until then the stream passes
-through unshifted and `schedulePosition()` reads Unarmed — and 'every_trigger' re-arms on each one, restarting the
-accumulated phase at the new anchor, because a re-anchor moves the phase by an unbounded amount and continuing it
-would be a step pretending to be a curve. A second tag under 'first_trigger' is ignored and counted; a
-`trigger_time` past the nanosecond axis is refused and counted. `trigger_offset` moves the anchor by its own seconds
-when `honor_trigger_offset` is set. A passing `frequency` tag is forwarded unchanged: the shift moves the signal
-within the band, not the band.
+An anchor places the schedule's time axis on the stream. With `anchor_source = 'setting'`, `anchor_index` and
+`anchor_ns` give the anchor. With 'first_trigger', the first `trigger_time` tag arms it. Until then the stream
+passes through unshifted and `schedulePosition()` reads Unarmed. With 'every_trigger', each trigger tag re-arms the
+anchor and restarts the accumulated phase. A re-anchor moves the phase by an unbounded amount. A continued phase
+would put a step in the signal. Under 'first_trigger', a second tag is ignored and counted. A `trigger_time` past
+the nanosecond axis is refused and counted. With `honor_trigger_offset` set, `trigger_offset` moves the anchor by
+its seconds. A passing `frequency` tag is forwarded unchanged. The shift moves the signal within the band and
+leaves the tuning as it is.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::vector<std::int64_t>, "schedule_times_ns", Visible, Unit<"ns">, Doc<"knot times on the SampleClock axis; strictly increasing, at least two">>          schedule_times_ns{};
-    Annotated<std::vector<double>, "schedule_offsets_hz", Visible, Unit<"Hz">, Doc<"knot offsets, one per time; held at the end values outside the table">>               schedule_offsets_hz{};
-    Annotated<std::string, "schedule_file", Doc<"a #!gr4-trajectory 1 file carrying a frequency column; an alternative to the paired vectors, and staging both refuses">> schedule_file{};
-    Annotated<std::string, "direction", Visible, Doc<"'apply' puts the schedule on the stream, 'correct' takes it off">>                                                  direction            = std::string("apply");
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                                                                                       sample_rate          = 1.f;
-    Annotated<std::uint64_t, "anchor_index", Doc<"the stream sample that anchor_ns belongs to, under anchor_source 'setting'">>                                           anchor_index         = 0ULL;
-    Annotated<std::int64_t, "anchor_ns", Unit<"ns">, Doc<"the schedule-axis time of anchor_index, under anchor_source 'setting'">>                                        anchor_ns            = 0LL;
-    Annotated<std::string, "anchor_source", Doc<"'setting' (the pair above), 'first_trigger' (armed once by a trigger_time tag) or 'every_trigger' (re-armed by each)">>  anchor_source        = std::string("setting");
-    Annotated<bool, "honor_trigger_offset", Doc<"move a trigger anchor by the tag's own trigger_offset seconds">>                                                         honor_trigger_offset = true;
+    Annotated<std::vector<std::int64_t>, "schedule_times_ns", Visible, Unit<"ns">, Doc<"strictly increasing knot times on the SampleClock axis, two or more">> schedule_times_ns{};
+    Annotated<std::vector<double>, "schedule_offsets_hz", Visible, Unit<"Hz">, Doc<"knot offsets, one per time, held at the end values outside">>              schedule_offsets_hz{};
+    Annotated<std::string, "schedule_file", Doc<"#!gr4-trajectory 1 file with a frequency column">>                                                            schedule_file{};
+    Annotated<std::string, "direction", Visible, Doc<"'apply' puts the schedule on the stream, 'correct' takes it off">>                                       direction            = std::string("apply");
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                                                                            sample_rate          = 1.f;
+    Annotated<std::uint64_t, "anchor_index", Doc<"the stream sample that anchor_ns belongs to, under anchor_source 'setting'">>                                anchor_index         = 0ULL;
+    Annotated<std::int64_t, "anchor_ns", Unit<"ns">, Doc<"the schedule-axis time of anchor_index, under anchor_source 'setting'">>                             anchor_ns            = 0LL;
+    Annotated<std::string, "anchor_source", Doc<"'setting', 'first_trigger' or 'every_trigger'">>                                                              anchor_source        = std::string("setting");
+    Annotated<bool, "honor_trigger_offset", Doc<"move a trigger anchor by the tag's own trigger_offset seconds">>                                              honor_trigger_offset = true;
 
     GR_MAKE_REFLECTABLE(DopplerShift, in, out, schedule_times_ns, schedule_offsets_hz, schedule_file, direction, sample_rate, anchor_index, anchor_ns, anchor_source, honor_trigger_offset);
 
@@ -171,15 +166,15 @@ within the band, not the band.
     gr::timing::SampleClock                              _clock{};
     gr::timing::ScheduleAnchor                           _anchor{};
     gr::signal::Phasor<float>                            _phasor{};
-    std::vector<double>                                  _increments{};   ///< one call's worth, grown rather than rebuilt
+    std::vector<double>                                  _increments{};   ///< increments for one call, resized only upward
     std::uint64_t                                        _position{0ULL}; ///< index of the next sample, counted from the stream's own start
     detail::DopplerDirection                             _direction{detail::DopplerDirection::Apply};
 
-    // The observables a caller polls belong to whatever thread does the polling, while the scheduler thread writes
-    // them; the doubles cross that boundary through the seqlock and the integers through their own atomics. An
-    // anchor time is nanoseconds since the epoch — around 1.7e18 today, past the 2^53 a double holds exactly — so it
-    // is an integer rather than a slot value, which would round the anchor by hundreds of nanoseconds.
-    gr::measurement::MeasurementSlot<2UZ> _slot{}; ///< offset Hz, schedule position; the fill count is the stream position
+    // The scheduler thread writes the observables, and a caller reads them from its own thread. The doubles cross
+    // through the seqlock and the integers through their own atomics. An anchor time is nanoseconds since the epoch,
+    // around 1.7e18 today. That is past 2^53, the largest integer a double holds exactly. The anchor is therefore an
+    // integer atomic. A slot value would round it by hundreds of nanoseconds.
+    gr::measurement::MeasurementSlot<2UZ> _slot{}; ///< offset in Hz and schedule position, with the stream position as fill count
     std::atomic<bool>                     _armed{true};
     std::atomic<std::uint64_t>            _anchorIndex{0ULL};
     std::atomic<std::int64_t>             _anchorNs{0LL};
@@ -217,14 +212,13 @@ within the band, not the band.
             }
             stageSchedule(trajectory.frequency->times(), trajectory.frequency->offsets());
         } else if (times.empty() && offsets.empty()) {
-            _schedule.reset(); // no table is a passthrough, not an error: a graph may stage the pass later
+            _schedule.reset(); // without a table the stream passes through, and a table can be staged later
         } else {
             stageSchedule(std::span<const std::int64_t>(times), std::span<const double>(offsets));
         }
 
-        // Neither the phase nor the stream position is touched by a settings change: a new table changes the
-        // increment, which is what a frequency change is, and re-anchoring either would put a step in the middle of
-        // the stream. The anchor machinery itself is rebuilt, so a trigger-armed anchor waits for its trigger again.
+        // A settings change keeps the phase and the stream position. The anchor is rebuilt, and a trigger-armed
+        // anchor waits for its trigger again.
         publishMeasurements();
     }
 
@@ -235,10 +229,10 @@ within the band, not the band.
         publishMeasurements();
     }
 
-    /// @brief The offset the block is applying to the stream right now, in Hz — negated in `correct`. Any thread.
+    /// @brief The offset in Hz the block applies to the stream now, negated in `correct`. Any thread.
     [[nodiscard]] double currentOffsetHz() const noexcept { return _slot.read().first[0]; }
 
-    /// @brief Where the next sample stands against the schedule's span; `Before`/`After` are where the ends hold.
+    /// @brief The position of the next sample against the schedule's span. `Before` and `After` hold an end value.
     [[nodiscard]] SchedulePosition schedulePosition() const noexcept { return static_cast<SchedulePosition>(static_cast<std::uint8_t>(_slot.read().first[1])); }
 
     /// @brief The next sample's index counted from the stream's start, which the anchor places in time.
@@ -262,8 +256,8 @@ within the band, not the band.
             return work::Status::OK;
         }
 
-        // Grown, not rebuilt: the buffer reaches the largest chunk the scheduler ever hands over and stays there, so
-        // no call after the first of a given size allocates and no sample ever does.
+        // The buffer grows to the largest chunk and keeps that size. A call allocates only when its chunk is
+        // larger than every earlier one.
         if (_increments.size() < nSamples) {
             _increments.resize(nSamples);
         }
@@ -279,8 +273,8 @@ within the band, not the band.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
 
-        // Every mode reads the trigger tags, because ignoring one is a counted event and a graph wired with a
-        // tagged source against a hand-set anchor can only be seen to be wired that way if the count happens.
+        // Every mode reads the trigger tags. An ignored trigger is counted. The count shows a tagged source wired
+        // against a hand-set anchor.
         std::size_t done = 0UZ;
         for (const auto& [relIndex, mapRef] : inSpan.tags(nSamples)) {
             if (relIndex < 0 || static_cast<std::size_t>(relIndex) >= nSamples) {
@@ -291,7 +285,7 @@ within the band, not the band.
                 continue;
             }
             const std::size_t at = static_cast<std::size_t>(relIndex);
-            if (at > done) { // the samples before the trigger run under the anchor they arrived under, so the call is cut before the rule is fed
+            if (at > done) { // the call splits at the trigger, and the samples before it keep their anchor
                 std::ignore = processBulk(std::span<const T>(inSpan.data() + done, at - done), std::span<T>(outSpan.data() + done, at - done));
                 done        = at;
             }
@@ -299,7 +293,7 @@ within the band, not the band.
             const gr::timing::ScheduleAnchor::Response response = read.readable ? _anchor.onTrigger(_position, read.timeNs, read.offsetSeconds) : _anchor.onUnreadableTrigger();
             if (response == gr::timing::ScheduleAnchor::Response::armed || response == gr::timing::ScheduleAnchor::Response::reanchored) {
                 _clock = clockAt(_anchor.anchorIndex(), _anchor.anchorNs());
-                _phasor.setPhase(0.); // the schedule's time jumped, and continuing the phase would be a step pretending to be a curve
+                _phasor.setPhase(0.); // the schedule time jumped, and a continued phase would put a step in the signal
             }
         }
         if (done < nSamples) {
@@ -329,8 +323,7 @@ private:
                 throw gr::exception(std::format("DopplerShift: knot {} offsets {} Hz, at or past the +/-{} Hz a {} Hz stream can carry — that is an alias, not a shift", i, offsets[i], limit, static_cast<double>(sample_rate)));
             }
         }
-        // `correct` is the same table with the sign flipped, negated once here so the sample path is identical in
-        // both seats and the two are exact inverses of one another
+        // `correct` negates the table once here. The sample path is the same in both directions.
         std::vector<double> applied(offsets.begin(), offsets.end());
         if (_direction == detail::DopplerDirection::Correct) {
             for (double& value : applied) {
@@ -340,7 +333,8 @@ private:
         _schedule = std::make_shared<const gr::timing::FrequencySchedule>(times, std::span<const double>(applied));
     }
 
-    /// The offset the schedule states at sample @p index, in the seat's own sign; an unarmed or tableless block shifts nothing.
+    /// The schedule's offset at sample @p index, in the direction's sign. An unarmed block or one without a table
+    /// shifts nothing.
     [[nodiscard]] double offsetAt(std::uint64_t index) const noexcept { return _schedule && _anchor.armed() ? _schedule->offsetAt(_clock.timeOf(index)) : 0.; }
 
     /// Where sample @p index stands against the schedule's span.
@@ -361,7 +355,7 @@ private:
         return SchedulePosition::Inside;
     }
 
-    /// Once per call, never per sample: what the block is doing right now, for a reader on another thread.
+    /// Publishes the block's current state for a reader on another thread. Runs once per call.
     void publishMeasurements() noexcept {
         _armed.store(_anchor.armed(), std::memory_order_relaxed);
         _anchorIndex.store(_anchor.anchorIndex(), std::memory_order_relaxed);

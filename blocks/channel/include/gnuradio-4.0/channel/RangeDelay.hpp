@@ -35,68 +35,67 @@ namespace gr::blocks::channel {
 GR_REGISTER_BLOCK(gr::blocks::channel::RangeDelay, [T], [ std::complex<float>, float ])
 
 /**
- * @brief The envelope delay a trajectory puts on a stream, or the same delay taken back off it.
+ * @brief Applies a trajectory's envelope delay to a stream, or removes it.
  *
- * A receiver at slant range `R(t)` sees the signal `R(t)/c` seconds late, and that envelope delay is the second
- * factor of the same propagation whose first factor is the Doppler shift `DopplerShift` carries: the baseband
- * equivalent of a moving source is `x(t - tau(t)) * exp(-j 2 pi f_c tau(t))`, and this block is the `x(t - tau(t))`
- * half. `DopplerShift` and `RangeDelay` fed from one trajectory are consistent by construction and compose in that
- * order; a ten-minute low-orbit pass moves the delay by about fourteen milliseconds, hundreds of samples at a
- * baseband rate, which is why a chain that models the shift without the delay is missing a real effect rather than
- * a refinement.
+ * A receiver at slant range `R(t)` sees the signal `R(t)/c` seconds late. The baseband equivalent of a moving
+ * source is `x(t - tau(t)) * exp(-j 2 pi f_c tau(t))`. The envelope delay and the Doppler shift are the two factors
+ * of that one propagation. `DopplerShift` carries the phase factor, and this block carries `x(t - tau(t))`.
+ * `DopplerShift` and `RangeDelay` fed from one trajectory are consistent, and they compose in that order. A
+ * ten-minute low-orbit pass moves the delay by about fourteen milliseconds. That is hundreds of samples at a
+ * baseband rate. A chain that models the shift without the delay misses a real effect.
  *
- * The table is a `(time, delay)` schedule — `schedule_times_ns` with `schedule_delays_s`, or a `#!gr4-trajectory 1`
- * file whose `range_m` column supplies `range/c` per knot. It is piecewise linear between knots and held at the
- * ends, and the loader never differentiates a delay table into a frequency one or the other way: those are separate
- * inputs to separate blocks.
+ * The table is a `(time, delay)` schedule. It comes from `schedule_times_ns` with `schedule_delays_s`, or from a
+ * `#!gr4-trajectory 1` file whose `range_m` column gives `range/c` per knot. It is piecewise linear between knots
+ * and held at the ends. The loader never converts a delay table into a frequency table, or the reverse. Delay and
+ * frequency are separate inputs to separate blocks.
  *
- * A delay line is causal, so it can only reach into the past. `apply` puts the trajectory's delay on a clean signal
- * and `correct` removes it, and `correct` — which would command a negative delay where the trajectory delayed the
- * signal least — is made causal by a `bias_s` that shifts the whole schedule into the reachable past; `apply`
- * defaults it to zero, `correct` to the schedule's own maximum. A commanded delay outside the fractional-delay
- * line's reach, or a schedule whose slope reaches one sample per sample, is refused at staging naming the knot.
+ * A delay line is causal and reaches only into the past. `apply` puts the trajectory's delay on a clean signal.
+ * `correct` removes it. `correct` would command a negative delay where the trajectory delay is least. A `bias_s`
+ * shifts the whole schedule into the reachable past and makes `correct` causal. The bias defaults to zero for
+ * `apply` and to the schedule's maximum for `correct`. Staging refuses a commanded delay outside the fractional-delay
+ * line's reach. It also refuses a schedule whose slope reaches one sample per sample. The refusal names the knot.
  *
- * The anchor and the trigger machinery are `DopplerShift`'s: the schedule's time meets the stream at
- * `anchor_source` in {setting, first_trigger, every_trigger}, honoring `trigger_offset` where set, ignoring a
- * second first-trigger tag and counting it, refusing a trigger time past the nanosecond axis. Until the anchor is
- * armed the stream passes through unmodified and the line is not fed, so a trigger-anchored block starts its delay
- * from silence and its first `historySamples()` outputs are the filter's transient over that silence.
+ * The anchor and trigger handling match `DopplerShift`. `anchor_source` is setting, first_trigger or
+ * every_trigger. The block honors `trigger_offset` where set. It ignores and counts a second first-trigger tag. It
+ * refuses a trigger time past the nanosecond axis. Until the anchor is armed, the stream passes through unmodified
+ * and the line is not fed. A trigger-anchored block therefore starts its delay from silence. Its first
+ * `historySamples()` outputs are the filter's transient over that silence.
  *
- * A tag rides with the sample it marks: the reserved stream vocabulary stays at the index it arrived on, and every
- * other tag is emitted on the first output sample whose whole read position has reached the tag's input index, in
- * the same fixed point the read cursor itself is kept in.
+ * Tags of the reserved stream vocabulary stay at the index they arrived on. Every other tag leaves on the first
+ * output sample whose whole read position has reached the tag's input index. The comparison uses the fixed point
+ * of the read cursor.
  */
 template<typename T>
 requires std::is_same_v<T, std::complex<float>> || std::is_same_v<T, float>
 struct RangeDelay : gr::Block<RangeDelay<T>, gr::NoTagPropagation> {
     using Description = Doc<R""(
-@brief Applies or corrects a range-delay schedule: piecewise-linear (time, delay) knots in, a fractionally delayed
-stream out, one sample per sample.
+@brief Applies or removes a range-delay schedule and outputs a fractionally delayed stream, one sample per sample.
 
-The delay is a `SampleClock`-timed schedule, `schedule_times_ns` with `schedule_delays_s`, or a #!gr4-trajectory 1
-`schedule_file` carrying a range column. 'apply' delays the signal, 'correct' advances it; a delay line is causal,
-so 'correct' biases the schedule into the past by its own maximum unless `bias_s` says otherwise. A slope of one
-sample per sample, or a delay past the line's reach, is refused naming the knot. A tag that is not part of the
-reserved stream vocabulary moves with the sample it marks.
+The delay is a `SampleClock`-timed schedule of piecewise-linear (time, delay) knots. It comes from
+`schedule_times_ns` with `schedule_delays_s`, or from a #!gr4-trajectory 1 `schedule_file` with a range column.
+'apply' delays the signal. 'correct' advances it. A delay line is causal. 'correct' therefore biases the schedule
+into the past by the schedule's maximum, unless `bias_s` sets the bias. A slope of one sample per sample, or a
+delay past the line's reach, is refused, and the refusal names the knot. A tag outside the reserved stream
+vocabulary moves with the sample it marks.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::vector<std::int64_t>, "schedule_times_ns", Visible, Unit<"ns">, Doc<"knot times on the SampleClock axis; strictly increasing, at least two">>                        schedule_times_ns{};
-    Annotated<std::vector<double>, "schedule_delays_s", Visible, Unit<"s">, Doc<"knot delays in seconds, one per time; held at the end values outside the table">>                      schedule_delays_s{};
-    Annotated<std::string, "schedule_file", Doc<"a #!gr4-trajectory 1 file carrying a range column; an alternative to the paired vectors, and staging both refuses">>                   schedule_file{};
-    Annotated<std::string, "direction", Visible, Doc<"'apply' delays the signal by the schedule, 'correct' advances it by the schedule">>                                               direction            = std::string("apply");
-    Annotated<double, "bias_s", Unit<"s">, Doc<"a constant delay added to the schedule to keep the commanded delay non-negative; NaN derives it (0 for apply, max delay for correct)">> bias_s               = std::numeric_limits<double>::quiet_NaN();
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                                                                                                     sample_rate          = 1.f;
-    Annotated<std::uint64_t, "anchor_index", Doc<"the stream sample that anchor_ns belongs to, under anchor_source 'setting'">>                                                         anchor_index         = 0ULL;
-    Annotated<std::int64_t, "anchor_ns", Unit<"ns">, Doc<"the schedule-axis time of anchor_index, under anchor_source 'setting'">>                                                      anchor_ns            = 0LL;
-    Annotated<std::string, "anchor_source", Doc<"'setting', 'first_trigger' or 'every_trigger'">>                                                                                       anchor_source        = std::string("setting");
-    Annotated<bool, "honor_trigger_offset", Doc<"move a trigger anchor by the tag's own trigger_offset seconds">>                                                                       honor_trigger_offset = true;
-    Annotated<gr::Size_t, "bank_size", Doc<"polyphase arms; 0 derives it from attenuation_db, otherwise a power of two up to 65536">>                                                   bank_size            = 0U;
-    Annotated<int, "order", Doc<"interpolation order between arms: 0, 1 or 3">>                                                                                                         order                = 1;
-    Annotated<double, "attenuation_db", Unit<"dB">, Doc<"stopband attenuation the derived bank meets, in [20, 140]">>                                                                   attenuation_db       = 60.0;
-    Annotated<double, "rolloff", Doc<"the design's excess bandwidth, in (0, 1)">>                                                                                                       rolloff              = 0.2;
+    Annotated<std::vector<std::int64_t>, "schedule_times_ns", Visible, Unit<"ns">, Doc<"strictly increasing knot times on the SampleClock axis, two or more">> schedule_times_ns{};
+    Annotated<std::vector<double>, "schedule_delays_s", Visible, Unit<"s">, Doc<"knot delays in seconds, one per time">>                                       schedule_delays_s{};
+    Annotated<std::string, "schedule_file", Doc<"#!gr4-trajectory 1 file with a range column">>                                                                schedule_file{};
+    Annotated<std::string, "direction", Visible, Doc<"'apply' delays the signal, 'correct' advances it">>                                                      direction            = std::string("apply");
+    Annotated<double, "bias_s", Unit<"s">, Doc<"constant delay added to the schedule, NaN to derive it">>                                                      bias_s               = std::numeric_limits<double>::quiet_NaN();
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                                                                            sample_rate          = 1.f;
+    Annotated<std::uint64_t, "anchor_index", Doc<"the stream sample that anchor_ns belongs to, under anchor_source 'setting'">>                                anchor_index         = 0ULL;
+    Annotated<std::int64_t, "anchor_ns", Unit<"ns">, Doc<"the schedule-axis time of anchor_index, under anchor_source 'setting'">>                             anchor_ns            = 0LL;
+    Annotated<std::string, "anchor_source", Doc<"'setting', 'first_trigger' or 'every_trigger'">>                                                              anchor_source        = std::string("setting");
+    Annotated<bool, "honor_trigger_offset", Doc<"move a trigger anchor by the tag's own trigger_offset seconds">>                                              honor_trigger_offset = true;
+    Annotated<gr::Size_t, "bank_size", Doc<"polyphase arms, 0 or a power of two up to 65536">>                                                                 bank_size            = 0U;
+    Annotated<int, "order", Doc<"interpolation order between arms, 0, 1 or 3">>                                                                                order                = 1;
+    Annotated<double, "attenuation_db", Unit<"dB">, Doc<"stopband attenuation the derived bank meets, in [20, 140]">>                                          attenuation_db       = 60.0;
+    Annotated<double, "rolloff", Doc<"the design's excess bandwidth, in (0, 1)">>                                                                              rolloff              = 0.2;
 
     GR_MAKE_REFLECTABLE(RangeDelay, in, out, schedule_times_ns, schedule_delays_s, schedule_file, direction, bias_s, sample_rate, anchor_index, anchor_ns, anchor_source, honor_trigger_offset, bank_size, order, attenuation_db, rolloff);
 
@@ -110,10 +109,10 @@ reserved stream vocabulary moves with the sample it marks.
     std::int64_t                                        _latencyQ32{0LL}; ///< the line's own lag in the fixed point the tag map reads
     std::vector<double>                                 _delays{};        ///< one call's worth of commanded delays, grown not rebuilt
     std::vector<std::uint64_t>                          _delaysQ32{};
-    std::vector<std::pair<std::uint64_t, property_map>> _tagsMoving{}; ///< by absolute input index, ascending: their output sample is not here yet
+    std::vector<std::pair<std::uint64_t, property_map>> _tagsMoving{}; ///< tags waiting for their output sample, by ascending absolute input index
     std::vector<std::pair<std::uint64_t, property_map>> _tagsHeld{};   ///< the same, for the tags that leave on the sample they arrived on
 
-    /// The bank the line was cut for. A table, a rate or an anchor leaves it alone and keeps the history the line holds.
+    /// The bank the line was built for. A change of table, rate or anchor keeps the bank and the line's history.
     std::size_t _builtBank{0UZ};
     int         _builtOrder{0};
     double      _builtRolloff{0.};
@@ -124,8 +123,8 @@ reserved stream vocabulary moves with the sample it marks.
     std::atomic<std::uint64_t>            _nBankRebuilds{0ULL};
     std::atomic<std::uint64_t>            _nDiscontinuities{0ULL};
     std::atomic<std::uint64_t>            _nRateDisagreements{0ULL};
-    // The anchor's state, mirrored for a reader on another thread: an anchor time is a nanosecond count past what a
-    // double holds exactly, so it travels as an integer beside the slot rather than inside it.
+    // The anchor state, copied for a reader on another thread. An anchor time is a nanosecond count beyond the
+    // exact range of a double. It is stored as an integer beside the slot.
     std::atomic<bool>          _armed{false};
     std::atomic<std::uint64_t> _anchorIndex{0ULL};
     std::atomic<std::int64_t>  _anchorNs{0LL};
@@ -135,8 +134,10 @@ reserved stream vocabulary moves with the sample it marks.
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
 
-    /// @brief Stages the schedule and cuts the bank from the members. Idempotent - it cuts only what the members no
-    /// longer describe - so `start()` may run it for a batch that moved nothing and so never called back.
+    /// @brief Stages the schedule and builds the bank from the members.
+    ///
+    /// It is idempotent and rebuilds only what differs from the members. `start()` can run it after a settings batch
+    /// that changed no value and made no call.
     void rebuild() {
         if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
             throw gr::exception(std::format("RangeDelay: 'sample_rate' must be positive and finite, got {}", sample_rate.value));
@@ -151,8 +152,8 @@ reserved stream vocabulary moves with the sample it marks.
             throw gr::exception(std::format("RangeDelay: 'rolloff' must be in (0, 1), got {}", rolloff.value));
         }
 
-        // Everything is built and validated into locals first, and installed only once nothing can still refuse:
-        // a change the block turns down leaves the schedule, the bank and the history it was already running on.
+        // Everything is built and validated into locals first. The block installs them after every check has
+        // passed. A refused change leaves the running schedule, bank and history in place.
         const detail::DopplerDirection   seat = detail::parseDopplerDirection(direction.value, "RangeDelay");
         const gr::timing::ScheduleAnchor anchor(detail::parseAnchorSource(anchor_source.value, "RangeDelay"), anchor_index.value, anchor_ns.value, honor_trigger_offset.value);
         const gr::timing::SampleClock    clock  = clockAt(anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
@@ -162,8 +163,8 @@ reserved stream vocabulary moves with the sample it marks.
         const bool held    = _line.has_value();
         const bool cutBank = !held || bank != _builtBank || order.value != _builtOrder || rolloff.value != _builtRolloff || attenuation_db.value != _builtAttenuationDb;
         if (cutBank) {
-            // The window length follows the prototype, so samples the line holds would not line up with the taps
-            // that read them; the bank is the one change that costs the history, and the count says how often.
+            // The window length follows the prototype. The samples in the old line would not line up with the new
+            // taps. A new bank is the only change that drops the history, and the count records each one.
             const gr::filter::ResamplerDesign  design = gr::filter::designFractionalDelay(bank, rolloff.value, attenuation_db.value);
             gr::filter::FractionalDelayLine<T> built(bank, order.value, std::span<const float>(design.taps), staged.wholeDelaySamples);
             _line               = std::move(built);
@@ -171,7 +172,7 @@ reserved stream vocabulary moves with the sample it marks.
             _builtOrder         = order.value;
             _builtRolloff       = rolloff.value;
             _builtAttenuationDb = attenuation_db.value;
-            if (held) { // cutting the first bank is not a rebuild: there was no history to lose
+            if (held) { // the first bank drops no history and is not counted
                 _nBankRebuilds.fetch_add(1ULL, std::memory_order_relaxed);
             }
         } else {
@@ -188,7 +189,7 @@ reserved stream vocabulary moves with the sample it marks.
     }
 
     void start() {
-        if (!_line) { // a batch that moved no value never called back, so the bank may not be cut yet
+        if (!_line) { // a settings batch that changed no value made no call, and the bank may not exist yet
             rebuild();
         }
         _position = 0ULL;
@@ -204,19 +205,19 @@ reserved stream vocabulary moves with the sample it marks.
         publishMeasurements();
     }
 
-    /// @brief The delay commanded right now, in seconds — the schedule plus the bias, negated in `correct`. Any thread.
+    /// @brief The delay commanded now, in seconds. It is the schedule plus the bias, negated in `correct`. Any thread.
     [[nodiscard]] double currentDelaySeconds() const noexcept { return _slot.read().first[0]; }
     /// @brief The same delay in samples at the block's own rate. Any thread.
     [[nodiscard]] double currentDelaySamples() const noexcept { return _slot.read().first[1]; }
     /// @brief The constant the schedule is shifted by, derived under `correct` unless `bias_s` states it. Any thread.
     [[nodiscard]] double biasSeconds() const noexcept { return _slot.read().first[2]; }
-    /// @brief The output's lag behind the input at a commanded delay of zero: the prototype's own plus the bank's one sample.
+    /// @brief The output's lag behind the input at a commanded delay of zero. It is the prototype's lag plus one sample.
     [[nodiscard]] double latencySamples() const noexcept { return _slot.read().first[3]; }
-    /// @brief `(N-1)/(2L)` input samples, the prototype's own, which `latencySamples()` carries one more than.
+    /// @brief The prototype's own delay of `(N-1)/(2L)` input samples. `latencySamples()` is one sample more.
     [[nodiscard]] double groupDelaySamples() const noexcept { return _slot.read().first[4]; }
-    /// @brief Where the next sample stands against the schedule's span; `Before`/`After` are where the ends hold.
+    /// @brief The position of the next sample against the schedule's span. `Before` and `After` hold an end value.
     [[nodiscard]] SchedulePosition schedulePosition() const noexcept { return static_cast<SchedulePosition>(static_cast<std::uint8_t>(_slot.read().first[5])); }
-    /// @brief The samples the line holds, which is the transient a fresh or re-anchored line emits over silence.
+    /// @brief The samples the line holds. A fresh or re-anchored line emits that many samples of transient over silence.
     [[nodiscard]] std::size_t historySamples() const noexcept { return _line ? _line->historySamples() : 0UZ; }
 
     /// @brief The next sample's index counted from the stream's start, which the anchor places in time.
@@ -245,9 +246,9 @@ reserved stream vocabulary moves with the sample it marks.
         const std::uint64_t callStart = _position;
         reserve(nSamples);
 
-        // The reserved vocabulary describes the stream rather than a point in it, so it leaves on the sample it
-        // arrived on; everything else leaves on the output sample that carries its input sample. Both go through
-        // the same walk over the output, because that walk is what puts them out in the order they are in.
+        // The reserved vocabulary describes the stream, not a point in it. Those tags leave on the sample they
+        // arrived on. Every other tag leaves on the output sample that carries its input sample. Both kinds go
+        // through one walk over the output, and the walk keeps them in order.
         _tagsHeld.clear();
         for (const auto& [relIndex, mapRef] : inSpan.tags(nSamples)) {
             if (relIndex < 0 || static_cast<std::size_t>(relIndex) >= nSamples) {
@@ -273,7 +274,7 @@ reserved stream vocabulary moves with the sample it marks.
                 continue;
             }
             const std::size_t at = static_cast<std::size_t>(relIndex);
-            advance(inSpan, outSpan, done, at); // the samples before the trigger run under the anchor they arrived under, so the call is cut before the rule is fed
+            advance(inSpan, outSpan, done, at); // the call splits at the trigger, and the samples before it keep their anchor
             done = at;
 
             const gr::timing::ScheduleAnchor::Response response = read.readable ? _anchor.onTrigger(_position, read.timeNs, read.offsetSeconds) : _anchor.onUnreadableTrigger();
@@ -293,7 +294,7 @@ reserved stream vocabulary moves with the sample it marks.
     }
 
 private:
-    /// A table and the constants that go with it, held apart from the block until every refusal has had its chance.
+    /// A table and its constants, kept apart from the block until every check has passed.
     struct Staged {
         std::optional<gr::timing::DelaySchedule> schedule{};
         double                                   bias{0.};
@@ -319,12 +320,12 @@ private:
         return bank;
     }
 
-    /// The largest delay the fixed point carries, in seconds at this rate, one sample short of it so that the
-    /// history the line is sized to — the whole part of the delay, plus one — stays inside the same bound.
+    /// The largest delay the fixed point carries, in seconds at this rate, less one sample. The line's history is
+    /// the whole part of the delay plus one. That history stays inside the same bound.
     [[nodiscard]] double reachSeconds() const noexcept { return static_cast<double>(gr::filter::kMaxFractionalDelaySamples - 1ULL) / static_cast<double>(sample_rate.value); }
 
-    /// The whole samples of history a commanded delay of @p seconds needs: its whole part, plus the sample the
-    /// fraction reaches into. Bounded by `reachSeconds()`, which every path checks before arriving here.
+    /// The whole samples of history a commanded delay of @p seconds needs. That is its whole part plus the sample
+    /// the fraction reaches into. `reachSeconds()` bounds it, and every path checks that bound before this call.
     [[nodiscard]] std::uint64_t wholeDelayFor(double seconds) const noexcept { return static_cast<std::uint64_t>(std::max(0., std::floor(seconds * static_cast<double>(sample_rate.value)) + 1.)); }
 
     [[nodiscard]] Staged stage(detail::DopplerDirection seat) const {
@@ -348,7 +349,7 @@ private:
         }
 
         if (times.empty() && delays.empty()) {
-            // No table is a constant delay of the bias alone, which the same reach and the same causality hold.
+            // Without a table the delay is the bias alone. The same reach and causality limits apply.
             Staged staged;
             staged.bias = std::isnan(bias_s.value) ? 0. : bias_s.value;
             if (!std::isfinite(staged.bias) || staged.bias < 0.) {
@@ -375,8 +376,8 @@ private:
         const double sign = seat == detail::DopplerDirection::Correct ? -1. : 1.;
         const double bias = resolveBias(schedule, seat);
 
-        // the commanded delay is `sign * delay + bias`; it must stay in [0, the line's reach) at every knot, and its
-        // slope must stay under one sample per sample or the read position would run backwards
+        // The commanded delay is `sign * delay + bias`. It must stay in [0, the line's reach) at every knot. Its
+        // slope must stay under one sample per sample, or the read position would run backwards.
         const double rate      = static_cast<double>(sample_rate.value);
         const double reach     = reachSeconds();
         const auto   knotTimes = schedule.times();
@@ -400,8 +401,8 @@ private:
 
         Staged staged;
         staged.bias = bias;
-        // the largest delay this table ever commands, which is what the line must hold history for; a schedule
-        // holds its end values, so that maximum is a property of the table rather than of the stream
+        // The line holds history for the largest delay this table commands. A schedule holds its end values. The
+        // maximum therefore depends on the table alone and not on the stream.
         double worst = 0.;
         for (const double value : knotVals) {
             worst = std::max(worst, sign * value + bias);
@@ -421,29 +422,30 @@ private:
             }
             return bias_s.value;
         }
-        // the default keeps the commanded delay causal: apply is already non-negative, so zero; correct commands
-        // `-delay + bias`, least where the delay is greatest, so the schedule's maximum lifts that to zero
+        // The default keeps the commanded delay causal. `apply` is already non-negative and takes zero. `correct`
+        // commands `-delay + bias`, least where the delay is greatest. The schedule's maximum lifts that least value
+        // to zero.
         return seat == detail::DopplerDirection::Correct ? schedule.maxValue() : 0.;
     }
 
     void reserve(std::size_t nSamples) {
-        // Grown, not rebuilt: the buffers reach the largest chunk the scheduler ever hands over and stay there, so
-        // no call after the first of a given size allocates and no sample ever does.
+        // The buffers grow to the largest chunk and keep that size. A call allocates only when its chunk is larger
+        // than every earlier one.
         if (_delays.size() < nSamples) {
             _delays.resize(nSamples);
             _delaysQ32.resize(nSamples);
         }
     }
 
-    /// @brief Fill `[at, at + input.size())` of the call's delays and run the line over @p input; true where it filtered.
+    /// @brief Fills `[at, at + input.size())` of the call's delays and runs the line over @p input. True where it filtered.
     [[nodiscard]] bool runSegment(std::span<const T> input, std::span<T> output, std::size_t at) {
         const std::size_t nSamples = input.size();
         if (nSamples == 0UZ) {
             return false;
         }
         if (!_line || !_anchor.armed()) {
-            // An anchor that has not been armed places no sample in time, so there is no delay to command and
-            // nothing the line could hold that would describe the stream: the input passes and the line waits.
+            // An unarmed anchor places no sample in time. There is no delay to command and nothing for the line to
+            // hold. The input passes through and the line waits.
             std::ranges::copy(input, output.begin());
             _position += nSamples;
             return false;
@@ -466,7 +468,7 @@ private:
         return true;
     }
 
-    /// @brief Run `[from, to)` of the call and hand the tags it carried to the output samples that carry their samples.
+    /// @brief Runs `[from, to)` of the call and attaches its tags to the output samples that carry their samples.
     void advance(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, std::size_t from, std::size_t to) {
         if (to <= from) {
             return;
@@ -477,12 +479,12 @@ private:
     }
 
     /**
-     * @brief Emit each waiting tag on the first output sample whose whole read position has reached its input index.
+     * @brief Emits each waiting tag on the first output sample whose whole read position has reached its input index.
      *
-     * The read position of output `k` is `k - lag`, with the lag the commanded delay plus the line's own, both in
-     * the `Q32` the cursor is kept in: `floor((k << 32) - lag) >> 32 >= i` is `(k - i) << 32 >= lag`, which is the
-     * comparison below and is integer throughout. The lag is non-negative, so the map is monotone and tags never
-     * reorder; where two of them reach one output sample both are attached there, in input order.
+     * The read position of output `k` is `k - lag`. The lag is the commanded delay plus the line's own, both in the
+     * `Q32` format of the cursor. `floor((k << 32) - lag) >> 32 >= i` equals `(k - i) << 32 >= lag`. The comparison
+     * below uses that integer form. The lag is non-negative, and the map is monotone. Tags keep their order. Two
+     * tags that reach one output sample are both attached there, in input order.
      */
     void placeTags(OutputSpanLike auto& outSpan, std::uint64_t firstIndex, std::size_t outOffset, std::size_t nSamples, bool filtered) {
         if (_tagsMoving.empty() && _tagsHeld.empty()) {
@@ -521,7 +523,7 @@ private:
         _tagsHeld.erase(_tagsHeld.begin(), _tagsHeld.begin() + static_cast<std::ptrdiff_t>(held));
     }
 
-    /// @brief A tag naming any of the reserved stream keys, which describe the stream rather than one place in it.
+    /// @brief A tag naming any reserved stream key. Those keys describe the whole stream, not one place in it.
     [[nodiscard]] static bool namesReservedKey(const property_map& map) noexcept {
         for (const auto& entry : map) {
             if (std::ranges::find(gr::tag::kDefaultTags, std::string_view(entry.first)) != gr::tag::kDefaultTags.end()) {
@@ -531,19 +533,19 @@ private:
         return false;
     }
 
-    /// @brief Count what the reserved keys say about the stream: a gap in it, and a rate that is not the staged one.
+    /// @brief Counts the gaps and the rates other than the staged one that the reserved keys report.
     void countStreamKeys(const property_map& map) noexcept {
         if (map.find(property_map::key_type(gr::tag::N_DROPPED_SAMPLES.shortKey())) != map.end()) {
-            // The schedule maps a sample index to a time, so a gap makes that map wrong by exactly the gap; the
-            // block does not bridge it, and the count is what says so.
+            // The schedule maps a sample index to a time. A gap makes that map wrong by exactly the gap. The block
+            // does not bridge the gap and counts it.
             _nDiscontinuities.fetch_add(1ULL, std::memory_order_relaxed);
         }
         const auto rate = map.find(property_map::key_type(gr::tag::SAMPLE_RATE.shortKey()));
         if (rate == map.end()) {
             return;
         }
-        // The staged rate is the one the schedule is read at, so a stream that says otherwise does not silently
-        // retime a pass; the disagreement is counted instead.
+        // The schedule is read at the staged rate. A stream tag with another rate does not retime the pass. The
+        // block counts the disagreement.
         const float* tagged = rate->second.get_if<float>();
         const double staged = static_cast<double>(sample_rate.value);
         if (tagged == nullptr || !(std::abs(static_cast<double>(*tagged) - staged) <= 1e-9 * staged)) {
@@ -576,7 +578,7 @@ private:
         return SchedulePosition::Inside;
     }
 
-    /// Once per call, never per sample: what the block is doing right now, for a reader on another thread.
+    /// Publishes the block's current state for a reader on another thread. Runs once per call.
     void publishMeasurements() noexcept {
         _armed.store(_anchor.armed(), std::memory_order_relaxed);
         _anchorIndex.store(_anchor.anchorIndex(), std::memory_order_relaxed);
