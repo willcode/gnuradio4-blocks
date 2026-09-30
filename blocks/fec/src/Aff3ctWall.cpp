@@ -36,8 +36,8 @@ namespace gr::blocks::fec::wall {
 
 namespace {
 
-//! Where the pinned release keeps the parity-check matrices it ships. Supplied by the build, which
-//! is the only place that knows where the package was found.
+//! Where the pinned release keeps the parity-check matrices it ships. The build supplies it, since
+//! the build knows where the package was found.
 #ifndef GR4_AFF3CT_LDPC_CONF_DIR
 #define GR4_AFF3CT_LDPC_CONF_DIR ""
 #endif
@@ -53,10 +53,10 @@ constexpr std::size_t kPolar5gLength = 1024UZ;
 /*!
  * @brief The constructions the release ships that this wrap names, and the file each resolves to.
  *
- * The set is what the pinned release actually carries at the shapes the blocks offer, not what a
- * specification wished for: the release ships no 802.11n `(648, 324)` matrix, and its Wi-Fi matrix
- * is the rate 5/6 `(648, 540)` one. A name here is a promise that the file is present and that the
- * dimensions below are its own; anything else is `alist_path`.
+ * The set holds the constructions the pinned release carries at the shapes the blocks offer, not
+ * those a specification wished for. The release ships no 802.11n `(648, 324)` matrix. Its Wi-Fi matrix is
+ * the rate 5/6 `(648, 540)` one. A name here promises that the file is present and that the
+ * dimensions below are its own. Any other matrix goes through `alist_path`.
  */
 const std::map<std::string, std::string>& ldpcCatalog() {
     static const std::map<std::string, std::string> known{
@@ -119,12 +119,12 @@ void fromFrame(const std::vector<int>& frame, std::span<std::uint8_t> bits) {
 }
 
 /*!
- * @brief The LLR bridge: our own sense in, AFF3CT's out.
+ * @brief Converts LLRs from this module's sense to AFF3CT's.
  *
- * Positive carries a one here and favors a zero there, so the crossing is a negation and nothing
- * else. No scaling: every decoder behind this wall is either a min-sum family, whose decisions are
- * invariant under a positive scale, or a sum-product one, whose LLRs the caller is expected to have
- * scaled by the channel it measured.
+ * Here a positive value carries a one. In AFF3CT it favors a zero. The conversion is a negation
+ * alone, with no scaling. Every decoder behind this adapter is either a min-sum family, whose
+ * decisions are invariant under a positive scale, or a sum-product one. The caller scales the
+ * LLRs of a sum-product decoder by the channel it measured.
  */
 void toAff3ctLlr(std::span<const float> llr, std::vector<float>& frame) {
     frame.resize(llr.size());
@@ -133,32 +133,31 @@ void toAff3ctLlr(std::span<const float> llr, std::vector<float>& frame) {
     }
 }
 
-//! The hard decision taken from a soft value: the sign, with zero reading as a one.
+//! The hard decision taken from a soft value by its sign, with zero reading as a one.
 [[nodiscard]] int slice(float value) noexcept { return (value >= 0.0F) ? 1 : 0; }
 
 /*!
- * @brief Our own CRC in the shape AFF3CT's list decoders ask for.
+ * @brief This module's CRC in the shape AFF3CT's list decoders ask for.
  *
- * The list decoder needs to ask, of each surviving path, whether its information bits check. That
- * question is answered by `gr::digital::Crc` so the tree keeps one polynomial vocabulary, and this
- * class is the adapter and nothing more: `K` is the payload, `size` the signature, and the bits are
- * packed most significant first, which is the bit order every other adapter in this module uses.
+ * The list decoder asks of each surviving path whether its information bits check.
+ * `gr::digital::Crc` answers, and the module keeps one polynomial vocabulary. This class is only
+ * the adapter. `K` is the payload and `size` the signature. The bits are packed most significant
+ * first, the bit order every other adapter in this module uses.
  */
 class TreeCrc : public aff3ct::module::CRC<int> {
 public:
     TreeCrc(int payloadBits, int signatureBits, const gr::digital::Crc& crc) : aff3ct::module::CRC<int>(payloadBits, signatureBits), _payload(static_cast<std::size_t>(payloadBits)), _signature(static_cast<std::size_t>(signatureBits)), _crc(crc) {}
 
-    //! Write the payload's signature into @p bits at the payload's end, which is what the encoder does.
+    //! Writes the payload's signature into @p bits at the payload's end, as the encoder does.
     void sign(int* bits) const { appendSignature(bits); }
 
     /*!
      * @brief Whether the payload and signature bits at @p bits carry their own signature.
      *
-     * Every bit is read for truth rather than for the value 1. The list decoder hands over the bits
-     * its trees hold, and those are truthy rather than normalized — AFF3CT's own store writes
-     * `s[i] ? 1 : 0` on the way out, which is the same statement made at the other end of the same
-     * data. Comparing the raw values instead rejects every correct path and is exactly the fault
-     * this comment exists to keep from coming back.
+     * Every bit is read for truth, not for the value 1. The list decoder passes the bits its trees
+     * hold, and those are truthy, not normalized. AFF3CT's own store writes `s[i] ? 1 : 0` on the
+     * way out, the same statement at the other end of the same data. Comparing the raw values would
+     * reject every correct path.
      */
     [[nodiscard]] bool signed_correctly(const int* bits) const {
         const std::uint64_t value = signatureOf(bits);
@@ -257,8 +256,8 @@ LdpcCodec::LdpcCodec(const LdpcSettings& settings) : _impl(std::make_unique<Impl
         _impl->k = _impl->n - h.get_n_cols();
 
         auto encoder = std::make_unique<aff3ct::module::Encoder_LDPC_from_H<int>>(static_cast<int>(_impl->k), static_cast<int>(_impl->n), h);
-        // The decoder reads its information bits out of the posterior at the positions the encoder
-        // put them, so the two must be told the same set; the encoder is what computed it.
+        // The decoder reads its information bits out of the posterior at the positions where the
+        // encoder put them. Both must be given the same set, and the encoder computed it.
         const std::vector<uint32_t> infoBitsPos = encoder->get_info_bits_pos();
 
         const int  iterations = static_cast<int>(settings.iterations);
@@ -311,21 +310,21 @@ void LdpcCodec::encode(std::span<const std::uint8_t> payload, std::span<std::uin
 DecodeReport LdpcCodec::decode(std::span<const float> llr, std::span<std::uint8_t> payload) {
     toAff3ctLlr(llr, _impl->llr);
     try {
-        // The three-argument vector overload cannot deduce its allocator, since the status frame is int8_t
-        // and the information frame is int and the signature shares one allocator parameter between them;
-        // the buffers are exactly N and K long, so the pointer form is the same call without the check.
+        // The three-argument vector overload cannot deduce its allocator. The status frame is int8_t, the
+        // information frame is int, and the signature shares one allocator parameter between them. The
+        // buffers are exactly N and K long, and the pointer form is the same call without the check.
         std::ignore = _impl->decoder->decode_siho(_impl->llr.data(), _impl->status.data(), _impl->frame.data());
     } catch (const std::exception& refusal) {
         reraise("LDPC", "decode", refusal);
     }
     fromFrame(_impl->frame, payload);
 
-    // The account of the channel is the same one every other decoder in this module gives: the coded
-    // bits by which the word received and the word decoded disagree. Re-encoding the estimate is what
-    // makes that comparable across families, since only the encoder knows where the parity went.
-    // AFF3CT's status socket is a codeword-detected flag rather than a failure flag: the belief
-    // propagation writes 1 where the syndrome checked and 0 where the iterations ran out with it
-    // still failing, which is the refusal this family can make.
+    // The account of the channel matches every other decoder in this module. It counts the coded
+    // bits where the word received and the word decoded differ. Re-encoding the estimate makes that
+    // comparable across families, since only the encoder knows where the parity went. AFF3CT's
+    // status socket is a codeword-detected flag, not a failure flag. Belief propagation writes 1
+    // where the syndrome checked and 0 where the iterations ran out with it still failing. That 0 is
+    // the refusal this family can make.
     DecodeReport report;
     report.refused = _impl->status[0UZ] == 0;
     try {
@@ -388,11 +387,11 @@ PolarCodec::PolarCodec(const PolarSettings& settings) : _impl(std::make_unique<I
         std::vector<bool>                                    frozen(settings.n, false);
         std::unique_ptr<aff3ct::tools::Frozenbits_generator> generator;
         if (settings.frozenConstruction == "5g") {
-            // The release ships the 5G reliability sequence as a data file and its installed package
-            // does not tell the library where that file went, so the wall names it: the sequence is
-            // read from the release's own conf directory, which the build supplies. Only the 1024-bit
-            // sequence is shipped, and subsampling it to a shorter code is the standard's own rule
-            // rather than a file, so a shorter code is refused here rather than approximated.
+            // The release ships the 5G reliability sequence as a data file. Its installed package
+            // does not tell the library where that file went, and the adapter names it. The sequence
+            // is read from the release's own conf directory, which the build supplies. Only the
+            // 1024-bit sequence is shipped. Subsampling it to a shorter code is a rule of the
+            // standard, not a file. A shorter code is therefore refused here, not approximated.
             const std::string directory(GR4_AFF3CT_POLAR_CONF_DIR);
             if (directory.empty()) {
                 throw gr::exception(std::format("Polar ({}): frozen_construction '5g' reads the release's reliability sequence, and this build was configured without the release's sequence directory; use 'ga'", configuration));
@@ -410,15 +409,15 @@ PolarCodec::PolarCodec(const PolarSettings& settings) : _impl(std::make_unique<I
         } else {
             throw gr::exception(std::format("Polar ({}): frozen_construction must be 'ga' or '5g', got '{}'", configuration, settings.frozenConstruction));
         }
-        // Every construction is handed the design point whether or not it reads it: the Gaussian
-        // approximation is evaluated at one noise level and that level is what "design SNR" means,
-        // while a tabulated sequence ignores it. The number is the design Eb/N0 turned into the
-        // standard deviation of antipodal signaling at this code's own rate.
+        // Every construction receives the design point, whether or not it reads it. The Gaussian
+        // approximation is evaluated at one noise level, and "design SNR" names that level.
+        // A tabulated sequence ignores it. The number is the design Eb/N0 turned into the standard
+        // deviation of antipodal signaling at this code's own rate.
         const double rate  = static_cast<double>(settings.k) / static_cast<double>(settings.n);
         const double esn0  = settings.designSnrDb + 10.0 * std::log10(rate);
         const double sigma = std::sqrt(1.0 / (2.0 * std::pow(10.0, esn0 / 10.0)));
-        // The generator keeps a pointer to the noise rather than a copy, so the design point has to
-        // outlive the call that reads it; a temporary here is a dangling read inside generate().
+        // The generator keeps a pointer to the noise, not a copy. The design point must outlive the
+        // call that reads it. A temporary here would be a dangling read inside generate().
         const aff3ct::tools::Sigma<float> designPoint(static_cast<float>(sigma));
         generator->set_noise(designPoint);
         generator->generate(frozen);
@@ -438,7 +437,7 @@ PolarCodec::PolarCodec(const PolarSettings& settings) : _impl(std::make_unique<I
         } else {
             throw gr::exception(std::format("Polar ({}): decoder must be 'sc', 'scl' or 'ca_scl', got '{}'", configuration, settings.decoder));
         }
-        // The list decoders this release ships in a *_fast_* form are broken at this tag, so the wrap
+        // The list decoders this release ships in a *_fast_* form are broken at this tag. The adapter
         // takes the naive forms, which are the reference implementations and are correct.
     } catch (const gr::exception&) {
         throw;
@@ -465,9 +464,9 @@ void PolarCodec::encode(std::span<const std::uint8_t> payload, std::span<std::ui
     }
     try {
         if (_impl->crc) {
-            // The signature is written straight into the k-bit frame rather than through AFF3CT's own
-            // build task: the wall owns this CRC, and one code path that both the encoder and the list
-            // decoder's path check go through is one fewer place for the two to disagree.
+            // The signature is written straight into the k-bit frame, not through AFF3CT's own build
+            // task. The adapter owns this CRC. The encoder and the list decoder's path check share one
+            // code path, which leaves one fewer place for the two to disagree.
             _impl->crc->sign(_impl->frame.data());
         }
         _impl->encoder->encode(_impl->frame, _impl->coded);
@@ -480,9 +479,9 @@ void PolarCodec::encode(std::span<const std::uint8_t> payload, std::span<std::ui
 DecodeReport PolarCodec::decode(std::span<const float> llr, std::span<std::uint8_t> payload) {
     toAff3ctLlr(llr, _impl->llr);
     try {
-        // The three-argument vector overload cannot deduce its allocator, since the status frame is int8_t
-        // and the information frame is int and the signature shares one allocator parameter between them;
-        // the buffers are exactly N and K long, so the pointer form is the same call without the check.
+        // The three-argument vector overload cannot deduce its allocator. The status frame is int8_t, the
+        // information frame is int, and the signature shares one allocator parameter between them. The
+        // buffers are exactly N and K long, and the pointer form is the same call without the check.
         std::ignore = _impl->decoder->decode_siho(_impl->llr.data(), _impl->status.data(), _impl->frame.data());
     } catch (const std::exception& refusal) {
         reraise("Polar", "decode", refusal);
@@ -493,8 +492,8 @@ DecodeReport PolarCodec::decode(std::span<const float> llr, std::span<std::uint8
 
     DecodeReport report;
     if (_impl->crc) {
-        // The list decoder falls back to its best path when no survivor checks, so the refusal is
-        // our own CRC asked once more of the answer actually delivered.
+        // The list decoder falls back to its best path when no survivor checks. The refusal is
+        // therefore this module's CRC asked once more of the answer delivered.
         report.refused = !_impl->crc->signed_correctly(_impl->frame.data());
     }
     try {

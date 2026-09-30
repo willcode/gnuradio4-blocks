@@ -1,18 +1,18 @@
-# The LDPC and Polar families are AFF3CT's, and AFF3CT is an option rather than a dependency: the module builds whole
-# without it and the four blocks that need it are registered only when the gate is on. That is the network module's
-# libzmq split, with one addition — the AFF3CT headers reach no installed header of ours, so the wrap is a compiled
-# translation unit behind a pointer and the block headers name this module's own types only.
+# The LDPC and Polar families come from AFF3CT. AFF3CT is an option, not a dependency. The module builds whole without
+# it, and the four blocks that need it are registered only when the gate is on. The network module splits libzmq the
+# same way, with one addition. The AFF3CT headers reach no installed header of this module. The adapter is a compiled
+# translation unit behind a pointer, and the block headers name this module's own types only.
 option(GR4_ENABLE_AFF3CT "build the LDPC and Polar blocks against a pinned AFF3CT release" OFF)
 
 set(GR4_FEC_HAVE_AFF3CT FALSE)
 if(GR4_ENABLE_AFF3CT)
-  # Threads first: the exported aff3ct config names Threads::Threads without finding it.
+  # Threads first. The exported aff3ct config names Threads::Threads without finding it.
   find_package(Threads REQUIRED)
   find_package(aff3ct CONFIG REQUIRED)
   set(GR4_FEC_HAVE_AFF3CT TRUE)
-  # The release ships its parity-check matrices as data beside the package, and the package does not name where. The
-  # directory is derived from where the config was found so that the 'standard' setting can resolve a name, and it is a
-  # cache variable so a different layout is one -D away.
+  # The release ships its parity-check matrices as data beside the package, and the package does not say where. The
+  # directory is derived from where the config was found, and the 'standard' setting can then resolve a name. It is a
+  # cache variable, and a different layout needs one -D.
   get_filename_component(GR4_AFF3CT_PREFIX "${aff3ct_DIR}/../../.." ABSOLUTE)
   set(GR4_AFF3CT_LDPC_CONF_DIR
       "${GR4_AFF3CT_PREFIX}/share/aff3ct-${aff3ct_VERSION}/conf/dec/LDPC"
@@ -45,13 +45,13 @@ set(GrFecBlocks_HDRS
     include/gnuradio-4.0/fec/RsBlocks.hpp)
 
 if(GR4_FEC_HAVE_AFF3CT)
-  # The wall: the only translation unit here that sees an AFF3CT header. It is position independent because the block
-  # library it is linked into is a shared object.
+  # Aff3ctWall.cpp is the one translation unit here that sees an AFF3CT header. It is position independent because the
+  # block library it is linked into is a shared object.
   add_library(gr-fec-aff3ct STATIC src/Aff3ctWall.cpp)
   set_target_properties(gr-fec-aff3ct PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  # gnuradio-options carries the project's warning set and is not itself installed, so it is a build-time link only; the
-  # AFF3CT headers arrive through an imported target and are therefore system includes, which is what keeps that warning
-  # set usable over them.
+  # gnuradio-options carries the project's warning set and is not installed itself. It is therefore a build-time link
+  # only. The AFF3CT headers arrive through an imported target and are system includes. That keeps the warning set
+  # usable over them.
   target_link_libraries(
     gr-fec-aff3ct
     PUBLIC gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm
@@ -68,8 +68,8 @@ if(GR4_FEC_HAVE_AFF3CT)
     include/gnuradio-4.0/fec/LdpcBlocks.hpp
     include/gnuradio-4.0/fec/PolarBlocks.hpp)
 else()
-  # The two headers are still on disk with the gate off, and they carry registrations. Naming them here is the module
-  # saying it meant it: without AFF3CT there is nothing behind them to register.
+  # The two headers stay on disk with the gate off, and they carry registrations. They are listed as unregistered
+  # headers on purpose. Without AFF3CT nothing behind them can be registered.
   set(GrFecBlocks_UNREGISTERED include/gnuradio-4.0/fec/LdpcBlocks.hpp include/gnuradio-4.0/fec/PolarBlocks.hpp)
 endif()
 

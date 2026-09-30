@@ -21,22 +21,23 @@
 #include <gnuradio-4.0/fec/PolarBlocks.hpp>
 
 /*
- * The coded-loopback gate for the two wrapped families: encode, a seeded additive
- * white Gaussian noise channel, decode, and the information bit-error rate read against the rate
- * the pinned release's own reference tables publish for the same code, decoder and iteration count.
+ * The coded-loopback gate for the two wrapped families. Each leg encodes, passes a seeded
+ * additive white Gaussian noise channel and decodes. The information bit-error rate is read
+ * against the rate that the pinned release's own reference tables publish for the same code,
+ * decoder and iteration count.
  *
- * The operating points, the published
- * readings, the envelope and the frame counts were fixed before the first run and none was changed
- * after it. A fixed seed measures one realization rather than an ensemble, and a frame error puts a
- * burst of bits wrong at once, so the estimator's spread at these frame counts is wide; the envelope
- * is a factor of four either way, asserted in both directions, so a rate far below the published
- * curve fails as loudly as one above it. What a factor of four still catches is every way a wrap can
- * be wrong — a sign inverted, a frozen set that is not the standard's, an iteration count that is
- * not being honored — since each of those lands orders of magnitude away.
+ * The operating points, the published readings, the envelope and the frame counts were fixed
+ * before the first run and not changed after it. A fixed seed measures one realization, not an
+ * ensemble. A frame error puts a burst of bits wrong at once. The estimator's spread at these frame
+ * counts is therefore wide. The envelope is a factor of four either way, asserted in both
+ * directions. A rate far below the published curve fails as loudly as one above it. A factor of
+ * four still catches every way the adapter can be wrong. Examples are an inverted sign, a frozen
+ * set that is not the standard's, and an ignored iteration count. Each of those lands orders of
+ * magnitude away.
  *
- * The channel is the channel module's `AwgnChannel<float>`, driven directly rather than wired into the
- * graph: it is a stream block and these are record blocks, so a graph would need a pair of
- * record-to-stream adapters between them and would measure those as well as this.
+ * The channel is the channel module's `AwgnChannel<float>`, driven directly and not wired into the
+ * graph. It is a stream block and these are record blocks. A graph would need a pair of
+ * record-to-stream adapters between them and would measure those too.
  */
 namespace qa_aff3ct_ber {
 
@@ -144,14 +145,13 @@ template<typename TBlock, typename TIn>
 }
 
 /*!
- * @brief Antipodal signaling of @p coded at unit energy a coded bit through the AWGN channel,
- * returned as log-likelihood ratios in our own sense.
+ * @brief Antipodal signaling of @p coded through the AWGN channel, as LLRs in this module's sense.
  *
- * A one is transmitted as +1 and a zero as -1, which is the sign convention our own soft carrier
- * states. The noise variance is the one that makes @p ebn0Db true at the code rate @p rate, since
- * `Eb = Es / rate` and `N0 = 2 * sigma^2`. The ratio handed to the decoder is `2 y / sigma^2`, the
- * exact channel LLR: the min-sum family is invariant to a positive scale but the sum-product family
- * is not, and a wrap that fed it an unscaled amplitude would be measuring a different decoder.
+ * Each coded bit has unit energy. A one is transmitted as +1 and a zero as -1, the sign convention
+ * of this module's soft carrier. The noise variance makes @p ebn0Db true at the code rate @p rate,
+ * since `Eb = Es / rate` and `N0 = 2 * sigma^2`. The decoder receives `2 y / sigma^2`, the exact
+ * channel LLR. The min-sum family is invariant to a positive scale, but the sum-product family is
+ * not. An adapter that fed it an unscaled amplitude would measure a different decoder.
  */
 [[nodiscard]] std::vector<float> throughChannel(const std::vector<std::uint8_t>& coded, double rate, double ebn0Db) {
     const double sigmaSquared = 1.0 / (2.0 * rate * std::pow(10.0, ebn0Db / 10.0));
@@ -185,7 +185,7 @@ template<typename TBlock, typename TIn>
     return count;
 }
 
-//! One leg: encode, channel, decode, and the information bit-error rate it measured.
+//! One leg of encode, channel and decode, with the information bit-error rate it measured.
 struct Reading {
     std::size_t errors = 0UZ;
     std::size_t bits   = 0UZ;
@@ -228,9 +228,9 @@ int main() {
     using namespace boost::ut;
 
     /*
-     * LDPC (576, 288), the WiMAX matrix the release ships, sum-product flooding at 100 iterations —
-     * the release's own reference run, decoder and iteration count included, so the readings compare
-     * against a curve produced by the same code rather than an adjacent one.
+     * LDPC (576, 288), the WiMAX matrix the release ships, with sum-product flooding at 100
+     * iterations. This is the release's own reference run, decoder and iteration count included. The
+     * readings compare against a curve produced by the same code, not an adjacent one.
      */
     "the LDPC loopback lands on the release's published waterfall"_test = [] {
         struct Point {
@@ -246,8 +246,8 @@ int main() {
     };
 
     /*
-     * Polar (1024, 512) under the release's own 5G reliability sequence, successive cancellation —
-     * again the configuration the release's reference table was produced at.
+     * Polar (1024, 512) under the release's own 5G reliability sequence, with successive
+     * cancellation. This is again the configuration of the release's reference table.
      */
     "the Polar loopback lands on the release's published waterfall"_test = [] {
         struct Point {

@@ -18,56 +18,56 @@
 #include <gnuradio-4.0/fec/Aff3ctWall.hpp>
 
 /**
- * The record-native adapters over AFF3CT's LDPC family.
+ * @brief Record blocks over AFF3CT's LDPC family.
  *
  * The code is a parity-check matrix and a belief-propagation schedule, both fixed at
- * configuration: `standard` names one of the matrices the pinned release ships, or `alist_path`
- * names one on disk, and neither has a default because a matrix is the code and a default matrix
- * would be an interoperability assumption nobody made. The decoder objects are built once and
- * reused for every record; a settings change is a new object, which is what a graph rebuild is
- * for.
+ * configuration. `standard` names one of the matrices the pinned release ships, or `alist_path`
+ * names one on disk. The other setting stays empty. Neither has a default. A matrix is the code,
+ * and a default matrix would assume an interoperability nobody chose. The decoder objects are
+ * built once and reused for every record. A settings change needs a new object, which a graph
+ * rebuild provides.
  *
- * The encoder carries bits and the decoder carries soft values, which is the split every
- * soft-decision family in this module has. `LdpcEncode` takes a `DataSet<std::uint8_t>` of
- * information bits and publishes a `DataSet<std::uint8_t>` of coded bits, one item per bit.
- * `LdpcDecode` takes a `DataSet<float>` of log-likelihood ratios in our own sense — positive
- * carries a one, the magnitude is confidence, zero is an erasure — and publishes the information
- * bits. A hard-decision receiver enters the decoder by presenting its bits as saturated values of
- * that sign, which is the same bridge `ViterbiDecodeSoft` takes and needs no second port.
+ * The encoder carries bits and the decoder carries soft values, as in every soft-decision family
+ * in this module. `LdpcEncode` takes a `DataSet<std::uint8_t>` of information bits and publishes a
+ * `DataSet<std::uint8_t>` of coded bits, one item per bit. `LdpcDecode` takes a `DataSet<float>`
+ * of log-likelihood ratios in this module's sense and publishes the information bits. A positive
+ * value carries a one, the magnitude is confidence, and zero is an erasure. A hard-decision
+ * receiver presents its bits to the decoder as saturated values of that sign. `ViterbiDecodeSoft`
+ * takes the same approach, and no second port is needed.
  *
  * A record holds a whole number of frames. Its length must be a nonzero multiple of the code's
- * `k` on the way in and of its `n` on the way back; a record that fails that test is dropped,
- * counted in `nRecordsRefused` and stated at `stop()`, and the record after it is coded normally.
+ * `k` on the way in and of its `n` on the way back. A record that fails that test is dropped,
+ * counted in `nRecordsRefused` and reported at `stop()`. The next record is coded normally.
  *
- * This family can refuse, and the honesty channel uses it. A decode whose syndrome still fails
- * when the iterations are spent is counted in `uncorrectable_errors`; `corrected_errors` gains
- * the coded bits by which the received word and the word decoded disagree, which is the same
- * account of the channel every other decoder in this module gives. The information estimate is
- * emitted either way — the counts say what it is worth and nothing is zeroed or invented.
+ * This family can refuse a frame, and the error counts report it. A decode whose syndrome still
+ * fails after the last iteration is counted in `uncorrectable_errors`. `corrected_errors` gains
+ * the coded bits where the received word and the decoded word differ. Every other decoder in this
+ * module gives the same account of the channel. The block emits the information estimate in both
+ * cases. The counts say what it is worth, and no bit is zeroed or fabricated.
  */
 namespace gr::blocks::fec {
 
 GR_REGISTER_BLOCK(gr::blocks::fec::LdpcEncode)
 
 /*!
-@brief LDPC encode: information-bit records in, codeword records out.
+@brief Encodes information-bit records into LDPC codeword records.
 
-Each record carries a whole number of information frames of `k` bits, and each becomes one `n`-bit
-codeword. An encoder has no status to report, so the record's metadata crosses unchanged; its
-signal name and its single-map shape follow it, and the output record's extent names its own
-length.
+Each record carries a whole number of information frames of `k` bits, and each frame becomes one
+`n`-bit codeword. An encoder has no status to report, and the record's metadata passes through
+unchanged. Its signal name and its single-map shape carry over, and the output record's extent
+names its own length.
 
-The block builds the code's generator matrix from its parity-check matrix at configuration, which
-is the expensive part of an LDPC encoder and is done once. See LdpcDecode for the counterpart.
+The block builds the code's generator matrix from its parity-check matrix once, at configuration.
+That step is the costly part of an LDPC encoder. See LdpcDecode for the counterpart.
 */
 struct LdpcEncode : Block<LdpcEncode> {
-    using Description = Doc<"LDPC encode: information-bit records to codeword records, under the matrix the 'standard' or 'alist_path' setting names">;
+    using Description = Doc<"Encodes information-bit records into LDPC codeword records under the matrix the 'standard' or 'alist_path' setting names">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "standard", Doc<"a parity-check matrix the pinned AFF3CT release ships, by name; empty when 'alist_path' names one instead">, Visible> standard{};
-    Annotated<std::string, "alist_path", Doc<"a parity-check matrix on disk, in alist form; empty when 'standard' names one instead">, Visible>                   alist_path{};
+    Annotated<std::string, "standard", Doc<"name of a parity-check matrix the pinned AFF3CT release ships">, Visible> standard{};
+    Annotated<std::string, "alist_path", Doc<"path of a parity-check matrix in alist form">, Visible>                 alist_path{};
 
     GR_MAKE_REFLECTABLE(LdpcEncode, in, out, standard, alist_path);
 
@@ -87,8 +87,8 @@ struct LdpcEncode : Block<LdpcEncode> {
         wall::LdpcSettings settings;
         settings.standard  = standard.value;
         settings.alistPath = alist_path.value;
-        // The encode side never runs a decoder, so the cheapest schedule the wall carries is what it
-        // is told to hold beside the encoder.
+        // The encode side runs no decoder. The adapter holds its cheapest schedule beside the
+        // encoder.
         settings.decoder    = std::string("min_sum");
         settings.iterations = 1UZ;
         _codec.emplace(settings);
@@ -101,7 +101,7 @@ struct LdpcEncode : Block<LdpcEncode> {
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) { // inert rather than coding under a matrix nobody chose
+        if (!_configured) { // inert until the settings name a matrix
             std::ignore = inSpan.consume(0UZ);
             outSpan.publish(0UZ);
             return work::Status::ERROR;
@@ -145,35 +145,35 @@ struct LdpcEncode : Block<LdpcEncode> {
 GR_REGISTER_BLOCK(gr::blocks::fec::LdpcDecode)
 
 /*!
-@brief LDPC decode: soft codeword records in, information-bit records out, with the channel's
-account and the code's verdict in metadata.
+@brief Decodes soft LDPC codeword records into information-bit records, with the account and verdict in metadata.
 
-Each record carries a whole number of `n`-value frames and each yields `k` information bits. A
-record whose length fails that test is dropped and counted exactly as LdpcEncode drops one.
+Each record carries a whole number of `n`-value frames, and each frame yields `k` information bits.
+A record whose length fails that test is dropped and counted as LdpcEncode drops one.
 
-The values are log-likelihood ratios in the convention these blocks use: a positive value carries a one and the
-magnitude is confidence, with zero a pure erasure. AFF3CT's own convention is the opposite sign
-sense, and the wall negates on the way in; that inversion is stated in one place and is pinned by
-a QA anchor, because a decode under the wrong sign returns the bitwise complement and nothing else
-would show.
+The values are log-likelihood ratios in the convention these blocks use. A positive value carries a
+one, the magnitude is confidence, and zero is a pure erasure. AFF3CT's own convention has the
+opposite sign, and the adapter negates each value on the way in. That inversion is stated in one
+place and pinned by a QA anchor. A decode under the wrong sign returns the bitwise complement with
+no other symptom.
 
-The verdict rides the record. `corrected_errors` gains the coded bits by which the received frame
-and the frame re-encoded from the decode disagree, and `uncorrectable_errors` the count of frames
-whose syndrome still failed when the iterations were spent, each added to whatever the key already
-carried. Every other key crosses verbatim, and a record arriving without a metadata map gains one.
+The verdict travels with the record. `corrected_errors` gains the coded bits where the received
+frame and the frame re-encoded from the decode differ. `uncorrectable_errors` gains the count of
+frames whose syndrome still failed after the last iteration. Each count is added to the value the key
+already held. Every other key passes through unchanged, and a record without a metadata map gains
+one.
 */
 struct LdpcDecode : Block<LdpcDecode> {
-    using Description = Doc<"LDPC decode: soft codeword records to information-bit records, the channel's account and the syndrome's verdict accumulating in metadata">;
+    using Description = Doc<"Decodes soft LDPC codeword records into information-bit records and accumulates the channel's account and the syndrome's verdict in metadata">;
 
     PortIn<DataSet<float>, Async>         in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "standard", Doc<"a parity-check matrix the pinned AFF3CT release ships, by name; empty when 'alist_path' names one instead">, Visible> standard{};
-    Annotated<std::string, "alist_path", Doc<"a parity-check matrix on disk, in alist form; empty when 'standard' names one instead">, Visible>                   alist_path{};
-    Annotated<std::string, "decoder", Doc<"'bp_flooding', 'bp_horizontal_layered', 'min_sum' or 'normalized_min_sum'">, Visible>                                  decoder       = std::string("normalized_min_sum");
-    Annotated<float, "normalization", Doc<"the factor the normalized min-sum rule scales a check message by">>                                                    normalization = 0.75F;
-    Annotated<gr::Size_t, "n_iterations", Doc<"belief propagation iterations before the decode gives up">, Visible>                                               n_iterations  = 50U;
-    Annotated<bool, "early_exit", Doc<"stop as soon as the syndrome checks, rather than running every iteration">>                                                early_exit    = true;
+    Annotated<std::string, "standard", Doc<"name of a parity-check matrix the pinned AFF3CT release ships">, Visible>            standard{};
+    Annotated<std::string, "alist_path", Doc<"path of a parity-check matrix in alist form">, Visible>                            alist_path{};
+    Annotated<std::string, "decoder", Doc<"'bp_flooding', 'bp_horizontal_layered', 'min_sum' or 'normalized_min_sum'">, Visible> decoder       = std::string("normalized_min_sum");
+    Annotated<float, "normalization", Doc<"the factor the normalized min-sum rule scales a check message by">>                   normalization = 0.75F;
+    Annotated<gr::Size_t, "n_iterations", Doc<"belief propagation iterations before the decode gives up">, Visible>              n_iterations  = 50U;
+    Annotated<bool, "early_exit", Doc<"stop at the first iteration whose syndrome checks">>                                      early_exit    = true;
 
     GR_MAKE_REFLECTABLE(LdpcDecode, in, out, standard, alist_path, decoder, normalization, n_iterations, early_exit);
 
@@ -185,7 +185,7 @@ struct LdpcDecode : Block<LdpcDecode> {
     std::uint64_t nFrames              = 0ULL; ///< codewords those records carried
     std::uint64_t nRecordsRefused      = 0ULL; ///< records whose length was not a whole number of frames
     std::uint64_t nCorrectedErrors     = 0ULL; ///< coded bits between the frames received and the frames decoded
-    std::uint64_t nUncorrectableFrames = 0ULL; ///< frames whose syndrome failed when the iterations were spent
+    std::uint64_t nUncorrectableFrames = 0ULL; ///< frames whose syndrome still failed after the last iteration
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
 
@@ -200,7 +200,7 @@ struct LdpcDecode : Block<LdpcDecode> {
         settings.iterations    = static_cast<std::size_t>(n_iterations.value);
         settings.earlyExit     = early_exit.value;
         _codec.emplace(settings);
-        _configured = true; // only reached when the settings named a code the wall accepts
+        _configured = true; // only reached when the settings named a code the adapter accepts
     }
 
     void stop() {
@@ -210,7 +210,7 @@ struct LdpcDecode : Block<LdpcDecode> {
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) { // inert rather than decoding under a matrix nobody chose
+        if (!_configured) { // inert until the settings name a matrix
             std::ignore = inSpan.consume(0UZ);
             outSpan.publish(0UZ);
             return work::Status::ERROR;

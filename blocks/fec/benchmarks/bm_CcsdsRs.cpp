@@ -1,6 +1,6 @@
-// The Reed-Solomon profile surface's hot paths, per symbol at a stated codeblock count: the dual-basis
-// recoding (one table lookup a symbol), the interleave gather, and the decode itself, measured through
-// the block so the staging copies the type erasure costs are inside the figure.
+// The hot paths of the Reed-Solomon profile surface, per symbol at a stated codeblock count. They are
+// the dual-basis recoding (one table lookup per symbol), the interleave gather, and the decode itself.
+// The decode is measured through the block, and the staging copies of the type erasure are in the figure.
 #include <cstddef>
 #include <cstdint>
 #include <print>
