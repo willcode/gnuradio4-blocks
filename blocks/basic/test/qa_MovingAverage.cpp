@@ -45,7 +45,7 @@ template<typename T>
     std::uint64_t      state = 0x243F6A8885A308D3ULL;
     for (std::size_t i = 0UZ; i < nSamples; ++i) {
         double sum = 0.0;
-        for (int k = 0; k < 4; ++k) { // four uniforms summed: close enough to normal for a rounding measurement
+        for (int k = 0; k < 4; ++k) { // four uniforms summed, close enough to normal for a rounding measurement
             state = state * 6364136223846793005ULL + 1442695040888963407ULL;
             sum += static_cast<double>(state >> 11U) / static_cast<double>(1ULL << 53U) - 0.5;
         }
@@ -204,7 +204,7 @@ const boost::ut::suite<"MovingAverage"> movingAverageTests = [] {
 
     "nanoseconds per sample"_test = [] {
         if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
-            return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
+            return; // opt-in, since a throughput figure needs a controlled run
         }
         using Clock = std::chrono::steady_clock;
 

@@ -26,37 +26,36 @@ GR_REGISTER_BLOCK(gr::blocks::basic::FloatTap)
 /*!
  * @brief Ring of the most recent samples, written by the graph and read on demand.
  *
- * A consumer that is not part of the flow graph -- a display, an analyzer -- wants the
- * latest N samples whenever it happens to ask, not every sample as it arrives. Keeping
- * only the latest N here costs the graph one chunked copy per work call and lets the
- * consumer run at its own rate rather than the sample rate.
+ * A consumer outside the flow graph, such as a display or an analyzer, reads the latest
+ * N samples when it asks. It does not receive every sample as it arrives. The graph makes
+ * one chunked copy per work call. The consumer runs at its own rate, not at the sample
+ * rate.
  *
- * Lock-guarded; the state lives on the heap behind a shared_ptr so the block stays
- * movable and the owner can read the ring without touching the block object.
+ * A mutex guards the state. The state lives on the heap behind a shared_ptr. The block
+ * stays movable, and the owner can read the ring without touching the block object.
  */
 struct TapState {
     std::vector<std::complex<float>> ring;
     std::size_t                      writePos = 0;
     std::uint64_t                    total    = 0;
-    /// Bumped every time the ring is re-allocated, which restarts `total` from zero. A
-    /// gapless reader holding a cursor from before the bump has an unknowable gap in front
-    /// of it, and comparing this against what it started with is the only way it can tell.
+    /// Incremented each time the ring is reallocated. A reallocation restarts `total` from
+    /// zero. A gapless reader with a cursor from before the reallocation has a gap of unknown
+    /// size ahead of it. The reader detects that case by comparing `gen` with the value it
+    /// started with.
     std::uint64_t      gen = 0;
     mutable std::mutex mtx;
 
-    /*! Where each gapless reader has read up to, and whether the writer waits for them.
+    /*! The position of each gapless reader, and whether the writer waits for them.
      *
-     * A tap is ordinarily a place to look rather than a queue to drain: the writer never
-     * waits, and a reader too slow to keep up loses the samples it did not reach. Gated,
-     * the writer instead waits -- briefly -- for the readers to make room, which is what
-     * lets a source run flat out without overwriting a stream that is being read through
-     * rather than sampled.
+     * With `gate` clear the writer does not wait. A reader too slow to keep up loses the
+     * samples it did not reach. With `gate` set the writer waits a short time for the
+     * readers to make room. A source can then run at full speed without overwriting a
+     * stream that a reader follows sample by sample.
      *
-     * There is a slot per reader because the tap has more than one and they move
-     * independently, and the writer has to wait for whichever is further behind. A slot
-     * reading `kIdle` is not reading and holds nothing up. The wait is bounded and the
-     * writer proceeds regardless when it expires, so a reader that stops without saying so
-     * stalls nothing.
+     * Each reader has its own slot, and the readers move independently. The writer waits
+     * for the reader furthest behind. A slot holding `kIdle` is not reading and holds
+     * nothing up. The wait is bounded, and the writer continues when it expires. A reader
+     * that stops without calling readerIdle() stalls nothing.
      */
     enum Reader : std::size_t { kAnalysis = 0, kCapture = 1, kReaderCount = 2 };
     static constexpr std::uint64_t kIdle = ~std::uint64_t{0};
@@ -65,13 +64,13 @@ struct TapState {
     std::atomic<std::uint64_t> readCursor[kReaderCount] = {std::atomic<std::uint64_t>{kIdle}, std::atomic<std::uint64_t>{kIdle}};
     std::condition_variable    room;
 
-    /// Say where a reader has reached, and let a waiting writer on.
+    /// Records a reader's position and wakes a waiting writer.
     void readerAt(Reader which, std::uint64_t cursor) {
         readCursor[which].store(cursor, std::memory_order_relaxed);
         room.notify_all();
     }
 
-    /// Say that a reader has stopped reading, so it holds the writer up no longer.
+    /// Marks a reader as stopped. A stopped reader does not hold the writer up.
     void readerIdle(Reader which) {
         readCursor[which].store(kIdle, std::memory_order_relaxed);
         room.notify_all();
@@ -93,8 +92,8 @@ struct TapState {
     void write(std::span<const std::complex<float>> in, std::size_t cap) {
         std::unique_lock lk(mtx);
         if (gate.load(std::memory_order_relaxed) && cap > 0 && ring.size() == cap) {
-            // Half the ring, so the readers have half to work through while the
-            // writer fills the other.
+            // Wait until the readers lag by at most half the ring. The writer fills one
+            // half while the readers work through the other.
             room.wait_for(lk, std::chrono::milliseconds(50), [&] { return readerLag() <= cap / 2; });
         }
         if (ring.size() != cap) {
@@ -138,7 +137,7 @@ struct TapState {
         return true;
     }
 
-    /// The writer's current absolute sample count -- the cursor a gapless reader starts from.
+    /// The writer's absolute sample count, the cursor a gapless reader starts from.
     std::uint64_t cursorNow() const {
         std::lock_guard lk(mtx);
         return total;
@@ -151,7 +150,7 @@ struct TapState {
         return ring.size();
     }
 
-    /// The ring's current allocation generation; see `gen`.
+    /// The ring's allocation generation, `gen`.
     std::uint64_t generation() const {
         std::lock_guard lk(mtx);
         return gen;
@@ -160,11 +159,11 @@ struct TapState {
     /*!
      * @brief Append every sample written since `cursor` to `out`, gapless.
      *
-     * `cursor` is an absolute count in the writer's `total` domain: pass what a previous
-     * call returned (or cursorNow() to start), and the samples appended since come back in
-     * chronological order. Returns the new cursor. A reader that falls more than the ring's
-     * capacity behind has lost samples: `lost` (may be null) reports how many, and
-     * the copy resumes from the oldest sample still held.
+     * `cursor` is an absolute count in the writer's `total` domain. Pass the value a
+     * previous call returned, or cursorNow() to start. The samples written since then are
+     * appended in chronological order. Returns the new cursor. A reader more than the ring's
+     * capacity behind has lost samples. `lost` receives their number when it is not null.
+     * The copy resumes from the oldest sample still held.
      */
     std::uint64_t copySince(std::uint64_t cursor, std::vector<std::complex<float>>& out, std::uint64_t* lost = nullptr) const {
         std::lock_guard lk(mtx);
@@ -176,7 +175,7 @@ struct TapState {
             return total;
         }
         if (cursor > total) {
-            cursor = total; // a cursor from a previous stream generation: resync
+            cursor = total; // resync a cursor from a previous ring generation
         }
         std::uint64_t behind = total - cursor;
         if (behind > cap) {
@@ -202,18 +201,17 @@ struct TapState {
 };
 
 struct IqTap : Block<IqTap> {
-    using Description = Doc<R""(@brief retains the latest `capacity` complex samples for a consumer outside the graph.
+    using Description = Doc<R""(@brief Retains the latest `capacity` complex samples for a consumer outside the graph.
 
-Assign nothing: the block allocates its own TapState. Read it through `sharedState`, either
-by snapshotting the latest N with copyLatest() or by following the stream gaplessly with
-copySince().)"">;
+The block allocates its own TapState. Read it through `sharedState`. copyLatest() copies
+the latest N samples. copySince() follows the stream without gaps.)"">;
 
     PortIn<std::complex<float>>                                       in;
     Annotated<Size_t, "capacity", Doc<"ring buffer size in samples">> capacity = 262144U;
 
     GR_MAKE_REFLECTABLE(IqTap, in, capacity);
 
-    // `sharedState` rather than `state`: the Block base already has a `state()` lifecycle method.
+    // Named `sharedState` because the Block base already has a `state()` lifecycle method.
     std::shared_ptr<TapState> sharedState = std::make_shared<TapState>();
 
     work::Status processBulk(std::span<const std::complex<float>> input) {
@@ -222,9 +220,8 @@ copySince().)"">;
     }
 };
 
-/// Real-valued counterpart of TapState, for a demodulated audio stream. Snapshot-only:
-/// there is no generation counter and no writer gate, because nothing follows an audio
-/// tap gaplessly.
+/// The real-valued counterpart of TapState, for a demodulated audio stream. It offers
+/// snapshots alone. It has no generation counter and no writer gate.
 struct FloatTapState {
     std::vector<float> ring;
     std::size_t        writePos = 0;
@@ -274,7 +271,7 @@ struct FloatTapState {
 };
 
 struct FloatTap : Block<FloatTap> {
-    using Description = Doc<R""(@brief retains the latest `capacity` real samples for a consumer outside the graph.)"">;
+    using Description = Doc<R""(@brief Retains the latest `capacity` real samples for a consumer outside the graph.)"">;
 
     PortIn<float>                                                     in;
     Annotated<Size_t, "capacity", Doc<"ring buffer size in samples">> capacity = 16384U;

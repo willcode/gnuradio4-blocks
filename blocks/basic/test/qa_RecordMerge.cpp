@@ -18,11 +18,10 @@
 #include <gnuradio-4.0/basic/RecordMerge.hpp>
 
 /*
- * The block owns an order and a set of counts and nothing else, so most of the assertions are about what did not
- * happen: no record was dropped, none was reordered within its input, and an input that offers nothing — because it
- * is silent or because it is not connected at all — neither stalls the block nor disturbs another input's order. The
- * mock spans drive processBulk directly, so a full output span is reachable on purpose rather than by luck, and one
- * graph test runs the same properties through the scheduler and real ports.
+ * The block keeps an order and a set of counts. Most assertions check that something did not happen. No record was
+ * dropped. No record was reordered within its input. An input that offers nothing, silent or unconnected, neither
+ * stalls the block nor disturbs another input's order. The mock spans drive processBulk directly, which makes a full
+ * output span reachable on purpose. One graph test runs the same properties through the scheduler and real ports.
  */
 namespace qa_record_merge {
 
@@ -95,7 +94,7 @@ struct OutputSpan : std::span<T> {
     }
 };
 
-/// @brief A one-signal record whose single item is @p mark, which is how a test names it.
+/// @brief A one-signal record whose single item is @p mark. The mark names the record in a test.
 [[nodiscard]] Record record(std::uint8_t mark) {
     Record r;
     r.signal_values.push_back(mark);
@@ -115,7 +114,7 @@ struct OutputSpan : std::span<T> {
     return out;
 }
 
-/// @brief The single item of every record of @p list, which is the order the assertions are written in.
+/// @brief The single item of every record of @p list, in the order the assertions are written in.
 [[nodiscard]] std::vector<std::uint8_t> marksOf(std::span<const Record> list) {
     std::vector<std::uint8_t> marks;
     marks.reserve(list.size());
@@ -141,7 +140,7 @@ struct Call {
     gr::work::Status         status = gr::work::Status::OK;
 };
 
-/// @brief One call over @p ins, offering @p outRoom records of output room; 0 offers room for all of them.
+/// @brief One call over @p ins, offering @p outRoom records of output room. 0 offers room for all of them.
 [[nodiscard]] Call call(RecordMerge<std::uint8_t>& block, std::vector<InputSpan<Record>>& ins, std::size_t outRoom) {
     std::size_t offered = 0UZ;
     for (const auto& in : ins) {
@@ -159,7 +158,7 @@ struct Call {
     return result;
 }
 
-// ─── graph-side blocks, so that the same properties are asserted through real ports and the scheduler ──────────────
+// ─── graph-side blocks, which assert the same properties through real ports and the scheduler ─────────────────────
 
 struct RecordSource : gr::Block<RecordSource> {
     gr::PortOut<Record> out;
@@ -244,7 +243,7 @@ int main() {
         expect(eq(firstCall.consumed, std::vector<std::size_t>{3UZ, 0UZ, 0UZ})) << "what did not fit was not consumed, so it is not lost";
         expect(eq(block.n_records.value, std::vector<gr::Size_t>{3U, 0U, 0U}));
 
-        // the framework offers the unconsumed records again; the second call is that offer
+        // the framework offers the unconsumed records again in the second call
         std::vector<InputSpan<Record>> rest;
         rest.emplace_back(std::span<const Record>(first).subspan(3UZ));
         rest.emplace_back(std::span<const Record>(second));
@@ -254,9 +253,9 @@ int main() {
         expect(eq(block.n_records.value, std::vector<gr::Size_t>{4U, 2U, 0U}));
     };
 
-    // An unconnected input port offers nothing and reports nothing available. The ports are asynchronous, so the
-    // framework's availability test is satisfied by any one input that has records rather than by all of them, and
-    // the block never waits on a port that has nothing to offer.
+    // An unconnected input port offers nothing and reports nothing available. The ports are asynchronous. The
+    // framework's availability test passes when any one input has records. The block does not wait on a port that
+    // has nothing to offer.
     "an input that offers nothing does not stall the block"_test = [] {
         auto block = make<RecordMerge<std::uint8_t>>({{"n_inputs", gr::Size_t{3U}}});
 
@@ -284,9 +283,9 @@ int main() {
         expect(eq(block.n_records.value, std::vector<gr::Size_t>{0U, 2U, 0U})) << "and it changes no count";
     };
 
-    // A record states its outcome in its own metadata, but a stage that publishes its reason as a tag — the record
-    // to packet boundary does — must not have it deleted here: the merge is the block that carries the failure
-    // ports, and a deleted annotation is the evidence the chain was told to keep.
+    // A record states its outcome in its own metadata. A stage can also publish its reason as a tag, as the
+    // record-to-packet boundary does. The merge must keep that tag. The merge carries the failure ports, and the tag
+    // is part of the failure's record.
     "a tag on a record travels with that record"_test = [] {
         auto block = make<RecordMerge<std::uint8_t>>({{"n_inputs", gr::Size_t{2U}}});
 
@@ -323,8 +322,8 @@ int main() {
         expect(eq(block.n_records.value.size(), 4UZ));
     };
 
-    // The same properties through the scheduler and real ports: three sources of different lengths, one output, and
-    // the counts read off the block afterwards.
+    // The same properties through the scheduler and real ports. Three sources of different lengths feed one output.
+    // The counts are read from the block afterwards.
     "three sources through the scheduler"_test = [] {
         const std::vector<std::uint8_t> firstMarks{1U, 2U, 3U, 4U, 5U};
         const std::vector<std::uint8_t> secondMarks{11U, 12U};

@@ -445,7 +445,7 @@ const boost::ut::suite<"SampleDelay"> sampleDelayTests = [] {
 
         // With DISABLE_SENSITIVE_TESTS set the test prints the figures and asserts nothing, with ENABLE_BENCHMARK_TESTS
         // set it asserts the tight 1.5x bound, and otherwise it asserts the loose 3x bound. The tight bound needs a
-        // harness that controls placement; the loose bound still catches a shifted line, which costs 5.6x.
+        // harness that controls placement. The loose bound still catches a shifted line, which costs 5.6x.
         const bool   asserted = std::getenv("DISABLE_SENSITIVE_TESTS") == nullptr;
         const double bound    = std::getenv("ENABLE_BENCHMARK_TESTS") != nullptr ? 1.5 : 3.0;
 

@@ -22,10 +22,10 @@ namespace detail {
 /**
  * @brief Republishes input tags at the output offsets where a decimator placed their samples.
  *
- * Each tag is carried to the next item the block keeps, so the map is the block's own phase by construction
- * rather than an offset scaled by a rate, which would assume a phase aligned to stream offset zero and would lose
- * exactness through a `float`. A tag with no kept item left in the call is held for the next one rather than dropped,
- * and order and multiplicity are preserved.
+ * Each tag moves to the next item the block keeps. The mapping follows the block's own phase. It does not scale an
+ * offset by a rate. A scaled offset would assume a phase aligned to stream offset zero and would lose exactness
+ * through a `float`. A tag with no kept item left in the call is held for the next call and is not dropped. Order and
+ * multiplicity are preserved.
  */
 struct TagRelay {
     std::vector<property_map> _carry{};
@@ -64,8 +64,8 @@ struct TagRelay {
         _carry.clear();
     }
 
-    /// @brief True while nothing is carried and nothing is left to collect, so a run of items can be copied in one go
-    /// instead of walked item by item. Meaningful only after `begin`.
+    /// @brief True when nothing is carried and nothing is left to collect. A run of items can then be copied in one
+    /// step instead of item by item. Meaningful only after `begin`.
     [[nodiscard]] bool idle() const noexcept { return _carry.empty() && _cursor >= _count; }
 };
 
@@ -78,19 +78,20 @@ struct KeepOneInN : Block<KeepOneInN<T>, NoTagPropagation> {
     using Description = Doc<R""(
 @brief Keeps the last item of every group of `n` and drops the rest.
 
-Display downsampling and slow status streams, where no anti-alias filtering is wanted or needed. After a reset the
-first item out is input index `n-1`, then `2n-1`, and so on. Setting `n` restarts the phase: the counter reloads
-immediately and the next item out is `n_new` inputs after the change. `n` must be at least one or the settings change throws.
+The block suits display downsampling and slow status streams, where no anti-alias filtering is wanted or needed.
+After a reset the first item out is input index `n-1`, then `2n-1`, and so on. Setting `n` restarts the phase. The
+counter reloads at once, and the next item out is `n_new` inputs after the change. `n` must be at least one or the
+settings change throws.
 
-Tag offsets are computed with integer arithmetic against the block's own phase, and a tag on a dropped item moves
-forward to the next kept item. The output rate is `1/n` and the block is variable-rate rather than a declared
-decimator, so a very large `n` does not force the scheduler into large buffer demands.
+Tag offsets are computed with integer arithmetic against the block's own phase. A tag on a dropped item moves forward
+to the next kept item. The output rate is `1/n`. The block is variable-rate and not a declared decimator. A very large
+`n` therefore puts no large buffer demand on the scheduler.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "n", Doc<"group size; the last item of each group is kept">> n = 1U;
+    Annotated<gr::Size_t, "n", Doc<"group size with the last item of each group kept">> n = 1U;
 
     GR_MAKE_REFLECTABLE(KeepOneInN, in, out, n);
 
@@ -140,22 +141,22 @@ struct KeepMInN : Block<KeepMInN<T>, NoTagPropagation> {
     using Description = Doc<R""(
 @brief Keeps `m` consecutive items out of every `n`, starting `offset` items into each group.
 
-Extracts a fixed slice from a repeating frame: a snapshot of a few thousand items out of every period, a fixed window
-of a repeating burst. The kept items are input indices `offset` to `offset + m - 1` of every group of `n`, counted
-from the start of the stream. `m` and `n` must be at least one, and `offset + m > n` is rejected at settings time
-rather than wrapped; a wrapped read would be a separate block.
+The block extracts a fixed slice from a repeating frame. Examples are a snapshot of a few thousand items in every
+period and a fixed window of a repeating burst. The kept items are input indices `offset` to `offset + m - 1` of
+every group of `n`, counted from the start of the stream. `m` and `n` must be at least one. `offset + m > n` is
+rejected at settings time and is not wrapped. A wrapped read would be a separate block.
 
-The block carries its group phase across calls in `_phase` and consumes whatever span it is handed, so a group may
-span many calls and a slice may be longer than one span or than the room left in the output. It is variable-rate
-rather than a declared decimator, so a very large `n` does not force the scheduler into large buffer demands: a period
-of millions of items is a number here and not a size the edge has to hold. A group left unfinished at the end of the
-stream is not held back - the part of the slice that was seen is emitted.
+The block keeps its group phase across calls in `_phase` and consumes every span it receives. A group may span many
+calls. A slice may be longer than one span or than the room left in the output. The block is variable-rate and not a
+declared decimator. A very large `n` therefore puts no large buffer demand on the scheduler. A period of millions of
+items is a number here and not a size the edge has to hold. A group left unfinished at the end of the stream is not
+held back. The block has already emitted the part of the slice it saw.
 
-Setting `m`, `n` or `offset` restarts the phase, as it does in `KeepOneInN`: the first group after the change begins
-at the next item in, wherever in a group the old phase stood.
+Setting `m`, `n` or `offset` restarts the phase, as in `KeepOneInN`. The first group after the change begins at the
+next input item, wherever the old phase stood in its group.
 
-Tag offsets are computed with integer arithmetic against the block's own group phase, and a tag on a dropped item
-moves forward to the next kept item - which, for an item past the end of a slice, is the first item of the next group.
+Tag offsets are computed with integer arithmetic against the block's own group phase. A tag on a dropped item moves
+forward to the next kept item. For an item past the end of a slice, that is the first item of the next group.
 )"">;
 
     PortIn<T>  in;
@@ -198,10 +199,10 @@ moves forward to the next kept item - which, for an item past the end of a slice
 
         while (walked < inSpan.size()) {
             const std::size_t phase = static_cast<std::size_t>(_phase);
-            if (phase >= first && phase < last) { // inside the slice: take the run that fits both spans
+            if (phase >= first && phase < last) { // inside the slice, copy the run that fits both spans
                 const std::size_t run = std::min({last - phase, inSpan.size() - walked, outSpan.size() - made});
                 if (run == 0UZ) {
-                    break; // the output is full; the rest of the slice waits for the next call
+                    break; // output full, the rest of the slice waits for the next call
                 }
                 if (_relay.idle()) {
                     std::copy_n(inSpan.begin() + static_cast<std::ptrdiff_t>(walked), run, outSpan.begin() + static_cast<std::ptrdiff_t>(made));
@@ -215,7 +216,7 @@ moves forward to the next kept item - which, for an item past the end of a slice
                 walked += run;
                 made += run;
                 _phase = static_cast<gr::Size_t>(phase + run);
-            } else { // outside it: skip to the start of the slice, or to the next group, in one step
+            } else { // outside the slice, skip to its start or to the next group in one step
                 const std::size_t until = phase < first ? first : group;
                 const std::size_t run   = std::min(until - phase, inSpan.size() - walked);
                 _relay.collect(inSpan, walked + run - 1UZ); // one call carries every tag of the skipped run forward

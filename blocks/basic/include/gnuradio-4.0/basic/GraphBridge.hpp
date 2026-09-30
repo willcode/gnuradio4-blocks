@@ -30,9 +30,10 @@ using namespace gr;
 GR_REGISTER_BLOCK(gr::blocks::basic::BridgeSink)
 GR_REGISTER_BLOCK(gr::blocks::basic::BridgeSource)
 
-/// What a bridge counts, readable through the registry by name and without a handle on either block:
-/// the samples the producer side has dropped since the last configure(), the ring's capacity, the
-/// samples waiting in it, and whether the producer has latched end-of-stream.
+/// The counters of a bridge. The registry returns them by name, without a handle on either block.
+/// `overflows` counts the samples the producer side dropped since the last configure(). `capacity`
+/// is the ring's size, `available` the samples waiting in it. `eos` is set once the producer has
+/// latched end-of-stream.
 struct BridgeCounters {
     std::uint64_t overflows = 0;
     std::size_t   capacity  = 0;
@@ -43,14 +44,13 @@ struct BridgeCounters {
 /*!
  * @brief Bounded ring joining two independently scheduled flow graphs.
  *
- * A front end that must keep running continuously cannot share a scheduler with a
- * consumer chain that is torn down and rebuilt whenever its configuration changes.
- * Two graphs joined only by this ring keep the producer alive across every rebuild of
- * the consumer, and the ring being bounded is also the end-to-end latency bound.
+ * The producer graph and the consumer graph run on separate schedulers. The consumer
+ * graph can be torn down and rebuilt after a configuration change. The producer graph
+ * keeps running through every rebuild. The ring's capacity bounds the end-to-end latency.
  *
- * Lock-guarded. The owner holds the `shared_ptr<BridgeState>` and injects the same
- * instance into both blocks after `emplaceBlock`, keeping the blocks movable and the
- * overflow counter readable from outside them.
+ * A mutex guards the state. The owner holds the `shared_ptr<BridgeState>` and assigns the
+ * same instance to both blocks after `emplaceBlock`. The blocks stay movable, and the
+ * overflow counter stays readable from outside them.
  */
 struct BridgeState {
     std::vector<std::complex<float>> ring;
@@ -58,17 +58,18 @@ struct BridgeState {
     std::size_t                      head  = 0; // index of the oldest valid sample
     std::size_t                      count = 0; // number of valid samples
     bool                             eos   = false;
-    /// Overflow policy, chosen by what feeds the producer graph. A real-time source cannot
-    /// be backpressured, so the sink drops the oldest samples and never blocks the producer.
-    /// A file (or any rate-free) source can be: the sink then accepts only what fits and
-    /// leaves the rest in the upstream edge buffer, which stalls the source without ever
-    /// blocking inside processBulk -- that would trip the scheduler's stuck-block watchdog.
+    /// Overflow policy, chosen by the source of the producer graph. A real-time source
+    /// cannot take backpressure. With `false` the sink drops the oldest samples and does not
+    /// block the producer. A file source, or any source without a fixed rate, can take
+    /// backpressure. With `true` the sink accepts only what fits. The rest stays in the
+    /// upstream edge buffer and stalls the source. The sink does not block inside
+    /// processBulk, where a block would trip the scheduler's stuck-block watchdog.
     bool                       backpressure = false;
     std::atomic<std::uint64_t> overflows{0};
     mutable std::mutex         mtx;
     std::condition_variable    cv;
 
-    /// (Re)size the ring and empty it. Called on every producer-graph build. `block`
+    /// Sizes the ring and empties it. Call it on each build of the producer graph. `block`
     /// selects backpressure over drop-oldest.
     void configure(std::size_t capacity, bool block = false) {
         std::lock_guard lk(mtx);
@@ -82,7 +83,7 @@ struct BridgeState {
         cv.notify_all();
     }
 
-    /// Empty the ring, keeping its capacity. Called on every consumer-graph (re)build.
+    /// Empties the ring and keeps its capacity. Call it on each build of the consumer graph.
     void clear() {
         {
             std::lock_guard lk(mtx);
@@ -99,7 +100,7 @@ struct BridgeState {
         return {overflows.load(std::memory_order_relaxed), cap, count, eos};
     }
 
-    /// Latch end-of-stream: the consumer graph drains what is left, then emits EoS.
+    /// Latches end-of-stream. The consumer side drains the ring and then emits EoS.
     void setEos() {
         {
             std::lock_guard lk(mtx);
@@ -108,8 +109,8 @@ struct BridgeState {
         cv.notify_all();
     }
 
-    /// Append exactly `n` samples at the tail, wrapping the ring end. The caller holds
-    /// the lock and has ensured the space.
+    /// Appends exactly `n` samples at the tail and wraps at the ring end. The caller holds
+    /// the lock and has checked the space.
     void appendLocked(std::span<const std::complex<float>> in, std::size_t n) {
         const std::size_t tail  = (head + count) % cap;
         const std::size_t first = std::min(n, cap - tail);
@@ -120,8 +121,8 @@ struct BridgeState {
         count += n;
     }
 
-    /// Producer side, drop-oldest: append `in`, dropping the oldest samples on overflow so
-    /// the producer never blocks. Always accepts all of `in`.
+    /// Appends all of `in` under the drop-oldest policy. On overflow the oldest samples are
+    /// dropped and counted. The producer does not block.
     void push(std::span<const std::complex<float>> in) {
         {
             std::lock_guard lk(mtx);
@@ -129,7 +130,7 @@ struct BridgeState {
                 return;
             }
             const std::size_t n = in.size();
-            if (n >= cap) { // incoming exceeds the whole ring: keep only its tail
+            if (n >= cap) { // the input fills the whole ring, keep only its tail
                 overflows.fetch_add(count + (n - cap), std::memory_order_relaxed);
                 std::copy_n(in.end() - static_cast<std::ptrdiff_t>(cap), cap, ring.begin());
                 head  = 0;
@@ -148,12 +149,11 @@ struct BridgeState {
         cv.notify_all();
     }
 
-    /// Producer side, backpressure: accept only what currently fits and return how much
-    /// that was, so the caller can consume just that many from the upstream edge. Never
-    /// drops. On a full ring it waits briefly -- bounded well under the scheduler's
-    /// stuck-block watchdog -- for the consumer to drain; without that wait the scheduler
-    /// re-invokes a zero-progress BridgeSink in a busy loop whenever the consumer graph is
-    /// the bottleneck.
+    /// Appends what fits under the backpressure policy and returns the count taken. The
+    /// caller consumes that many samples from the upstream edge. No sample is dropped. On a
+    /// full ring the call waits up to 10 ms for the consumer to drain it. The wait is well
+    /// under the scheduler's stuck-block watchdog. Without it, the scheduler calls a
+    /// BridgeSink that made no progress in a busy loop while the consumer graph is slower.
     std::size_t accept(std::span<const std::complex<float>> in) {
         std::size_t took = 0;
         {
@@ -174,8 +174,8 @@ struct BridgeState {
         return took;
     }
 
-    /// Sink one span under the configured policy; returns how many samples to consume from
-    /// the upstream edge -- all of `in` for drop-oldest, only what fit for backpressure.
+    /// Takes one span under the configured policy. Returns the samples to consume from the
+    /// upstream edge. That is all of `in` for drop-oldest and what fit for backpressure.
     std::size_t sink(std::span<const std::complex<float>> in) {
         if (backpressure) {
             return accept(in);
@@ -184,9 +184,9 @@ struct BridgeState {
         return in.size();
     }
 
-    /// Consumer side: wait up to 100 ms for data, then pop up to `out.size()` samples in
-    /// chronological order. Returns how many were popped and reports the current EoS latch
-    /// in `eosOut`, so the source can emit DONE once the ring has drained.
+    /// Waits up to 100 ms for data, then pops up to `out.size()` samples in chronological
+    /// order. Returns the count popped. `eosOut` receives the EoS latch. The source emits
+    /// DONE once the ring has drained after EoS.
     std::size_t popOrWait(std::span<std::complex<float>> out, bool& eosOut) {
         std::size_t n = 0;
         {
@@ -213,11 +213,11 @@ struct BridgeState {
 /*!
  * @brief Bridge rings published by name, so a loaded graph can join one without a C++ handle.
  *
- * A settings map cannot carry a shared pointer, so the two halves of an exported flow graph have
- * no way to name the same ring. The application creates the ring, publishes it here under a name,
- * and both files name that string in their `bridge_name` setting. This is `DataSinkRegistry` for
- * bridges: one global instance, a duplicate name refused, and the counters readable from outside
- * the blocks.
+ * A settings map cannot carry a shared pointer. The two halves of an exported flow graph need
+ * another way to name the same ring. The application creates the ring and publishes it here
+ * under a name. Both graph files name that string in their `bridge_name` setting. The registry
+ * follows `DataSinkRegistry`. It has one global instance and refuses a duplicate name. The
+ * counters are readable from outside the blocks.
  */
 class BridgeRegistry {
     mutable std::mutex                                  _mutex;
@@ -243,7 +243,7 @@ public:
         return it == _bridges.end() ? nullptr : it->second;
     }
 
-    /// `find`, refusing by name rather than returning null: what a block joining by name needs.
+    /// `find` for a block that joins by name. An unknown name throws an error that names it.
     [[nodiscard]] std::shared_ptr<BridgeState> require(std::string_view name, std::string_view blockName, std::source_location location = std::source_location::current()) const {
         std::shared_ptr<BridgeState> state = find(name);
         if (state == nullptr) {
@@ -270,8 +270,8 @@ __attribute__((visibility("default"))) inline BridgeRegistry& globalBridgeRegist
 
 namespace detail {
 
-// Called from settingsChanged rather than start(): a loaded graph applies its settings at init, and
-// a BridgeSource with no ring returns DONE on its first work call, before start() would have run.
+// Called from settingsChanged and not from start(). A loaded graph applies its settings at init.
+// A BridgeSource without a ring returns DONE on its first work call, before start() would run.
 inline void rebindBridge(std::shared_ptr<BridgeState>& bridge, const property_map& oldSettings, std::string_view bridgeName, std::string_view blockName) {
     if (!oldSettings.contains("bridge_name")) {
         return;
@@ -285,12 +285,12 @@ inline void rebindBridge(std::shared_ptr<BridgeState>& bridge, const property_ma
 } // namespace detail
 
 struct BridgeSink : Block<BridgeSink> {
-    using Description = Doc<R""(@brief producer-graph terminal of a GraphBridge: pushes its input into the shared BridgeState ring.
+    using Description = Doc<R""(@brief Pushes its input into the shared BridgeState ring of a GraphBridge, at the end of the producer graph.
 
 Assign the shared `BridgeState` after `emplaceBlock`, or set `bridge_name` to a name the
-application has published in the global bridge registry, which is how a graph loaded from a
-file reaches a ring no settings map could carry. Without either the block consumes and
-discards its input.)"">;
+application has published in the global bridge registry. A graph loaded from a file reaches
+its ring by that name, since a settings map cannot carry the ring. Without either the block
+consumes and discards its input.)"">;
 
     PortIn<std::complex<float>> in;
 
@@ -308,8 +308,8 @@ discards its input.)"">;
         }
     }
 
-    // InputSpanLike rather than the auto-consume-all span form, so backpressure mode can
-    // consume only what fit -- that partial consume is what stalls the upstream source.
+    // An InputSpanLike span lets backpressure mode consume only what fit. The partial
+    // consume stalls the upstream source.
     /// Answers `INSUFFICIENT_OUTPUT_ITEMS` when a backpressured ring takes none of a non-empty
     /// input, and `OK` otherwise.
     work::Status processBulk(InputSpanLike auto& inSpan) {
@@ -323,12 +323,12 @@ discards its input.)"">;
 };
 
 struct BridgeSource : Block<BridgeSource> {
-    using Description = Doc<R""(@brief consumer-graph source of a GraphBridge: pops from the shared BridgeState ring.
+    using Description = Doc<R""(@brief Pops samples from the shared BridgeState ring of a GraphBridge, at the start of the consumer graph.
 
-Waits on a condition variable rather than polling, so an idle bridge never spins the
-scheduler. Emits DONE once the ring has drained and the producer side has latched EoS.
-Takes its ring the same two ways `BridgeSink` does: assigned after `emplaceBlock`, or named
-through `bridge_name` in the global bridge registry.)"">;
+The block waits on a condition variable and does not poll. An idle bridge does not spin the
+scheduler. The block emits DONE once the ring has drained and the producer side has latched
+EoS. It gets its ring in the two ways `BridgeSink` does. The ring is assigned after
+`emplaceBlock` or named through `bridge_name` in the global bridge registry.)"">;
 
     PortOut<std::complex<float>> out;
 
@@ -348,7 +348,7 @@ through `bridge_name` in the global bridge registry.)"">;
 
     /// Answers `OK` when it published, `DONE` once the ring has drained after end-of-stream, and
     /// `INSUFFICIENT_INPUT_ITEMS` when the wait ends on an empty ring. The scheduler keeps calling a
-    /// block that answers that status; the framework's zero-progress report counts only an `OK`.
+    /// block that answers that status. The framework's zero-progress report counts only an `OK`.
     work::Status processBulk(OutputSpanLike auto& outSpan) {
         if (!bridge) {
             outSpan.publish(0);
@@ -357,7 +357,7 @@ through `bridge_name` in the global bridge registry.)"">;
         bool              eos = false;
         const std::size_t n   = bridge->popOrWait(std::span<std::complex<float>>(outSpan.data(), outSpan.size()), eos);
         outSpan.publish(n);
-        if (n == 0 && eos) { // drained and the producer finished: propagate EoS downstream
+        if (n == 0 && eos) { // ring drained after the producer finished, propagate EoS
             return work::Status::DONE;
         }
         return n == 0UZ ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::OK;

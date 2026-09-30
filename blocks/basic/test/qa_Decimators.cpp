@@ -82,8 +82,8 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
     };
 
     "a tag offset above 2^24 survives exactly"_test = [] {
-        // Scaling the offset by a float reciprocal loses it: a float holds integers exactly only to 2^24, so offset
-        // 16777217 becomes 16777216, and 50331651 * (1.0f/3.0f) evaluates to 16777218 where the answer is 16777217.
+        // Scaling the offset by a float reciprocal loses it. A float holds integers exactly only up to 2^24. Offset
+        // 16777217 becomes 16777216, and 50331651 * (1.0f/3.0f) evaluates to 16777218 instead of 16777217.
         KeepOneInN<float>          identity = makeBlock<KeepOneInN<float>>({{"n", 1U}});
         const std::vector<gr::Tag> one{gr::Tag{16777217UZ, probe(0)}};
         const auto                 kept = callAt<KeepOneInN<float>, float>(identity, 4UZ, 16777215UZ, 16777215UZ, std::span<const gr::Tag>(one));
@@ -188,8 +188,8 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
     };
 
     "a group larger than the input span is counted across calls"_test = [] {
-        constexpr std::size_t edge   = 65536UZ;     // the span a scheduler hands the block
-        constexpr gr::Size_t  n      = 4U * 65536U; // four spans to the group: a declared decimator could not run here at all
+        constexpr std::size_t edge   = 65536UZ;     // the span size a scheduler gives the block
+        constexpr gr::Size_t  n      = 4U * 65536U; // four spans per group, which a declared decimator could not run
         constexpr gr::Size_t  m      = 1024U;
         constexpr std::size_t groups = 3UZ;
 
@@ -346,7 +346,7 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
 
     "nanoseconds per sample"_test = [] {
         if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
-            return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
+            return; // opt-in, since a throughput figure needs a controlled run
         }
         using Clock = std::chrono::steady_clock;
         using CF    = std::complex<float>;
@@ -382,18 +382,18 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         std::println("KeepOneInN<complex<float>> n=8: best {:.3f} ns/input sample, spread {:.3f} ns", bestOne, worstOne - bestOne);
         std::println("KeepMInN<complex<float>> 3/8: best {:.3f} ns/input sample, spread {:.3f} ns", bestM, worstM - bestM);
 
-        // the snapshot case, as a publisher would drive it: a period of two million items against the same block as a
-        // pass-through, both over spans of the size a scheduler hands out, so one stage can be costed against three
+        // The snapshot case with a period of two million items, against the same block as a pass-through. Both run
+        // over spans of the size a scheduler gives out. One stage can then be costed against three.
         const gr::Size_t span        = static_cast<gr::Size_t>(x.size());
         KeepMInN<CF>     passThrough = makeBlock<KeepMInN<CF>>({{"m", span}, {"n", span}, {"offset", 0U}});
-        constexpr int    kCalls      = 32; // 2 097 152 items: one whole period and the head of the next
+        constexpr int    kCalls      = 32; // 2 097 152 items, one whole period and the head of the next
 
         double bestSnapshot = 1e30, bestPassThrough = 1e30;
         for (int repeat = 0; repeat < kRepeats; ++repeat) {
             const double perRun = static_cast<double>(kCalls) * static_cast<double>(x.size());
 
-            // built inside the loop: the phase carries across calls, so a block reused between repeats would spend most
-            // of them dropping and the figure would leave the slice out
+            // Built inside the loop. The phase carries across calls. A block reused between repeats would drop items
+            // for most of them, and the figure would leave the slice out.
             KeepMInN<CF> snapshot = makeBlock<KeepMInN<CF>>({{"m", 4096U}, {"n", 2000000U}, {"offset", 0U}});
 
             auto start = Clock::now();

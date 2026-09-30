@@ -39,8 +39,8 @@ bool matchesFrom(std::span<const C> got, std::size_t first) {
     return true;
 }
 
-/// A snapshot is valid only if it is a run of consecutive indices: a torn copy taken while
-/// the writer was mid-chunk would break the step, wrap or not.
+/// A snapshot is valid only if it is a run of consecutive indices. A torn copy taken while
+/// the writer was mid-chunk would break the step, with or without a wrap.
 bool isConsecutive(std::span<const C> got) {
     for (std::size_t i = 1UZ; i < got.size(); ++i) {
         if (got[i] != value(static_cast<std::size_t>(got[i - 1UZ].real()) + 1UZ)) {
@@ -192,9 +192,9 @@ const boost::ut::suite IqTapTests = [] {
     "the gate makes the writer wait for a lagging reader, but never indefinitely"_test = [] {
         constexpr std::size_t kCap = 64UZ;
         TapState              ts;
-        ts.write(seq(0UZ, 100UZ), kCap); // allocate the ring; total = 100
+        ts.write(seq(0UZ, 100UZ), kCap); // allocate the ring, total = 100
 
-        // Ungated, a lagging reader is ignored: the writer never waits.
+        // Without the gate the writer ignores a lagging reader and does not wait.
         ts.readerAt(TapState::kCapture, 0UZ);
         expect(gt(ts.readerLag(), kCap / 2UZ));
         auto start = std::chrono::steady_clock::now();
@@ -202,8 +202,8 @@ const boost::ut::suite IqTapTests = [] {
         const auto ungated = std::chrono::steady_clock::now() - start;
         expect(lt(millisOf(ungated), 40.0)) << "ungated writer must not wait";
 
-        // Gated with the same lagging reader, the writer waits out its bounded timeout and
-        // then proceeds regardless, so a reader that stops without saying so stalls nothing.
+        // With the gate and the same lagging reader, the writer waits out its bounded timeout
+        // and then continues. A reader that stops without going idle stalls nothing.
         ts.gate.store(true);
         expect(gt(ts.readerLag(), kCap / 2UZ));
         start = std::chrono::steady_clock::now();

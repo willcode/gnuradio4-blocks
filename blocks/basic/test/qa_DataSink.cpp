@@ -978,9 +978,9 @@ const boost::ut::suite DataSinkTests = [] {
     };
 
     "DataSet - the poller's ring is as deep as the consumer asked for, and says what it dropped"_test = [] {
-        // A record's size follows the transform behind it, so a deep ring of records is a large backlog of stale
-        // frames rather than useful slack: at 8192 bins a record is 64 KiB and at 4194304 it is 32 MiB. The depth is
-        // therefore the consumer's own response time, and a consumer that stops answering drops and is told so.
+        // A record's size follows the transform behind it. At 8192 bins a record is 64 KiB, and at 4194304 it is
+        // 32 MiB. A deep ring of records holds a large backlog of stale frames. The depth matches the consumer's own
+        // response time. A consumer that stops answering drops records, and the poller counts them.
         constexpr std::size_t kDepth   = 2UZ;
         constexpr std::size_t kRecords = 8UZ;
 
@@ -995,8 +995,7 @@ const boost::ut::suite DataSinkTests = [] {
             source._tags.push_back(Tag{128UZ + 256UZ * k, {{gr::tag::TRIGGER_NAME.shortKey(), "CMD_DIAG_TRIGGER1"}, {gr::tag::TRIGGER_TIME.shortKey(), std::uint64_t(0)}, {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f}, {gr::tag::CONTEXT.shortKey(), std::string()}, {gr::tag::TRIGGER_META_INFO.shortKey(), gr::property_map{}}}});
         }
 
-        // Drop rather than backpressure, which is what a display asks for, and a consumer that never answers, which
-        // is the case the depth is there to bound.
+        // The Drop policy suits a display. The consumer does not answer during the run. The depth bounds that case.
         auto poller = sink.getPoller(PollerConfig{.overflowPolicy = OverflowPolicy::Drop, .dataSetDepth = kDepth});
         expect(poller != nullptr) << fatal;
         expect(eq(poller->buffer.size(), kDepth)) << "the ring is as deep as the config asked for, not a fixed size";

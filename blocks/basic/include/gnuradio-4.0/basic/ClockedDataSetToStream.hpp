@@ -17,37 +17,36 @@ namespace gr::blocks::basic {
 GR_REGISTER_BLOCK(gr::blocks::basic::ClockedDataSetToStream, [T], [float])
 
 /*!
-@brief Clock-paced record playback: `DataSet<T>` records in, a continuous stream of `T` out,
-each record's samples at the record's stated position and every other position `T{}`.
+@brief Plays `DataSet<T>` records into a continuous stream of `T`, paced by a clock input.
 
-`DataSetToStream` concatenates records and reports the gaps between them; this block renders
-the gaps. A live sink needs a continuous stream in which idle time is explicit, and after the
-last record the idle time has no bound, so gap synthesis from record positions alone cannot
-know when to stop. Pace therefore arrives as a second input: a clock stream, consumed for
-pace only, its values unread. For every `input_chunk_size` clock items consumed,
-`output_chunk_size` output samples are published (the framework's runtime resampling
-settings; the defaults 3 and 5 name the 8000/4800 voice-to-symbol ratio this block was built
-against). Output cannot run ahead of the clock, so a real-time clock branch yields a
-real-time output and a file-rate run of the same graph yields the identical sample sequence
-faster.
+Each record's samples appear at the record's stated position. Every other position holds
+`T{}`. `DataSetToStream` concatenates records and reports the gaps between them. This block
+fills the gaps. A live sink needs a continuous stream in which idle time is explicit. After
+the last record the idle time has no bound. Record positions alone cannot tell the block when
+to stop. The pace comes from a second input, a clock stream. The block consumes clock items
+and does not read their values. For every `input_chunk_size` clock items consumed, it
+publishes `output_chunk_size` output samples. These are the framework's runtime resampling
+settings. The defaults 3 and 5 turn 4800 clock items into 8000 output samples, a voice rate
+from a symbol rate. Output cannot run ahead of the clock. A real-time clock branch gives a
+real-time output. A file-rate run of the same graph gives the same sample sequence faster.
 
-A record's first-sample position on the output stream's own clock is its
-`meta_information[0]["sample_start"]`; absent means position 0. The producing chain owns the
-translation onto that timebase. A record with no samples or no metadata map is skipped and
-counted. A record wholly behind the emitted position is dropped and its length counted in
-`nLateSamples`; a partly late record plays its remainder and counts the overlap. Overlapping
-records resolve in arrival order. The sample sequence depends only on the records and their
-positions, never on the schedule, except where the schedule delivers a record late — which
-is exactly what `nLateSamples` counts.
+A record's first sample goes to the output position in `meta_information[0]["sample_start"]`.
+An absent key means position 0. The position is on the output stream's clock, and the block
+does not translate it. A record with no samples or no metadata map is skipped and counted. A
+record wholly behind the emitted position is dropped, and its length is counted in
+`nLateSamples`. A partly late record plays its remainder, and the overlap is counted.
+Overlapping records resolve in arrival order. The sample sequence depends only on the records
+and their positions. The schedule changes it only by delivering a record late, and
+`nLateSamples` counts that case.
 
-The counters are published through `std::atomic_ref` so a status reader outside the graph's
+The counters are published through `std::atomic_ref`. A status reader outside the graph's
 threads can poll them without a lock.
 */
 template<typename T>
 struct ClockedDataSetToStream : Block<ClockedDataSetToStream<T>, Resampling<3UZ, 5UZ, false>> {
-    using Description = Doc<"Clock-paced record playback: records placed at their stated stream positions, the idle value elsewhere, output advancing at a fixed ratio to a clock input">;
+    using Description = Doc<"Plays records into a continuous stream at their stated positions, paced by a clock input. The idle value fills every other position. The output advances at a fixed ratio to the clock.">;
 
-    PortIn<std::uint8_t>      clock; //!< consumed for pace only, values unread
+    PortIn<std::uint8_t>      clock; //!< consumed for pace, values not read
     PortIn<DataSet<T>, Async> in;
     PortOut<T>                out;
 
@@ -61,7 +60,7 @@ struct ClockedDataSetToStream : Block<ClockedDataSetToStream<T>, Resampling<3UZ,
     alignas(8) std::uint64_t _lateShared     = 0ULL;
     alignas(8) std::uint64_t _unplacedShared = 0ULL;
 
-    //! Clock items absorbed; advances through idle time.
+    //! Clock items consumed, idle time included.
     [[nodiscard]] std::uint64_t clockItemsConsumed() const noexcept { return std::atomic_ref<const std::uint64_t>(_clockShared).load(std::memory_order_relaxed); }
     //! Output samples published.
     [[nodiscard]] std::uint64_t samplesEmitted() const noexcept { return std::atomic_ref<const std::uint64_t>(_emittedShared).load(std::memory_order_relaxed); }
@@ -70,8 +69,8 @@ struct ClockedDataSetToStream : Block<ClockedDataSetToStream<T>, Resampling<3UZ,
     //! Records skipped for want of samples or a metadata map, cumulative.
     [[nodiscard]] std::uint64_t nRecordsUnplaced() const noexcept { return std::atomic_ref<const std::uint64_t>(_unplacedShared).load(std::memory_order_relaxed); }
 
-    //! Admit one record: place it in the pending queue at its stated position, or count it
-    //! as unplaced or late. Called by `processBulk` for each arriving record.
+    //! Queues one record at its stated position, or counts it as unplaced or late.
+    //! `processBulk` calls it for each arriving record.
     void absorb(const DataSet<T>& record) {
         if (record.signal_values.empty() || record.meta_information.empty()) {
             std::atomic_ref<std::uint64_t>(_unplacedShared).fetch_add(1ULL, std::memory_order_relaxed);
@@ -83,12 +82,12 @@ struct ClockedDataSetToStream : Block<ClockedDataSetToStream<T>, Resampling<3UZ,
             start = entry->second.value_or(std::uint64_t{0ULL});
         }
         if (start + record.signal_values.size() <= _emitted) {
-            // wholly in the past: the clock outran it
+            // wholly behind the emitted position
             std::atomic_ref<std::uint64_t>(_lateShared).fetch_add(record.signal_values.size(), std::memory_order_relaxed);
             return;
         }
         if (start < _emitted) {
-            // the overlap the clock already passed
+            // the part behind the emitted position
             std::atomic_ref<std::uint64_t>(_lateShared).fetch_add(_emitted - start, std::memory_order_relaxed);
         }
         _pending.push_back(record);
@@ -120,7 +119,7 @@ struct ClockedDataSetToStream : Block<ClockedDataSetToStream<T>, Resampling<3UZ,
     }
 
 private:
-    //! Keep a record's resolved position in its own metadata, so `popSample` reads one place.
+    //! Stores a record's resolved position in its own metadata, where `popSample` reads it.
     static void writeStart(DataSet<T>& record, std::uint64_t start) { record.meta_information[0UZ]["sample_start"] = start; }
 
     [[nodiscard]] static std::uint64_t startOf(const DataSet<T>& record) {
@@ -136,7 +135,7 @@ private:
             const DataSet<T>&   front = _pending.front();
             const std::uint64_t start = startOf(front);
             if (start + front.signal_values.size() <= _emitted) {
-                _pending.pop_front(); // fully behind the stream: spent, or arrived too late
+                _pending.pop_front(); // fully behind the emitted position, played or late
                 continue;
             }
             if (_emitted >= start) {

@@ -859,9 +859,9 @@ const boost::ut::suite<"DataSetToStream"> dataSetToStreamTests = [] {
     };
 };
 
-// ─── scheduler-driven: criteria 2, 3 and 9 ────────────────────────────────────────────────────────────────────────
-// StreamToDataSet inspects only tags at relative index 0, its input_chunk_size being 1, so a hand-driven span that
-// hands it a tag mid-window tests nothing. These run under the scheduler for that reason.
+// ─── scheduler-driven tests ───────────────────────────────────────────────────────────────────────────────────────
+// StreamToDataSet runs with input_chunk_size 1 and inspects only tags at relative index 0. A hand-driven span with a
+// tag in mid-window would test nothing. These tests run under the scheduler.
 
 namespace {
 
@@ -964,7 +964,7 @@ const boost::ut::suite<"DataSetToStream round trip"> roundTripTests = [] {
         expect(eq(result.samples.front(), sampleValue<float>(kTrigger[0UZ]))) << "and the output starts at 0, not at the input's absolute offset";
     };
 
-    // Runtime half: a reserved key survives one default forwarder and a non-reserved one does not
+    // Under the scheduler, a reserved key survives one default forwarder and a non-reserved key does not
     "one ordinary block downstream keeps the reserved keys only"_test = [] {
         gr::test::RuntimeTest test;
 

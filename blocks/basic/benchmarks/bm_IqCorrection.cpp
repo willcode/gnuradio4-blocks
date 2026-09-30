@@ -53,11 +53,11 @@ int main() {
         return static_cast<double>(y[kSamples / 2UZ].real());
     };
 
-    // What the subnormal flush costs and what it saves, at the rate a device delivers. On a live stream the flush is
-    // two compares and two conditional stores. On silence the recursion as it stood decays the estimate below the
-    // smallest normal after 7 054 006 510 zeros - 705 s at 10 MS/s - and then sits on the smallest subnormal, where
-    // every operation costs a microcode assist; the flushed block sits on an exact zero instead, which is where the
-    // last two arms start.
+    // The cost and the saving of the subnormal flush, at a device rate. On a live stream the flush adds two compares
+    // and two conditional stores. `asItStood` runs the recursion without the flush. On silence that recursion decays
+    // the estimate below the smallest normal after 7 054 006 510 zeros, 705 s at 10 MS/s. It then stays on the
+    // smallest subnormal, where every operation costs a microcode assist. The flushed block stays on an exact zero.
+    // The last two arms start from those two states.
     const double alpha     = device._alpha;
     const double rest      = device._oneMinusAlpha;
     const auto   asItStood = [&y, alpha, rest](std::span<const CF> input, double seed) {

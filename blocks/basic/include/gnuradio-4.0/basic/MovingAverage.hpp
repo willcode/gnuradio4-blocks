@@ -41,20 +41,20 @@ template<typename T>
 struct MovingAverage : Block<MovingAverage<T>> {
     using TAccumulator = typename detail::WindowAccumulator<T>::type;
     using Description  = Doc<R""(
-@brief The sum of the last `length` samples, scaled - a running sum, so its cost does not depend on the window.
+@brief Outputs the scaled sum of the last `length` samples, kept as a running sum at a cost independent of the window.
 
-The accumulator is reseeded by exact direct summation whenever the absolute output offset is a multiple of
-`reseed_interval`, so the output does not depend on how the scheduler split the stream. The window is causal and
-uncompensated: the first `length - 1` outputs are partial-window sums over a zeroed history.
+The accumulator is reseeded by exact direct summation at each absolute output offset that is a multiple of
+`reseed_interval`. The output then does not depend on how the scheduler split the stream. The window is causal and
+uncompensated. The first `length - 1` outputs are partial-window sums over a zeroed history.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
     Annotated<gr::Size_t, "length", Doc<"window length N in samples">>                                             length          = 4U;
-    Annotated<T, "scale", Doc<"multiplies the window sum; 1/length makes it a mean">>                              scale           = T(1);
+    Annotated<T, "scale", Doc<"factor on the window sum, 1/length for a mean">>                                    scale           = T(1);
     Annotated<gr::Size_t, "reseed_interval", Doc<"reseed at absolute output offsets that are a multiple of this">> reseed_interval = 4096U;
-    Annotated<gr::Size_t, "vlen", Doc<"element count of a vector sample; one average per element">>                vlen            = 1U;
+    Annotated<gr::Size_t, "vlen", Doc<"element count of a vector sample, one average per element">>                vlen            = 1U;
 
     GR_MAKE_REFLECTABLE(MovingAverage, in, out, length, scale, reseed_interval, vlen);
 
@@ -65,8 +65,9 @@ uncompensated: the first `length - 1` outputs are partial-window sums over a zer
     std::uint64_t             _offset   = 0ULL;
     bool                      _reseed   = true;
 
-    /// The window is sized from the members, and a batch that moves no value never calls back, so a block
-    /// constructed at its declared defaults is born with the history and the accumulator it describes.
+    /// The window is sized from the members. A settings batch that changes no value does not call settingsChanged().
+    /// The constructor sizes the window too. A block built at its declared defaults starts with the history and the
+    /// accumulator its settings describe.
     explicit MovingAverage(property_map init = {}) : Block<MovingAverage<T>>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
@@ -88,7 +89,7 @@ uncompensated: the first `length - 1` outputs are partial-window sums over a zer
         _reseed = true;
     }
 
-    /// @brief The running sum of element @p element, in the accumulator's own width; inspected by the tests.
+    /// @brief The running sum of element @p element, in the accumulator's own width.
     [[nodiscard]] TAccumulator windowSum(std::size_t element) const noexcept { return _sum[element]; }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) {

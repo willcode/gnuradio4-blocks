@@ -81,7 +81,7 @@ struct StallingSource : Block<StallingSource> {
     }
 };
 
-/// Sends file descriptor 2 to a temporary file until `release()`; `text()` reads what arrived.
+/// Sends file descriptor 2 to a temporary file until `release()`. `text()` reads what arrived.
 class StderrCapture {
     std::FILE* _file  = std::tmpfile();
     int        _saved = -1;
@@ -154,7 +154,7 @@ const boost::ut::suite GraphBridgeTests = [] {
         BridgeState b;
         b.configure(8UZ);
         b.push(seq(0, 6));
-        b.push(seq(6, 10)); // 10 samples into capacity 8: the oldest two go
+        b.push(seq(6, 10)); // 10 samples into capacity 8 drop the oldest two
 
         std::vector<C> out(8UZ);
         bool           eos = false;
@@ -216,7 +216,7 @@ const boost::ut::suite GraphBridgeTests = [] {
         auto bridge = std::make_shared<BridgeState>();
         bridge->configure(1UZ << 16);
         bridge->push(seq(0, static_cast<int>(kSamples)));
-        bridge->setEos(); // the producer finished: drain, then DONE
+        bridge->setEos(); // the producer finished, so the source drains and then answers DONE
 
         gr::Graph flow;
         auto&     src = flow.emplaceBlock<BridgeSource>();

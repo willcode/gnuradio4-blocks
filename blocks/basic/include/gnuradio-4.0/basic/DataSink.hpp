@@ -36,14 +36,13 @@ struct PollerConfig {
     std::size_t              minRequiredSamples  = 1UZ;                                     // Minimum number of samples required before `process` call. Higher values optimize throughput by reducing frequent small `process` calls.
     std::size_t              maxRequiredSamples  = std::numeric_limits<std::size_t>::max(); // Maximum number of samples that can be processed in a single `process` call. Lower values optimize latency by allowing faster processing of small batches.
 
-    // How many DataSet records a poller's ring holds. This is slack for a consumer that answers late, not storage: a
-    // record occupies a slot only while it waits there, and a consumer that keeps up uses one or two whatever the
-    // depth is. The depth is what a consumer that stops answering can accumulate before the policy takes over, and a
-    // record is as large as its transform - 64 KiB at 8192 bins and 32 MiB at 2^22 - so a deep ring buys nothing but
-    // a large backlog of stale frames. Four is a display's own answer: at 25 records a second a consumer that replies
-    // within one or two frame periods needs two to four records of slack, and one that needs more than that is not
-    // keeping up and should drop and say so rather than fall further behind. Raise it only for a consumer that reads
-    // in batches on purpose. Only used by the DataSet pollers.
+    // The number of DataSet records a poller's ring holds. The depth is slack for a consumer that answers late. A
+    // record occupies a slot only while it waits. A consumer that keeps up uses one or two slots at any depth. A
+    // consumer that stops answering fills the ring before the overflow policy acts. A record is as large as its
+    // transform, 64 KiB at 8192 bins and 32 MiB at 2^22. A deep ring only holds a large backlog of stale frames. Four
+    // suits a display at 25 records a second. A consumer that replies within one or two frame periods needs two to
+    // four records of slack. A consumer that needs more is not keeping up. It should drop records and report the
+    // drops. Raise the depth only for a consumer that reads in batches. Only the DataSet pollers use it.
     std::size_t dataSetDepth = 4UZ;
 
     std::size_t preSamples  = 100; // Only used in trigger mode. Number of samples to keep before a trigger.
@@ -186,10 +185,10 @@ struct DataSetPoller {
     decltype(buffer.new_reader())  reader   = buffer.new_reader();
     decltype(buffer.new_writer())  writer   = buffer.new_writer();
     std::atomic<bool>              finished = false;
-    /// Records this poller was not given room for, counted rather than waited for. It is a plain counter a consumer
-    /// may read at any rate and from any thread - once a frame is the usual one - and it only rises, so a consumer
-    /// wanting a rate takes the difference between two readings rather than resetting it. Nothing but this poller's
-    /// own listener writes it, so it says what this consumer missed and not what any other did.
+    /// Records dropped because this poller's ring had no room. The listener counts them and does not wait. A consumer
+    /// may read the counter at any rate and from any thread, usually once a frame. The count only rises. A consumer
+    /// that wants a rate takes the difference of two readings. Only this poller's own listener writes the counter. It
+    /// counts the records this consumer missed.
     std::atomic<std::size_t> dropCount = 0;
     std::size_t              minRequiredSamples; // the number of samples (DataSets) to process must be in a range [minRequiredSamples, maxRequiredSamples]
     std::size_t              maxRequiredSamples;
@@ -1231,14 +1230,13 @@ private:
         template<typename CallbackFW, DataSetMatcher<T> Matcher>
         explicit Listener(Matcher&& matcher_, CallbackFW&& cb) : matcher(std::forward<Matcher>(matcher_)), callback{std::forward<CallbackFW>(cb)} {}
 
-        /// @brief Hand one record to this listener's consumer. Taken by value so that the record moves into the ring
-        /// slot and into a callback: `std::move` on a const reference names the copy assignment, which is what this
-        /// took before and cost a whole record's memory move per frame - 64 KiB at 8192 bins, 32 MiB at 2^22.
+        /// @brief Passes one record to this listener's consumer. The record is taken by value and moves into the ring
+        /// slot or into a callback. `std::move` on a const reference selects the copy assignment. A copy costs a whole
+        /// record per frame, 64 KiB at 8192 bins and 32 MiB at 2^22.
         ///
-        /// The copy that remains is the one into the parameter, and it is a property of the sink's input span being
-        /// const: several listeners may want the same record, and none of them may take it out of the graph's own
-        /// buffer. A sole listener could be given the record to move, and that is a change to the port rather than to
-        /// this block.
+        /// The copy into the parameter remains, because the sink's input span is const. Several listeners may want
+        /// the same record. None of them may take it out of the graph's buffer. Moving the record to a sole listener
+        /// needs a change to the port.
         inline void publishDataSet(DataSet<T> data) {
             if constexpr (!std::is_same_v<Callback, gr::meta::null_type>) {
                 callback(std::move(data));
