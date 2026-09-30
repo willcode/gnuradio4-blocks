@@ -23,11 +23,11 @@
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 /*
- * The gate's whole state is one boolean and one counter, so the tests drive processBulk directly for the exact
- * counts the hold/release contract asks for, then hand the same gate to the scheduler for the chunk-size
- * independence and the held-gate cost measurement, both of which are properties of a real run rather than of one
- * call. The last test in the file is that measurement and is the one place here that reads a clock: what it is
- * about is what a held gate costs a machine, which no synthetic count can stand in for.
+ * The gate's whole state is one boolean and one counter. The tests drive processBulk directly for the exact counts
+ * of the hold and release contract. They then hand the same gate to the scheduler for chunk-size independence and
+ * the held-gate cost. Both are properties of a real run, not of one call. The last test in the file is that cost
+ * measurement. Only this test reads a clock. It measures what a held gate costs a machine. No synthetic count can
+ * replace that measurement.
  */
 namespace qa_csma_gate {
 
@@ -80,10 +80,10 @@ struct ChunkedRecordSource : gr::Block<ChunkedRecordSource> {
     GR_MAKE_REFLECTABLE(ChunkedRecordSource, out);
     std::vector<Record> _records{};
     std::size_t         _pos   = 0UZ;
-    std::size_t         _chunk = 1UZ; ///< records offered per call at most, the "input chunk size" criterion 4 asks about
+    std::size_t         _chunk = 1UZ; ///< records offered per call at most, the input chunk size
 
-    // idle rather than done once exhausted: this graph carries a second source (the sense line), and the test owns
-    // the teardown through an explicit stop() rather than relying on a multi-source graph's own completion
+    // Idle, not done, once exhausted. This graph carries a second source, the sense line. The test owns the teardown
+    // through an explicit stop() and does not rely on the completion of a multi-source graph.
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
         if (_pos >= _records.size()) {
             outSpan.publish(0UZ);
@@ -99,16 +99,16 @@ struct ChunkedRecordSource : gr::Block<ChunkedRecordSource> {
     }
 };
 
-/// Publishes one sense item, `_value`, on its first call and is done: the gate keeps that value as its newest until
-/// something else overwrites it, which is what lets a graph exercise "sense stays clear/busy" with a finite source.
+/// Publishes one sense item, `_value`, on its first call and is then done. The gate keeps that value as its newest
+/// until another item overwrites it. A finite source can then exercise "sense stays clear" or "sense stays busy".
 struct OneShotSense : gr::Block<OneShotSense> {
     gr::PortOut<std::uint8_t, gr::Async> out;
     GR_MAKE_REFLECTABLE(OneShotSense, out);
     std::uint8_t _value = 0U;
     bool         _sent  = false;
 
-    // idle rather than done once the one item is sent: the test owns the teardown, and a DONE source here would
-    // risk the scheduler treating the whole (multi-source) graph as finished before ChunkedRecordSource has
+    // Idle, not done, once the one item is sent. The test owns the teardown. A DONE source here could lead the
+    // scheduler to treat the whole multi-source graph as finished before ChunkedRecordSource is done.
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
         if (_sent || outSpan.size() == 0UZ) {
             outSpan.publish(0UZ);
@@ -121,9 +121,9 @@ struct OneShotSense : gr::Block<OneShotSense> {
     }
 };
 
-/// Offers `_limit` records in windows of `_chunk` and then goes idle, leaving a backlog the gate can decline call
-/// after call. Bounded rather than endless so that what the measurement below times is the declining, not this
-/// block's own record construction filling a buffer.
+/// Offers `_limit` records in windows of `_chunk` and then goes idle. The backlog stays for the gate to decline call
+/// after call. The source is bounded. The measurement below then times the declining, not this block's record
+/// construction filling a buffer.
 struct BackloggedRecordSource : gr::Block<BackloggedRecordSource> {
     gr::PortOut<Record, gr::Async> out;
     GR_MAKE_REFLECTABLE(BackloggedRecordSource, out);
@@ -142,8 +142,8 @@ struct BackloggedRecordSource : gr::Block<BackloggedRecordSource> {
     }
 };
 
-/// A sense line that publishes a busy item on every call: the sense source performs work every traversal, which is
-/// the arm that says what a co-runnable productive block does to a scheduler's idle back-off.
+/// A sense line that publishes a busy item on every call. The sense source performs work every traversal. This arm
+/// shows what a co-runnable productive block does to a scheduler's idle back-off.
 struct EndlessBusySense : gr::Block<EndlessBusySense> {
     gr::PortOut<std::uint8_t, gr::Async> out;
     GR_MAKE_REFLECTABLE(EndlessBusySense, out);
@@ -186,8 +186,8 @@ struct RecordSink : gr::Block<RecordSink> {
     }
 };
 
-/// Runs a graph in a background thread until explicitly stopped, which is what a graph carrying more than one source
-/// that never reports DONE on its own needs: the test owns the teardown.
+/// Runs a graph in a background thread until explicitly stopped. A graph with more than one source that never
+/// reports DONE on its own needs this. The test owns the teardown.
 struct GraphRunner {
     gr::scheduler::Simple<> scheduler;
     std::thread             worker;
@@ -265,12 +265,12 @@ struct HeldRun {
 };
 
 /**
- * @brief A backlogged gate held busy for @p interval, with the sense line @p addSense wires in, measured.
+ * @brief Measures a backlogged gate held busy for @p interval, with the sense line @p addSense wires in.
  *
- * Process CPU time against wall time over the same interval is the number: a gate that declines its input should
- * cost approximately nothing, and a whole core says the scheduler came straight back in. The two arms differ only
- * in the sense source, so what the difference between them measures is that source's effect on the scheduler's own
- * idle back-off rather than anything the gate does.
+ * The number is process CPU time against wall time over the same interval. A gate that declines its input should
+ * cost approximately nothing. A whole core means the scheduler came straight back in. The two arms differ only in
+ * the sense source. Their difference measures that source's effect on the scheduler's idle back-off, not anything
+ * the gate does.
  */
 template<typename TAddSense>
 [[nodiscard]] HeldRun runHeldGate(std::chrono::milliseconds interval, TAddSense&& addSense) {
@@ -321,13 +321,13 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         expect(that % block.nBusyCalls > 0ULL);
         expect(eq(block.nRecordsPassed, std::uint64_t{0ULL}));
 
-        // the same ten offered again and held again: ten records were delayed, not twenty
+        // the same ten offered again and held again. Ten records were delayed, not twenty.
         const Driven heldAgain = drive(block, std::span<const Record>(ten), std::span<const std::uint8_t>(busy));
         expect(eq(heldAgain.consumed, 0UZ));
         expect(eq(block.nRecordsHeld, std::uint64_t{10ULL})) << "a record waiting through a second call is the same waiting record";
         expect(eq(block.nBusyCalls, std::uint64_t{2ULL})) << "the calls, though, are two";
 
-        // one clear item pushed at burst_records = 1: exactly one record is released and the gate holds again
+        // one clear item pushed at burst_records = 1. Exactly one record is released, and the gate holds again.
         const std::vector<std::uint8_t> clear{0U};
         const Driven                    released = drive(block, std::span<const Record>(ten), std::span<const std::uint8_t>(clear));
         expect(eq(released.out.size(), 1UZ));
@@ -414,7 +414,7 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         }
         expect(eq(block.nRecordsPassed, std::uint64_t{2ULL}));
 
-        // the new value staged the way a graph stages one, through settingsChanged rather than by calling rebuild()
+        // the new value staged as a graph stages one, through settingsChanged and not by calling rebuild()
         expect(block.settings().setStaged({{"burst_records", gr::Size_t{1U}}}).empty()) << "the value is accepted";
         std::ignore = block.settings().applyStagedParameters();
         expect(eq(block.burst_records.value, gr::Size_t{1U}));
@@ -439,7 +439,7 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         expect(eq(block.nAllowanceDiscarded, std::uint64_t{3ULL})) << "the three releases the channel granted and no record spent";
     };
 
-    // F4 asks what a graph does with `sense` unconnected, the port being required rather than gr::Optional.
+    // The graph's handling of an unconnected `sense`, a required port and not gr::Optional.
     "a graph with sense unconnected"_test = [] {
         gr::Graph flow;
         auto&     source = flow.emplaceBlock<BackloggedRecordSource>();
@@ -450,17 +450,16 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         expect(flow.connect<"out", "in">(gate, sink).has_value());
 
         gr::scheduler::Simple<> scheduler;
-        // the port is required rather than gr::Optional, but nothing refuses the graph for it: connection checking
-        // is on the output side, so a mandatory input nobody wired is accepted and the block simply never sees an
-        // item on it
+        // The port is required and not gr::Optional, but nothing refuses the graph for it. Connection checking is on
+        // the output side. A mandatory input with no connection is accepted, and the block never sees an item on it.
         expect(scheduler.exchange(std::move(flow)).has_value()) << "the graph is accepted with a required input port unconnected";
         std::thread runner([&scheduler] { std::ignore = scheduler.runAndWait(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         scheduler.requestStop();
         runner.join();
         std::println("gr::blocks::digital::CsmaGate qa: a graph with sense unconnected ran, releasing {} of {} records over {} busy calls", sink.count(), source._limit, gate.nBusyCalls);
-        // nothing arrives on an unconnected sense port, so the gate never leaves the busy state it starts in: the
-        // graph is a permanent silent stall, which is exactly what the port being required is meant to prevent
+        // Nothing arrives on an unconnected sense port. The gate stays in the busy state it starts in. The graph is a
+        // permanent silent stall. The required port is meant to prevent this stall.
         expect(eq(sink.count(), 0UZ)) << "no record crosses a gate whose channel was never observed";
         expect(eq(gate.nRecordsPassed, std::uint64_t{0ULL}));
     };
@@ -480,22 +479,22 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         }
     };
 
-    // What a graph held busy costs. This is a performance measurement and reads the wall clock, which
-    // is the one thing the tests here are otherwise built to avoid; the assertions on the gate's own behavior are
-    // counts, and only the cost bound is a time.
+    // The cost of a graph held busy. This is a performance measurement and reads the wall clock. The other tests
+    // here avoid the wall clock. The assertions on the gate's own behavior are counts, and only the cost bound is a
+    // time.
     "a held gate releases nothing, and what it costs depends on what else is runnable"_test = [] {
         constexpr auto kInterval = std::chrono::milliseconds(150);
 
-        // one busy observation and then an idle sense line: nothing in the graph performs work, and the scheduler's
-        // idle back-off is free to engage
+        // One busy observation and then an idle sense line. Nothing in the graph performs work, and the scheduler's
+        // idle back-off can engage.
         const HeldRun quiet = runHeldGate(kInterval, [](gr::Graph& flow, CsmaGate& gate) {
             auto& sense  = flow.emplaceBlock<OneShotSense>();
             sense._value = 1U;
             boost::ut::expect(flow.connect<"out", "sense">(sense, gate).has_value());
         });
 
-        // the same graph with a sense line that publishes on every call: that source performs work every traversal,
-        // so the back-off never engages however little the gate itself does
+        // The same graph with a sense line that publishes on every call. That source performs work every traversal.
+        // The back-off never engages, however little the gate itself does.
         const HeldRun productive = runHeldGate(kInterval, [](gr::Graph& flow, CsmaGate& gate) {
             auto& sense = flow.emplaceBlock<EndlessBusySense>();
             boost::ut::expect(flow.connect<"out", "sense">(sense, gate).has_value());
@@ -511,17 +510,17 @@ const boost::ut::suite<"csma_gate"> csmaGateTests = [] {
         held("idle sense", quiet);
         held("publishing sense", productive);
 
-        // The gate's own work is the same in both arms — it declines and returns — so the difference between them is
-        // the scheduler's. With nothing else runnable it reaches its idle back-off and sleeps between traversals,
-        // and the held gate costs about a tenth of a core, most of that the run's own setup; with one block
-        // publishing on every call the back-off never engages and the run costs a whole core however little the
-        // gate does. Measured here: 0.014 s of CPU against 0.150 s of wall idle, 0.151 s against 0.151 s
-        // publishing. The bound is half a core, five times the idle arm's measured cost and half the publishing
-        // arm's, so machine load does not decide it.
+        // The gate's own work is the same in both arms. It declines and returns. The difference between the arms is
+        // the scheduler's. With nothing else runnable, the scheduler reaches its idle back-off and sleeps between
+        // traversals. The held gate then costs about a tenth of a core, most of that the run's own setup. With one
+        // block publishing on every call, the back-off never engages. The run then costs a whole core, however little
+        // the gate does. The measured values are 0.014 s of CPU against 0.150 s of wall time idle, and 0.151 s
+        // against 0.151 s publishing. The bound is half a core. That is five times the idle arm's measured cost and
+        // half the publishing arm's. Machine load therefore does not decide it.
         //
-        // What both bounds rest on is that a traversal is short against the interval, which is true of the code a
-        // receiver runs and not of an unoptimized or sanitizer-instrumented build: there a single traversal can fill
-        // the interval, the back-off never gets a turn, and the idle arm reads a whole core like the other one.
+        // Both bounds assume a traversal is short against the interval. That holds for an optimized build. It does
+        // not hold for an unoptimized or sanitizer-instrumented build. There a single traversal can fill the
+        // interval, and the back-off never runs. The idle arm then reads a whole core like the other one.
         if (gr::blocks::testing::kCostMeasurable) {
             expect(that % (quiet.cpuSeconds < 0.5 * quiet.wallSeconds)) << std::format("idle sense: cpu={:.3f}s wall={:.3f}s", quiet.cpuSeconds, quiet.wallSeconds);
             expect(that % (productive.cpuSeconds > 4.0 * quiet.cpuSeconds)) << std::format("the two arms must really differ: idle sense cpu={:.4f}s, publishing sense cpu={:.4f}s", quiet.cpuSeconds, productive.cpuSeconds);

@@ -19,15 +19,15 @@ namespace qa_offset_word_framing {
 using gr::blocks::digital::GroupAssembler;
 using gr::blocks::digital::OffsetWordSync;
 
-/// EN 50067's constants, stated once for every leg. Built per call: the suite runs at process exit, when
+/// EN 50067's constants, stated once for every leg. They are built per call. The suite runs at process exit, when
 /// namespace-scope objects are already destroyed.
 [[nodiscard]] gr::property_map rdsSync() {
     return {{"polynomial", gr::Size_t(0x5B9)}, {"check_bits", gr::Size_t(10)}, {"data_bits", gr::Size_t(16)}, //
         {"offsets", std::vector<gr::Size_t>{0x0FCU, 0x198U, 0x168U, 0x1B4U}}, {"alternate_position", gr::Size_t(2)}, {"alternate_word", gr::Size_t(0x350)}};
 }
 
-/// The framer conformance vector: 446 bits msb-first, four transmitted groups of which the
-/// middle-of-the-air's one flipped bit drops exactly one — an oracle this tree did not compute.
+/// The framer conformance vector, 446 bits msb-first. It holds four transmitted groups. One flipped bit on the air
+/// drops exactly one group. The vector is an independent reference, not computed by this code.
 constexpr std::string_view kVectorHex  = "2aaaaaaa5bab1302780835babf815115fb5bab13027853a5babf814d51e95bab130a78b2c5babf8121a4405bab130a7832c5babf8121a440";
 constexpr std::size_t      kVectorBits = 446UZ;
 
@@ -40,12 +40,12 @@ constexpr std::size_t      kVectorBits = 446UZ;
             bits.push_back(static_cast<std::uint8_t>((v >> b) & 1U));
         }
     }
-    // The constant is 446 bits; the leading hex digit carries two bits of padding.
+    // The constant is 446 bits. The leading hex digit carries two bits of padding.
     bits.erase(bits.begin(), bits.begin() + static_cast<std::ptrdiff_t>(bits.size() - kVectorBits));
     return bits;
 }
 
-/// The words the conformance vector carries, in order; built per call for the reason the settings above are.
+/// The words the conformance vector carries, in order. It is built per call for the same reason as the settings above.
 [[nodiscard]] std::vector<std::uint16_t> vectorWords() { return {0x5babU, 0x09e0U, 0x5babU, 0x5445U, 0x5babU, 0x09e1U, 0x5babU, 0x5354U, 0x5babU, 0x29e0U, 0x5babU, 0x4869U}; }
 
 template<typename T>
@@ -76,7 +76,7 @@ struct RecordSink : gr::Block<RecordSink> {
     }
 };
 
-/// Run bits through sync -> assembler on the Simple scheduler to completion; empty on a hang.
+/// Run bits through sync -> assembler on the Simple scheduler to completion. Returns empty on a hang.
 [[nodiscard]] std::vector<gr::DataSet<std::uint16_t>> runChain(std::vector<std::uint8_t> bits, gr::Size_t minGood = 4U) {
     gr::Graph flow;
     auto&     src = flow.emplaceBlock<FiniteSource<std::uint8_t>>();
