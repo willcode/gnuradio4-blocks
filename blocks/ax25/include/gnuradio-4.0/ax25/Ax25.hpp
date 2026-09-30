@@ -23,24 +23,22 @@
 #include <gnuradio-4.0/annotated.hpp>
 
 /**
- * The address, control and protocol-identifier layer of the AX.25 version 2.2 frame, as a pair of
- * record adapters over `DataSet<std::uint8_t>`.
+ * `Ax25Decode` and `Ax25Encode` handle the address, control and protocol-identifier layer of the
+ * AX.25 version 2.2 frame. Both are record blocks over `DataSet<std::uint8_t>`.
  *
- * A frame reaches `Ax25Decode` after the flags and the bit stuffing have been taken off by
- * `DelimiterExtractor` and the frame check sequence has been validated and stripped by `CrcCheck`,
- * so what these blocks see is an address field of two to ten seven-byte subfields, one control
- * byte, a protocol identifier on the two frame types that carry one, and the information field.
- * `Ax25Encode` builds exactly that and hands it to `CrcAppend` and `DelimiterFramer`, which put the
- * check sequence and the framing back.
+ * `Ax25Decode` expects a frame without flags, bit stuffing or frame check sequence, as
+ * `DelimiterExtractor` and `CrcCheck` leave it. Such a frame holds an address field of two to ten
+ * seven-byte subfields, one control byte, a protocol identifier on the two frame types that carry
+ * one, and the information field. `Ax25Encode` builds the same layout. `CrcAppend` and
+ * `DelimiterFramer` add the check sequence and the framing.
  *
- * The address arithmetic is shifts and masks over a fixed layout, so it lives in `detail` here
- * rather than in the algorithm library: both blocks that need it are in this module and neither
- * kernel would have a second caller.
+ * The address arithmetic is shifts and masks over a fixed layout. It lives in `detail` in this
+ * header, not in the algorithm library. The blocks that use it are in this header.
  *
- * Decode refuses on structure alone and never on content. The low bits of the callsign bytes are
- * not policed and the characters are not held to an alphabet, because the frame's integrity check
- * has already passed upstream and because real traffic puts data there: APRS Mic-E encodes a
- * position in the destination callsign's characters, and a charset rule would drop those frames.
+ * `Ax25Decode` refuses a frame for its structure alone. It does not check the low bits of the
+ * callsign bytes or hold the characters to an alphabet. The frame has already passed its integrity
+ * check. Real traffic also carries data in those characters. APRS Mic-E encodes a position in the
+ * destination callsign, and a character-set rule would drop those frames.
  */
 namespace gr::blocks::ax25 {
 
@@ -62,7 +60,7 @@ constexpr unsigned kMaxByte      = 255U;
 /// @brief The nine named unnumbered modifiers, with the poll/final bit clear.
 constexpr std::array<std::pair<unsigned, std::string_view>, 9UZ> kUnnumbered{{{0x03U, "UI"}, {0x0FU, "DM"}, {0x2FU, "SABM"}, {0x43U, "DISC"}, {0x63U, "UA"}, {0x6FU, "SABME"}, {0x87U, "FRMR"}, {0xAFU, "XID"}, {0xE3U, "TEST"}}};
 
-/// @brief One address subfield's text form: the callsign, the SSID and the repeated marker a '*' spells.
+/// @brief The callsign, the SSID and the repeated ('*') marker of one address subfield.
 struct Address {
     std::string call{};
     unsigned    ssid     = 0U;
@@ -95,7 +93,7 @@ struct Frame {
     gr::Size_t  pid          = 0U;
     std::size_t infoAt       = 0UZ;
     bool        command      = false;
-    bool        commandKnown = false; ///< false when both C bits agree, the pre-2.2 convention that says nothing
+    bool        commandKnown = false; ///< false when both C bits agree, the pre-2.2 convention with no command flag
 };
 
 /// @brief Render @p subfield as `CALL`, `CALL-N`, or a repeater's `CALL-N*` when its H bit is set.
@@ -117,10 +115,10 @@ struct Frame {
     return text;
 }
 
-/// @brief Read @p text as one address, reporting what the grammar refuses through `std::invalid_argument`.
+/// @brief Parses @p text as one address and throws `std::invalid_argument` when the grammar refuses it.
 ///
-/// A trailing '*' is accepted only on a repeater, where it sets the H bit, so that a chain regenerating frames it
-/// heard can reproduce them; a transmitter of new frames writes no '*' and leaves the bit clear.
+/// A trailing '*' is accepted on a repeater alone and sets its H bit. A chain that regenerates received frames uses it
+/// to reproduce them. A new frame carries no '*' and leaves the bit clear.
 [[nodiscard]] inline Address addressFromText(std::string_view text, bool repeater) {
     Address          address;
     std::string_view rest = text;
@@ -195,8 +193,8 @@ inline void packAddress(const Address& address, bool highBit, bool last, std::ve
 
 /// @brief Classify @p control by its low bits, modulo 8.
 ///
-/// An unlisted unnumbered modifier is reported as type "U" with the masked byte kept, because an unknown unnumbered
-/// frame is still a frame and refusing it would lose traffic the parser has no quarrel with.
+/// An unlisted unnumbered modifier is reported as type "U" with the masked byte kept. The frame is still valid, and
+/// refusing it would lose valid traffic.
 [[nodiscard]] inline Control classify(std::uint8_t control) noexcept {
     Control        result;
     const unsigned value = control;
@@ -241,7 +239,7 @@ inline void packAddress(const Address& address, bool highBit, bool last, std::ve
     throw std::invalid_argument(std::format("must be one of 'UI', 'DM', 'SABM', 'DISC', 'UA', 'SABME', 'FRMR', 'XID' or 'TEST'; the I and supervisory types carry sequence numbers no setting supplies, got '{}'", name));
 }
 
-/// @brief Walk @p frame by position: seven bytes a subfield, then the control byte and the identifier behind it.
+/// @brief Parses @p frame by position, seven bytes per subfield, then the control byte and the protocol identifier.
 [[nodiscard]] inline Frame parseFrame(std::span<const std::uint8_t> frame) {
     Frame       parsed;
     std::size_t at         = 0UZ;
@@ -281,8 +279,8 @@ inline void packAddress(const Address& address, bool highBit, bool last, std::ve
         return parsed;
     }
     if (subfields < 2UZ || at >= frame.size()) {
-        // an address field closing after the destination has no source subfield, and one closing at the record's end
-        // has no control byte; both are fewer bytes than the structure requires at the point reached
+        // An address field that ends after the destination has no source subfield. One that ends at the record's end
+        // has no control byte. Both frames are shorter than the structure requires.
         parsed.outcome = Outcome::ShortFrame;
         return parsed;
     }
@@ -309,26 +307,26 @@ inline void packAddress(const Address& address, bool highBit, bool last, std::ve
 GR_REGISTER_BLOCK(gr::blocks::ax25::Ax25Decode)
 
 /*!
-@brief One validated AX.25 frame in, its information field out with the address and control layer in metadata.
+@brief Decodes one validated AX.25 frame per record into its information field and writes its address layer to metadata.
 
-The record's items are the information field, which is often empty: a UA or a DISC frame carries none, and its record
-has zero items and its answer entirely in the keys. The input record's metadata crosses verbatim and the block's own
-keys are written over it, so what `CrcCheck` and `DelimiterExtractor` reported about the frame survives beside what
-the frame says about itself.
+The output record's items are the information field. The field is often empty. A UA or DISC frame carries none, and
+its record has zero items and carries everything in the keys. The block copies the input record's metadata and writes
+its own keys over it. Keys that earlier blocks such as `CrcCheck` and `DelimiterExtractor` wrote stay beside the
+frame's own keys.
 
-`ax25_destination`, `ax25_source` and `ax25_via` are the text forms: `CALL` or `CALL-N`, a repeater that has been
-repeated gaining a trailing `*`, and the path comma-joined and empty when there is none. `ax25_type` names the frame,
-`ax25_poll_final` carries the poll/final bit, and the sequence numbers, the protocol identifier and the masked control
-byte appear on the frame types that have them. `ax25_command` appears only when the two C bits disagree, which is the
-version 2.2 encoding; two equal C bits are the older convention that carries no information and the key is omitted
-rather than guessed at.
+`ax25_destination`, `ax25_source` and `ax25_via` hold the text forms. An address reads `CALL` or `CALL-N`. A repeater
+whose H bit is set gains a trailing `*`. `ax25_via` joins the path with commas and is empty when the frame has none.
+`ax25_type` names the frame type. `ax25_poll_final` carries the poll/final bit. The sequence numbers, the protocol
+identifier and the masked control byte appear on the frame types that have them. `ax25_command` appears only when the
+two C bits differ, as version 2.2 encodes them. Two equal C bits follow the older convention and carry no information.
+The block then omits the key.
 
-Two structural refusals publish nothing and are counted: a record too short for the structure reached, and an address
-field whose tenth subfield still has its extension bit clear. Both are stated at `stop()`, and the record after either
-one decodes normally.
+The block refuses two structures, publishes nothing for them and counts them. One is a record too short for the
+structure parsed so far. The other is an address field whose tenth subfield still has its extension bit clear. Both
+counts are reported at `stop()`. The next record decodes normally.
 */
 struct Ax25Decode : Block<Ax25Decode> {
-    using Description = Doc<"AX.25 decode: one FCS-stripped frame per record becomes its information field, with the address, control and PID layer written to metadata">;
+    using Description = Doc<"Decodes one FCS-stripped AX.25 frame per record into its information field and writes the address, control and PID fields to metadata">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
@@ -378,7 +376,7 @@ struct Ax25Decode : Block<Ax25Decode> {
             info.meta_information.resize(1UZ);
             property_map& map = info.meta_information[0UZ];
             if (!record.meta_information.empty()) {
-                map = record.meta_information[0UZ]; // the record's facts carry through, this block's keys over them
+                map = record.meta_information[0UZ]; // the input metadata passes through, and the block's keys overwrite it
             }
             map.insert_or_assign(property_map::key_type("ax25_destination"), pmt::Value(parsed.destination));
             map.insert_or_assign(property_map::key_type("ax25_source"), pmt::Value(parsed.source));
@@ -419,37 +417,38 @@ struct Ax25Decode : Block<Ax25Decode> {
 GR_REGISTER_BLOCK(gr::blocks::ax25::Ax25Encode)
 
 /*!
-@brief One information field per record in, the assembled AX.25 frame out, ready for `CrcAppend`.
+@brief Builds one AX.25 frame per record around its information field, without the frame check sequence.
 
-The addresses are settings because a transmitter's own call and its path are properties of the station rather than of
-a frame, and they are held to the text grammar `Ax25Decode` renders: one to six characters of `A`-`Z` and `0`-`9`, an
-optional `-N` with N in 0 to 15, and on a repeater an optional trailing `*` that sets the H bit. A setting outside
-that grammar is refused when it is staged, naming the setting, because a chain built on a callsign nobody can read is
-better stopped than started.
+The addresses are settings. A transmitter's own call and its path belong to the station, not to one frame. They follow
+the text grammar that `Ax25Decode` writes. A callsign is one to six characters of `A`-`Z` and `0`-`9`, with an
+optional `-N` for N from 0 to 15. A repeater may carry a trailing `*`, which sets its H bit. A setting outside the
+grammar is refused when it is staged, with an error that names the setting. A chain with an unreadable callsign stops
+before it starts. An empty `destination` or `source` leaves the block inert.
 
 A record may override `ax25_destination`, `ax25_source`, `ax25_via`, `ax25_command`, `ax25_poll_final` or `ax25_pid`
-for its own frame, which is how a digipeater or a test regenerates frames it read. An override arrives mid-stream
-rather than at staging, so one that fails the same grammar is a counted drop naming the key rather than an error that
-takes the chain down, and the record after it is built from the settings again.
+for its own frame. A digipeater or a test uses these overrides to regenerate frames it read. An override arrives
+mid-stream. The block drops a record whose override fails the grammar, names the key in a message and counts the
+record in `nRefusedOverride`. The chain keeps running. The next record is built from the settings again.
 
-`control_type` names the frame. The I and supervisory types are refused: they carry sequence numbers that belong to a
-connected-mode state machine, and nothing here numbers a frame. The reserved SSID bits go out as `11`, the C bits
-follow `command`, and the protocol identifier is emitted for the UI frame alone, the only accepted type that carries
-one.
+`control_type` names the frame type. The block refuses the I and supervisory types. Their sequence numbers belong to a
+connected-mode state machine, and this block numbers no frames. The reserved SSID bits go out as `11`. `command` true
+sends the command pair of C bits, destination 1 and source 0. `command` false sends the response pair. The block
+emits a protocol identifier on UI frames alone. UI is the only accepted type that carries one. `pid` defaults to
+0xF0, the no-layer-3 value that APRS and plain text use.
 */
 struct Ax25Encode : Block<Ax25Encode> {
-    using Description = Doc<"AX.25 encode: a record of information bytes becomes an addressed frame - address field, control byte and PID - for CrcAppend and DelimiterFramer">;
+    using Description = Doc<"Builds an AX.25 frame from each record of information bytes by adding the address field, control byte and PID. The frame carries no check sequence or flags">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "destination", Doc<"the destination address as 'CALL' or 'CALL-N'; required, and empty leaves the block inert">, Visible>    destination{};
-    Annotated<std::string, "source", Doc<"the source address as 'CALL' or 'CALL-N'; required, and empty leaves the block inert">, Visible>              source{};
-    Annotated<std::string, "via", Doc<"the repeater path, comma separated and at most eight hops, a trailing '*' on a hop setting its H bit">, Visible> via{};
-    Annotated<bool, "command", Doc<"true sends the version 2.2 command pair of C bits, destination 1 and source 0; false sends the response pair">>     command      = true;
-    Annotated<bool, "poll_final", Doc<"the poll/final bit of the control byte">>                                                                        poll_final   = false;
-    Annotated<gr::Size_t, "pid", Doc<"the protocol identifier of a UI frame, 0 to 255; 0xF0 is the no-layer-3 value APRS and plain text use">>          pid          = 0xF0U;
-    Annotated<std::string, "control_type", Doc<"'UI', 'DM', 'SABM', 'DISC', 'UA', 'SABME', 'FRMR', 'XID' or 'TEST'">, Visible>                          control_type = std::string("UI");
+    Annotated<std::string, "destination", Doc<"destination address, 'CALL' or 'CALL-N', required">, Visible>                   destination{};
+    Annotated<std::string, "source", Doc<"source address, 'CALL' or 'CALL-N', required">, Visible>                             source{};
+    Annotated<std::string, "via", Doc<"up to eight comma-separated repeater hops, '*' setting the H bit">, Visible>            via{};
+    Annotated<bool, "command", Doc<"send the command pair of C bits, else the response pair">>                                 command      = true;
+    Annotated<bool, "poll_final", Doc<"the poll/final bit of the control byte">>                                               poll_final   = false;
+    Annotated<gr::Size_t, "pid", Doc<"protocol identifier of a UI frame, 0 to 255">>                                           pid          = 0xF0U;
+    Annotated<std::string, "control_type", Doc<"'UI', 'DM', 'SABM', 'DISC', 'UA', 'SABME', 'FRMR', 'XID' or 'TEST'">, Visible> control_type = std::string("UI");
 
     GR_MAKE_REFLECTABLE(Ax25Encode, in, out, destination, source, via, command, poll_final, pid, control_type);
 
@@ -515,7 +514,7 @@ struct Ax25Encode : Block<Ax25Encode> {
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) { // inert rather than addressing frames to nobody
+        if (!_configured) { // inert until destination and source are set
             std::ignore = inSpan.consume(0UZ);
             outSpan.publish(0UZ);
             return work::Status::ERROR;
@@ -592,7 +591,7 @@ struct Ax25Encode : Block<Ax25Encode> {
             frame.timing_events.resize(1UZ);
             frame.meta_information.resize(1UZ);
             if (meta != nullptr) {
-                frame.meta_information[0UZ] = *meta; // the record's facts carry through; assembly has nothing to add
+                frame.meta_information[0UZ] = *meta; // the record's metadata passes through, and the block adds no keys
             }
 
             ++nRecords;
@@ -659,40 +658,38 @@ private:
 GR_REGISTER_BLOCK(gr::blocks::ax25::Ax25AddressFilter)
 
 /*!
-@brief Routes a decoded frame to `ok` or `fail` by address, over the keys `Ax25Decode` already wrote.
+@brief Routes a decoded AX.25 frame to `ok` or `fail` by the address keys in its metadata.
 
-One predicate, and it parses nothing: `ax25_destination`, `ax25_source` and `ax25_via` are read as `Ax25Decode` wrote
-them and nothing about the frame's bytes is touched again. `direction` says which of the first two keys the `address`
-setting is read against — `"destination"`, `"source"` or `"either"`, required with no default because addressed-to
-and heard-from are different streams and a default would silently pick one. `address` is `CALL` or `CALL-N`: without
-an SSID it matches any, with one it matches that SSID exactly. `digipeater`, when non-empty, is read under that same
-grammar and gives a frame a second, independent way in — checked only when the address and direction did not already
-match — if it names a hop of `ax25_via` carrying the trailing `*` that `Ax25Decode` writes for a hop whose H bit was
-set. Both settings are refused when staged if the grammar does not accept them, so a callsign nobody can spell is a
-message at configuration time rather than a filter that silently never matches; the `*` belongs to the frame and not
-to the setting, and writing one into `digipeater` is one of the spellings refused.
+The block reads the `ax25_destination`, `ax25_source` and `ax25_via` keys that `Ax25Decode` writes. It does not parse
+the frame's bytes. `direction` selects the key that `address` is compared against. It takes `"destination"`,
+`"source"` or `"either"`. It is required and has no default, because addressed-to and heard-from are different
+streams. `address` is `CALL` or `CALL-N`. Without an SSID it matches any SSID. With one it matches that SSID exactly.
 
-A record none of whose direction's keys is present goes to `fail` and is counted `nMissingKey` before the digipeater
-path is considered: a missing key is not a value to fall back past. Under `"either"` that means both keys absent —
-one key present and not matching is an ordinary failure, because the frame did say who it was. A key of the wrong
-type reads as absent, the same convention every metadata-reading block in this tree follows. Nothing is written to
-metadata on either port — the frame's facts were `Ax25Decode`'s to write and are identical on both outputs, so a
-`matched` flag here would only be a second spelling of which port the record left by.
+A non-empty `digipeater` gives a frame a second way to match. The block checks it only when `address` did not match.
+It matches when `ax25_via` names that hop with the trailing `*`. `Ax25Decode` writes the `*` for a hop whose H bit is
+set. `digipeater` follows the `address` grammar. The `*` belongs to the frame, and a `*` in the setting is refused.
+Both settings are refused at staging when the grammar does not accept them. A misspelled callsign is then an error at
+configuration time. It does not become a filter that never matches.
 
-`fail` is `gr::Optional`. Connected, it bounds the loop exactly as `ok` does: a refused record whose port has no room
-stays in the input buffer for the next call rather than being counted and dropped on the floor. Unconnected, a
-refused record is a counted stated drop and only `nFailed` is left to say it happened.
+A record that lacks every key `direction` names goes to `fail` and is counted in `nMissingKey`. The block does not
+try the digipeater path for it. Under `"either"` both keys must be absent. A record with one key present that does
+not match is an ordinary failure. A key of the wrong type reads as absent. The block writes no metadata on either
+port. The frame's keys are identical on both outputs, and the output port already shows whether the record matched.
+
+`fail` is `gr::Optional`. When `fail` is connected, it bounds the loop as `ok` does. A refused record that finds no
+room on `fail` stays in the input buffer for the next call. When `fail` is unconnected, the block drops a refused
+record and counts it in `nFailed`.
 */
 struct Ax25AddressFilter : Block<Ax25AddressFilter> {
-    using Description = Doc<"AX.25 address filter: routes a decoded frame to 'ok' or 'fail' by 'address', 'direction' and an optional 'digipeater' hop, reading only ax25_destination, ax25_source and ax25_via">;
+    using Description = Doc<"Routes a decoded AX.25 frame to 'ok' or 'fail' by 'address', 'direction' and an optional 'digipeater' hop. It reads only ax25_destination, ax25_source and ax25_via">;
 
     PortIn<DataSet<std::uint8_t>, Async>            in;
     PortOut<DataSet<std::uint8_t>, Async>           ok;
     PortOut<DataSet<std::uint8_t>, Async, Optional> fail;
 
-    Annotated<std::string, "address", Doc<"'CALL' or 'CALL-N'; required. Without '-N' any SSID matches; with '-N' the SSID must match exactly">, Visible> address{};
-    Annotated<std::string, "direction", Doc<"'destination', 'source' or 'either'; required, no default">, Visible>                                        direction{};
-    Annotated<std::string, "digipeater", Doc<"when non-empty, a frame also matches if this callsign appears in ax25_via with its '*' marker">, Visible>   digipeater{};
+    Annotated<std::string, "address", Doc<"required callsign, 'CALL' matching any SSID or 'CALL-N' matching one">, Visible> address{};
+    Annotated<std::string, "direction", Doc<"required address key, 'destination', 'source' or 'either'">, Visible>          direction{};
+    Annotated<std::string, "digipeater", Doc<"repeater callsign that also matches when marked '*' in ax25_via">, Visible>   digipeater{};
 
     GR_MAKE_REFLECTABLE(Ax25AddressFilter, in, ok, fail, address, direction, digipeater);
 
@@ -734,7 +731,7 @@ struct Ax25AddressFilter : Block<Ax25AddressFilter> {
         }
         if (!digipeater.value.empty()) {
             _digipeaterHasSsid = digipeater.value.find('-') != std::string::npos;
-            try { // the repeated marker is the frame's; a hop is named here the way `address` names one
+            try { // the setting names a hop without the '*' marker, as `address` names an address
                 _digipeater = detail::addressFromText(digipeater.value, false);
             } catch (const std::invalid_argument& error) {
                 throw gr::exception(std::format("digipeater: {}", error.what()));
@@ -759,7 +756,7 @@ struct Ax25AddressFilter : Block<Ax25AddressFilter> {
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& okSpan, OutputSpanLike auto& failSpan) {
-        if (!_configured) { // inert rather than routing frames nobody named
+        if (!_configured) { // inert until address and direction are set
             std::ignore = inSpan.consume(0UZ);
             okSpan.publish(0UZ);
             failSpan.publish(0UZ);
@@ -769,8 +766,8 @@ struct Ax25AddressFilter : Block<Ax25AddressFilter> {
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         std::size_t refused  = 0UZ;
-        // a connected `fail` bounds the loop as `ok` does: a refused record with nowhere to go waits in the input
-        // buffer for the next call, where counting it and writing it nowhere would lose it
+        // A connected `fail` bounds the loop as `ok` does. A refused record with no room on `fail` waits in the input
+        // buffer for the next call. Counting it and writing it nowhere would lose it.
         const std::size_t failRoom = failSpan.isConnected ? failSpan.size() : std::numeric_limits<std::size_t>::max();
         for (; consumed < inSpan.size() && made < okSpan.size() && refused < failRoom; ++consumed) {
             const DataSet<std::uint8_t>& record = inSpan[consumed];
@@ -819,7 +816,7 @@ private:
         return value == nullptr ? std::nullopt : std::optional<std::string>(std::string(value->begin(), value->end()));
     }
 
-    /// @brief Whether @p text, read as one address, is the address `address` names, its SSID rule applied.
+    /// @brief Whether @p text parses as the address that `address` names, under its SSID rule.
     [[nodiscard]] bool addressMatches(const std::string& text) const {
         try {
             const detail::Address parsed = detail::addressFromText(text, false);
@@ -828,7 +825,7 @@ private:
             }
             return !_hasSsid || parsed.ssid == _address.ssid;
         } catch (const std::invalid_argument&) {
-            return false; // a value the grammar does not accept matches nothing rather than throwing mid-stream
+            return false; // a value the grammar refuses matches nothing and throws nothing mid-stream
         }
     }
 
@@ -856,7 +853,7 @@ private:
         return false;
     }
 
-    /// @brief One record's verdict: matched, failed, or missing the key `direction` names.
+    /// @brief Classifies one record as matched, failed, or missing the keys `direction` names.
     [[nodiscard]] Verdict classify(const property_map* meta) const {
         const bool checkDestination = direction.value == "destination" || direction.value == "either";
         const bool checkSource      = direction.value == "source" || direction.value == "either";

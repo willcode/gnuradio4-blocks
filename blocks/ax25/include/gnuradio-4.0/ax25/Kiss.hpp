@@ -19,61 +19,59 @@
 #include <gnuradio-4.0/annotated.hpp>
 
 /**
- * KISS, the one command byte a host and a terminal node controller put in front of a frame.
+ * KISS puts one command byte in front of each frame passed between a host and a terminal node
+ * controller.
  *
- * A KISS frame is that byte followed by the payload, delimited on the wire by SLIP framing, which is
- * `gr::digital::slip()` in both directions and belongs to `DelimiterFramer` and `DelimiterExtractor`.
- * What is left for these two blocks is the byte itself: its high nibble the terminal node
- * controller's port, 0 to 15, and its low nibble the command, where zero means data and the values
- * above it configure the controller.
+ * A KISS frame is that byte followed by the payload. SLIP framing delimits it on the wire.
+ * `DelimiterFramer` and `DelimiterExtractor` apply `gr::digital::slip()` in both directions. These
+ * two blocks handle the command byte alone. Its high nibble is the terminal node controller's port,
+ * 0 to 15. Its low nibble is the command. Zero means data, and the values above zero configure the
+ * controller.
  *
  * These blocks carry data frames only. The parameter commands set transmit delay, persistence, slot
- * time and the rest of a controller's radio timing, which a receive or transmit chain here has no
- * consumer for; a parameter frame arriving on the wire is therefore counted and passed over rather
- * than decoded, and no setting sends one.
+ * time and the rest of a controller's radio timing. These blocks do not use them. `KissDecode`
+ * counts and skips a parameter frame. No setting sends one.
  *
- * The one exception is the gr-satellites timestamp record: a frame whose command byte is 0x09, carrying eight
- * bytes, big-endian unsigned milliseconds since the Unix epoch, ahead of the data frame it stamps. `0x09` is not a
- * command Chepponis and Karn defined; it is this extension's own, opt in on both blocks through `emit_timestamp` and
- * `read_timestamp` so a chain that sets neither is unchanged.
+ * The one exception is the gr-satellites timestamp record. It is a frame with command byte 0x09 and eight bytes of
+ * big-endian unsigned milliseconds since the Unix epoch. It precedes the data frame it stamps. Chepponis and Karn did
+ * not define `0x09`. The extension defines it. Each block enables it through a setting, `emit_timestamp` or
+ * `read_timestamp`. With neither set, the blocks handle plain KISS.
  */
 namespace gr::blocks::ax25 {
 
 GR_REGISTER_BLOCK(gr::blocks::ax25::KissDecode)
 
 /*!
-@brief One de-SLIPped KISS frame per record in, its payload out with the port it arrived on in metadata.
+@brief Strips the KISS command byte from each de-SLIPped frame and publishes the payload with its port in metadata.
 
-The first byte is the command byte. A command nibble of zero is a data frame: the byte is stripped, the rest of the
-record is published, and `kiss_port` carries the high nibble so a multi-port controller's frames can be told apart
-downstream. The record's own metadata crosses verbatim underneath that key.
+The first byte is the command byte. A command nibble of zero marks a data frame. The block strips the byte and
+publishes the rest of the record. `kiss_port` carries the high nibble and tells the ports of a multi-port controller
+apart. The record's own metadata passes through unchanged beneath that key.
 
-Anything else is a parameter frame, counted in `nControlFrames` and dropped. The count is per frame rather than per
-byte, which is what makes it readable: a controller sending its timing parameters once at startup shows as a handful
-rather than as a byte total nobody can interpret. An empty record carries no command byte at all and is counted
-separately. Either way the next record decodes.
+Any other command marks a parameter frame. The block counts it in `nControlFrames` and drops it. The count is per
+frame, not per byte. A controller that sends its timing parameters once at startup shows as a few frames. An empty
+record carries no command byte and is counted in `nRefusedEmpty`. In both cases the next record decodes.
 
-With `read_timestamp` set, a command nibble of 9 is read instead of counted: a nine-byte frame sets a pending stamp,
-counted `nTimestampsRead`, and the **next** data frame's output record carries `timestamp = milliseconds * 1'000'000`.
-A second timestamp frame arriving before any data frame consumed the first supersedes it, and a change to
-`read_timestamp` discards one still pending; both are counted `nTimestampsUnused`, and so is a stamp still held when
-the stream ends, because no data frame will carry it. A change to any other setting leaves a pending stamp where it
-is, because the frame it belongs to is still the next one.
+With `read_timestamp` set, the block reads a command nibble of 9 as a timestamp. A nine-byte frame sets a pending
+stamp and counts in `nTimestampsRead`. The output record of the **next** data frame carries
+`timestamp = milliseconds * 1'000'000`. A second timestamp frame before the next data frame replaces the first. A
+change to `read_timestamp` discards a pending stamp. `nTimestampsUnused` counts both cases. It also counts a stamp
+still held when the stream ends, since no data frame will carry it. A change to any other setting keeps a pending
+stamp, because its data frame is still the next one.
 
-A command-9 frame is malformed, counted `nTimestampsMalformed` and never held as pending, when it is not exactly nine
-bytes or when its eight bytes hold more milliseconds than a nanosecond count can carry: the wire field is unsigned
-and 64 bits wide where `DataSet::timestamp` is signed nanoseconds, so everything above `2^63 / 10^6` milliseconds —
-some 292 million years past the epoch — names a time this carrier cannot express, and refusing it is what keeps a
-hostile or corrupt frame from wrapping the multiplication. With `read_timestamp` false a command-9 frame is a
-parameter frame like any other, counted in `nControlFrames`.
+A command-9 frame is malformed when it is not exactly nine bytes long. It is also malformed when its milliseconds
+exceed `2^63 / 10^6`, about 292 million years past the epoch. The wire field is unsigned and 64 bits wide.
+`DataSet::timestamp` is signed nanoseconds and cannot express a later time. The block counts a malformed frame in
+`nTimestampsMalformed` and never holds it as pending. The check keeps a corrupt frame from overflowing the
+multiplication. With `read_timestamp` false, a command-9 frame is a parameter frame and counts in `nControlFrames`.
 */
 struct KissDecode : Block<KissDecode> {
-    using Description = Doc<"KISS decode: strips the command byte from a de-SLIPped record, publishing the payload with 'kiss_port' and counting the parameter frames it passes over; with read_timestamp, a command-9 frame stamps the next data record instead">;
+    using Description = Doc<"Strips the KISS command byte from a de-SLIPped record and publishes the payload with 'kiss_port'. It counts the parameter frames it skips. With read_timestamp set, a command-9 frame stamps the next data record">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<bool, "read_timestamp", Doc<"interpret a command-9 control frame as a timestamp for the next data frame">, Visible> read_timestamp = false;
+    Annotated<bool, "read_timestamp", Doc<"read a command-9 frame as the next data frame's timestamp">, Visible> read_timestamp = false;
 
     GR_MAKE_REFLECTABLE(KissDecode, in, out, read_timestamp);
 
@@ -91,16 +89,16 @@ struct KissDecode : Block<KissDecode> {
     std::uint64_t nTimestampsMalformed = 0ULL; ///< a command-9 frame that was not nine bytes, or whose milliseconds exceed what nanoseconds hold
 
     std::optional<std::int64_t> _pendingTimestamp{}; ///< nanoseconds, ready for the next data frame's DataSet::timestamp
-    bool                        _stamping = false;   ///< the read_timestamp in force, so that only a change to it discards a pending stamp
-    /// @brief The unused stamps this thread has already retired; the counter adds the one still held.
+    bool                        _stamping = false;   ///< the read_timestamp in force. Only a change to it discards a pending stamp.
+    /// @brief The unused stamps the worker thread has retired. `nTimestampsUnused` adds the one still held.
     std::uint64_t _timestampsUnusedBanked = 0ULL;
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
 
     void start() { rebuild(); }
 
-    /// @brief Discards a pending stamp when `read_timestamp` itself changes, counted the same way a superseded one is.
-    /// Any other setting leaves it alone: the data frame it belongs to is still the next one to arrive.
+    /// @brief Discards a pending stamp when `read_timestamp` changes and counts it as a superseded one.
+    /// Any other setting keeps the stamp. Its data frame is still the next one to arrive.
     void rebuild() {
         if (read_timestamp.value == _stamping) {
             return;
@@ -113,11 +111,11 @@ struct KissDecode : Block<KissDecode> {
         countUnusedTimestamps();
     }
 
-    /// @brief Reports the counters, and touches nothing else: it does not run on the thread that owns the rest.
+    /// @brief Reports the counters and changes no state. It does not run on the worker thread.
     void stop() {
-        // SchedulerBase::stop() calls changeStateTo(REQUESTED_STOP) on whichever thread requested the stop, and that
-        // reaches here while this block's worker may still be inside processBulk. The pending stamp belongs to that
-        // worker, so the counters are left complete after every call and this reports them.
+        // SchedulerBase::stop() calls changeStateTo(REQUESTED_STOP) on the thread that requested the stop. That call
+        // reaches here while this block's worker may still be inside processBulk. The pending stamp belongs to the
+        // worker. Every call therefore leaves the counters complete, and this function reports them.
         std::string report;
         const auto  append = [&report](std::string_view label, std::uint64_t count) {
             if (count > 0ULL) {
@@ -164,7 +162,7 @@ struct KissDecode : Block<KissDecode> {
             payload.meta_information.resize(1UZ);
             property_map& map = payload.meta_information[0UZ];
             if (!record.meta_information.empty()) {
-                map = record.meta_information[0UZ]; // the record's facts carry through, the port key over them
+                map = record.meta_information[0UZ]; // the record's metadata passes through, the port key written over it
             }
             map.insert_or_assign(property_map::key_type("kiss_port"), pmt::Value(gr::Size_t{command >> 4U}));
             if (read_timestamp.value && _pendingTimestamp.has_value()) {
@@ -178,7 +176,7 @@ struct KissDecode : Block<KissDecode> {
             ++made;
         }
 
-        countUnusedTimestamps(); // a stamp still held is one no data frame carried, and only this thread may look
+        countUnusedTimestamps(); // a stamp still held has no data frame yet, and only the worker thread reads it
         std::ignore = inSpan.consume(consumed);
         outSpan.publish(made);
         if (made == 0UZ && consumed == 0UZ) {
@@ -188,10 +186,10 @@ struct KissDecode : Block<KissDecode> {
     }
 
 private:
-    /// @brief Leaves `nTimestampsUnused` complete: what is retired, plus the stamp still waiting for a data frame.
+    /// @brief Sets `nTimestampsUnused` to the retired stamps plus the stamp still waiting for a data frame.
     void countUnusedTimestamps() noexcept { nTimestampsUnused = _timestampsUnusedBanked + (_pendingTimestamp.has_value() ? 1ULL : 0ULL); }
 
-    /// @brief Reads a command-9 frame into the pending stamp, or counts it malformed. Never throws.
+    /// @brief Reads a command-9 frame into the pending stamp or counts it malformed. Does not throw.
     void readTimestampFrame(const DataSet<std::uint8_t>& record) {
         if (record.signal_values.size() != kTimestampBytes) {
             ++nTimestampsMalformed;
@@ -201,7 +199,7 @@ private:
         for (std::size_t i = 1UZ; i < kTimestampBytes; ++i) {
             milliseconds = (milliseconds << 8U) | static_cast<std::uint64_t>(record.signal_values[i]);
         }
-        if (milliseconds > kMaxMilliseconds) { // a time no signed nanosecond count reaches; the multiplication below would wrap
+        if (milliseconds > kMaxMilliseconds) { // beyond signed nanoseconds, and the multiplication below would wrap
             ++nTimestampsMalformed;
             return;
         }
@@ -216,28 +214,29 @@ private:
 GR_REGISTER_BLOCK(gr::blocks::ax25::KissEncode)
 
 /*!
-@brief Puts a KISS data command byte in front of each record, for `DelimiterFramer` under SLIP framing.
+@brief Puts a KISS data command byte in front of each record.
 
-`kiss_port` is the terminal node controller port the frame is for and goes into the byte's high nibble; the low
-nibble is zero, the data command, because a chain that carries frames has no parameter frame to send. A record may
-name its own port under a `kiss_port` metadata key, which is what lets one chain feed several ports, and a port
-outside 0 to 15 there is a counted drop rather than a truncated nibble sending the frame somewhere else.
+The output still needs SLIP framing, as `DelimiterFramer` applies it. `kiss_port` names the terminal node controller
+port of the frame. It goes into the byte's high nibble. The low nibble is zero, the data command. The block sends no
+parameter frames. A record may name its own port under a `kiss_port` metadata key. One chain can then feed several
+ports. The block drops a record whose port is outside 0 to 15 and counts it in `nRefusedOverride`. A truncated
+nibble would send the frame to the wrong port.
 
-Metadata crosses verbatim; prefixing a byte has nothing to report about the frame.
+Metadata passes through unchanged. The block adds no keys.
 
-With `emit_timestamp` set, a record whose `DataSet::timestamp` is non-zero gets its own command-9 frame ahead of it:
-the command byte followed by eight bytes, big-endian unsigned, of `timestamp / 1'000'000` — the record's own field,
-truncated to the millisecond it divides evenly into, never the host clock. A record whose `timestamp` is zero, the
-field's unstated value, gets no stamp frame and is counted `nTimestampsUnavailable`; nothing is invented for it.
+With `emit_timestamp` set, a record with a non-zero `DataSet::timestamp` gets a command-9 frame ahead of it. That
+frame holds the command byte and eight bytes of `timestamp / 1'000'000`, big-endian unsigned. The value comes from
+the record's own field, truncated toward zero to whole milliseconds. The block does not read the host clock. A zero
+`timestamp` means the field is unset. Such a record gets no stamp frame and is counted in `nTimestampsUnavailable`.
 */
 struct KissEncode : Block<KissEncode> {
-    using Description = Doc<"KISS encode: prepends the data command byte, its high nibble the 'kiss_port' setting or the record's own override; with emit_timestamp, a command-9 frame precedes any record whose DataSet::timestamp is non-zero">;
+    using Description = Doc<"Prepends the KISS data command byte, its high nibble the 'kiss_port' setting or the record's own override. With emit_timestamp set, a command-9 frame precedes each record whose DataSet::timestamp is non-zero">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "kiss_port", Doc<"the terminal node controller port a frame is for, 0 to 15; a record's own 'kiss_port' key overrides it">, Visible>    kiss_port      = 0U;
-    Annotated<bool, "emit_timestamp", Doc<"publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero">, Visible> emit_timestamp = false;
+    Annotated<gr::Size_t, "kiss_port", Doc<"terminal node controller port, 0 to 15, overridable by a 'kiss_port' key">, Visible> kiss_port      = 0U;
+    Annotated<bool, "emit_timestamp", Doc<"precede each record with a non-zero timestamp by a command-9 frame">, Visible>        emit_timestamp = false;
 
     GR_MAKE_REFLECTABLE(KissEncode, in, out, kiss_port, emit_timestamp);
 
@@ -281,8 +280,8 @@ struct KissEncode : Block<KissEncode> {
         for (; consumed < inSpan.size(); ++consumed) {
             const DataSet<std::uint8_t>& record = inSpan[consumed];
 
-            // a stamped record needs two slots and an unstamped one needs one, so the room check is per record rather
-            // than a loop condition: publishing the stamp frame without the frame it stamps would strand it
+            // A stamped record needs two slots and an unstamped one needs one. The room check is therefore per record,
+            // not a loop condition. A stamp frame published without the frame it stamps would be stranded.
             const bool        stamping = emit_timestamp.value && record.timestamp != 0;
             const std::size_t needed   = stamping ? 2UZ : 1UZ;
             if (made + needed > outSpan.size()) {
@@ -318,7 +317,7 @@ struct KissEncode : Block<KissEncode> {
             framed.timing_events.resize(1UZ);
             framed.meta_information.resize(1UZ);
             if (meta != nullptr) {
-                framed.meta_information[0UZ] = *meta; // the record's facts carry through; a prefixed byte adds none
+                framed.meta_information[0UZ] = *meta; // the record's metadata passes through, and the block adds no keys
             }
 
             ++nRecords;
@@ -329,8 +328,8 @@ struct KissEncode : Block<KissEncode> {
         std::ignore = inSpan.consume(consumed);
         outSpan.publish(made);
         if (made == 0UZ && consumed == 0UZ) {
-            // a record held for want of slots is short of output, whatever the input port has waiting: one free slot
-            // is not room for a stamped record, and calling that a shortage of input names the wrong port
+            // A record held for lack of slots is short of output, whatever the input port holds. One free slot is not
+            // room for a stamped record. Reporting a shortage of input would name the wrong port.
             return (roomHold || outSpan.size() == 0UZ) ? work::Status::INSUFFICIENT_OUTPUT_ITEMS : work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
         return work::Status::OK;
@@ -346,7 +345,7 @@ private:
         return entry == map->end() ? std::nullopt : std::optional<gr::Size_t>(entry->second.value_or(gr::Size_t{0x100U}));
     }
 
-    /// @brief The command-9 frame for @p timestampNs: the command byte, then its milliseconds, big-endian.
+    /// @brief The command-9 frame for @p timestampNs, the command byte followed by its milliseconds, big-endian.
     [[nodiscard]] static DataSet<std::uint8_t> timestampFrame(std::int64_t timestampNs) {
         const std::uint64_t milliseconds = static_cast<std::uint64_t>(timestampNs / 1'000'000LL); // truncating toward zero
 
