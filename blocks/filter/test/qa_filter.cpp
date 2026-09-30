@@ -518,6 +518,33 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         expect(eq(run.sampleOffsetsOf("trigger_meta_info").size(), 1UZ)) << "a tag inside the stream reaches a sample";
     };
 
+    "a key outside the default tags crosses fir_filter, and neither BasicFilter nor BasicDecimatingFilter in IIR mode nor Decimator"_test = [] {
+        // fir_filter forwards every key of a tag; the other three forward a tag through the framework's key filter,
+        // which passes the keys of gr::tag::kDefaultTags alone. The one-tap FirFilter upstream forwards every key
+        // without moving the tag.
+        namespace filter_test = gr::blocks::filter::testing;
+        constexpr std::string_view kPrivateKey = "private_key";
+        static_assert(std::ranges::find(gr::tag::kDefaultTags, kPrivateKey) == gr::tag::kDefaultTags.end());
+        const std::vector<gr::Tag> tags{{kMid, gr::property_map{{gr::property_map::key_type{"trigger_name"}, std::string("mid")}, {gr::property_map::key_type{kPrivateKey}, std::string("kept")}}}};
+        const gr::property_map     oneTap{{"taps", std::vector<float>{1.0f}}};
+
+        const auto fir = filter_test::runChained<FirFilter<float>, fir_filter<float>>(oneTap, {{"b", std::vector<float>(31UZ, 1.0f / 31.0f)}}, kSamples, tags);
+        expect(fir.ran);
+        expect(eq(fir.offsetsOf("trigger_name").size(), 1UZ)) << "fir_filter: the tag crosses";
+        expect(eq(fir.offsetsOf(kPrivateKey).size(), 1UZ)) << "fir_filter: with the key outside the default tags";
+
+        const auto expectDropped = [](const filter_test::EndRun& run, std::string_view label) {
+            expect(run.ran) << label;
+            expect(eq(run.offsetsOf("trigger_name").size(), 1UZ)) << label << ": the tag crosses";
+            expect(that % run.offsetsOf(kPrivateKey).empty()) << label << ": without the key outside the default tags";
+        };
+        gr::property_map decimating{{"filter_type", std::string("IIR")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}};
+        decimating.insert_or_assign(gr::property_map::key_type{"decimate"}, gr::Size_t{5});
+        expectDropped(filter_test::runChained<FirFilter<float>, BasicFilter<float>>(oneTap, {{"filter_type", std::string("IIR")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}}, kSamples, tags), "BasicFilter, IIR");
+        expectDropped(filter_test::runChained<FirFilter<float>, BasicDecimatingFilter<float>>(oneTap, decimating, kSamples, tags), "BasicDecimatingFilter, IIR");
+        expectDropped(filter_test::runChained<FirFilter<float>, Decimator<float>>(oneTap, {{"decim", gr::Size_t{5}}}, kSamples, tags), "Decimator");
+    };
+
     "under a stop request the epilogue of fir_filter publishes nothing, and a call publishes its outputs' tags"_test = [] {
         // 5 equal taps delay by 2: the trigger on input 9 maps to output 11, past the 10 outputs of its call and among
         // the 4 outputs of the next 4 inputs
