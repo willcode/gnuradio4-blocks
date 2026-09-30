@@ -29,50 +29,49 @@ namespace gr::blocks::ofdm {
 GR_REGISTER_BLOCK(gr::blocks::ofdm::CpInsert)
 
 /**
- * @brief Frequency-domain symbol records in, a time-domain stream with cyclic prefixes out.
+ * @brief Converts frequency-domain symbol records into a time-domain stream with cyclic prefixes.
  *
- * This is one of the two blocks where the domains meet, so it carries the inverse transform as well as the prefix.
- * The fourier module's `FFT` block takes a stream and emits a four-signal real `DataSet` of magnitude, phase and
- * parts; it neither accepts nor produces a `DataSet<complex<float>>` symbol, and the module has no inverse block at
- * all. Composing it between a symbol source and this one is therefore not available, and the transform is taken here
- * on the library kernel — the same kernel the fourier block itself uses, so this is a reuse and not a second FFT.
+ * This block is one of the two where the domains meet. It takes the inverse transform as well as adding the prefix.
+ * The FFT block of the fourier module takes a stream and emits a four-signal real `DataSet` of magnitude, phase and
+ * parts. It neither accepts nor produces a `DataSet<complex<float>>` symbol, and that module has no inverse block.
+ * The FFT block therefore cannot sit between a symbol source and this block. This block takes the transform on the
+ * library kernel, the same kernel the fourier block uses. It reuses that kernel and adds no second FFT.
  *
- * The transform is the inverse DFT with its `1/fft_len`: the library's transforms are unnormalized, so the scaling is
- * applied here and `CpRemove`'s forward transform returns the record it started from.
+ * The transform is the inverse DFT with its `1/fft_len`. The library's transforms are unnormalized. This block
+ * applies the scaling, and the forward transform of `CpRemove` returns the record it started from.
  *
- * Each symbol's tail `cp_len` samples are copied in front of it. `cp_len` is a scalar or a per-symbol cycle — 802.11's
- * long-then-short opening is a two-entry cycle — and the cycle position is the record's own `symbol_in_frame`, so it
- * restarts with every frame rather than drifting against it. A record that carries no `symbol_in_frame` is counted in
- * `nUnmarked()` and takes the position the block was already at.
+ * The block copies each symbol's tail `cp_len` samples in front of it. `cp_len` is a scalar or a per-symbol cycle.
+ * The long-then-short opening of 802.11 is a two-entry cycle. The cycle position is the record's own
+ * `symbol_in_frame`. The cycle therefore restarts with every frame and does not drift against it. A record without
+ * `symbol_in_frame` is counted in `nUnmarked()` and takes the position the block was already at.
  *
- * `window_len` raised-cosine samples smooth each symbol's edges into its neighbor's: the symbol is extended
- * cyclically by that many samples, the extension falls while the next symbol's head rises, and the two are added. The
- * stream advances by `cp_len + fft_len` per symbol either way, so windowing costs no rate. It is off by default,
- * because it is a deliberate departure from the exact prefix algebra and its benefit — a narrower spectrum — is a
- * measurement rather than a given.
+ * `window_len` raised-cosine samples blend each symbol's edges into its neighbor's. The symbol is extended cyclically
+ * by that many samples. The extension falls while the next symbol's head rises, and the two are added. The stream
+ * advances by `cp_len + fft_len` per symbol in both cases, and windowing costs no rate. Windowing is off by default.
+ * It departs on purpose from the exact prefix algebra. Its benefit, a narrower spectrum, must be measured.
  *
- * A frame's first sample carries a `trigger_name` tag, which is what lets `CpRemove` align a loopback without a
- * detector in between. It is a transmit-side marker that nothing on air ever sees; `emit_trigger` turns it off.
+ * A frame's first sample carries a `trigger_name` tag. `CpRemove` uses it to align a loopback without a detector in
+ * between. The tag is a transmit-side marker and never goes on air. `emit_trigger` turns it off.
  */
 struct CpInsert : Block<CpInsert, NoTagPropagation> {
-    using Description = Doc<"OFDM cyclic-prefix insertion: DataSet<complex<float>> symbol records in, a time-domain complex stream out. Carries the inverse transform, since the fourier module's FFT block neither takes nor returns a complex symbol record. cp_len is a scalar or a per-symbol cycle restarting at each frame; window_len raised-cosine samples optionally smooth the symbol edges; a frame's first sample carries a trigger tag">;
+    using Description = Doc<"Converts DataSet<complex<float>> symbol records into a time-domain complex stream with cyclic prefixes. It takes the inverse transform, since the FFT block of the fourier module neither takes nor returns a complex symbol record. cp_len is a scalar or a per-symbol cycle restarting at each frame. Optional window_len raised-cosine samples smooth the symbol edges. A frame's first sample carries a trigger tag">;
 
     PortIn<DataSet<Complex>, Async> in;
     PortOut<Complex>                out;
 
-    Annotated<std::vector<gr::Size_t>, "cp_len", Visible, Doc<"prefix samples: one entry is a constant, several are a per-symbol cycle restarting at each frame">> cp_len        = std::vector<gr::Size_t>{16U};
-    Annotated<gr::Size_t, "window_len", Visible, Doc<"raised-cosine edge samples overlapped with the next symbol; 0 is off">>                                      window_len    = 0U;
-    Annotated<bool, "emit_trigger", Doc<"tag the first sample of every frame with trigger_name">>                                                                  emit_trigger  = true;
-    Annotated<std::string, "trigger_label", Doc<"the label written under the trigger_name key of the emitted tags">>                                               trigger_label = std::string("ofdm_frame");
+    Annotated<std::vector<gr::Size_t>, "cp_len", Visible, Doc<"prefix samples, a constant or a per-symbol cycle restarting each frame">> cp_len        = std::vector<gr::Size_t>{16U};
+    Annotated<gr::Size_t, "window_len", Visible, Doc<"raised-cosine edge samples overlapped with the next symbol, 0 for off">>           window_len    = 0U;
+    Annotated<bool, "emit_trigger", Doc<"tag the first sample of every frame with trigger_name">>                                        emit_trigger  = true;
+    Annotated<std::string, "trigger_label", Doc<"the label written under the trigger_name key of the emitted tags">>                     trigger_label = std::string("ofdm_frame");
 
     GR_MAKE_REFLECTABLE(CpInsert, in, out, cp_len, window_len, emit_trigger, trigger_label);
 
     gr::algorithm::FFT<Complex, Complex, gr::algorithm::Direction::Backward> _inverse{};
 
     std::vector<Complex> _time{};    ///< one symbol, transformed, before the prefix is put in front of it
-    std::vector<Complex> _out{};     ///< the symbol as a stream: prefix, symbol and the windowed head folded in
+    std::vector<Complex> _out{};     ///< the symbol as a stream, with prefix, symbol and the windowed head folded in
     std::vector<Complex> _overlap{}; ///< the previous symbol's falling extension, waiting for this one's head
-    std::vector<float>   _ramp{};    ///< the rising raised-cosine edge; the falling one is its complement
+    std::vector<float>   _ramp{};    ///< the rising raised-cosine edge, whose complement is the falling one
 
     std::size_t   _fftLength    = 0UZ;
     std::size_t   _outAt        = 0UZ;  ///< samples of `_out` already published
@@ -84,7 +83,7 @@ struct CpInsert : Block<CpInsert, NoTagPropagation> {
     /// @brief Records that carried no `symbol_in_frame`, and so took the cycle position the block was already at.
     [[nodiscard]] std::uint64_t nUnmarked() const noexcept { return _unmarked; }
 
-    /// @brief Records shorter than the prefix they would have been given, which are dropped rather than read past.
+    /// @brief Records shorter than the prefix they would have been given. They are dropped, not read past.
     [[nodiscard]] std::uint64_t nMalformed() const noexcept { return _malformed; }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
@@ -115,10 +114,10 @@ struct CpInsert : Block<CpInsert, NoTagPropagation> {
     }
 
     /**
-     * @brief Drain the symbol under construction, then build the next one, for as long as both spans allow.
+     * @brief Drains the symbol under construction, then builds the next one, for as long as both spans allow.
      *
-     * A record is consumed only once its whole stream form has been published, so a call that runs out of output room
-     * leaves the record where it is and resumes on the next one; nothing of a symbol is ever lost between calls.
+     * A record is consumed only once its whole stream form has been published. A call that runs out of output room
+     * leaves the record in place and resumes it on the next call. No part of a symbol is lost between calls.
      */
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         std::size_t written  = 0UZ;
@@ -165,13 +164,13 @@ private:
         _overlap.assign(edge, Complex{});
     }
 
-    /// @brief One record as a stretch of stream: the inverse transform, its prefix, and the windowed edges.
+    /// @brief One record as a stretch of stream, with the inverse transform, its prefix and the windowed edges.
     void build(const DataSet<Complex>& record) {
         const std::size_t fftLength = record.signal_values.size();
         const std::size_t longest   = static_cast<std::size_t>(*std::ranges::max_element(cp_len.value));
         if (fftLength < longest || fftLength == 0UZ) {
-            // A prefix is a copy of the symbol's own tail, so a record with less symbol than prefix is not one. It is
-            // dropped and counted rather than read past its end.
+            // A prefix is a copy of the symbol's own tail. A record with less symbol than prefix is not a symbol. It
+            // is dropped and counted, not read past its end.
             ++_malformed;
             _out.clear();
             _outAt = 0UZ;
@@ -206,8 +205,8 @@ private:
         std::copy_n(_time.begin(), fftLength, _out.begin() + static_cast<std::ptrdiff_t>(prefix));
 
         if (edge > 0UZ) {
-            // The symbol continues cyclically past its end, so the extension is its own head; it falls while this
-            // symbol's head rises, and the previous symbol's extension is added into that head.
+            // The symbol continues cyclically past its end, and the extension is its own head. The extension falls
+            // while this symbol's head rises. The previous symbol's extension is added into that head.
             for (std::size_t n = 0UZ; n < edge; ++n) {
                 _out[n] = _out[n] * _ramp[n] + _overlap[n];
             }
@@ -224,37 +223,37 @@ private:
 GR_REGISTER_BLOCK(gr::blocks::ofdm::CpRemove)
 
 /**
- * @brief A time-domain stream in, one frequency-domain symbol record per symbol out, aligned by a trigger tag.
+ * @brief Cuts a time-domain stream into frequency-domain symbol records, one per symbol, aligned by a trigger tag.
  *
- * The alignment convention is pinned so that this block and `CpInsert` meet exactly: **the trigger marks the first
- * sample of the first symbol's cyclic prefix**. On a trigger the block skips `cp_len` samples and cuts the
- * `fft_len` that follow — equivalently, it takes `cp_len + fft_len` and keeps the last `fft_len` — then repeats at
- * the symbol cadence for `n_sync + frame_len` symbols, or until the next trigger, whichever comes first. Between
- * frames it discards, and `nDiscarded()` says how many samples, as does every record's `discarded_samples`.
+ * This block and `CpInsert` share one alignment convention and meet exactly. **The trigger marks the first sample of
+ * the first symbol's cyclic prefix.** On a trigger the block skips `cp_len` samples and cuts the `fft_len` samples
+ * that follow. Equivalently, it takes `cp_len + fft_len` samples and keeps the last `fft_len`. It repeats at the
+ * symbol cadence for `n_sync + frame_len` symbols or until the next trigger, whichever comes first. Between frames it
+ * discards samples. `nDiscarded()` and each record's `discarded_samples` report how many.
  *
- * `timing_offset` biases the cut into the prefix, the standard margin against a channel's delay spread: a negative
- * value starts the window that many samples early, inside the prefix, where the symbol's own tail already sits. The
- * consequence is a per-carrier phase slope of `-2*pi*k*timing_offset/fft_len`, a rotation the equalizer's channel
- * estimate absorbs along with the channel's own — it is not an error and must not be "fixed" anywhere downstream.
- * The range is `[-min(cp_len), 0]`: outside it the window leaves the symbol and the algebra no longer holds.
+ * `timing_offset` biases the cut into the prefix. This is the standard margin against a channel's delay spread. A
+ * negative value starts the window that many samples early, inside the prefix, where the symbol's own tail already
+ * sits. The result is a per-carrier phase slope of `-2*pi*k*timing_offset/fft_len`. The equalizer's channel estimate
+ * absorbs this rotation along with the channel's own. It is not an error, and no later stage should correct it. The
+ * range is `[-min(cp_len), 0]`. Outside it the window leaves the symbol and the algebra fails.
  *
- * The forward transform is taken here for the reason `CpInsert` takes the inverse: the fourier module's `FFT` block
- * carries no complex symbol record on either side. It is the library kernel, unnormalized, which is the exact inverse
- * of `CpInsert`'s scaled backward transform.
+ * The block takes the forward transform for the reason `CpInsert` takes the inverse. The FFT block of the fourier
+ * module carries no complex symbol record on either side. The transform runs on the library kernel, unnormalized. It
+ * is the exact inverse of the scaled backward transform in `CpInsert`.
  */
 struct CpRemove : Block<CpRemove, NoTagPropagation> {
-    using Description = Doc<"OFDM cyclic-prefix removal: a complex stream in, one DataSet<complex<float>> symbol record of fft_len bins out per symbol. Aligned by a trigger tag marking the first sample of the first symbol's prefix; cuts fft_len after cp_len, biased by timing_offset; discards between frames and counts what it discarded">;
+    using Description = Doc<"Cuts a complex stream into one DataSet<complex<float>> symbol record of fft_len bins per symbol. A trigger tag marks the first sample of the first symbol's prefix. The block cuts fft_len samples after cp_len, biased by timing_offset. It discards samples between frames and counts them">;
 
     PortIn<Complex>                  in;
     PortOut<DataSet<Complex>, Async> out;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length, a power of two; the record's length in bins">>                                                       fft_len       = 64U;
-    Annotated<std::vector<gr::Size_t>, "cp_len", Visible, Doc<"prefix samples: one entry is a constant, several are a per-symbol cycle restarting at each frame">>        cp_len        = std::vector<gr::Size_t>{16U};
-    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head, which are cut like any other">>                                                         n_sync        = 0U;
-    Annotated<gr::Size_t, "frame_len", Visible, Doc<"data symbols per frame; with n_sync it sets the cadence a trigger starts. 0 cuts until the next trigger">>           frame_len     = 0U;
-    Annotated<std::int32_t, "timing_offset", Visible, Unit<"samples">, Doc<"signed bias of the cut, in [-min(cp_len), 0]; negative starts the window inside the prefix">> timing_offset = 0;
-    Annotated<std::string, "trigger_label", Doc<"the trigger_name a tag must carry to start a frame; empty accepts any trigger">>                                         trigger_label = std::string("");
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                        signal_name   = std::string("ofdm_symbol");
+    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length and record length in bins, a power of two">>                         fft_len       = 64U;
+    Annotated<std::vector<gr::Size_t>, "cp_len", Visible, Doc<"prefix samples, a constant or a per-symbol cycle restarting each frame">> cp_len        = std::vector<gr::Size_t>{16U};
+    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head, cut like data symbols">>                               n_sync        = 0U;
+    Annotated<gr::Size_t, "frame_len", Visible, Doc<"data symbols per frame, 0 cutting until the next trigger">>                         frame_len     = 0U;
+    Annotated<std::int32_t, "timing_offset", Visible, Unit<"samples">, Doc<"signed bias of the cut, in [-min(cp_len), 0]">>              timing_offset = 0;
+    Annotated<std::string, "trigger_label", Doc<"trigger_name that starts a frame, empty for any trigger">>                              trigger_label = std::string("");
+    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                       signal_name   = std::string("ofdm_symbol");
 
     GR_MAKE_REFLECTABLE(CpRemove, in, out, fft_len, cp_len, n_sync, frame_len, timing_offset, trigger_label, signal_name);
 
@@ -265,7 +264,7 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     std::vector<int>          _binCarriers{}; ///< the signed carrier each bin holds, which is the record's axis
     detail::SymbolRecordShape _shape{};       ///< the invariant part of a record, assigned into the slot the port recycles
 
-    bool          _collecting    = false; ///< inside a frame; otherwise the block is discarding
+    bool          _collecting    = false; ///< inside a frame, and discarding when false
     std::uint64_t _symbolStart   = 0ULL;  ///< absolute index of the current symbol's first prefix sample
     std::uint64_t _windowStart   = 0ULL;  ///< absolute index of the current cut's first sample
     std::size_t   _have          = 0UZ;   ///< samples of the cut already collected
@@ -280,13 +279,13 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
         static constexpr std::array kRebuildKeys{"fft_len", "cp_len", "timing_offset"};
         if (!_cut.empty() && !std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            return; // a cost hint only: the cut is built from the members, never from what the callback was handed
+            return; // a cost hint only, since the cut is built from the members and not from the callback's arguments
         }
         rebuild();
     }
 
-    /// @brief Builds the cut, the transform buffers and the record shape from the members. Idempotent, so `start()`
-    /// runs it for a construction that moved no value and so never called back.
+    /// @brief Builds the cut, the transform buffers and the record shape from the members. It is idempotent.
+    /// `start()` runs it for a construction that moved no value and made no callback.
     void rebuild() {
         detail::requireFftLength(fft_len);
         detail::requireCyclicPrefix(std::span<const gr::Size_t>(cp_len.value), fft_len);
@@ -319,12 +318,12 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     }
 
     /**
-     * @brief Walk the call's samples, cutting where the cadence says and discarding where it does not.
+     * @brief Walks the call's samples, cutting where the cadence says and discarding elsewhere.
      *
-     * Only the tags inside the region this call consumes are read: one further on is offered again next call, and
-     * acting on it now would restart the frame at a sample the block has not reached. The span is walked in stretches
-     * rather than sample by sample — a skip over a prefix, a copy into a cut, a discard between frames — so the cost
-     * is the copy and nothing per sample beyond it.
+     * The block reads only the tags inside the region this call consumes. A tag further on is offered again next
+     * call. Acting on it now would restart the frame at a sample the block has not reached. The span is walked in
+     * stretches, not sample by sample. A stretch is a skip over a prefix, a copy into a cut or a discard between
+     * frames. The cost is the copy and nothing per sample beyond it.
      */
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::uint64_t        base = static_cast<std::uint64_t>(inSpan.streamIndex);

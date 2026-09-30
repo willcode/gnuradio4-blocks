@@ -68,10 +68,10 @@ template<typename TBlock>
     return flat;
 }
 
-/// @brief One transmitted frame: a Schmidl-Cox preamble and `kFrame` QPSK-loaded data symbols, with silence in front.
+/// @brief One transmitted frame, a Schmidl-Cox preamble and `kFrame` QPSK-loaded data symbols, with silence in front.
 ///
-/// The frame's first sample -- the first sample of the preamble's own prefix -- is at index `kLead`, which is what
-/// every timing assertion here is measured against.
+/// The frame's first sample, the first sample of the preamble's own prefix, is at index `kLead`. Every timing
+/// assertion here is measured against it.
 [[nodiscard]] std::vector<CF> transmit() {
     const auto      data     = dataCarriers();
     const auto      pilots   = pilotCarriers();
@@ -128,8 +128,8 @@ template<typename TBlock>
     return sum / static_cast<double>(stream.size());
 }
 
-/// The energy floor the metric's ratio is guarded by, set from the signal the scene actually carries: a fraction of
-/// what a correlation window of fft_len/2 samples holds when the preamble is present.
+/// The energy floor that guards the metric's ratio, set from the signal the scene carries. It is a fraction of what
+/// a correlation window of fft_len/2 samples holds when the preamble is present.
 [[nodiscard]] float energyFloor(std::span<const CF> stream) {
     const double perSample = meanPower(stream.subspan(kLead, static_cast<std::size_t>(kCp + kFft)));
     return static_cast<float>(0.25 * perSample * static_cast<double>(kFft / 2U));
@@ -176,8 +176,8 @@ struct Detection {
 
 /// @brief The residual offset a stream still carries, read off the preamble's own repeated halves.
 ///
-/// The preamble at `at` is `cp_len` prefix samples followed by two identical halves; correlating the halves gives
-/// `pi * eps` exactly as the block's own estimator does, so this measures what the correction left behind.
+/// The preamble at `at` is `cp_len` prefix samples followed by two identical halves. Correlating the halves gives
+/// `pi * eps`, as the block's own estimator does. This measures what the correction left behind.
 [[nodiscard]] double residualCfo(std::span<const CF> stream, std::size_t at) {
     const std::size_t    half  = static_cast<std::size_t>(kFft) / 2UZ;
     const std::size_t    start = at + static_cast<std::size_t>(kCp);
@@ -195,15 +195,15 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
     const float           floor = energyFloor(std::span<const CF>(clean));
 
     /**
-     * The exact-correlation plateau runs from the frame's first sample to `cp_len` samples later, so its own midpoint
-     * is `t0 + cp_len/2` and the rule the block applies is unbiased against it. The threshold crossings are wider than
-     * that plateau, and where they fall depends on the preamble's time-domain energy profile: at `d = t0 - delta` the
-     * correlation holds the energy of the window's last `L - delta` samples while the reference holds all `L`, so the
-     * rising edge is early by however many samples carry the first fifth of the symbol's energy, and the falling edge
-     * is late by the matching count at the other end plus what the incoherent terms against the next symbol add. The
-     * residue is a property of the sequence and not of the estimator, so what is asserted is that it stays inside a
-     * quarter of the prefix -- where the prefix itself absorbs it, and `timing_offset` is the setting for the rest --
-     * and that it does not depend on how the stream is chunked.
+     * The exact-correlation plateau runs from the frame's first sample to `cp_len` samples later. Its midpoint is
+     * `t0 + cp_len/2`, and the block's rule is unbiased against it. The threshold crossings are wider than that
+     * plateau. Where they fall depends on the preamble's time-domain energy profile. At `d = t0 - delta` the
+     * correlation holds the energy of the window's last `L - delta` samples, and the reference holds all `L`. The
+     * rising edge is early by the number of samples that carry the first fifth of the symbol's energy. The falling
+     * edge is late by the matching count at the other end, plus what the incoherent terms against the next symbol
+     * add. The residue is a property of the sequence and not of the estimator. The test asserts that it stays inside
+     * a quarter of the prefix, where the prefix absorbs it. `timing_offset` handles the rest. The test also asserts
+     * that the residue does not depend on how the stream is chunked.
      */
     "the trigger lands within a quarter prefix of the constructed frame start, at any chunking"_test = [&clean, floor] {
         std::vector<std::int64_t> biases;

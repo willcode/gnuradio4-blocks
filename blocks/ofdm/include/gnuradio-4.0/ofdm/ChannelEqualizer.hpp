@@ -30,53 +30,54 @@ namespace gr::blocks::ofdm {
 GR_REGISTER_BLOCK(gr::blocks::ofdm::OfdmChannelEqualizer)
 
 /**
- * @brief Post-transform symbol records in, equalized data carriers out.
+ * @brief Equalizes post-transform symbol records and emits their data carriers.
  *
- * A frame opens with its sync symbols, and the one at `sync_index` is the known full symbol this block divides by:
- * `H[c] = Y[c] / X[c]` on every occupied carrier. Guards hold no estimate and are never divided. A `sync_word` that
- * leaves an occupied carrier empty is refused at configure rather than producing a carrier with no channel behind it.
+ * A frame opens with its sync symbols. The one at `sync_index` is the known full symbol this block divides by,
+ * `H[c] = Y[c] / X[c]` on every occupied carrier. The block passes over and counts the other sync symbols. Guard
+ * carriers hold no estimate and are never divided. A `sync_word` that leaves an occupied carrier empty is refused at
+ * configure time. It would otherwise produce a carrier with no channel estimate. A symbol's data index is
+ * `symbol_in_frame - n_sync`. Pilot values follow the family's two-level cycle over that index.
  *
- * Each data symbol is then tracked and equalized:
+ * The block then tracks and equalizes each data symbol in one of three modes.
  *
  * - `cpe` takes the common phase error the pilots agree on,
- *   `theta_s = angle( sum_p Y_s[p] * conj(H[p] * X_s[p]) )`, and applies `e^{-j theta_s}` to the whole symbol. It is
- *   the correction a phase-noise process needs and the one a residual frequency offset needs, and it costs one
- *   arctangent a symbol.
- * - `cpe_interp` does that and then follows the channel itself: the residual each pilot sees after the common phase
- *   is removed is interpolated across the occupied carriers, linearly in magnitude and in unwrapped phase, and fed
- *   into a single-pole per-carrier smoother of coefficient `alpha`. The interpolation weights are a table built once
- *   at configure; what is left per symbol is one `polar` a carrier, which is the transcendental a phase
- *   interpolation cannot be written without.
- * - `none` equalizes on the sync word's estimate alone, which is what a scene measures tracking against.
+ *   `theta_s = angle( sum_p Y_s[p] * conj(H[p] * X_s[p]) )`, and applies `e^{-j theta_s}` to the whole symbol. It
+ *   corrects phase noise and a residual frequency offset. It costs one arctangent per symbol.
+ * - `cpe_interp` does the same and then follows the channel itself. After the common phase is removed, the residual
+ *   at each pilot is interpolated across the occupied carriers, linearly in magnitude and in unwrapped phase. A
+ *   single-pole per-carrier smoother of coefficient `alpha` takes the result. The interpolation weights are a table
+ *   built once at configure time. Per symbol, one `polar` per carrier remains. A phase interpolation cannot avoid
+ *   that transcendental.
+ * - `none` equalizes on the sync word's estimate alone. The tests measure tracking against this mode.
  *
- * Equalization is zero-forcing, `Y[c]/H[c]`, with the reciprocal kept beside the estimate so a symbol costs a
- * multiply a carrier and no divide. An MMSE variant and a decision-directed channel update are both strategy swaps
- * on this structure and neither is here.
+ * Equalization is zero-forcing, `Y[c]/H[c]`. The reciprocal is kept beside the estimate, and a symbol costs one
+ * multiply per carrier and no divide. An MMSE variant and a decision-directed channel update would each swap a
+ * strategy on this structure. Neither is implemented.
  *
- * Output records carry the data carriers alone, in `data_carriers` order, ready for a constellation decoder, and
- * their axis states which carrier each value came from. `cpe_rad` is the phase this symbol was turned by, `evm_db`
- * is the symbol's own error vector magnitude against the nearest constellation point, and `frame_evm_db` is the same
- * measure accumulated over the frame so far, which on a frame's last symbol is the frame's figure.
+ * Output records carry the data carriers alone, in `data_carriers` order, for a constellation decoder. Their axis
+ * states the carrier each value came from. `cpe_rad` is the phase this symbol was turned by. `evm_db` is the
+ * symbol's own error vector magnitude against the nearest constellation point. `frame_evm_db` is the same measure
+ * accumulated over the frame so far. On a frame's last symbol it is the frame's figure.
  *
- * The channel estimate is readable on an optional record port, one record per estimate, carrying its magnitude and
- * phase against the carrier axis.
+ * The channel estimate is readable on an optional record port, one record per estimate. Each record carries
+ * magnitude and phase against the carrier axis.
  */
 struct OfdmChannelEqualizer : Block<OfdmChannelEqualizer, NoTagPropagation> {
-    using Description = Doc<"OFDM channel equalizer: post-transform DataSet<complex<float>> symbol records in, equalized data carriers out in data_carriers order. Least squares against the frame's known sync word, common-phase-error tracking on the pilots with an optional interpolated per-carrier update, and zero-forcing equalization. Records carry cpe_rad, evm_db and frame_evm_db; the channel estimate is readable on an optional record port">;
+    using Description = Doc<"Equalizes post-transform DataSet<complex<float>> symbol records and emits the data carriers in data_carriers order. It estimates the channel by least squares against the frame's known sync word, tracks the common phase error on the pilots with an optional interpolated per-carrier update, and equalizes by zero forcing. Records carry cpe_rad, evm_db and frame_evm_db. The channel estimate is readable on an optional record port">;
 
     PortIn<DataSet<Complex>, Async>          in;
     PortOut<DataSet<Complex>, Async>         out;
     PortOut<DataSet<float>, Optional, Async> channel;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length, a power of two; the record's length in bins">>                               fft_len = 64U;
+    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length and record length in bins, a power of two">>                                  fft_len = 64U;
     Annotated<std::vector<std::int32_t>, "data_carriers", Visible, Doc<"signed logical carrier indices the output holds, in order">>              data_carriers{};
     Annotated<std::vector<std::int32_t>, "pilot_carriers", Visible, Doc<"signed logical carrier indices the tracking reads">>                     pilot_carriers{};
-    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im; read by (s * n_pilots + p) % len with s the data index in the frame">> pilot_symbols{};
-    Annotated<std::vector<float>, "sync_word", Doc<"interleaved re,im, one whole fft_len symbol: the known symbol least squares divides by">>     sync_word{};
-    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head; the data index of a symbol is symbol_in_frame - n_sync">>       n_sync      = 1U;
-    Annotated<gr::Size_t, "sync_index", Doc<"which of the frame's sync symbols is the known one; the others are passed over">>                    sync_index  = 0U;
+    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im pilots, read by (s * n_pilots + p) % len">>                             pilot_symbols{};
+    Annotated<std::vector<float>, "sync_word", Doc<"interleaved re,im known symbol of fft_len carriers for least squares">>                       sync_word{};
+    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head">>                                                               n_sync      = 1U;
+    Annotated<gr::Size_t, "sync_index", Doc<"index of the known symbol among the frame's sync symbols">>                                          sync_index  = 0U;
     Annotated<std::string, "tracking", Visible, Doc<"'cpe', 'cpe_interp' or 'none'">>                                                             tracking    = std::string("cpe");
-    Annotated<float, "alpha", Visible, Doc<"single-pole coefficient of the per-carrier update, in (0, 1]; read by 'cpe_interp'">>                 alpha       = 0.1f;
+    Annotated<float, "alpha", Visible, Doc<"single-pole coefficient of the 'cpe_interp' update, in (0, 1]">>                                      alpha       = 0.1f;
     Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                signal_name = std::string("ofdm_equalized");
 
     Annotated<std::string, "constellation", gr::blocks::digital::detail::ConstellationSettingsDoc, Visible> constellation = std::string("qpsk");
@@ -110,7 +111,7 @@ struct OfdmChannelEqualizer : Block<OfdmChannelEqualizer, NoTagPropagation> {
     std::vector<Complex>      _pilotEstimate{};
     std::vector<int>          _dataAxis{}; ///< the signed carrier of each output value
     std::vector<int>          _occupiedAxis{};
-    std::vector<float>        _pilotMagnitude{}; ///< |H| at each pilot, taken once a symbol rather than once a carrier
+    std::vector<float>        _pilotMagnitude{}; ///< |H| at each pilot, taken once per symbol instead of once per carrier
     std::vector<float>        _pilotAngle{};
     detail::SymbolRecordShape _shape{}; ///< the invariant part of a record, assigned into the slot the port recycles
 
@@ -126,7 +127,7 @@ struct OfdmChannelEqualizer : Block<OfdmChannelEqualizer, NoTagPropagation> {
 
     /// @brief Data symbols equalized on the identity channel because no sync word had arrived yet.
     [[nodiscard]] std::uint64_t nUntrained() const noexcept { return _untrained; }
-    /// @brief Sync symbols passed over: a frame's head holds more than the one least squares reads.
+    /// @brief Sync symbols passed over, when a frame's head holds more than the one least squares reads.
     [[nodiscard]] std::uint64_t nSkipped() const noexcept { return _skipped; }
     /// @brief Least-squares estimates taken over the run, which is one per frame.
     [[nodiscard]] std::uint64_t nEstimates() const noexcept { return _estimates; }
@@ -305,7 +306,7 @@ private:
             while (upper < slotOf.size() && pilotOrder[slotOf[upper]] < carrier) {
                 ++upper;
             }
-            if (upper == 0UZ) { // below every pilot: the nearest one's value is held
+            if (upper == 0UZ) { // below every pilot, holding the nearest pilot's value
                 where = Between{slotOf.front(), slotOf.front(), 0.f};
             } else if (upper == slotOf.size()) {
                 where = Between{slotOf.back(), slotOf.back(), 0.f};
@@ -318,7 +319,7 @@ private:
         }
     }
 
-    /// @brief Least squares against the known symbol: divide once, keep the reciprocal.
+    /// @brief Least squares against the known symbol. Divides once and keeps the reciprocal.
     void estimate(const DataSet<Complex>& record) {
         const Complex* observed = record.signal_values.data();
         const Complex* known    = _sync.data();
@@ -390,12 +391,12 @@ private:
     }
 
     /**
-     * @brief Follow the channel between sync words: each pilot's residual, interpolated and smoothed per carrier.
+     * @brief Follows the channel between sync words by interpolating and smoothing each pilot's residual per carrier.
      *
-     * The common phase has already been taken out of `_corrected`, so what a pilot sees now is the channel itself and
-     * the smoother's input stays near its previous value rather than chasing a rotation. Magnitude and phase are
-     * interpolated apart, because a linear interpolation of two complex numbers shrinks toward zero wherever they
-     * disagree in phase, and it is exactly the phase that a delay spread makes disagree.
+     * The common phase has already been removed from `_corrected`. A pilot now sees the channel itself. The
+     * smoother's input stays near its previous value and does not chase a rotation. Magnitude and phase are
+     * interpolated separately. A linear interpolation of two complex numbers shrinks toward zero wherever their phases
+     * differ. A delay spread makes exactly the phases differ.
      */
     void interpolate(std::uint64_t dataIndex) {
         const std::size_t* pilotBins = _map->pilotBins().data();
@@ -403,8 +404,8 @@ private:
         for (std::size_t p = 0UZ; p < nPilots; ++p) {
             const Complex estimate = detail::divide(_corrected[pilotBins[p]], pilotOf(dataIndex, p));
             _pilotEstimate[p]      = estimate;
-            // taken once a pilot, not once a carrier: there are four of these and fifty-two of those, and an
-            // arctangent is the most expensive thing on the path
+            // taken once per pilot, not once per carrier. There are four pilots and fifty-two carriers, and an
+            // arctangent is the costliest operation on the path.
             _pilotMagnitude[p] = std::abs(estimate);
             _pilotAngle[p]     = std::arg(estimate);
         }
@@ -416,7 +417,7 @@ private:
             const float    lowPhase = _pilotAngle[where.left];
 
             const float magnitude = lowMag + where.weight * (_pilotMagnitude[where.right] - lowMag);
-            // the shorter way round, so a pair straddling the branch cut interpolates through it rather than the far side
+            // the shorter way round. A pair straddling the branch cut interpolates through the cut, not the far side.
             const float step  = std::remainder(_pilotAngle[where.right] - lowPhase, 2.f * std::numbers::pi_v<float>);
             const float phase = lowPhase + where.weight * step;
 
@@ -429,7 +430,7 @@ private:
         }
     }
 
-    /// @brief The channel estimate as a measurement record: magnitude and phase against the carrier axis.
+    /// @brief The channel estimate as a measurement record, with magnitude and phase against the carrier axis.
     [[nodiscard]] DataSet<float> channelRecord(const DataSet<Complex>& source) const {
         const std::size_t count = _occupied.size();
         DataSet<float>    ds;

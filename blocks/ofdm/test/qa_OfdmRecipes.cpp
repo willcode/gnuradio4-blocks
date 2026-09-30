@@ -1,8 +1,8 @@
 /* The numerology-as-a-recipe gate. Four OFDM blocks read the same transform length, the same
- * carrier sets, the same pilot cycle and the same sync words, and nothing in a graph makes
- * three settings agree. The two recipes state the numerology once each; what is tested here is
- * that the vector-typed exported parameters -- which the recipe engine carries by substitution
- * rather than through an expression -- reach the interior blocks whole. */
+ * carrier sets, the same pilot cycle and the same sync words. Nothing in a graph makes three
+ * settings agree. The two recipes state the numerology once each. This test checks that the
+ * vector-typed exported parameters reach the interior blocks whole. The recipe engine carries
+ * them by substitution, not through an expression. */
 #include <algorithm>
 #include <complex>
 #include <cstddef>

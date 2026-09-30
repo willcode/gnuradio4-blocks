@@ -33,8 +33,8 @@ target_link_libraries(
           gnuradio4::gr-filter
           gnuradio4::gr-testing)
 
-# the recipes gate for this family: the composites load, and the numerology reaches every interior block. The shared
-# library is linked so the interior registry ids the recipes name are registered when the test runs.
+# the recipes gate for this family. The composites load, and the numerology reaches every interior block. The shared
+# library is linked, and the interior registry ids the recipes name are registered when the test runs.
 add_ut_test(qa_OfdmRecipes)
 target_link_libraries(qa_OfdmRecipes PRIVATE gnuradio-core gnuradio4::gr-ofdm gnuradio4::GrOfdmBlocksShared)
 target_compile_definitions(qa_OfdmRecipes PRIVATE RECIPES_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../recipes")

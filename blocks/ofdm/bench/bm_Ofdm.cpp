@@ -80,8 +80,8 @@ void init(TBlock& block) {
     return word;
 }
 
-/// A stream with no repeated halves in it, so the sync's metric never opens a plateau and what is measured is the
-/// steady-state cost of the two sliding sums rather than the cost of a detection.
+/// A stream with no repeated halves. The sync's metric opens no plateau, and the arm measures the steady-state cost of
+/// the two sliding sums, not the cost of a detection.
 [[nodiscard]] std::vector<CF> noise(std::size_t count) {
     std::vector<CF> data(count);
     std::uint32_t   state = 2026U;
@@ -97,8 +97,8 @@ void init(TBlock& block) {
 
 /// @brief One call of a passthrough block over the whole sample vector, at a stream position that keeps advancing.
 ///
-/// The position matters: every block here reasons in absolute indices, so replaying the same window would put the
-/// prefix cadence and the correlation history somewhere they never are in a running graph.
+/// The position matters. Every block here works in absolute indices. Replaying the same window would put the prefix
+/// cadence and the correlation history where a running graph never has them.
 template<typename TBlock>
 [[nodiscard]] double sweepStream(TBlock& block, std::span<const CF> input, std::span<CF> output, std::size_t& at) {
     shim::InputSpan<CF>  inSpan(input, at);
@@ -119,7 +119,7 @@ int main() {
     const auto      known  = sounding();
     std::vector<CF> pilotValues{CF(1.f, 0.f), CF(1.f, 0.f), CF(1.f, 0.f), CF(-1.f, 0.f)};
 
-    // --- the stream-rate arms: the sync's two sliding sums, which are the family's hot path ---
+    // --- the stream-rate arms, the sync's two sliding sums, which are the family's hot path ---
     SchmidlCoxSync bare({{"fft_len", kFft}, {"cp_len", kCp}, {"correct_cfo", false}});
     SchmidlCoxSync derotating({{"fft_len", kFft}, {"cp_len", kCp}, {"correct_cfo", true}});
     SchmidlCoxSync wide({{"fft_len", gr::Size_t{1024U}}, {"cp_len", gr::Size_t{128U}}, {"correct_cfo", false}});
@@ -162,8 +162,8 @@ int main() {
     init(cpe);
     init(interp);
 
-    // one symbol of slack: the allocator holds a sample back for its end-of-stream epilogue, so a payload of exactly
-    // kSymbols symbols would leave the last record of the vector default-constructed
+    // one symbol of slack. The allocator holds a sample back for its end-of-stream epilogue. A payload of exactly
+    // kSymbols symbols would leave the last record of the vector default-constructed.
     const std::vector<CF>        payload = noise((kSymbols + 1UZ) * data.size());
     std::vector<gr::DataSet<CF>> records(kSymbols);
     std::vector<gr::DataSet<CF>> equalized(kSymbols);
@@ -180,7 +180,7 @@ int main() {
         shim::OutputSpan<CF>             outSpan{std::span<CF>(carried)};
         std::ignore = prefix.processBulk(inSpan, outSpan);
     }
-    // the prefix block keeps state across calls, so the arm below starts from a block that has already run once
+    // the prefix block keeps state across calls. The arm below starts from a block that has already run once.
     init(prefix);
 
     std::vector<gr::DataSet<CF>> recordSink(kSymbols);

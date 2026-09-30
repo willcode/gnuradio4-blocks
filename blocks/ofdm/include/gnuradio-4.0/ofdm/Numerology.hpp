@@ -22,15 +22,14 @@ using Complex = std::complex<float>;
 
 /// @brief The record every block in this module emits or consumes, and the settings vocabulary they share.
 ///
-/// One OFDM symbol is one `DataSet<std::complex<float>>` of `fft_len` values in FFT bin order: DC at index 0, the
-/// positive carriers ascending, the negative ones in the upper half. Carrier indices in settings are signed logical
-/// indices and are converted to bins in exactly one place, `gr::ofdm::CarrierMap`; nothing here does that arithmetic
-/// itself. The record's axis carries the signed index of each value, so a consumer reads the mapping off the record
-/// rather than re-deriving it.
+/// One OFDM symbol is one `DataSet<std::complex<float>>` of `fft_len` values in FFT bin order. DC is at index 0, the
+/// positive carriers ascend, and the negative ones fill the upper half. Carrier indices in settings are signed logical
+/// indices. `gr::ofdm::CarrierMap` alone converts them to bins, and nothing here repeats that arithmetic. The record's
+/// axis carries the signed index of each value. A consumer reads the mapping off the record and does not re-derive it.
 namespace detail {
 
 /// The transform lengths the family accepts. The lower bound is the shortest transform a numerology with guards,
-/// pilots and data can populate; the upper is the kernel's own ceiling.
+/// pilots and data can populate. The upper bound is the kernel's own ceiling.
 inline constexpr std::size_t kMinFftLength = 8UZ;
 inline constexpr std::size_t kMaxFftLength = gr::ofdm::CarrierMap::kMaxFftLength;
 
@@ -56,11 +55,11 @@ inline constexpr std::string_view kKindEqualized = "equalized";
 /**
  * @brief Complex multiply, divide and reciprocal written out.
  *
- * The language's own operators call the library helpers that preserve infinities and guard the division's exponent
- * range, and each of those is a function call in the middle of a loop that runs once per carrier per symbol. The
- * values these run on are bounded by the numerology: a carrier's channel estimate comes from a sync word every
- * occupied carrier is required to occupy, so a zero divisor is refused at configure rather than met here, and no
- * quantity in an OFDM symbol approaches the exponent range the guarded form exists for.
+ * The language's own operators call library helpers that preserve infinities and guard the exponent range of the
+ * division. Each helper is a function call inside a loop that runs once per carrier per symbol. The numerology bounds
+ * the values these functions see. A carrier's channel estimate comes from a sync word that every occupied carrier
+ * must occupy. A zero divisor is therefore refused at configure time and never reaches these functions. No quantity
+ * in an OFDM symbol approaches the exponent range the guarded form exists for.
  */
 [[nodiscard]] inline constexpr Complex multiply(Complex a, Complex b) noexcept { return Complex(a.real() * b.real() - a.imag() * b.imag(), a.real() * b.imag() + a.imag() * b.real()); }
 
@@ -82,8 +81,8 @@ inline void requireFftLength(gr::Size_t fftLength) {
 /// @brief Build the numerology, restating the kernel's refusal as the failure a graph reports.
 [[nodiscard]] inline gr::ofdm::CarrierMap buildMap(gr::Size_t fftLength, std::span<const std::int32_t> dataCarriers, std::span<const std::int32_t> pilotCarriers) {
     requireFftLength(fftLength);
-    // The kernel takes `int`, which is the same width as the settings type on every platform this builds for; the
-    // copy is what lets the two disagree without this file having to notice.
+    // The kernel takes `int`, the same width as the settings type on every platform this builds for. The copy lets
+    // the two types differ without this file noticing.
     const std::vector<int> data(dataCarriers.begin(), dataCarriers.end());
     const std::vector<int> pilots(pilotCarriers.begin(), pilotCarriers.end());
     try {
@@ -108,10 +107,9 @@ inline void requireFftLength(gr::Size_t fftLength) {
 /**
  * @brief The sync words a setting holds, as whole symbols.
  *
- * A setting carries no vector of vectors, so the words are one concatenation of interleaved re,im pairs and the
- * length says how many there are. A concatenation that is not a whole number of symbols is refused rather than
- * truncated: a short final word would be emitted as a symbol with silent carriers, which is the one failure a
- * receiver cannot tell from a real one.
+ * A setting carries no vector of vectors. The words are one concatenation of interleaved re,im pairs, and the length
+ * gives their count. A concatenation that is not a whole number of symbols is refused, not truncated. A short final
+ * word would be emitted as a symbol with silent carriers. A receiver cannot tell that failure from a real symbol.
  */
 [[nodiscard]] inline std::vector<std::vector<Complex>> syncWordsFrom(std::span<const float> interleaved, std::size_t fftLength) {
     const std::vector<Complex> flat = complexFrom(interleaved, "sync_words");
@@ -127,9 +125,9 @@ inline void requireFftLength(gr::Size_t fftLength) {
 
 /// @brief The cyclic-prefix length of symbol @p symbolInFrame, from a setting that is a scalar or a cycle.
 ///
-/// One setting expresses both shapes: a single entry is a constant prefix, and several are read in turn, which is
-/// what makes 802.11's long-then-short opening expressible. The cycle position is the symbol's index within its
-/// frame, so the cycle restarts with every frame rather than drifting against it.
+/// One setting expresses both shapes. A single entry is a constant prefix, and several entries are read in turn. The
+/// cycle expresses the long-then-short opening of 802.11. The cycle position is the symbol's index within its frame.
+/// The cycle therefore restarts with every frame and does not drift against it.
 [[nodiscard]] inline std::size_t cyclicPrefixLength(std::span<const gr::Size_t> cycle, std::size_t symbolInFrame) noexcept { return static_cast<std::size_t>(cycle[symbolInFrame % cycle.size()]); }
 
 /// @brief Reject a prefix cycle that says nothing, or one longer than the symbol it precedes.
@@ -145,14 +143,14 @@ inline void requireCyclicPrefix(std::span<const gr::Size_t> cycle, gr::Size_t ff
 }
 
 /**
- * @brief One OFDM symbol as a record on the family's §0 conventions.
+ * @brief One OFDM symbol as a record in the family's layout.
  *
  * @param values     the symbol, `fft_len` values in bin order, or the data carriers alone for an equalizer output
  * @param carriers   the signed logical index each value belongs to, which becomes the record's axis
  *
- * The axis is what makes the record self-describing: a consumer reads which carrier a value came from instead of
- * re-deriving the signed-to-bin map, and an equalizer output whose values are a subset of the symbol says so in the
- * same place a whole symbol does.
+ * The axis makes the record self-describing. A consumer reads the carrier each value came from and does not
+ * re-derive the signed-to-bin map. An equalizer output holds a subset of the symbol's values and states that subset
+ * in the same place a whole symbol does.
  */
 [[nodiscard]] inline DataSet<Complex> makeSymbolRecord(std::vector<Complex> values, std::span<const int> carriers, std::string_view kind, std::string_view signalName, property_map extra) {
     DataSet<Complex>  ds;
@@ -166,7 +164,7 @@ inline void requireCyclicPrefix(std::span<const gr::Size_t> cycle, gr::Size_t ff
     ds.axis_values.resize(1UZ);
     ds.axis_values[0UZ].resize(count);
     for (std::size_t k = 0UZ; k < count; ++k) {
-        // The axis of a complex record is complex; a carrier index is real, and the imaginary part stays zero.
+        // The axis of a complex record is complex. A carrier index is real, and the imaginary part stays zero.
         ds.axis_values[0UZ][k] = Complex(static_cast<float>(carriers[k]), 0.f);
     }
 
@@ -174,8 +172,8 @@ inline void requireCyclicPrefix(std::span<const gr::Size_t> cycle, gr::Size_t ff
     ds.signal_quantities = {"OfdmSymbol"};
     ds.signal_units      = {"a.u."};
     ds.signal_values     = std::move(values);
-    // A complex range would have to order two samples, which is a comparison the type does not carry. The vector is
-    // sized so a consumer indexing it finds an entry, and left at the default that states no limit.
+    // A complex range would have to order two samples, and the type has no such comparison. The vector is sized for
+    // a consumer that indexes it and left at the default, which states no limit.
     ds.signal_ranges.resize(1UZ);
 
     ds.meta_information.resize(1UZ);
@@ -191,13 +189,13 @@ inline void requireCyclicPrefix(std::span<const gr::Size_t> cycle, gr::Size_t ff
 }
 
 /**
- * @brief The invariant part of a symbol record, built once and copy-assigned into the slot the port hands back.
+ * @brief The invariant part of a symbol record, built once and copy-assigned into the slot the port returns.
  *
- * A record is a dozen containers and a map, and building one from nothing per symbol costs more than the transform
- * that produced it. An output port hands back a slot it has already used, so the assignment reuses that slot's
- * storage -- vectors keep their capacity, strings their buffers, and the map its nodes -- and what is left per record
- * is the values and the handful of meta entries that actually change. The fourier module's FFT block keeps its
- * record skeleton for the same reason and in the same way.
+ * A record is a dozen containers and a map. Building one from nothing per symbol costs more than the transform that
+ * produced it. An output port returns a slot it has already used, and the assignment reuses that slot's storage.
+ * Vectors keep their capacity, strings their buffers, and the map its nodes. Per record, only the values and the few
+ * meta entries that change remain to write. The FFT block of the fourier module keeps its record template the same
+ * way for the same reason.
  */
 class SymbolRecordShape {
 public:
@@ -206,7 +204,7 @@ public:
 
     [[nodiscard]] bool built() const noexcept { return !_skeleton.signal_values.empty(); }
 
-    /// @brief Write @p values into @p target on this shape, and hand back the meta map for the caller to stamp.
+    /// @brief Writes @p values into @p target on this shape and returns the meta map for the caller to stamp.
     [[nodiscard]] property_map& emitInto(DataSet<Complex>& target, std::span<const Complex> values, std::string_view kind) const {
         target = _skeleton;
         std::ranges::copy(values, target.signal_values.begin());

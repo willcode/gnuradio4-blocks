@@ -79,8 +79,8 @@ template<typename TBlock>
     return CF(re, im);
 }
 
-/// The known full symbol least squares divides by: every occupied carrier carries a point, which is what makes the
-/// estimate defined everywhere the data is.
+/// The known full symbol least squares divides by. Every occupied carrier carries a point, and the estimate is
+/// defined wherever the data is.
 [[nodiscard]] std::vector<CF> channelSounding() {
     std::vector<CF> word(kFft, CF{});
     std::uint32_t   state = 987654321U;
@@ -115,7 +115,7 @@ struct Modulated {
     std::vector<gr::DataSet<CF>> records{};
 };
 
-/// @brief One frame of QPSK data through the allocator: the payload it was given and the symbols it produced.
+/// @brief One frame of QPSK data through the allocator, with the payload it was given and the symbols it produced.
 [[nodiscard]] Modulated modulate(std::size_t frames = 1UZ) {
     CarrierAllocator allocator = make<CarrierAllocator>(numerology());
 
@@ -237,8 +237,8 @@ struct Equalized {
     return wrong;
 }
 
-/// The static profile every impaired scene here runs through: four paths over nine samples, which at 64 samples a
-/// symbol is a delay spread of an eighth of the transform and well inside the prefix.
+/// The static profile every impaired scene here runs through. It has four paths over nine samples. At 64 samples per
+/// symbol that is a delay spread of an eighth of the transform, well inside the prefix.
 [[nodiscard]] std::vector<CF> multipathTaps() {
     constexpr double          rate = static_cast<double>(kFft);
     const std::vector<double> delays{0., 2. / rate, 5. / rate, 9. / rate};
@@ -336,7 +336,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             return equalize(block, std::span<const gr::DataSet<CF>>(toRecords(noisy)));
         };
 
-        constexpr double kLinewidth = 0.02; // hertz, against a subcarrier spacing of one: a slow oscillator
+        constexpr double kLinewidth = 0.02; // hertz, against a subcarrier spacing of one, a slow oscillator
         const Equalized  tracked    = through(kLinewidth, "cpe");
         const Equalized  untracked  = through(kLinewidth, "none");
 
@@ -352,10 +352,10 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         std::println("criterion 4, phase noise of {} Hz against a 1 Hz spacing over {} symbols: cpe EVM {:.1f} dB with {} symbol errors, no tracking EVM {:.1f} dB with {} errors; the last symbol was turned by {:+.3f} rad", //
             kLinewidth, kFrame, trackedEvm, trackedWrong, untrackedEvm, untrackedWrong, lastCpe);
 
-        // The strict inequality the spec asks for is the symbol count and not the error vector: once the phase has
-        // turned past a decision boundary the nearest point is a different point, so the error vector stops growing
-        // while every decision under it is wrong. What cpe leaves is the phase noise inside a symbol rather than
-        // between symbols, which turns each carrier against its neighbors and no common phase can remove.
+        // The strict inequality applies to the symbol count and not to the error vector. Once the phase has turned
+        // past a decision boundary, the nearest point is a different point. The error vector then stops growing while
+        // every decision under it is wrong. cpe leaves the phase noise inside a symbol, not between symbols. That
+        // noise turns each carrier against its neighbors, and no common phase can remove it.
         expect(lt(trackedEvm, untrackedEvm)) << "tracking lowers the error vector";
         expect(eq(trackedWrong, 0UZ)) << "cpe holds the constellation";
         expect(gt(untrackedWrong, kFrame * dataCarriers().size() / 4UZ)) << "and without it the frame provably loses lock";
@@ -365,8 +365,8 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         const Modulated sent  = modulate();
         const Stream    clean = toStream(std::span<const gr::DataSet<CF>>(sent.records));
 
-        // A frequency ramp is the impairment a per-carrier update answers and a common phase does not: it turns each
-        // carrier by its own angle, which is what the interpolation between pilots is there to follow.
+        // A frequency ramp is the impairment a per-carrier update answers and a common phase does not. It turns each
+        // carrier by its own angle, and the interpolation between pilots follows that.
         PhaseNoise<CF> jitter = make<PhaseNoise<CF>>({{"sample_rate", static_cast<float>(kFft)}, {"linewidth", 0.05}, {"seed", std::uint64_t{99}}});
         Stream         noisy;
         noisy.tags         = clean.tags;

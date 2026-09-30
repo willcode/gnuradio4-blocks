@@ -26,8 +26,8 @@ namespace shim = gr::blocks::testing::span;
 
 constexpr std::size_t kFft = 64UZ;
 
-/// The reference inverse transform: the library kernel the block itself uses, scaled the way the block scales it, so
-/// a comparison against it is exact rather than approximate.
+/// The reference inverse transform. It is the library kernel the block uses, scaled as the block scales it. A
+/// comparison against it is exact, not approximate.
 [[nodiscard]] std::vector<CF> inverseTransform(std::span<const CF> spectrum) {
     gr::algorithm::FFT<CF, CF, gr::algorithm::Direction::Backward> inverse{};
     std::vector<CF>                                                time(spectrum.size());
@@ -162,7 +162,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
         CpInsert     block  = make<CpInsert>({{"cp_len", cycle}});
         const Stream stream = insert(block, std::span<const gr::DataSet<CF>>(records), 4096UZ);
 
-        // 16, 4, 16 in the first frame and again in the second: the cycle follows symbol_in_frame, not the record count
+        // 16, 4, 16 in both frames. The cycle follows symbol_in_frame, not the record count.
         const std::size_t expectedLength = 6UZ * kFft + 2UZ * (16UZ + 4UZ + 16UZ);
         expect(eq(stream.samples.size(), expectedLength));
         expect(eq(stream.tags.size(), 2UZ));
@@ -178,7 +178,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
             CpInsert     insertBlock = make<CpInsert>({{"cp_len", cycle}});
             const Stream stream      = insert(insertBlock, std::span<const gr::DataSet<CF>>(records), 4096UZ);
 
-            // What the cut must contain: the samples of the stream the cadence names, taken from the stream itself.
+            // The cut must contain the samples of the stream the cadence names, taken from the stream itself.
             std::vector<std::vector<CF>> expected;
             std::size_t                  at = 0UZ;
             for (std::size_t s = 0UZ; s < records.size(); ++s) {
@@ -275,10 +275,9 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
     };
 
     "edge windowing narrows the spectrum, measured"_test = [] {
-        // F5: turning the edge on is a measured improvement, not a given. The scene is 24 occupied carriers of an
-        // fft_len of 64, which leaves a guard band wide enough for the shoulder the windowing attacks to be visible
-        // well away from the transition; the analysis is Hann-windowed so that its own leakage does not stand in for
-        // the signal's.
+        // Turning the edge on is a measured improvement, not a given. The scene is 24 occupied carriers of an fft_len
+        // of 64. The guard band is wide enough that the shoulder the windowing reduces shows well away from the
+        // transition. The analysis is Hann-windowed, and its own leakage does not mask the signal's.
         constexpr std::size_t        kOccupiedHalf = 12UZ;
         constexpr std::size_t        kSymbols      = 48UZ;
         std::vector<gr::DataSet<CF>> records;
@@ -313,8 +312,8 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
             }
             const std::vector<CF> spectrum = forwardTransform(std::span<const CF>(segment));
 
-            // The occupied band is |carrier| <= 12 of 64; everything past |carrier| 20 is the shoulder, with the
-            // carriers between left out so the transition counts as neither.
+            // The occupied band is |carrier| <= 12 of 64. Everything past |carrier| 20 is the shoulder. The carriers
+            // between are left out, and the transition counts as neither.
             constexpr std::size_t inEdge  = kOccupiedHalf * kAnalysis / kFft;
             constexpr std::size_t outEdge = 20UZ * kAnalysis / kFft;
             double                inBand  = 0.;
