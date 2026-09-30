@@ -31,4 +31,5 @@ A **port collection** is addressed by index. An edge to one is written `in#0`. T
 this repository have plain ports and are written plainly.
 
 `fm_radio_mono.yaml` writes out the chain of `gr::recipes::WbfmMonoDemod` and states the
-numbers the recipe derives.
+numbers the recipe derives. A graph file can also name a recipe by its registry name, and
+the importer builds each block with the parameters the file gives it.

@@ -57,9 +57,9 @@
 #include <gnuradio-4.0/recipes/KissFileWrite.hpp>
 
 /*
- * End-to-end tests of composed graphs and not of a list of blocks. One graph is a packet-radio APRS link closed through
- * the KISS file sink and read back. Three satellite receive graphs run against off-air audio. One synthetic orbital
- * pass carries coded frames from end to end.
+ * The tests run composed graphs end to end. One graph is a packet-radio APRS link closed through the KISS file sink and
+ * read back. Three satellite receive graphs run against off-air audio. One synthetic orbital pass carries coded frames
+ * from end to end.
  *
  * The APRS graph is synthetic. Its transmit side uses the same library blocks the receive side inverts. They
  * are address encoding, the frame check sequence, HDLC framing and NRZI. The test writes the tone pair and the noise.

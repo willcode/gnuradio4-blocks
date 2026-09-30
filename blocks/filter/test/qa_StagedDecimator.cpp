@@ -365,8 +365,8 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
             expect(approx(settledPeak(std::span<const CF>(y.samples)), 1.0, 0.01)) << "a tone at " << f << " is inside the kept band and comes through at unit gain";
         }
 
-        // Every frequency here is above the kept band and folds back inside it, so it is exactly what the
-        // acceptance rule bounds: one stopband crossed and several passbands.
+        // Every frequency here is above the kept band and folds back inside it. The test bounds that case: one stopband
+        // crossed and several passbands.
         for (const double f : {0.13, 0.24, 0.26, 0.38, 0.49}) {
             expect(f > half) << "the probe frequency is outside the kept band to begin with";
             expect(foldedBy(f, kD) <= half * static_cast<double>(kD)) << "and folds back inside it";

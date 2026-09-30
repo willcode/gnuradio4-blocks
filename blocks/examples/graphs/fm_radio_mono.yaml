@@ -1,7 +1,8 @@
 # Broadcast FM, mono, from a wideband front end to audio with this repository's own blocks.
 #
 # The file writes out the chain of gr::recipes::WbfmMonoDemod. It states the numbers the recipe
-# derives.
+# derives. A graph file can also name a recipe by its registry name, and the importer builds each
+# block with the parameters the file gives it.
 #
 #   channel rate       = 1920000 / 8            = 240 kHz
 #   discriminator gain = 240000 / (2*pi*75000)  = 0.5092958

@@ -285,7 +285,7 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     /// @brief Builds the cut, the transform buffers and the record shape from the members.
     ///
     /// It is idempotent. The framework calls settingsChanged() only for a batch that changes a value. `start()` runs it
-    /// when construction changed no value.
+    /// on every start. That builds the cut for a block whose construction changed no value.
     void rebuild() {
         detail::requireFftLength(fft_len);
         detail::requireCyclicPrefix(std::span<const gr::Size_t>(cp_len.value), fft_len);

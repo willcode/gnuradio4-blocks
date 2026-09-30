@@ -35,8 +35,8 @@ struct PowerMeter : Block<PowerMeter<T>> {
 
 A sink. 0 dBFS is a mean power of exactly 1.0. The window is a boxcar, not a pole. `level()` is that reading in dBFS.
 `linear_power()` is the same reading without the logarithm. `coverage()` is the fraction of the nominal window
-accumulated so far. A partial window is reported and not suppressed. A change of `sample_rate` or `window_time` rebuilds
-the window. The reading refreshes once per segment.
+accumulated so far. A partial window is reported and not suppressed. A change of `sample_rate`, `window_time` or
+`segments` rebuilds the window. The reading refreshes once per segment.
 
 The optional `records` port carries the same reading as one `DataSet<float>` per completed window, for a consumer
 outside C++. Each record is stamped with the window's first input sample. A stream that ends mid-window emits a final
