@@ -1,6 +1,6 @@
 add_ut_test(qa_ExampleGraphs)
-# gnuradio-core for the YAML importer and the scheduler; the shared block library of every family a shipped graph names,
-# so the ids in the files resolve in the global registry when the test runs.
+# gnuradio-core provides the YAML importer and the scheduler. The shared block library of each family a shipped graph
+# names resolves the ids in the files in the global registry when the test runs.
 target_link_libraries(
   qa_ExampleGraphs
   PRIVATE gnuradio-core
@@ -13,9 +13,9 @@ target_link_libraries(
           gnuradio4::GrMeasurementBlocksShared)
 target_compile_definitions(qa_ExampleGraphs PRIVATE EXAMPLE_GRAPHS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../graphs")
 
-# The acceptance graphs. They are composed of blocks from most of the tree, and they instantiate recipes through the
-# generated recipe headers, so the shared library of every family a graph names has to be loaded for the ids inside a
-# recipe to resolve in the global registry.
+# The acceptance graphs use blocks from most families and instantiate recipes through the generated recipe headers. The
+# shared library of each family a graph names must be loaded. The ids inside a recipe then resolve in the global
+# registry.
 add_ut_test(qa_Tier5Gates)
 target_link_libraries(
   qa_Tier5Gates
@@ -32,8 +32,8 @@ target_link_libraries(
           gnuradio4::GrMathBlocksShared
           gnuradio4::GrSyncBlocksShared)
 target_include_directories(qa_Tier5Gates PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../recipes/include")
-# The off-air captures are machine-local, so the path reaches the test through its environment rather than through a
-# graph file. Empty means the machine has none and the recording legs report a skip.
+# The off-air captures are local to a machine. Their path reaches the test through its environment and not through a
+# graph file. An empty path means the machine has none, and the recording legs report a skip.
 set_property(
   TEST qa_Tier5Gates
   APPEND

@@ -1,8 +1,8 @@
-/* The example gate: every graph in blocks/examples/graphs loads through the tree's own YAML
- * importer, runs headless, and delivers what the file says it delivers. An example that no
- * longer loads is worse than no example, because it is the first thing a new user runs. Each
- * case runs its graph for a bounded stretch and reads the result through the sink registry,
- * which is the route a host application takes. */
+/* The example gate. Each graph in blocks/examples/graphs loads through the YAML importer,
+ * runs headless and delivers what its file says it delivers. An example that fails to load
+ * is worse than no example, as it is the first thing a new user runs. Each case runs its
+ * graph for a bounded stretch. It reads the result through the sink registry, the route a
+ * host application takes. */
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -47,9 +47,9 @@ constexpr auto kDeliveryTimeout = 4s;
     return content.str();
 }
 
-/// Polls `collect` until it reports it has enough or the timeout runs out, then stops the graph.
-/// The scheduler runs on its own thread throughout, because the sinks hand data to a consumer
-/// thread and a stopped graph hands out nothing.
+/// Polls `collect` until it reports enough data or the timeout runs out, then stops the graph.
+/// The scheduler runs on its own thread throughout. The sinks pass data to a consumer thread,
+/// and a stopped graph delivers nothing.
 [[nodiscard]] bool runUntil(auto& scheduler, auto collect) {
     auto       runner   = std::async(std::launch::async, [&scheduler] { return scheduler.runAndWait(); });
     const auto deadline = std::chrono::steady_clock::now() + kDeliveryTimeout;
@@ -90,10 +90,10 @@ constexpr auto kDeliveryTimeout = 4s;
     return fallback;
 }
 
-/// One scalar parameter as the graph file itself states it, found by key in the text that was loaded.
-/// A calibration reads the graph's own numbers rather than carrying a copy of them: a copy stops
-/// testing the file the moment the file moves. Comment lines are not parameters, and a YAML type tag
-/// is the writer's business - `!!float32 1.0` is the same number as `1.0`.
+/// One scalar parameter as the graph file states it, found by key in the loaded text.
+/// A calibration reads the graph's own numbers and keeps no copy of them. A copy stops testing
+/// the file as soon as the file changes. Comment lines are not parameters. A YAML type tag is
+/// ignored, and `!!float32 1.0` is the same number as `1.0`.
 [[nodiscard]] double graphParameter(std::string_view graph, std::string_view key) {
     for (std::size_t at = 0UZ; at < graph.size();) {
         const std::size_t lineEnd = std::min(graph.find('\n', at), graph.size());
@@ -143,8 +143,8 @@ const boost::ut::suite<"example graphs"> ExampleGraphTests = [] {
     using namespace gr::blocks::basic;
 
     "fm_radio_mono.yaml loads, runs headless and hands back demodulated audio"_test = [] {
-        // The generator's carrier sits 15 kHz above center, a fifth of the 75 kHz the discriminator
-        // gain is scaled against, so the audio settles at 0.2 and stays there.
+        // The generator's carrier is 15 kHz above center. That is a fifth of the 75 kHz the
+        // discriminator gain is scaled against. The audio settles at 0.2 and stays there.
         constexpr std::size_t kWanted   = 8192UZ;
         constexpr std::size_t kSettled  = 4096UZ; // the tail, past the resampler's ramp-up
         constexpr double      kExpected = 0.2;
@@ -198,8 +198,8 @@ const boost::ut::suite<"example graphs"> ExampleGraphTests = [] {
 
         expect(delivered) << std::format("records produced within the timeout: {}", records.size()) << fatal;
 
-        // The four keys are the spectral tier's own record contract: a consumer that cannot read
-        // them cannot turn a density back into a power, so the graph is only an example if they arrive.
+        // The four keys are the spectral estimator's record contract. Without them a density cannot be
+        // turned back into a power. The graph is an example only if the keys arrive.
         const auto& record = records.front();
         expect(eq(record.meta_information.size(), 1UZ)) << fatal;
         expect(eq(metaNumber(record, "sample_rate"), kSampleRate)) << "the record states the rate the graph set";
@@ -208,20 +208,19 @@ const boost::ut::suite<"example graphs"> ExampleGraphTests = [] {
         expect(gt(metaNumber(record, "enbw_bins"), 1.)) << "a Hann window's noise bandwidth exceeds a bin";
         expect(eq(record.signal_values.size(), 1024UZ)) << "one two-sided density per transform bin";
 
-        // The graph is a calibration as well as a picture, and every level it is held to is read back out
-        // of the file that was just run rather than restated here: a copy of the numbers would stop
-        // testing the file the moment the file moved. What the chain does to a level is closed form.
+        // The graph is a calibration as well as a picture. Each level it is checked against is read
+        // back from the file that was just run. The chain's effect on each level is closed form.
         //
         //   tone   SignalGenerator's complex Sin is the analytic signal -j*A*exp(j*theta), a constant
-        //          envelope, so the tone's power is A^2 and not the A^2/2 a real sine of amplitude A holds
-        //   noise  AwgnChannel adds circular noise of mean power `noise_power`, flat across the band
-        //   phase  FrequencyOffset and PhaseNoise multiply by a unit modulus: they move power in frequency,
-        //          and spread it, without changing how much of it there is
+        //          envelope. The tone's power is A^2 and not the A^2/2 of a real sine of amplitude A.
+        //   noise  AwgnChannel adds circular noise of mean power `noise_power`, flat across the band.
+        //   phase  FrequencyOffset and PhaseNoise multiply by a unit modulus. They move power in
+        //          frequency and spread it without changing its total.
         //   image  IqImbalance is `out = alpha*x + beta*conj(x)` with `alpha = (1 + g*exp(j*phi))/2` and
-        //          `beta = (1 - g*exp(j*phi))/2`, so it leaves |alpha|^2 of the tone on its own frequency,
-        //          puts |beta|^2 into the image at -100 kHz, and passes circular noise at
-        //          |alpha|^2 + |beta|^2. At 0.5 dB and 0.02 rad that is +0.25 dB on the tone - a quarter of
-        //          a decibel the reading would be out by if the chain's own gain were left out of it.
+        //          `beta = (1 - g*exp(j*phi))/2`. It leaves |alpha|^2 of the tone on its own frequency
+        //          and puts |beta|^2 into the image at -100 kHz. It passes circular noise at
+        //          |alpha|^2 + |beta|^2. At 0.5 dB and 0.02 rad that is +0.25 dB on the tone. Without
+        //          the chain's own gain the reading would be off by that quarter of a decibel.
         const double               amplitude       = graphParameter(file, "amplitude");
         const double               noise           = graphParameter(file, "noise_power");
         const std::complex<double> rotated         = std::polar(std::pow(10., graphParameter(file, "amplitude_imbalance_db") / 20.), graphParameter(file, "phase_imbalance"));
@@ -239,16 +238,16 @@ const boost::ut::suite<"example graphs"> ExampleGraphTests = [] {
             const double      enbwBins = metaNumber(spectrum, "enbw_bins");
             const std::size_t peak     = static_cast<std::size_t>(std::ranges::distance(density.begin(), std::ranges::max_element(density)));
 
-            // The tone. The density is linear power per hertz referred to a full-scale sine, which is what
-            // `level_reference` states, so `sum(psd) * bin_width` over a band is that band's power and a
-            // full-scale complex tone integrates to one. The lobe is the peak bin and every bin within TWO
-            // ENBW of it, to the nearest bin - three each side at Hann's 1.5015, 2.9 kHz of a 1 MHz band. One
-            // ENBW is what the peak density alone is worth; the second covers what the chain spreads: the
-            // Hann kernel carries real power two bins out when the tone falls between bins, the drift walks
-            // the line 92 Hz within a record (20 kHz/s across the 4608 samples eight half-overlapped
-            // segments span), and the 2 Hz Lorentzian leaves a skirt. The AWGN caught inside the lobe is
-            // seven bins of a floor 30 dB down, 7e-6 of the tone and 0.00003 dB of the reading, so it is
-            // not subtracted.
+            // The tone. The density is linear power per hertz referred to a full-scale sine, as
+            // `level_reference` states. `sum(psd) * bin_width` over a band is therefore that band's power,
+            // and a full-scale complex tone integrates to one. The lobe is the peak bin and every bin within
+            // two ENBW of it, to the nearest bin. At Hann's 1.5015 that is three bins each side, 2.9 kHz of a
+            // 1 MHz band. One ENBW holds the power of the peak density alone. The second holds what the chain
+            // spreads. The Hann kernel carries real power two bins out when the tone falls between bins. The
+            // drift moves the line 92 Hz within a record, at 20 kHz/s across the 4608 samples that eight
+            // half-overlapped segments span. The 2 Hz Lorentzian leaves a skirt. The AWGN inside the lobe is
+            // seven bins of a floor 30 dB down. That is 7e-6 of the tone and 0.00003 dB of the reading, and
+            // it is not subtracted.
             const std::size_t lobeHalf = static_cast<std::size_t>(std::llround(2. * enbwBins));
             double            lobe     = 0.;
             for (std::size_t offset = 0UZ; offset <= 2UZ * lobeHalf; ++offset) {
@@ -256,14 +255,15 @@ const boost::ut::suite<"example graphs"> ExampleGraphTests = [] {
             }
             lobe *= binWidth;
 
-            // The floor. Away from the line the density is the AWGN's alone, so density times the sample
-            // rate is the power the graph asked for. The far bins start 20 ENBW out, 31 bins, past which the
-            // 2 Hz skirt is under the floor; the median over them ignores the image and the inner bins the
-            // skirt still reaches. Half a decibel is the estimate's own scatter with room to spare: one bin
-            // at eight averages has a relative standard deviation near 1/sqrt(8), 35% or 1.5 dB, and the
-            // median over the ~960 far bins tightens that by about 1.25/sqrt(960) - the median's own factor
-            // over the mean - to 1.4%, 0.06 dB, on top of the ~0.1 dB by which a chi-square's median sits
-            // below its mean. The tolerance is several times the sum, and still small against a real fault.
+            // The floor. Away from the line the density is the AWGN's alone. Density times the sample rate
+            // is then the configured noise power. The far bins start 20 ENBW out, at 31 bins. Past that point
+            // the 2 Hz skirt is under the floor. The median over the far bins ignores the image and the inner
+            // bins the skirt still reaches. Half a decibel covers the estimate's own scatter with room to
+            // spare. One bin at eight averages has a relative standard deviation near 1/sqrt(8), 35% or
+            // 1.5 dB. The median over the ~960 far bins tightens that by about 1.25/sqrt(960) to 1.4%, or
+            // 0.06 dB. The factor 1.25 is the median's own factor over the mean. A chi-square's median also
+            // sits about 0.1 dB below its mean. The tolerance is several times the sum, and still small
+            // against a real fault.
             const std::size_t   away = static_cast<std::size_t>(std::ceil(20. * enbwBins));
             std::vector<double> far;
             far.reserve(bins);

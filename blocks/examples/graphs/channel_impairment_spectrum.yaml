@@ -1,29 +1,29 @@
 # A clean tone through the channel models, read back as a power spectral density.
 #
-# Every impairment in gr::blocks::channel leaves a signature a spectrum shows, and this graph puts
-# them in the order a link applies them so each one can be turned off and back on against the same
-# picture. At 1 MS/s with a 100 kHz tone:
+# Each impairment in gr::blocks::channel leaves a signature in a spectrum. This graph applies them in
+# the order a link applies them. Each one can be turned off and on again against the same picture.
+# At 1 MS/s with a 100 kHz tone the signatures are these.
 #
 #   noise      AwgnChannel     a flat floor at -30 dB of the tone's power per unit bandwidth
-#   drift      FrequencyOffset 20 kHz/s of chirp, so the line walks the axis while the graph runs
+#   drift      FrequencyOffset 20 kHz/s of chirp, the line moving along the axis as the graph runs
 #   jitter     PhaseNoise      a 2 Hz Lorentzian skirt at the foot of the line, out to about 18 kHz
 #   imbalance  IqImbalance     an image at -100 kHz, about 30 dB down at 0.5 dB and 0.02 rad
 #
-# The linewidth is 2 Hz and not something broader because a Wiener skirt falls only as 1/f^2: against
-# this floor, a 200 Hz line stands above the noise out to 178 kHz and sets the floor over a third of
-# the band, so the flat floor the first line above promises would not be the AWGN's. At 2 Hz the skirt
-# crosses the floor 18 kHz out - visible at the foot of the line, and past it the floor is the noise
-# the graph asked for. That is also what makes the picture a calibration: qa_ExampleGraphs reads the
-# tone's power and the noise floor off these records and holds them to the numbers below.
+# The linewidth is 2 Hz. A Wiener skirt falls only as 1/f^2. Against this floor a 200 Hz line stands
+# above the noise out to 178 kHz. It would set the floor over a third of the band, and the flat floor
+# of the noise row would not be the AWGN's. At 2 Hz the skirt crosses the floor 18 kHz out. The skirt
+# shows at the foot of the line, and past it the floor is the configured noise. The picture is
+# therefore a calibration. qa_ExampleGraphs reads the tone's power and the noise floor from these
+# records and checks them against the numbers below.
 #
-# The estimate is Welch's: 1024-point Hann segments at half overlap, eight per record. Each record
-# carries `sample_rate`, `sample_start`, `n_averaged` and `enbw_bins` in its metadata; `enbw_bins`
-# times the bin width is what turns the peak density back into the tone's own power.
+# The estimate is Welch's, with 1024-point Hann segments at half overlap and eight per record. Each
+# record carries `sample_rate`, `sample_start`, `n_averaged` and `enbw_bins` in its metadata.
+# `enbw_bins` times the bin width turns the peak density back into the tone's own power.
 #
-# `tone` is paced to wall-clock time, so the graph runs at 1 MS/s and the drift is real seconds.
-# A host reads the records through the DataSetSink registry under the signal name `psd`; studio
-# substitutes its own gr::studio::* waterfall or series sink, whose `in` is a port COLLECTION -
-# a bare `in` on one connects nothing and silently passes no data, so write those edges `in#0`.
+# `tone` is paced to wall-clock time. The graph runs at 1 MS/s, and the drift is in real seconds. A
+# host reads the records through the DataSetSink registry under the signal name `psd`. Studio
+# substitutes its own gr::studio::* waterfall or series sink, whose `in` is a port collection. A bare
+# `in` on one connects nothing and passes no data, with no error. Write those edges as `in#0`.
 # DataSetSink's `in` is a plain port and is written as one.
 blocks:
   - id: gr::blocks::basic::SignalGenerator<complex<float32>>
