@@ -146,9 +146,9 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
 
     "a constant is removed exactly"_test = [] {
         for (const bool longForm : {true, false}) {
-            // the pipeline fills in stages*(D-1) samples, which is twice the group delay: the cascade's own impulse
-            // response is stages*(D-1)+1 long and the group delay is its center, which is where the step transient is
-            // exactly half way rather than where it ends
+            // The pipeline fills in stages*(D-1) samples, twice the group delay. The cascade's impulse response is
+            // stages*(D-1)+1 long, and the group delay is its center. The step transient is exactly half way at the
+            // group delay and ends at the fill.
             const std::size_t        transient = (longForm ? 4UZ : 2UZ) * (kLength - 1UZ);
             DcBlocker<float>         block     = makeBlock<float>({{"length", kLength}, {"long_form", longForm}});
             const std::vector<float> input(2000UZ, 1.f);
@@ -246,7 +246,7 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
 
     "nanoseconds per sample"_test = [] {
         if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
-            return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
+            return; // opt-in, since a throughput figure belongs to a controlled run and not to every ctest invocation
         }
         using Clock = std::chrono::steady_clock;
 
@@ -287,8 +287,8 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
     };
 
     "length and long_form are refused while the block runs; reseed_interval is not"_test = [] {
-        // A refused settings change stays staged and re-applies, so a block that has refused once goes on refusing:
-        // each case gets its own block, the discipline qa_LinearEqualizer already records for the same reason.
+        // A refused settings change stays staged and re-applies. A block that has refused once goes on refusing.
+        // Each case therefore gets its own block, as in qa_LinearEqualizer for the same reason.
         const auto running = [](gr::property_map settings) {
             auto block = std::make_unique<DcBlocker<float>>(std::move(settings));
             block->settings().init();
@@ -311,7 +311,7 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
             expect(throws([&] { live(*block, {{"long_form", false}}); })) << "and a new form";
         }
         {
-            // reseed_interval touches no pipeline state and stays live, which is what the documentation claims
+            // reseed_interval touches no pipeline state and stays live, as the documentation states
             auto             block  = running({{"length", gr::Size_t(32)}, {"long_form", true}});
             const gr::Size_t before = block->group_delay;
             expect(nothrow([&] { live(*block, {{"reseed_interval", gr::Size_t(2048)}}); }));
@@ -319,7 +319,7 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
             expect(eq(block->group_delay.value, before)) << "and moves nothing the refusals protect";
         }
         {
-            // stopped, both move again: the contract is construction-time, not immutable
+            // stopped, both move again. The contract is construction-time, not immutable.
             auto             block  = running({{"length", gr::Size_t(32)}, {"long_form", true}});
             const gr::Size_t before = block->group_delay;
             block->stop();

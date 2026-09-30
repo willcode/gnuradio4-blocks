@@ -18,8 +18,8 @@ using gr::blocks::filter::PolyphaseSynthesizer;
 namespace test = gr::blocks::testing::span;
 using CF       = std::complex<float>;
 
-/// The denominator is the wideband stream in both directions: the analysis bank's input and the synthesizer's output.
-/// That is the rate a consumer plans against, and it makes the two banks directly comparable.
+/// The denominator is the wideband stream in both directions. That is the analysis bank's input and the synthesizer's
+/// output. A consumer plans against that rate, and it makes the two banks directly comparable.
 constexpr std::size_t kWidebandSamples = 65536UZ;
 constexpr std::size_t kRepeats         = 9UZ;
 
