@@ -22,37 +22,37 @@ GR_REGISTER_BLOCK(gr::blocks::digital::OffsetWordSync)
 
 struct OffsetWordSync : Block<OffsetWordSync, NoTagPropagation> {
     using Description = Doc<R""(
-@brief Block synchronization by coset offset words: bits in, position-labeled data words out.
+@brief Block synchronization by coset offset words, with bits in and position-labeled data words out.
 
-The scheme EN 50067's Annex C made familiar, as the general pattern it is: a systematic shortened cyclic block whose
-checkword is xored with one of a small set of offset words naming the block's position in a cycle. The syndrome of a
-valid block IS its offset word, so framing recovery is one polynomial reduction and a lookup — the checkword is the
-sync, and there is no preamble.
+EN 50067 Annex C uses this scheme, and the block implements its general form. A systematic shortened cyclic block
+has its checkword xored with one of a small set of offset words. The offset word names the block's position in a
+cycle. The syndrome of a valid block equals its offset word. Framing recovery is therefore one polynomial reduction
+and a lookup. The checkword is the sync, and there is no preamble.
 
-Unlocked, the register slides bit by bit and locks where the last block_bits validate as position 0. Locked, every
-block is tested against the position the cycle expects (or that position's stated alternate, accepted
-unconditionally — the bit that selects between a pair may live in a block that was itself lost). Success and failure
-BOTH emit the block's data bits, tagged with the position, whether the offset validated, and whether the alternate
-was the match: the assembler downstream owns the accept policy, and a doubtful word is worth more to it than a
-silent gap. A failure advances the expected position, so a lost block costs a block and not the lock; a run of
-`relock_failures` consecutive failures returns to sliding acquisition.
+Unlocked, the register slides bit by bit. It locks where the last block_bits validate as position 0. Locked, the
+block tests every block against the position the cycle expects. It also accepts that position's stated alternate
+unconditionally, since the bit that selects between a pair may sit in a lost block. Success and failure both emit
+the block's data bits. The tags carry the position, whether the offset validated, and whether the alternate
+matched. The block leaves the accept policy to a downstream assembler. A doubtful word gives the assembler more than
+a silent gap. A failure advances the expected position. A lost block therefore costs a block and not the lock. After
+`relock_failures` consecutive failures, the block returns to sliding acquisition.
 
-One sharp edge of such constants travels with them: a code of small minimum distance can hold offset pairs one bit
-error apart (RDS's C and D differ by exactly the syndrome of bit 18), so a lone validated block is not authoritative
-about its position. Lock keys on the offset sequence, never on one checkword.
+A code of small minimum distance can hold offset pairs one bit error apart. RDS's C and D differ by exactly the
+syndrome of bit 18. A lone validated block is therefore not authoritative about its position. Lock depends on the
+offset sequence and never on one checkword.
 )"">;
 
     PortIn<std::uint8_t, Async>   in;
     PortOut<std::uint16_t, Async> out;
 
-    Annotated<gr::Size_t, "polynomial", Doc<"the code's generator, its degree-check_bits term present; there is no default code">>                                                polynomial = 0U;
-    Annotated<gr::Size_t, "check_bits", Doc<"checkword width; the offset words live in this many bits">>                                                                          check_bits = 0U;
-    Annotated<gr::Size_t, "data_bits", Doc<"data width per block; block_bits = data_bits + check_bits">>                                                                          data_bits  = 0U;
-    Annotated<std::vector<gr::Size_t>, "offsets", Doc<"the position cycle's offset words, position 0 first; sliding acquisition locks on position 0; there is no default cycle">> offsets{};
-    Annotated<gr::Size_t, "alternate_position", Doc<"cycle position that also accepts alternate_word; any position past the cycle means none">>                                   alternate_position = 0xFFFFU;
-    Annotated<gr::Size_t, "alternate_word", Doc<"the alternate offset accepted at alternate_position">>                                                                           alternate_word     = 0U;
-    Annotated<gr::Size_t, "relock_failures", Doc<"consecutive failed positions before falling back to sliding acquisition">>                                                      relock_failures    = 8U;
-    Annotated<std::string, "trigger_label", Doc<"the label written under the trigger_name key of the emitted tags">>                                                              trigger_label      = std::string("offset_word");
+    Annotated<gr::Size_t, "polynomial", Doc<"generator polynomial with its degree-check_bits term, required">>               polynomial = 0U;
+    Annotated<gr::Size_t, "check_bits", Doc<"checkword width, also the width of the offset words">>                          check_bits = 0U;
+    Annotated<gr::Size_t, "data_bits", Doc<"data width per block, block_bits = data_bits + check_bits">>                     data_bits  = 0U;
+    Annotated<std::vector<gr::Size_t>, "offsets", Doc<"the cycle's offset words, position 0 first, required">>               offsets{};
+    Annotated<gr::Size_t, "alternate_position", Doc<"cycle position that also accepts alternate_word, if inside the cycle">> alternate_position = 0xFFFFU;
+    Annotated<gr::Size_t, "alternate_word", Doc<"the alternate offset accepted at alternate_position">>                      alternate_word     = 0U;
+    Annotated<gr::Size_t, "relock_failures", Doc<"consecutive failed positions before falling back to sliding acquisition">> relock_failures    = 8U;
+    Annotated<std::string, "trigger_label", Doc<"the label written under the trigger_name key of the emitted tags">>         trigger_label      = std::string("offset_word");
 
     GR_MAKE_REFLECTABLE(OffsetWordSync, in, out, polynomial, check_bits, data_bits, offsets, alternate_position, alternate_word, relock_failures, trigger_label);
 
@@ -72,8 +72,8 @@ about its position. Lock keys on the offset sequence, never on one checkword.
         if (offsets.value.empty()) {
             throw gr::exception("offsets holds the position cycle and there is no default: the constants select a protocol");
         }
-        // The kernel's constructor carries the width and generator refusals; building one here
-        // surfaces them at settings time.
+        // The kernel's constructor refuses a bad width or generator. Building one here raises those
+        // refusals at settings time.
         const gr::digital::CyclicSyndrome code(static_cast<std::uint32_t>(polynomial.value), static_cast<unsigned>(check_bits.value), static_cast<unsigned>(data_bits.value));
         for (const gr::Size_t word : offsets.value) {
             if (static_cast<std::uint64_t>(word) >> code.checkBits != 0ULL) {
@@ -94,7 +94,7 @@ about its position. Lock keys on the offset sequence, never on one checkword.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (offsets.value.empty()) { // unconfigured: inert rather than framing on an arbitrary code
+        if (offsets.value.empty()) { // unconfigured, the block stays inert and frames on no arbitrary code
             std::ignore = inSpan.consume(0UZ);
             outSpan.publish(0UZ);
             return work::Status::ERROR;
@@ -114,7 +114,7 @@ about its position. Lock keys on the offset sequence, never on one checkword.
                     _failures = 0UZ;
                     emit(code, outSpan, made, true, false);
                     _bitsIn   = 0UZ;
-                    _position = 1UZ % offsets.value.size(); // the locking block WAS position 0; the next is expected one on
+                    _position = 1UZ % offsets.value.size(); // the locking block was position 0, and the next is expected one on
                 }
                 continue;
             }
@@ -131,11 +131,11 @@ about its position. Lock keys on the offset sequence, never on one checkword.
             _position = (_position + 1UZ) % offsets.value.size();
             _failures = good ? 0UZ : _failures + 1UZ;
             if (_failures >= static_cast<std::size_t>(relock_failures.value)) {
-                // Sliding resumes with the register's history intact: the bits already seen may
+                // Sliding resumes with the register's history intact. The bits already seen may
                 // hold the next lock.
                 _locked   = false;
                 _failures = 0UZ;
-                _bitsIn   = _blockBits; // the register is full; every further bit may test
+                _bitsIn   = _blockBits; // the register is full, and every further bit may be tested
             }
         }
 
@@ -149,7 +149,7 @@ about its position. Lock keys on the offset sequence, never on one checkword.
 
 private:
     void emit(const gr::digital::CyclicSyndrome& code, OutputSpanLike auto& outSpan, std::size_t& made, bool good, bool alternate) {
-        // The position reported is the one this block occupies; on the sliding lock that is 0.
+        // The position reported is the one this block occupies. On the sliding lock it is 0.
         outSpan[made] = static_cast<std::uint16_t>((_register >> code.checkBits) & ((1ULL << code.dataBits) - 1ULL));
         outSpan.publishTag(property_map{{gr::tag::TRIGGER_NAME.shortKey(), trigger_label.value}, //
                                {gr::tag::TRIGGER_OFFSET.shortKey(), 0.0f},                       //
@@ -163,24 +163,25 @@ GR_REGISTER_BLOCK(gr::blocks::digital::GroupAssembler)
 
 struct GroupAssembler : Block<GroupAssembler, NoTagPropagation> {
     using Description = Doc<R""(
-@brief The N-of-M good-block gate: position-labeled words in, one record per completed cycle out.
+@brief The N-of-M good-block gate, with position-labeled words in and one record per completed cycle out.
 
-Consumes the word stream `OffsetWordSync` emits — each word tagged with its cycle position and whether its offset
-validated — and assembles one `DataSet` record per completed cycle whose valid count reaches `min_good`. A group
-with fewer good words is dropped and counted, never published: a consumer of the record port reads accepted groups
-and nothing else. The record's data is the cycle's words in position order; its metadata carries `protocol`,
-`crc_ok` (every word valid), `good_words`, `alternate_positions` (which positions validated on their stated
-alternate — RDS reads its version bit there when block B was lost), and `sequence`. A word tagged position 0 always
-begins a new group, so a relock upstream cannot splice two half groups into one record.
+The block consumes the word stream `OffsetWordSync` emits. Each word is tagged with its cycle position and whether
+its offset validated. The block assembles one `DataSet` record per completed cycle whose valid count reaches
+`min_good`. A group with fewer good words is dropped and counted, and never published. The record port carries
+accepted groups only. The record's data is the cycle's words in position order. Its metadata carries `protocol`,
+`crc_ok` (every word valid), `good_words`, `alternate_positions` and `sequence`. `alternate_positions` lists the
+positions that validated on their stated alternate. RDS reads its version bit there when block B was lost. A word
+tagged position 0 always begins a new group. A relock upstream therefore cannot splice two half groups into one
+record.
 )"">;
 
     PortIn<std::uint16_t, Async>           in;
     PortOut<DataSet<std::uint16_t>, Async> out;
 
-    Annotated<gr::Size_t, "group_size", Doc<"words per cycle; a record carries exactly this many">>                                  group_size = 4U;
-    Annotated<gr::Size_t, "min_good", Doc<"offset-valid words a group needs to publish; group_size accepts only clean groups">>      min_good   = 4U;
-    Annotated<std::string, "protocol", Doc<"the record metadata's protocol key, and the record's signal name; there is no default">> protocol{};
-    Annotated<std::string, "trigger_label", Doc<"the upstream trigger_name label whose tags carry the position">>                    trigger_label = std::string("offset_word");
+    Annotated<gr::Size_t, "group_size", Doc<"words per cycle and per record">>                                    group_size = 4U;
+    Annotated<gr::Size_t, "min_good", Doc<"offset-valid words a group needs, group_size for clean groups only">>  min_good   = 4U;
+    Annotated<std::string, "protocol", Doc<"record metadata protocol key and record signal name, required">>      protocol{};
+    Annotated<std::string, "trigger_label", Doc<"the upstream trigger_name label whose tags carry the position">> trigger_label = std::string("offset_word");
 
     GR_MAKE_REFLECTABLE(GroupAssembler, in, out, group_size, min_good, protocol, trigger_label);
 
@@ -214,7 +215,7 @@ begins a new group, so a relock upstream cannot splice two half groups into one 
     [[nodiscard]] std::uint64_t droppedGroups() const noexcept { return _dropped; }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (_words.size() != static_cast<std::size_t>(group_size.value)) { // unconfigured: inert rather than placing a word in a group that was never sized
+        if (_words.size() != static_cast<std::size_t>(group_size.value)) { // unconfigured, the block stays inert and places no word in an unsized group
             std::ignore = inSpan.consume(0UZ);
             outSpan.publish(0UZ);
             return work::Status::ERROR;
@@ -227,7 +228,7 @@ begins a new group, so a relock upstream cannot splice two half groups into one 
         std::size_t consumed = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
             // The word's annotation arrives as the trigger tag at its own index.
-            std::size_t position  = size; // no position: the word cannot be placed
+            std::size_t position  = size; // a word without a position cannot be placed
             bool        good      = false;
             bool        alternate = false;
             for (const gr::Tag& tag : inSpan.rawTags) {
@@ -257,7 +258,7 @@ begins a new group, so a relock upstream cannot splice two half groups into one 
                 continue; // an unlabeled word belongs to no cycle
             }
 
-            if (position == 0UZ) { // a new cycle always starts clean, whatever was pending
+            if (position == 0UZ) { // a new cycle starts clean, whatever was pending
                 if (_filled != 0UZ) {
                     ++_dropped;
                 }
