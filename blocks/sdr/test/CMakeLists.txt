@@ -159,7 +159,11 @@ if(TARGET SoapySDR)
               ut)
     add_test(NAME qa_SoapyLoopback COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
                                            ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapyLoopback)
-    set_tests_properties(qa_SoapyLoopback PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+    set_tests_properties(
+      qa_SoapyLoopback
+      PROPERTIES
+        ENVIRONMENT
+        "SOAPY_SDR_ROOT=${SOAPY_EMPTY_ROOT};SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
   else()
     message(STATUS "qa_SoapyLoopback SKIPPED (SoapySDR C++ ABI mismatch)")
   endif()
@@ -243,8 +247,11 @@ if(TARGET SoapySDR)
       COMMENT "Copying gr-sdr-loopback.so for the burst test")
     add_test(NAME qa_SoapySinkBurst COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR}
                                             ${CMAKE_CURRENT_BINARY_DIR}/qa_SoapySinkBurst)
-    set_tests_properties(qa_SoapySinkBurst
-                         PROPERTIES ENVIRONMENT "SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
+    set_tests_properties(
+      qa_SoapySinkBurst
+      PROPERTIES
+        ENVIRONMENT
+        "SOAPY_SDR_ROOT=${SOAPY_EMPTY_ROOT};SOAPY_SDR_PLUGIN_PATH=${SOAPY_MODULE_DIR};ASAN_OPTIONS=detect_leaks=0")
   else()
     message(STATUS "qa_SoapyRaiiWrapper SKIPPED (loopback .so module requires matching SoapySDR ABI)")
   endif()
