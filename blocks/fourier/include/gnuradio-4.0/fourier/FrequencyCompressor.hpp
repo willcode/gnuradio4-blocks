@@ -23,46 +23,45 @@ struct FrequencyCompressor : Block<FrequencyCompressor> {
     using Description = Doc<R""(
 @brief Divides every frequency in a complex stream by an integer, in real time.
 
-An ultrasonic band is inaudible because of where it sits, not how loud it is; dividing every frequency by N moves
-the whole band into hearing at once — five octaves down at N = 32 — where a heterodyne brings down one narrow slice
-at a time. Division is a pure TRANSPOSITION: every frequency ratio survives, so a call and its harmonics stay
-harmonically related and a five-octave band stays five octaves wide. Nothing here adds a frequency offset,
-deliberately — an offset would preserve neither.
+An ultrasonic band is inaudible because of where it sits, not because of its level. Dividing every frequency by N
+moves the whole band into hearing at once, five octaves down at N = 32. A heterodyne brings down one narrow slice at
+a time. Division is a pure TRANSPOSITION. Every frequency ratio survives. A call and its harmonics stay harmonically
+related, and a five-octave band stays five octaves wide. The block adds no frequency offset, by design. An offset
+would preserve neither property.
 
-"Same duration, frequencies divided by N" is "reinterpret the stream at 1/N of its sample rate, then compress time
-by N to give the duration back". The rate reinterpretation is free — the output rate is declared fs/N — and the time
-compression is a phase vocoder resynthesizing the unmodified spectrum at 1/N of its analysis hop, each bin's phase
-advanced by its measured frequency so partials stay coherent across frames. Level is preserved by normalizing the
-overlap-add against the window energy actually laid down.
+"Same duration, frequencies divided by N" equals "reinterpret the stream at 1/N of its sample rate, then compress
+time by N to restore the duration". The rate reinterpretation is free, since the output rate is declared fs/N. The
+time compression is a phase vocoder. It resynthesizes the unmodified spectrum at 1/N of its analysis hop. Each bin's
+phase advances by its measured frequency, and partials stay coherent across frames. Normalizing the overlap-add
+against the window energy laid down preserves the level.
 
-The analysis frame sets the lowest resolvable output frequency (fs/frame well below it) and how much a transient
-smears: compressing a 190 kHz band to end near 300 Hz wants about 16 ms of window at 250 kSps, and shorter events
-arrive blurred toward that. Narrowing the input band and lowering the divisor trades reach for sharpness; every
-setting stays a pure transposition.
+The analysis frame sets the lowest resolvable output frequency, with fs/frame well below it. It also sets how far a
+transient spreads in time. Compressing a 190 kHz band to end near 300 Hz needs about 16 ms of window at 250 kSps.
+Shorter events arrive blurred toward that length. Narrowing the input band and lowering the divisor trades reach for
+sharpness. Every setting stays a pure transposition.
 
-Both settings move while the block runs. A new `divisor` or `frame` re-plans the vocoder in place, and a new divisor
-also has the block state its output rate on the next sample it publishes, as `sample_rate / divisor` — so a chain
-that derives both this divisor and a downstream ratio from one parameter can move them together in a single settings
-transaction instead of being rebuilt. A new frame changes the resolution and the latency but not the rate, and states
-nothing. Leaving `sample_rate` at zero leaves the rate unstated and publishes no tag, which is what the block did
-before it had the setting.
+Both settings can change while the block runs. A new `divisor` or `frame` re-plans the vocoder in place. After a new
+divisor, the block states its output rate as `sample_rate / divisor` on the next sample it publishes. A chain that
+derives this divisor and a downstream ratio from one parameter can then move both in one settings transaction
+without a rebuild. A new frame changes the resolution and the latency but not the rate, and states nothing. With
+`sample_rate` at zero, the rate stays unstated and the block publishes no tag.
 
-**A change is audible.** Settings are atomic; a stream is not. Samples already downstream were produced under the
-old settings, and the frame in flight is dropped rather than resynthesized under settings it was not analyzed for —
-the same rule the block already applies at end of stream, a window that cannot fill resolving no frequency. Crossing
-to or from `divisor == 1` also moves the latency between none and a frame, 1 being the bit-exact passthrough that
-skips the vocoder entirely.
+**A change is audible.** Settings are atomic, and a stream is not. Samples already downstream were produced under
+the old settings. The frame in flight is dropped and not resynthesized under settings it was not analyzed for. The
+block applies the same rule at end of stream, where a window that cannot fill resolves no frequency. Crossing to or
+from `divisor == 1` also moves the latency between none and a frame. A divisor of 1 is the bit-exact passthrough
+that skips the vocoder entirely.
 
-The ports are Async (an arbitrary integer ratio is not a constant L:M); at end of stream the sub-frame tail is
-dropped and the block ends with the stream.
+The ports are Async, since an arbitrary integer ratio is not a constant L:M. At end of stream the block drops the
+sub-frame tail and ends with the stream.
 )"">;
 
     PortIn<std::complex<float>, Async>  in;
     PortOut<std::complex<float>, Async> out;
 
-    Annotated<gr::Size_t, "divisor", Visible, Doc<"frequency divisor; 1 is a bit-exact passthrough with no latency">>                           divisor     = 1U;
-    Annotated<gr::Size_t, "frame", Doc<"analysis frame; a power of two, fs/frame well below the lowest output frequency wanted">>               frame       = 4096U;
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate; 0 leaves the output rate unstated and publishes no rate tag">> sample_rate = 0.f;
+    Annotated<gr::Size_t, "divisor", Visible, Doc<"frequency divisor, 1 for a bit-exact zero-latency passthrough">>                  divisor     = 1U;
+    Annotated<gr::Size_t, "frame", Doc<"analysis frame, a power of two, fs/frame below the lowest output frequency">>                frame       = 4096U;
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, 0 to leave the output rate unstated and untagged">> sample_rate = 0.f;
 
     GR_MAKE_REFLECTABLE(FrequencyCompressor, in, out, divisor, frame, sample_rate);
 
@@ -70,7 +69,7 @@ dropped and the block ends with the stream.
     std::vector<std::complex<float>> _queue;
     std::vector<std::complex<float>> _made;
     bool                             _running       = false;
-    gr::Size_t                       _statedDivisor = 0U; /// the divisor the last published rate tag stated; 0 is none
+    gr::Size_t                       _statedDivisor = 0U; /// the divisor the last published rate tag stated, 0 for none
 
     /// One call's input bound, so a burst of buffered input cannot queue unbounded output.
     static constexpr std::size_t kMaxTake = 1UZ << 16;
@@ -95,9 +94,9 @@ dropped and the block ends with the stream.
     void replan() {
         const auto frameSize = static_cast<std::size_t>(frame.value);
         const auto n         = static_cast<std::size_t>(divisor.value);
-        // A quarter-frame analysis hop is the overlap at which the Hann window is well behaved;
-        // shrinking it to a multiple of the divisor keeps the synthesis hop whole, which is what
-        // keeps the output rate exactly fs over the divisor.
+        // A quarter-frame analysis hop is the overlap at which the Hann window is well behaved.
+        // Shrinking it to a multiple of the divisor keeps the synthesis hop whole. A whole
+        // synthesis hop keeps the output rate exactly fs over the divisor.
         std::size_t hopIn = frameSize / 4UZ;
         hopIn -= hopIn % n;
         _vocoder.configure(frameSize, hopIn, hopIn / n);
@@ -115,9 +114,8 @@ dropped and the block ends with the stream.
 
     /// @brief State the output rate on the next sample published after it moved, if the block was told a rate at all.
     ///
-    /// The test is against the divisor last stated rather than against which keys a settings transaction carried:
-    /// a transaction can restage a value that did not move, and a redundant rate tag is something downstream has to
-    /// decide to ignore. A new frame changes the resolution and the latency but not the rate, and states nothing.
+    /// The test compares the divisor last stated, not the keys a settings transaction carried. A transaction can
+    /// restage a value that did not move. A redundant rate tag would leave downstream to decide to ignore it.
     void stateRate(OutputSpanLike auto& outSpan) {
         if (divisor.value == _statedDivisor) {
             return;
@@ -129,7 +127,7 @@ dropped and the block ends with the stream.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (divisor == 1U) { // passthrough: nothing to do and no latency to add
+        if (divisor == 1U) { // passthrough, with nothing to do and no latency to add
             const std::size_t n = std::min(inSpan.size(), outSpan.size());
             std::copy_n(inSpan.begin(), n, outSpan.begin());
             std::ignore = inSpan.consume(n);
@@ -164,9 +162,9 @@ dropped and the block ends with the stream.
             stateRate(outSpan);
         }
         outSpan.publish(n);
-        // Publishing nothing while the first frame fills is ordinary start-up latency, but it
-        // must be reported as wanting input rather than as work done, or the scheduler has no
-        // reason to come back with more.
+        // Publishing nothing while the first frame fills is ordinary start-up latency. The call
+        // then returns INSUFFICIENT_INPUT_ITEMS and reports no work done. The scheduler then
+        // comes back with more input.
         return n > 0UZ ? work::Status::OK : work::Status::INSUFFICIENT_INPUT_ITEMS;
     }
 };

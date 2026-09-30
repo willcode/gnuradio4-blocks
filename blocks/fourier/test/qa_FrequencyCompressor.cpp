@@ -55,15 +55,15 @@ struct CollectSink : gr::Block<CollectSink<T>> {
     return outData;
 }
 
-/// @brief One call into the block: returns what it published and any tag it placed.
+/// @brief One call into the block. Returns what it published and any tag it placed.
 struct Call {
     std::size_t          made{};
     std::size_t          consumed{};
     std::vector<gr::Tag> tags{};
 };
 
-/// The settings change is placed exactly between two calls: the scheduler cannot be asked to change a setting at a
-/// chosen sample, and a test that waited for one would be timing-dependent.
+/// The settings change is placed exactly between two calls. The scheduler cannot be asked to change a setting at a
+/// chosen sample. A test that waited for one would depend on timing.
 [[nodiscard]] Call drive(gr::blocks::fourier::FrequencyCompressor& block, std::span<const CF> input, std::span<CF> output) {
     namespace span = gr::blocks::testing::span;
     std::vector<gr::Tag> published;
@@ -80,7 +80,7 @@ void applyLive(gr::blocks::fourier::FrequencyCompressor& block, gr::property_map
     std::ignore = block.settings().applyStagedParameters();
 }
 
-/// Run source → compressor → sink to completion on the Simple scheduler; empty on a hang.
+/// Run source → compressor → sink to completion on the Simple scheduler. Returns empty on a hang.
 [[nodiscard]] std::vector<CF> runGraph(gr::property_map settings, std::vector<CF> data) {
     gr::Graph flow;
     auto&     src = flow.emplaceBlock<FiniteSource<CF>>();
