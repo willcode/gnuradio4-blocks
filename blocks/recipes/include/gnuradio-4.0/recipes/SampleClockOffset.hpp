@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/SampleClockOffset.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/SampleClockOffset.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_SAMPLECLOCKOFFSET_HPP
 #define GNURADIO_RECIPES_SAMPLECLOCKOFFSET_HPP
 
@@ -15,8 +15,8 @@ namespace gr::recipes {
 
 struct SampleClockOffset {
     struct Parameters {
-        double ppm = 0.0; // clock error in parts per million; positive means this clock runs fast and emits more samples than it takes
-        float attenuation_db = 60.0f; // stopband target of the resampler's designed prototype, and what its polyphase bank is sized against
+        double ppm = 0.0; // clock error in parts per million, positive for a fast clock
+        float attenuation_db = 60.0f; // stopband target sizing the resampler's prototype and polyphase bank
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -29,7 +29,7 @@ struct SampleClockOffset {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("clock error in parts per million; positive means this clock runs fast and emits more samples than it takes"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("clock error in parts per million, positive for a fast clock"));
             m5[std::pmr::string("default")] = gr::pmt::Value(0.0);
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("ppm"));
@@ -37,7 +37,7 @@ struct SampleClockOffset {
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("stopband target of the resampler's designed prototype, and what its polyphase bank is sized against"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("stopband target sizing the resampler's prototype and polyphase bank"));
             m7[std::pmr::string("default")] = gr::pmt::Value(60.0f);
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("attenuation_db"));
@@ -113,9 +113,9 @@ struct SampleClockOffset {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("ppm")] = parameters.ppm;

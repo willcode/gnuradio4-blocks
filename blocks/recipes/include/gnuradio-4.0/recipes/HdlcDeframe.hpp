@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/HdlcDeframe.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/HdlcDeframe.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_HDLCDEFRAME_HPP
 #define GNURADIO_RECIPES_HDLCDEFRAME_HPP
 
@@ -15,12 +15,12 @@ namespace gr::recipes {
 
 struct HdlcDeframe {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t max_payload_items_) : max_payload_items(std::move(max_payload_items_)) {}
-        std::uint32_t max_payload_items; // largest payload a frame may carry, in octets; required, there is no default — the extractor contract admits none
-        std::string coding = std::string("nrzi"); // line code ahead of the framing: 'nrzi', or 'differential' for a link coded the other way round
-        std::string payload_bit_order = std::string("LsbFirst"); // order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first
+        std::uint32_t max_payload_items; // largest payload a frame may carry, in octets (required)
+        std::string coding = std::string("nrzi"); // line code ahead of the framing, 'nrzi' or 'differential'
+        std::string payload_bit_order = std::string("LsbFirst"); // order the pack stage assembles a de-stuffed octet in
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -33,14 +33,14 @@ struct HdlcDeframe {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("largest payload a frame may carry, in octets; required, there is no default — the extractor contract admits none"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("largest payload a frame may carry, in octets (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("max_payload_items"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("line code ahead of the framing: 'nrzi', or 'differential' for a link coded the other way round"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("line code ahead of the framing, 'nrzi' or 'differential'"));
             m7[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("nrzi"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("coding"));
@@ -48,7 +48,7 @@ struct HdlcDeframe {
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("order the pack stage assembles a de-stuffed octet in; HDLC transmits least significant bit first"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("order the pack stage assembles a de-stuffed octet in"));
             m9[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("LsbFirst"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("payload_bit_order"));
@@ -221,9 +221,9 @@ struct HdlcDeframe {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("max_payload_items")] = parameters.max_payload_items;

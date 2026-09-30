@@ -2,11 +2,11 @@
 #define GNURADIO_RECIPEHEADEREMITTER_HPP
 
 // Emits the typed C++ header for one recipe definition. The YAML recipe is the single
-// source of truth; the emitted header is a committed artifact a qa regenerates and diffs,
-// so drift between the two is a red test rather than a mystery. The generated emplace()
-// builds the definition as a property-map literal — no YAML text, no file I/O, no parser
-// at run time — and hands it to the same instantiation path the loader uses, so the two
-// front ends cannot disagree about semantics.
+// source of truth. The emitted header is kept in the source tree. qa_Recipes regenerates
+// it and diffs the two, and drift between them fails the test. The generated emplace()
+// builds the definition as a property-map literal. At run time it reads no YAML text, does
+// no file I/O and runs no parser. It passes the literal to the same instantiation path the
+// loader uses. The two front ends therefore agree on semantics.
 
 #include <algorithm>
 #include <cctype>
@@ -64,8 +64,8 @@ namespace detail {
         return std::string(*v ? "true" : "false");
     }
     if (const auto* v = value.get_if<float>()) {
-        // std::format is shortest-round-trip, so the text re-parses exactly, but it drops the
-        // point on an integral value and `60f` is not a literal: put the point back before the suffix
+        // std::format writes the shortest round-trip text, which parses back exactly. It drops the
+        // point on an integral value, and `60f` is not a literal. The point goes back before the suffix.
         const std::string text = std::format("{}", *v);
         return text.find_first_of(".eE") == std::string::npos ? text + ".0f" : text + "f";
     }
@@ -105,8 +105,8 @@ namespace detail {
 
 /// @brief A vector default as a braced initializer of the element literals `scalarExpression` writes.
 ///
-/// The element types are the numeric ones the dialect names. `string[]` is refused rather than emitted, because a
-/// string element's literal is a `std::pmr::string` and the member it would initialize is a `std::vector<std::string>`.
+/// The element types are the numeric ones the dialect names. `string[]` is refused and not emitted. A string
+/// element's literal is a `std::pmr::string`, and the member it would initialize is a `std::vector<std::string>`.
 template<typename... TElements>
 [[nodiscard]] inline std::expected<std::string, gr::Error> vectorExpressionAs(const gr::pmt::Value& value, const std::string& cppType) {
     std::string joined;
@@ -147,16 +147,16 @@ template<typename... TElements>
 
 /// @brief One homogeneous rank-1 `gr::Tensor<T>`, as the C++ expression that reconstructs it exactly.
 ///
-/// A YAML sequence with a whole-list type tag (`escape_map: !!uint32 [220, 192, 221, 219]`) parses to this shape
-/// rather than to the heterogeneous `gr::Tensor<gr::pmt::Value>` the untagged-list branch above handles, and it is
-/// what a `std::vector<T>`-typed interior block setting's conversion requires exactly: `Settings.hpp`'s
-/// `convertParameter` looks for `Tensor<TTensorElem>`, not `Tensor<Value>`. Rank 1 is the only shape with a literal
-/// spelling here — `gr::data_from` builds rank 1 and throws on anything else — so a tensor of higher rank is
-/// declined rather than reshaped behind the reader's back. An empty tensor takes the default constructor, because an
-/// empty braced list deduces no element type and `gr::Tensor<T>(gr::data_from, {})` does not compile.
+/// A YAML sequence with a whole-list type tag (`escape_map: !!uint32 [220, 192, 221, 219]`) parses to this shape. The
+/// untagged-list branch above handles the heterogeneous `gr::Tensor<gr::pmt::Value>`. The conversion of a
+/// `std::vector<T>`-typed interior block setting requires exactly this shape. `Settings.hpp`'s `convertParameter`
+/// looks for `Tensor<TTensorElem>` and not `Tensor<Value>`. Rank 1 is the one shape with a literal spelling here.
+/// `gr::data_from` builds rank 1 and throws on anything else. A tensor of higher rank is therefore declined and not
+/// reshaped. An empty tensor takes the default constructor. An empty braced list deduces no element type, and
+/// `gr::Tensor<T>(gr::data_from, {})` does not compile.
 ///
-/// `nullopt` means this function has no expression for @p value: another element type may still have one, and when
-/// none does the caller refuses the value rather than emitting something that does not reconstruct it.
+/// `nullopt` means this function has no expression for @p value. Another element type may still have one. When none
+/// does, the caller refuses the value and emits no expression that fails to reconstruct it.
 template<typename T>
 [[nodiscard]] inline std::optional<std::string> numericTensorExpressionOf(const gr::pmt::Value& value, std::string_view typeName) {
     const auto* tensor = value.get_if<gr::Tensor<T>>();
@@ -214,8 +214,8 @@ template<typename T>
     return std::nullopt;
 }
 
-/// emits statements reconstructing `value` into the named local; containers recurse with
-/// uniquely-numbered locals
+/// Emits statements that reconstruct `value` into the named local. Containers recurse with
+/// uniquely numbered locals.
 inline std::expected<void, gr::Error> emitValueInto(std::string& out, const gr::pmt::Value& value, const std::string& target, int& counter, const std::string& indent) {
     if (const auto* map = value.get_if<gr::property_map>()) {
         const std::string local = std::format("m{}", counter++);
@@ -289,8 +289,8 @@ inline std::expected<void, gr::Error> emitValueInto(std::string& out, const gr::
     guard += "_HPP";
 
     std::string out;
-    out += std::format("// GENERATED FILE — do not edit. Source of truth: blocks/recipes/{}.\n", sourceFileName);
-    out += "// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.\n";
+    out += std::format("// Generated from blocks/recipes/{}, the source of truth. Do not edit.\n", sourceFileName);
+    out += "// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.\n";
     out += std::format("#ifndef {0}\n#define {0}\n\n", guard);
     const bool carriesVector = std::ranges::any_of(declarations, [](const auto& declaration) { return detail::vectorTypeWord(declaration.type); });
     out += "#include <memory>\n#include <string>\n#include <utility>\n";
@@ -328,8 +328,8 @@ inline std::expected<void, gr::Error> emitValueInto(std::string& out, const gr::
         members += "\n";
     }
     if (!ctorArguments.empty()) {
-        out += "        // required parameters are constructor arguments: omitting one is a compile error,\n";
-        out += "        // the same requirement the loader enforces at run time\n";
+        out += "        // Required parameters are constructor arguments. Omitting one is a compile error.\n";
+        out += "        // The loader enforces the same requirement at run time.\n";
         out += std::format("        Parameters({}) : {} {{}}\n", ctorArguments, ctorInits);
     }
     out += members;
@@ -351,9 +351,9 @@ inline std::expected<void, gr::Error> emitValueInto(std::string& out, const gr::
     }
     out += "            return def;\n        }();\n        return kDefinition;\n    }\n\n";
 
-    out += "    // Builds the composite through the same instantiation path the loader uses — the\n";
-    out += "    // bindings attach identically, so live parameter changes behave identically — and\n";
-    out += "    // adds it to `graph`. No YAML is parsed and no file is read.\n";
+    out += "    // Builds the composite through the loader's instantiation path and adds it to `graph`.\n";
+    out += "    // The bindings attach as they do in the loader, and live parameter changes behave the same.\n";
+    out += "    // No YAML is parsed and no file is read.\n";
     out += "    static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {\n";
     out += "        gr::property_map values;\n";
     for (const auto& declaration : declarations) {

@@ -1,12 +1,10 @@
-# The recipe index. The YAML-definitions loader reads this file to learn which recipe
-# definitions this directory ships; a recipe absent from the index does not exist to a
-# loader, however present its file is.
+# The recipe index. The YAML definitions loader reads this file to learn which recipe definitions this directory
+# ships. A loader ignores a recipe that is missing from the index, even when its file is present.
 #
-# The `modified` stamp records when a definition last changed. A loader reads a definition
-# that is on disk at every load, so an edit here reaches the generator, the tests and any
-# consumer immediately and the stamp gates nothing. Bump it with every edit even so: it is
-# what a remote catalog of these recipes is served against, and it is the only account of
-# the definition's age a reader has.
+# The `modified` stamp records when a definition last changed. A loader reads each definition from disk at every
+# load. An edit reaches the generator and the tests at once, and the stamp gates nothing. Bump the stamp with every
+# edit anyway. A remote catalog of these recipes is served against it. It also records the definition's age for a
+# reader.
 assets:
   - file: AfskDemod.yaml
     created: "2026-09-02-00:00:00"

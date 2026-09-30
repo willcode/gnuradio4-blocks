@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/OfdmDemodulator.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/OfdmDemodulator.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_OFDMDEMODULATOR_HPP
 #define GNURADIO_RECIPES_OFDMDEMODULATOR_HPP
 
@@ -16,25 +16,25 @@ namespace gr::recipes {
 
 struct OfdmDemodulator {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t fft_len_, std::vector<std::int32_t> data_carriers_, std::vector<std::int32_t> pilot_carriers_, std::vector<float> pilot_symbols_, std::vector<float> sync_word_, std::uint32_t n_sync_, std::uint32_t frame_len_, std::vector<std::uint32_t> cp_len_, std::uint32_t preamble_cp_len_) : fft_len(std::move(fft_len_)), data_carriers(std::move(data_carriers_)), pilot_carriers(std::move(pilot_carriers_)), pilot_symbols(std::move(pilot_symbols_)), sync_word(std::move(sync_word_)), n_sync(std::move(n_sync_)), frame_len(std::move(frame_len_)), cp_len(std::move(cp_len_)), preamble_cp_len(std::move(preamble_cp_len_)) {}
-        std::uint32_t fft_len; // transform length, a power of two; one symbol is this many carriers; required
-        std::vector<std::int32_t> data_carriers; // signed logical carrier indices the output holds, in order; required
-        std::vector<std::int32_t> pilot_carriers; // signed logical carrier indices the tracking reads; required
-        std::vector<float> pilot_symbols; // interleaved re,im read by (s * n_pilots + p) % len with s the symbol's data index in its frame; required
-        std::vector<float> sync_word; // interleaved re,im, one whole fft_len symbol: the known symbol least squares divides by; required
-        std::uint32_t n_sync; // sync symbols at a frame's head, the preamble among them; required
-        std::uint32_t sync_index = std::uint32_t{1}; // which of those sync symbols is the known one; a Schmidl-Cox preamble occupies even carriers only and cannot be it
-        std::uint32_t frame_len; // data symbols per frame; required
-        std::vector<std::uint32_t> cp_len; // prefix samples per symbol, the transmitter's own cycle; required
-        std::uint32_t preamble_cp_len; // the preamble symbol's prefix, which sets the sync's plateau width; cp_len's first entry; required
-        std::int32_t timing_offset = std::int32_t{0}; // signed bias of the cut, in [-min(cp_len), 0]; negative starts the transform window inside the prefix
-        float threshold = 0.6f; // the timing metric above which the sync holds a preamble's plateau to have started, in (0, 1)
-        float r_floor = 1e-09f; // received energy below which no trigger is emitted; scale dependent, set it from the link's own level
-        std::uint32_t min_gap = std::uint32_t{1}; // dead time after a trigger, in symbols; a frame's own length keeps it from being detected twice
+        std::uint32_t fft_len; // transform length and carriers per symbol, a power of two (required)
+        std::vector<std::int32_t> data_carriers; // signed logical carrier indices the output holds, in order (required)
+        std::vector<std::int32_t> pilot_carriers; // signed logical carrier indices the tracking reads (required)
+        std::vector<float> pilot_symbols; // pilot values as interleaved re,im (required)
+        std::vector<float> sync_word; // known sync symbol as interleaved re,im, one fft_len symbol (required)
+        std::uint32_t n_sync; // sync symbols at a frame's head, including the preamble (required)
+        std::uint32_t sync_index = std::uint32_t{1}; // index of the known symbol among the sync symbols
+        std::uint32_t frame_len; // data symbols per frame (required)
+        std::vector<std::uint32_t> cp_len; // prefix samples per symbol in the transmitter's own cycle (required)
+        std::uint32_t preamble_cp_len; // prefix length of the preamble symbol (required)
+        std::int32_t timing_offset = std::int32_t{0}; // signed bias of the cut in [-min(cp_len), 0], negative inside the prefix
+        float threshold = 0.6f; // timing metric level that starts a preamble plateau, in (0, 1)
+        float r_floor = 1e-09f; // minimum received energy for a trigger
+        std::uint32_t min_gap = std::uint32_t{1}; // dead time after a trigger, in symbols
         std::string tracking = std::string("cpe"); // 'cpe', 'cpe_interp' or 'none'
-        float alpha = 0.1f; // single-pole coefficient of the per-carrier update, in (0, 1]; read by 'cpe_interp'
+        float alpha = 0.1f; // single-pole coefficient of the per-carrier 'cpe_interp' update in (0, 1]
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -47,49 +47,49 @@ struct OfdmDemodulator {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("transform length, a power of two; one symbol is this many carriers; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("transform length and carriers per symbol, a power of two (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("fft_len"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the output holds, in order; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the output holds, in order (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("int32[]"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("data_carriers"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the tracking reads; required"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the tracking reads (required)"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("int32[]"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("pilot_carriers"));
             e8 = gr::pmt::Value(std::move(m9));
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("interleaved re,im read by (s * n_pilots + p) % len with s the symbol's data index in its frame; required"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("pilot values as interleaved re,im (required)"));
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32[]"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("pilot_symbols"));
             e10 = gr::pmt::Value(std::move(m11));
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("interleaved re,im, one whole fft_len symbol: the known symbol least squares divides by; required"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("known sync symbol as interleaved re,im, one fft_len symbol (required)"));
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32[]"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sync_word"));
             e12 = gr::pmt::Value(std::move(m13));
             t3.push_back(std::move(e12));
             gr::pmt::Value e14;
             gr::property_map m15;
-            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("sync symbols at a frame's head, the preamble among them; required"));
+            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("sync symbols at a frame's head, including the preamble (required)"));
             m15[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m15[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("n_sync"));
             e14 = gr::pmt::Value(std::move(m15));
             t3.push_back(std::move(e14));
             gr::pmt::Value e16;
             gr::property_map m17;
-            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("which of those sync symbols is the known one; a Schmidl-Cox preamble occupies even carriers only and cannot be it"));
+            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("index of the known symbol among the sync symbols"));
             m17[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m17[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m17[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sync_index"));
@@ -97,28 +97,28 @@ struct OfdmDemodulator {
             t3.push_back(std::move(e16));
             gr::pmt::Value e18;
             gr::property_map m19;
-            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("data symbols per frame; required"));
+            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("data symbols per frame (required)"));
             m19[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m19[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("frame_len"));
             e18 = gr::pmt::Value(std::move(m19));
             t3.push_back(std::move(e18));
             gr::pmt::Value e20;
             gr::property_map m21;
-            m21[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("prefix samples per symbol, the transmitter's own cycle; required"));
+            m21[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("prefix samples per symbol in the transmitter's own cycle (required)"));
             m21[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32[]"));
             m21[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("cp_len"));
             e20 = gr::pmt::Value(std::move(m21));
             t3.push_back(std::move(e20));
             gr::pmt::Value e22;
             gr::property_map m23;
-            m23[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the preamble symbol's prefix, which sets the sync's plateau width; cp_len's first entry; required"));
+            m23[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("prefix length of the preamble symbol (required)"));
             m23[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m23[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("preamble_cp_len"));
             e22 = gr::pmt::Value(std::move(m23));
             t3.push_back(std::move(e22));
             gr::pmt::Value e24;
             gr::property_map m25;
-            m25[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed bias of the cut, in [-min(cp_len), 0]; negative starts the transform window inside the prefix"));
+            m25[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed bias of the cut in [-min(cp_len), 0], negative inside the prefix"));
             m25[std::pmr::string("default")] = gr::pmt::Value(std::int32_t{0});
             m25[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("int32"));
             m25[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("timing_offset"));
@@ -126,7 +126,7 @@ struct OfdmDemodulator {
             t3.push_back(std::move(e24));
             gr::pmt::Value e26;
             gr::property_map m27;
-            m27[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the timing metric above which the sync holds a preamble's plateau to have started, in (0, 1)"));
+            m27[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing metric level that starts a preamble plateau, in (0, 1)"));
             m27[std::pmr::string("default")] = gr::pmt::Value(0.6f);
             m27[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m27[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("threshold"));
@@ -134,7 +134,7 @@ struct OfdmDemodulator {
             t3.push_back(std::move(e26));
             gr::pmt::Value e28;
             gr::property_map m29;
-            m29[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("received energy below which no trigger is emitted; scale dependent, set it from the link's own level"));
+            m29[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("minimum received energy for a trigger"));
             m29[std::pmr::string("default")] = gr::pmt::Value(1e-09f);
             m29[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m29[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("r_floor"));
@@ -142,7 +142,7 @@ struct OfdmDemodulator {
             t3.push_back(std::move(e28));
             gr::pmt::Value e30;
             gr::property_map m31;
-            m31[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("dead time after a trigger, in symbols; a frame's own length keeps it from being detected twice"));
+            m31[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("dead time after a trigger, in symbols"));
             m31[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m31[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m31[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("min_gap"));
@@ -158,7 +158,7 @@ struct OfdmDemodulator {
             t3.push_back(std::move(e32));
             gr::pmt::Value e34;
             gr::property_map m35;
-            m35[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("single-pole coefficient of the per-carrier update, in (0, 1]; read by 'cpe_interp'"));
+            m35[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("single-pole coefficient of the per-carrier 'cpe_interp' update in (0, 1]"));
             m35[std::pmr::string("default")] = gr::pmt::Value(0.1f);
             m35[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m35[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("alpha"));
@@ -315,9 +315,9 @@ struct OfdmDemodulator {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("fft_len")] = parameters.fft_len;

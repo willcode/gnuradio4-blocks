@@ -1,13 +1,11 @@
-# gr::recipes::NbfmDemod — narrow-band FM demodulation, general form.
+# gr::recipes::NbfmDemod, narrow-band FM demodulation in general form.
 #
-# The derivation this recipe saves: an FM discriminator's gain must be
-# sample_rate / (2·pi·deviation), and the de-emphasis constant is evaluated at the same
-# rate. sample_rate and deviation carry no defaults BY DESIGN — a general recipe demands
-# them, because a defaulted rate hides behavior from a user unaware of the parameter and
-# is usually wrong (a PTT radio and a broadcast differ in exactly these). A well-defined
-# recipe built for one service is the place for defaults that really are normal values.
-# Complex baseband at sample_rate in; demodulated float audio out at the same rate —
-# resample downstream to the sink's rate.
+# The recipe derives the discriminator gain. An FM discriminator's gain must be sample_rate / (2·pi·deviation). The
+# de-emphasis constant is evaluated at the same rate. sample_rate and deviation have no defaults by design. A general
+# recipe requires them. A defaulted rate hides behavior from a user unaware of the parameter, and it is usually wrong.
+# A PTT radio and a broadcast differ in exactly these two values. A recipe built for one service is the place for
+# defaults that are normal values. The input is complex baseband at sample_rate. The output is demodulated float audio
+# at the same rate. Resample it to the sink's rate after the recipe.
 definition_metadata:
   block_type: gr::recipes::NbfmDemod
   plugin_name: GrRecipes
@@ -21,14 +19,14 @@ blocks:
     exported_parameters:
       - name: sample_rate
         type: float32
-        doc: "channel sample rate in hertz; required"
+        doc: "channel sample rate in hertz (required)"
       - name: deviation
         type: float32
-        doc: "nominal FM deviation in hertz; required"
+        doc: "nominal FM deviation in hertz (required)"
       - name: tau
         type: float64
         default: !!float64 7.5e-05
-        doc: "de-emphasis time constant in seconds; 75 us is the common narrow-band choice"
+        doc: "de-emphasis time constant in seconds, commonly 75 us for narrow band"
     graph:
       blocks:
         - id: "gr::blocks::analog::QuadratureDemod<float32>"

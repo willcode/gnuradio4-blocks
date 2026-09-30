@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/DbpskDemod.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/DbpskDemod.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_DBPSKDEMOD_HPP
 #define GNURADIO_RECIPES_DBPSKDEMOD_HPP
 
@@ -15,22 +15,22 @@ namespace gr::recipes {
 
 struct DbpskDemod {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(float sample_rate_, float symbol_rate_) : sample_rate(std::move(sample_rate_)), symbol_rate(std::move(symbol_rate_)) {}
-        float sample_rate; // input sample rate in hertz; required
-        float symbol_rate; // symbol rate in hertz; required
-        double frequency_offset = 0.0; // where the carrier sits relative to the front end's center, in hertz
-        std::uint32_t decimation = std::uint32_t{1}; // decimation in the channel filter; pick it for about four samples per symbol after it
+        float sample_rate; // input sample rate in hertz (required)
+        float symbol_rate; // symbol rate in hertz (required)
+        double frequency_offset = 0.0; // carrier offset from the front end's center in hertz
+        std::uint32_t decimation = std::uint32_t{1}; // channel filter decimation giving about four samples per symbol
         double channel_bandwidth = 0.75; // cutoff of the channel filter as a multiple of the symbol rate
         double rolloff = 0.35; // excess bandwidth of the transmit shaping filter, in [0, 1]
-        double fll_noise_bandwidth = 0.01; // closed-loop noise bandwidth of the frequency-locked loop, normalized: Bn*T per sample
+        double fll_noise_bandwidth = 0.01; // frequency-locked loop noise bandwidth in Bn*T per sample
         std::uint32_t fll_filter_length = std::uint32_t{45}; // taps in each band-edge filter
-        std::string timing_detector = std::string("Gardner"); // timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: Gardner, ZeroCrossing or EarlyLate
+        std::string timing_detector = std::string("Gardner"); // timing error detector, one of Gardner, ZeroCrossing or EarlyLate
         double timing_noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
         double agc_reference_db = 0.0; // target output level of the front end's AGC, in decibels
-        double agc_attack_symbols = 256.0; // gain-control time constant when the gain must decrease, in SYMBOL PERIODS; the recipe divides by symbol_rate, because a gain loop reading the instantaneous magnitude follows the modulation's own envelope unless its constant is long against a symbol
-        double agc_decay_symbols = 512.0; // gain-control time constant when the gain must increase, in SYMBOL PERIODS; twice the attack, so a level that rises is followed half as fast as one that falls
+        double agc_attack_symbols = 256.0; // gain-control time constant while the gain falls, in symbol periods
+        double agc_decay_symbols = 512.0; // gain-control time constant while the gain rises, in symbol periods
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -43,21 +43,21 @@ struct DbpskDemod {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sample_rate"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("symbol_rate"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("where the carrier sits relative to the front end's center, in hertz"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("carrier offset from the front end's center in hertz"));
             m9[std::pmr::string("default")] = gr::pmt::Value(0.0);
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("frequency_offset"));
@@ -65,7 +65,7 @@ struct DbpskDemod {
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("decimation in the channel filter; pick it for about four samples per symbol after it"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel filter decimation giving about four samples per symbol"));
             m11[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("decimation"));
@@ -89,7 +89,7 @@ struct DbpskDemod {
             t3.push_back(std::move(e14));
             gr::pmt::Value e16;
             gr::property_map m17;
-            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("closed-loop noise bandwidth of the frequency-locked loop, normalized: Bn*T per sample"));
+            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("frequency-locked loop noise bandwidth in Bn*T per sample"));
             m17[std::pmr::string("default")] = gr::pmt::Value(0.01);
             m17[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m17[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("fll_noise_bandwidth"));
@@ -105,7 +105,7 @@ struct DbpskDemod {
             t3.push_back(std::move(e18));
             gr::pmt::Value e20;
             gr::property_map m21;
-            m21[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: Gardner, ZeroCrossing or EarlyLate"));
+            m21[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("timing error detector, one of Gardner, ZeroCrossing or EarlyLate"));
             m21[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("Gardner"));
             m21[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m21[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("timing_detector"));
@@ -129,7 +129,7 @@ struct DbpskDemod {
             t3.push_back(std::move(e24));
             gr::pmt::Value e26;
             gr::property_map m27;
-            m27[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("gain-control time constant when the gain must decrease, in SYMBOL PERIODS; the recipe divides by symbol_rate, because a gain loop reading the instantaneous magnitude follows the modulation's own envelope unless its constant is long against a symbol"));
+            m27[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("gain-control time constant while the gain falls, in symbol periods"));
             m27[std::pmr::string("default")] = gr::pmt::Value(256.0);
             m27[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m27[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("agc_attack_symbols"));
@@ -137,7 +137,7 @@ struct DbpskDemod {
             t3.push_back(std::move(e26));
             gr::pmt::Value e28;
             gr::property_map m29;
-            m29[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("gain-control time constant when the gain must increase, in SYMBOL PERIODS; twice the attack, so a level that rises is followed half as fast as one that falls"));
+            m29[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("gain-control time constant while the gain rises, in symbol periods"));
             m29[std::pmr::string("default")] = gr::pmt::Value(512.0);
             m29[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m29[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("agc_decay_symbols"));
@@ -375,9 +375,9 @@ struct DbpskDemod {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("sample_rate")] = parameters.sample_rate;

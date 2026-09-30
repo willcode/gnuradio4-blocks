@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/KissFileWrite.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/KissFileWrite.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_KISSFILEWRITE_HPP
 #define GNURADIO_RECIPES_KISSFILEWRITE_HPP
 
@@ -15,13 +15,13 @@ namespace gr::recipes {
 
 struct KissFileWrite {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::string file_name_) : file_name(std::move(file_name_)) {}
-        std::string file_name; // the KISS file's path; required, there is no default
-        std::string mode = std::string("overwrite"); // BasicFileSink's own: 'overwrite', 'append' or 'multi'
-        std::uint32_t kiss_port = std::uint32_t{0}; // the terminal node controller port a frame is for, 0 to 15; KissEncode's own default
-        bool emit_timestamp = false; // publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero
+        std::string file_name; // path of the KISS file (required)
+        std::string mode = std::string("overwrite"); // file write mode, 'overwrite', 'append' or 'multi'
+        std::uint32_t kiss_port = std::uint32_t{0}; // terminal node controller port of a frame, 0 to 15
+        bool emit_timestamp = false; // publish a command-9 frame before each data frame with a non-zero timestamp
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -34,14 +34,14 @@ struct KissFileWrite {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the KISS file's path; required, there is no default"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("path of the KISS file (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("file_name"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("BasicFileSink's own: 'overwrite', 'append' or 'multi'"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("file write mode, 'overwrite', 'append' or 'multi'"));
             m7[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("overwrite"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("mode"));
@@ -49,7 +49,7 @@ struct KissFileWrite {
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the terminal node controller port a frame is for, 0 to 15; KissEncode's own default"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("terminal node controller port of a frame, 0 to 15"));
             m9[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{0});
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("kiss_port"));
@@ -57,7 +57,7 @@ struct KissFileWrite {
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("publish a command-9 frame before each data frame with a non-zero timestamp"));
             m11[std::pmr::string("default")] = gr::pmt::Value(false);
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("bool"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("emit_timestamp"));
@@ -197,9 +197,9 @@ struct KissFileWrite {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("file_name")] = std::pmr::string(parameters.file_name);

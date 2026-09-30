@@ -1,45 +1,44 @@
-# gr::recipes::BpskFrontEnd — the five stages every BPSK receiver runs before it decides anything.
+# gr::recipes::BpskFrontEnd, the five stages ahead of a BPSK detector.
 #
-# Tuning, channel filtering with decimation, automatic gain control, frequency-locked loop, timing recovery. It ends
-# at one complex sample per symbol, and what happens to that sample is the difference between the coherent and the
-# differential detector — which is why these five stages are a recipe of their own. BpskDemod and DbpskDemod should
-# name it as an interior block and currently write it out instead, because the graph importer does not forward an
-# interior block's parameters; each of them says so in its own header. This recipe is usable on its own, and it is the
-# one place the five numbers below are derived.
-#
-# The derivations this recipe saves:
+# The stages are tuning, a channel filter with decimation, automatic gain control, a frequency-locked loop and timing
+# recovery. The recipe ends at one complex sample per symbol. The coherent and the differential detector differ in
+# what they do with that sample. The five stages are therefore a recipe of their own. The recipe runs on its own. It
+# derives the five numbers below.
 #
 #   samples per symbol = sample_rate / (decimation * symbol_rate), at both loops
-#   channel cutoff     = channel_bandwidth * symbol_rate; a root-raised-cosine signal at excess bandwidth `rolloff`
-#                        occupies (1 + rolloff) symbol rates two-sided, so half of that is (1 + rolloff)/2 = 0.675 at
-#                        the default rolloff, and 0.75 leaves the filter's own transition band outside the signal
-#   agc rate           = sample_rate / decimation, the rate the AGC's time constants are measured against
+#   channel cutoff     = channel_bandwidth * symbol_rate
+#   agc rate           = sample_rate / decimation
 #
-# THE GAIN CONTROL'S TIME CONSTANTS ARE SYMBOL PERIODS, NOT SECONDS. The Agc block takes seconds, and the seconds a
-# link wants are its own: the gain loop reads the INSTANTANEOUS magnitude, and a linearly modulated carrier passes
-# through zero at every symbol transition, so a constant of a few symbols follows the modulation's envelope and writes
-# it back onto the stream as a multiplicative error no detector downstream can remove. What is invariant across links
-# is the count of symbol periods, so that is what this recipe exports and it divides by `symbol_rate` itself. 256 and
-# 512 hold the level of every link measured through these recipes -- 400 baud Manchester off the air through 12.5
-# kilobaud synthetic -- where one figure in seconds holds none of them: 5 ms is 62 symbols at 12.5 kBd and four chips
-# at 800 chips a second.
+# A root-raised-cosine signal at excess bandwidth `rolloff` occupies (1 + rolloff) symbol rates two-sided. Half of
+# that is (1 + rolloff)/2, or 0.675 at the default rolloff. The default `channel_bandwidth` of 0.75 keeps the filter's
+# own transition band outside the signal. The AGC measures its time constants at the agc rate. The matched filter and
+# the band-edge filters are both designed from `rolloff`.
 #
-# THE AGC IS A PRECONDITION, NOT AN OPTION. FllBandEdge's band-edge discriminant and CostasLoop's phase detector both
-# have gains proportional to input power, and both blocks state their detector gains at unit amplitude. That is why
-# `agc_reference_db` is 0 here and not the AGC block's own -6: the loops downstream are specified against an amplitude
-# of one, so the front end delivers one.
+# The gain control's time constants are counted in symbol periods. The Agc block takes seconds, and the recipe divides
+# each constant by `symbol_rate`. The gain loop reads the instantaneous magnitude. A linearly modulated carrier passes
+# through zero at every symbol transition. A time constant of a few symbols follows the modulation's envelope. The loop
+# then writes that envelope back onto the stream as a multiplicative error, and no detector can remove it. The count
+# of symbol periods is the same across links, and the time in seconds is not. The defaults of 256 and 512 symbols hold
+# the level of every link measured through these recipes. Those links run from 400 baud Manchester off the air to 12.5
+# kilobaud synthetic. No single figure in seconds holds them all. 5 ms is 62 symbols at 12.5 kBd and four chips at 800
+# chips a second. The decay constant is twice the attack by default. The gain rises half as fast as it falls.
 #
-# THE TIMING DETECTOR MUST BE NON-DATA-AIDED. Timing recovery runs here BEFORE any carrier recovery, so the symbol it
-# is handed still carries the carrier phase and a decision-directed detector — SymbolSync's own default, Mueller &
-# Muller — would be slicing a constellation it cannot see yet. At a carrier phase of 90 degrees that detector loses
-# the loop entirely. `timing_detector` therefore defaults to Gardner, which is non-data-aided and works at any phase,
-# and the three legal choices are the three that need no decision.
+# The AGC is required. The gains of FllBandEdge's band-edge discriminant and CostasLoop's phase detector are
+# proportional to input power. Both blocks state their detector gains at unit amplitude. `agc_reference_db` is
+# therefore 0 here, and the Agc block's own default is -6. The front end delivers an amplitude of one.
 #
-# SymbolSync designs its own root-raised-cosine matched filter from `samples_per_symbol` and `rolloff` when no taps
-# are given, so the recipe passes a rolloff and never a tap vector.
+# The timing detector must be non-data-aided. Timing recovery runs before any carrier recovery. The symbol it receives
+# still carries the carrier phase. A decision-directed detector would slice a constellation whose phase is unknown.
+# SymbolSync's own default, Mueller and Muller, is such a detector. At a carrier phase of 90 degrees it loses the loop
+# entirely. `timing_detector` defaults to Gardner, which is non-data-aided and works at any phase. The three allowed
+# choices are the three that need no decision.
 #
-# Complex baseband at sample_rate in; one complex sample per symbol out, at unit amplitude and with the residual
-# carrier frequency taken out but NOT the carrier phase — that is the detector's job and this recipe has none.
+# SymbolSync designs its own root-raised-cosine matched filter from `samples_per_symbol` and `rolloff` when it gets no
+# taps. The recipe passes a rolloff and no tap vector.
+#
+# The input is complex baseband at sample_rate. The output is one complex sample per symbol at unit amplitude. The
+# residual carrier frequency is removed. The carrier phase is left in place. Phase recovery belongs to the detector,
+# and this recipe has none.
 definition_metadata:
   block_type: gr::recipes::BpskFrontEnd
   plugin_name: GrRecipes
@@ -53,38 +52,38 @@ blocks:
     exported_parameters:
       - name: sample_rate
         type: float32
-        doc: "input sample rate in hertz; required"
+        doc: "input sample rate in hertz (required)"
       - name: symbol_rate
         type: float32
-        doc: "symbol rate in hertz; required"
+        doc: "symbol rate in hertz (required)"
       - name: frequency_offset
         type: float64
         default: !!float64 0.0
-        doc: "where the carrier sits relative to the front end's center, in hertz; 0 leaves the tuner inert"
+        doc: "carrier offset from center in hertz (0 leaves the tuner inert)"
       - name: decimation
         type: uint32
         default: !!uint32 1
-        doc: "decimation in the channel filter; pick it for about four samples per symbol after it"
+        doc: "channel filter decimation giving about four samples per symbol"
       - name: channel_bandwidth
         type: float64
         default: !!float64 0.75
-        doc: "cutoff of the channel filter as a multiple of the symbol rate; (1 + rolloff)/2 plus room for the transition band"
+        doc: "cutoff of the channel filter as a multiple of the symbol rate"
       - name: rolloff
         type: float64
         default: !!float64 0.35
-        doc: "excess bandwidth of the transmit shaping filter, in [0, 1]; the matched filter and the band-edge filter are both designed from it"
+        doc: "excess bandwidth of the transmit shaping filter, in [0, 1]"
       - name: fll_noise_bandwidth
         type: float64
         default: !!float64 0.01
-        doc: "closed-loop noise bandwidth of the frequency-locked loop, normalized: Bn*T per sample"
+        doc: "frequency-locked loop noise bandwidth in Bn*T per sample"
       - name: fll_filter_length
         type: uint32
         default: !!uint32 45
-        doc: "taps in each band-edge filter; 30 to 70 is the useful range"
+        doc: "taps in each band-edge filter, useful from 30 to 70"
       - name: timing_detector
         type: string
         default: "Gardner"
-        doc: "timing error detector; it runs BEFORE carrier recovery, so it must be one that needs no decision: Gardner, ZeroCrossing or EarlyLate"
+        doc: "timing error detector, one of Gardner, ZeroCrossing or EarlyLate"
       - name: timing_noise_bandwidth
         type: float64
         default: !!float64 0.002
@@ -92,15 +91,15 @@ blocks:
       - name: agc_reference_db
         type: float64
         default: !!float64 0.0
-        doc: "target output level; 0 dB because the loops downstream state their detector gains at unit amplitude"
+        doc: "AGC target output level in decibels"
       - name: agc_attack_symbols
         type: float64
         default: !!float64 256.0
-        doc: "gain-control time constant when the gain must decrease, in SYMBOL PERIODS; the recipe divides by symbol_rate, because a gain loop reading the instantaneous magnitude follows the modulation's own envelope unless its constant is long against a symbol"
+        doc: "gain-control time constant while the gain falls, in symbol periods"
       - name: agc_decay_symbols
         type: float64
         default: !!float64 512.0
-        doc: "gain-control time constant when the gain must increase, in SYMBOL PERIODS; twice the attack, so a level that rises is followed half as fast as one that falls"
+        doc: "gain-control time constant while the gain rises, in symbol periods"
     graph:
       blocks:
         - id: "gr::blocks::math::Rotator<complex<float32>>"

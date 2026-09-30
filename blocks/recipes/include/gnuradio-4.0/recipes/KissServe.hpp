@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/KissServe.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/KissServe.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_KISSSERVE_HPP
 #define GNURADIO_RECIPES_KISSSERVE_HPP
 
@@ -15,15 +15,15 @@ namespace gr::recipes {
 
 struct KissServe {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::string endpoint_, std::uint32_t queue_bytes_) : endpoint(std::move(endpoint_)), queue_bytes(std::move(queue_bytes_)) {}
-        std::string endpoint; // 'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default
-        bool bind = true; // listen on the endpoint rather than connect to it; TcpByteSink's own default
-        std::string overflow = std::string("drop_oldest"); // 'drop_oldest' or 'backpressure', applied when the in-process byte queue is full; TcpByteSink's own default
-        std::uint32_t queue_bytes; // the in-process byte queue's bound; required, there is no default
-        std::uint32_t kiss_port = std::uint32_t{0}; // the terminal node controller port a frame is for, 0 to 15; KissEncode's own default
-        bool emit_timestamp = false; // publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero
+        std::string endpoint; // 'host:port' address, such as 127.0.0.1:5555 or [::1]:5555 (required)
+        bool bind = true; // listen on the endpoint (true) or connect to it (false)
+        std::string overflow = std::string("drop_oldest"); // full-queue policy, 'drop_oldest' or 'backpressure'
+        std::uint32_t queue_bytes; // bound of the in-process byte queue (required)
+        std::uint32_t kiss_port = std::uint32_t{0}; // terminal node controller port of a frame, 0 to 15
+        bool emit_timestamp = false; // publish a command-9 frame before each data frame with a non-zero timestamp
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -36,14 +36,14 @@ struct KissServe {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("'host:port' address, such as 127.0.0.1:5555 or [::1]:5555 (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("endpoint"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("listen on the endpoint rather than connect to it; TcpByteSink's own default"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("listen on the endpoint (true) or connect to it (false)"));
             m7[std::pmr::string("default")] = gr::pmt::Value(true);
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("bool"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("bind"));
@@ -51,7 +51,7 @@ struct KissServe {
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("'drop_oldest' or 'backpressure', applied when the in-process byte queue is full; TcpByteSink's own default"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("full-queue policy, 'drop_oldest' or 'backpressure'"));
             m9[std::pmr::string("default")] = gr::pmt::Value(std::pmr::string("drop_oldest"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("overflow"));
@@ -59,14 +59,14 @@ struct KissServe {
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the in-process byte queue's bound; required, there is no default"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("bound of the in-process byte queue (required)"));
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("queue_bytes"));
             e10 = gr::pmt::Value(std::move(m11));
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the terminal node controller port a frame is for, 0 to 15; KissEncode's own default"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("terminal node controller port of a frame, 0 to 15"));
             m13[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{0});
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("kiss_port"));
@@ -74,7 +74,7 @@ struct KissServe {
             t3.push_back(std::move(e12));
             gr::pmt::Value e14;
             gr::property_map m15;
-            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero"));
+            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("publish a command-9 frame before each data frame with a non-zero timestamp"));
             m15[std::pmr::string("default")] = gr::pmt::Value(false);
             m15[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("bool"));
             m15[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("emit_timestamp"));
@@ -216,9 +216,9 @@ struct KissServe {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("endpoint")] = std::pmr::string(parameters.endpoint);

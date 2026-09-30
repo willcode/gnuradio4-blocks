@@ -1,20 +1,18 @@
-# gr::recipes::SampleClockOffset — sampling-clock frequency error, stated in parts per million.
+# gr::recipes::SampleClockOffset, sampling-clock frequency error in parts per million.
 #
-# Two radios never agree on the sample rate exactly. A receiver whose clock runs `ppm` parts
-# per million fast reads the transmitter's stream slightly compressed in time, which shows up
-# downstream as a symbol-timing drift the recovery loop has to track. The model is a
-# resampling by 1 + ppm*1e-6: positive ppm produces more output samples than input, the
-# receiver-runs-fast convention.
+# Two radios differ slightly in sample rate. A receiver whose clock runs `ppm` parts per million fast reads the
+# transmitter's stream slightly compressed in time. That appears as a symbol-timing drift, and a recovery loop has to
+# track it. The model is a resampling by 1 + ppm*1e-6. Positive ppm produces more output samples than input samples.
+# That is the convention for a receiver clock that runs fast.
 #
-# The derivation this recipe saves is small but the machinery behind it is not. Rate changes
-# have to re-origin tags — a tag's sample offset means something different on either side of a
-# resampler — and ArbitraryRateResampler already carries that, along with the fixed-point phase
-# whose realized ratio is exact and does not drift. Expressing the impairment as a rate leaves
-# all of it in one place.
+# The derivation is small, and the machinery behind it is not. A rate change has to re-origin tags. A tag's sample
+# offset means something different on either side of a resampler. ArbitraryRateResampler re-origins tags. Its
+# fixed-point phase realizes an exact ratio that does not drift. Expressing the impairment as a rate keeps all of this
+# in one block.
 #
-# Complex baseband in, complex baseband out. The realized ratio is what the resampler's
-# fixed-point step can represent, which for the small offsets this models is the requested one
-# to well past the precision a clock is specified to.
+# The input and output are complex baseband. The realized ratio is one the resampler's fixed-point step can represent.
+# For the small offsets this recipe models, that ratio matches the requested one to well past the precision of a clock
+# specification.
 definition_metadata:
   block_type: gr::recipes::SampleClockOffset
   plugin_name: GrRecipes
@@ -29,11 +27,11 @@ blocks:
       - name: ppm
         type: float64
         default: !!float64 0.0
-        doc: "clock error in parts per million; positive means this clock runs fast and emits more samples than it takes"
+        doc: "clock error in parts per million, positive for a fast clock"
       - name: attenuation_db
         type: float32
         default: !!float32 60.0
-        doc: "stopband target of the resampler's designed prototype, and what its polyphase bank is sized against"
+        doc: "stopband target sizing the resampler's prototype and polyphase bank"
     graph:
       blocks:
         - id: "gr::blocks::filter::ArbitraryRateResampler<complex<float32>>"

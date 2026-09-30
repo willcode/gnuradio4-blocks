@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/KissFileRead.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/KissFileRead.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_KISSFILEREAD_HPP
 #define GNURADIO_RECIPES_KISSFILEREAD_HPP
 
@@ -15,12 +15,12 @@ namespace gr::recipes {
 
 struct KissFileRead {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::string file_name_, std::uint32_t max_payload_items_) : file_name(std::move(file_name_)), max_payload_items(std::move(max_payload_items_)) {}
-        std::string file_name; // the KISS file's path; required, there is no default
-        std::uint32_t max_payload_items; // DelimiterExtractor's own bound on a decoded frame's items; required, there is no default
-        bool read_timestamp = false; // interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default
+        std::string file_name; // path of the KISS file (required)
+        std::uint32_t max_payload_items; // DelimiterExtractor's bound on a decoded frame's items (required)
+        bool read_timestamp = false; // read a command-9 control frame as the next data frame's timestamp
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -33,21 +33,21 @@ struct KissFileRead {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the KISS file's path; required, there is no default"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("path of the KISS file (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("file_name"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("DelimiterExtractor's own bound on a decoded frame's items; required, there is no default"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("DelimiterExtractor's bound on a decoded frame's items (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("max_payload_items"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("read a command-9 control frame as the next data frame's timestamp"));
             m9[std::pmr::string("default")] = gr::pmt::Value(false);
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("bool"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("read_timestamp"));
@@ -161,9 +161,9 @@ struct KissFileRead {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("file_name")] = std::pmr::string(parameters.file_name);

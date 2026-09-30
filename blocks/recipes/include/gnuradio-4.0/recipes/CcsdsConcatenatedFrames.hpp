@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/CcsdsConcatenatedFrames.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/CcsdsConcatenatedFrames.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_CCSDSCONCATENATEDFRAMES_HPP
 #define GNURADIO_RECIPES_CCSDSCONCATENATEDFRAMES_HPP
 
@@ -15,17 +15,17 @@ namespace gr::recipes {
 
 struct CcsdsConcatenatedFrames {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t frame_length_, std::uint32_t error_capability_, std::string code_, std::string basis_, std::string convolutional_, std::string encoded_marker_, std::uint32_t sync_errors_) : frame_length(std::move(frame_length_)), error_capability(std::move(error_capability_)), code(std::move(code_)), basis(std::move(basis_)), convolutional(std::move(convolutional_)), encoded_marker(std::move(encoded_marker_)), sync_errors(std::move(sync_errors_)) {}
-        std::uint32_t frame_length; // transfer frame octets, the standard's kI - Q; required, and a multiple of interleave
-        std::uint32_t error_capability; // E, the symbol-correction capability per codeword: 16 or 8; must agree with code
-        std::string code; // the Reed-Solomon profile: ccsds_255_223 for E = 16, ccsds_255_239 for E = 8
-        std::string basis; // conventional or dual; there is no default, because a wrong choice decodes nothing
-        std::string convolutional; // the inner convention: ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted; four live conventions, no default
-        std::string encoded_marker; // the marker's 52 state-independent encoded symbols, gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional); a definition cannot call the derivation, so its result is required here
-        std::uint32_t sync_errors; // the correlator's max_errors, in raw channel symbols of the 52-symbol word; an operating point, so required
-        std::uint32_t interleave = std::uint32_t{1}; // I, the codewords of one codeblock: 1, 2, 3, 4, 5 or 8
+        std::uint32_t frame_length; // transfer frame octets kI - Q, a multiple of interleave (required)
+        std::uint32_t error_capability; // symbol-correction capability E per codeword, 16 or 8, agreeing with code
+        std::string code; // Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)
+        std::string basis; // symbol basis, conventional or dual (required)
+        std::string convolutional; // inner code convention, ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted
+        std::string encoded_marker; // the marker's 52 state-independent encoded symbols (required)
+        std::uint32_t sync_errors; // correlator max_errors in raw channel symbols of the 52-symbol word (required)
+        std::uint32_t interleave = std::uint32_t{1}; // codewords I per codeblock, 1, 2, 3, 4, 5 or 8
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -38,56 +38,56 @@ struct CcsdsConcatenatedFrames {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("transfer frame octets, the standard's kI - Q; required, and a multiple of interleave"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("transfer frame octets kI - Q, a multiple of interleave (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("frame_length"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("E, the symbol-correction capability per codeword: 16 or 8; must agree with code"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol-correction capability E per codeword, 16 or 8, agreeing with code"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("error_capability"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the Reed-Solomon profile: ccsds_255_223 for E = 16, ccsds_255_239 for E = 8"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("code"));
             e8 = gr::pmt::Value(std::move(m9));
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("conventional or dual; there is no default, because a wrong choice decodes nothing"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol basis, conventional or dual (required)"));
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("basis"));
             e10 = gr::pmt::Value(std::move(m11));
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the inner convention: ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted; four live conventions, no default"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("inner code convention, ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted"));
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("convolutional"));
             e12 = gr::pmt::Value(std::move(m13));
             t3.push_back(std::move(e12));
             gr::pmt::Value e14;
             gr::property_map m15;
-            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the marker's 52 state-independent encoded symbols, gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional); a definition cannot call the derivation, so its result is required here"));
+            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the marker's 52 state-independent encoded symbols (required)"));
             m15[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m15[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("encoded_marker"));
             e14 = gr::pmt::Value(std::move(m15));
             t3.push_back(std::move(e14));
             gr::pmt::Value e16;
             gr::property_map m17;
-            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("the correlator's max_errors, in raw channel symbols of the 52-symbol word; an operating point, so required"));
+            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("correlator max_errors in raw channel symbols of the 52-symbol word (required)"));
             m17[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m17[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sync_errors"));
             e16 = gr::pmt::Value(std::move(m17));
             t3.push_back(std::move(e16));
             gr::pmt::Value e18;
             gr::property_map m19;
-            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("I, the codewords of one codeblock: 1, 2, 3, 4, 5 or 8"));
+            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("codewords I per codeblock, 1, 2, 3, 4, 5 or 8"));
             m19[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m19[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m19[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("interleave"));
@@ -328,9 +328,9 @@ struct CcsdsConcatenatedFrames {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("frame_length")] = parameters.frame_length;

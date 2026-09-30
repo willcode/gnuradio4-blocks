@@ -1,21 +1,25 @@
-# gr::recipes::KissServe — a record chain served over a raw TCP byte stream: KissEncode → DelimiterFramer(slip) →
-# DataSetToStream<u8> → TcpByteSink.
+# gr::recipes::KissServe, a record chain served over a raw TCP byte stream.
 #
-# A KISS server, and `KissFileWrite`'s twin with the file swapped for a socket: the same SLIP-framed byte stream,
-# put on a peer instead of a path. `TcpByteSink` carries the raw byte stream with no envelope, no framing and no
-# interpretation of any kind; nothing here writes the tree's own versioned packet envelope, and nothing downstream
-# should expect one.
+# The chain is KissEncode, DelimiterFramer(slip), DataSetToStream<u8> and TcpByteSink. The recipe is a KISS server. It
+# matches `KissFileWrite` with the file replaced by a socket. It writes the same SLIP-framed byte stream to a peer
+# instead of a path. `TcpByteSink` carries the raw byte stream with no envelope, no framing and no interpretation. The
+# recipe writes no versioned packet envelope, and a peer receives none.
 #
-# The SLIP profile is spelled out exactly as `KissFileWrite`'s: end delimiter 0xC0 ("11000000", MSB first), byte
-# escaping, introducer 0xDB (219), map {0xDC (220) -> 0xC0 (192), 0xDD (221) -> 0xDB (219)}, eight bits per item.
+# The SLIP profile is spelled out as in `KissFileWrite`. The profile has these settings.
 #
-# `endpoint` and `queue_bytes` are `TcpByteSink`'s own required settings, forwarded with no default of their own:
-# an endpoint nobody stated binds to nothing, and a queue with no bound is not a bound. `bind` keeps the sink's
-# own default of true, since a KISS server normally listens. `overflow` is exported with the sink's own default
-# because the two answers differ in kind for a framed stream: `drop_oldest` sheds bytes from the middle of a frame,
-# which SLIP resynchronizes past at the cost of that frame, while `backpressure` stalls the chain instead and loses
-# nothing. A server that must not lose frames states the second; one that must not stall keeps the first, and
-# neither choice belongs to the recipe. `kiss_port` and `emit_timestamp` are `KissEncode`'s, as in `KissFileWrite`.
+#   end delimiter    0xC0 ("11000000", MSB first)
+#   escaping         byte escaping
+#   introducer       0xDB (219)
+#   map              {0xDC (220) -> 0xC0 (192), 0xDD (221) -> 0xDB (219)}
+#   bits per item    8
+#
+# `endpoint` and `queue_bytes` are `TcpByteSink`'s own required settings. The recipe forwards them with no default of
+# its own. An endpoint nobody stated binds to nothing. A queue with no bound is not a bound. `bind` keeps the sink's own
+# default of true, as a KISS server normally listens. `overflow` is exported with the sink's own default. The two
+# values differ in kind for a framed stream. `drop_oldest` drops bytes from the middle of a frame. SLIP resynchronizes
+# after the gap, and that frame is lost. `backpressure` stalls the chain instead and loses nothing. A server that must
+# not lose frames sets `backpressure`. A server that must not stall keeps `drop_oldest`. The recipe makes neither
+# choice. `kiss_port` and `emit_timestamp` belong to `KissEncode`, as in `KissFileWrite`.
 definition_metadata:
   block_type: gr::recipes::KissServe
   plugin_name: GrRecipes
@@ -29,26 +33,26 @@ blocks:
     exported_parameters:
       - name: endpoint
         type: string
-        doc: "'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default"
+        doc: "'host:port' address, such as 127.0.0.1:5555 or [::1]:5555 (required)"
       - name: bind
         type: bool
         default: !!bool true
-        doc: "listen on the endpoint rather than connect to it; TcpByteSink's own default"
+        doc: "listen on the endpoint (true) or connect to it (false)"
       - name: overflow
         type: string
         default: "drop_oldest"
-        doc: "'drop_oldest' or 'backpressure', applied when the in-process byte queue is full; TcpByteSink's own default"
+        doc: "full-queue policy, 'drop_oldest' or 'backpressure'"
       - name: queue_bytes
         type: uint32
-        doc: "the in-process byte queue's bound; required, there is no default"
+        doc: "bound of the in-process byte queue (required)"
       - name: kiss_port
         type: uint32
         default: !!uint32 0
-        doc: "the terminal node controller port a frame is for, 0 to 15; KissEncode's own default"
+        doc: "terminal node controller port of a frame, 0 to 15"
       - name: emit_timestamp
         type: bool
         default: !!bool false
-        doc: "publish a command-9 timestamp frame ahead of each data frame whose record's DataSet::timestamp is non-zero"
+        doc: "publish a command-9 frame before each data frame with a non-zero timestamp"
     graph:
       blocks:
         - id: "gr::blocks::ax25::KissEncode"

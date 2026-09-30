@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/FskDemodAudio.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/FskDemodAudio.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_FSKDEMODAUDIO_HPP
 #define GNURADIO_RECIPES_FSKDEMODAUDIO_HPP
 
@@ -15,12 +15,12 @@ namespace gr::recipes {
 
 struct FskDemodAudio {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(float sample_rate_, float symbol_rate_) : sample_rate(std::move(sample_rate_)), symbol_rate(std::move(symbol_rate_)) {}
-        float sample_rate; // input sample rate in hertz; required
-        float symbol_rate; // symbol rate in hertz; required
-        double lowpass_bandwidth = 0.5; // cutoff of the post-detection lowpass, as a multiple of the symbol rate
+        float sample_rate; // input sample rate in hertz (required)
+        float symbol_rate; // symbol rate in hertz (required)
+        double lowpass_bandwidth = 0.5; // post-detection lowpass cutoff in multiples of the symbol rate
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
         std::string detector = std::string("MuellerMuller"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
     };
@@ -35,21 +35,21 @@ struct FskDemodAudio {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sample_rate"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("symbol_rate"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("cutoff of the post-detection lowpass, as a multiple of the symbol rate"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("post-detection lowpass cutoff in multiples of the symbol rate"));
             m9[std::pmr::string("default")] = gr::pmt::Value(0.5);
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("lowpass_bandwidth"));
@@ -195,9 +195,9 @@ struct FskDemodAudio {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("sample_rate")] = parameters.sample_rate;
