@@ -95,8 +95,8 @@ template<typename TBlock>
 } // namespace
 
 int main() {
-    // Frames a record, chosen so every arm moves a comparable number of bits and the report's
-    // denominator — information bits a call — is the figure a chain is budgeted in.
+    // Frames per record, chosen so every arm moves a comparable number of bits. The report's
+    // denominator, information bits per call, is the figure a chain is budgeted in.
     constexpr std::size_t kLdpcFrames  = 16UZ;
     constexpr std::size_t kPolarFrames = 16UZ;
     constexpr std::size_t kAidedFrames = 16UZ;
@@ -133,8 +133,8 @@ int main() {
 
     std::vector<Bits> sink(1UZ);
 
-    // Every arm is read against the information bits its call carries, which is the figure a link
-    // budget is written in; the shapes differ, so the denominator is stated per arm.
+    // Every arm is read against the information bits its call carries, the figure a link budget is
+    // written in. The shapes differ, and the denominator is stated per arm.
     std::vector<Arm> ldpcArms{
         {"LdpcEncode (576, 288)", [&] { return sweepEncode(ldpcEncoder, std::span<const Bits>(ldpcInput), std::span<Bits>(sink)); }},
         {"LdpcDecode (576, 288) NMS 50", [&] { return sweepDecode(ldpcNms, std::span<const Soft>(ldpcSoft), std::span<Bits>(sink)); }},

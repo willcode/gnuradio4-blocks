@@ -20,15 +20,15 @@
 #include <gnuradio-4.0/fec/PolarBlocks.hpp>
 
 /*
- * The two wrapped families are exercised through the scheduler, because what this module owns is a
- * record contract and a wall, not a decoder. AFF3CT's own correctness is its business and its test
- * suite's; what is pinned here is the layer between it and these blocks.
+ * The scheduler runs the two wrapped families, because this module owns a record contract and an
+ * adapter, not a decoder. AFF3CT's own correctness belongs to AFF3CT and its test suite. This file
+ * pins the layer between AFF3CT and these blocks.
  *
- * The sign is the first of those and the one that could fail silently. Our own soft convention
- * is that a positive value carries a one; AFF3CT's is the opposite, and the wall negates. A wrap
- * that got that backwards would decode every frame to something wrong in a way no round trip
- * through the same wrap would show, so the anchor below decodes one known word under the bridge and
- * again under a deliberately inverted one, and asserts that the second does not recover it.
+ * The sign is the first part of that layer and the one that could fail silently. In this module a
+ * positive soft value carries a one. AFF3CT uses the opposite sign, and the adapter negates. An
+ * adapter that got the sign backwards would decode every frame wrong. No round trip through the
+ * same adapter would show it. The anchor below decodes one known word under the bridge and again
+ * under a deliberately inverted one. It asserts that the second does not recover the word.
  */
 namespace qa_aff3ct_blocks {
 
@@ -70,12 +70,11 @@ template<typename T>
 }
 
 /*!
- * @brief Coded bits as soft values in our own sense: a one becomes @p magnitude and a zero
- * becomes its negative.
+ * @brief Coded bits as soft values in this module's sense, a one as @p magnitude and a zero as its negative.
  *
- * The magnitude is confidence and no decoder here is scale sensitive in a way that changes a
- * decision, so the same vector at magnitude 1 is the hard entry point and at magnitude 8 the
- * strong-LLR one; both are exercised.
+ * The magnitude is confidence. No decoder here is scale sensitive in a way that changes a decision.
+ * The same vector at magnitude 1 is the hard entry point, and at magnitude 8 the strong-LLR one.
+ * The tests exercise both.
  */
 [[nodiscard]] std::vector<float> asSoft(const std::vector<std::uint8_t>& coded, float magnitude) {
     std::vector<float> values(coded.size());
@@ -94,7 +93,7 @@ template<typename T>
     return count + (a.size() > b.size() ? a.size() - b.size() : b.size() - a.size());
 }
 
-//! A record's count under @p key, with the key's absence reported rather than defaulted away.
+//! A record's count under @p key. A missing key is reported, not defaulted away.
 [[nodiscard]] gr::Size_t metaCount(const Bits& r, const char* key) {
     boost::ut::expect(!r.meta_information.empty()) << "the record carries a metadata map";
     if (r.meta_information.empty()) {
@@ -210,11 +209,11 @@ constexpr std::array<LdpcShape, 2UZ> kLdpcShapes{{{"ccsds_128_64", 64UZ, 128UZ},
 
 [[nodiscard]] gr::property_map ldpcDecode(const char* standard, const char* decoder, gr::Size_t iterations = 50U) { return {{"standard", std::string(standard)}, {"decoder", std::string(decoder)}, {"n_iterations", iterations}}; }
 
-//! The two Polar constructions exercised here: the 5G sequence, and a small aided one.
+//! The two Polar constructions exercised here, the 5G sequence and a small aided one.
 [[nodiscard]] gr::property_map polarEncode5g() { return {{"n", gr::Size_t{1024U}}, {"k", gr::Size_t{512U}}, {"frozen_construction", std::string("5g")}}; }
 [[nodiscard]] gr::property_map polarDecode5g() { return {{"n", gr::Size_t{1024U}}, {"k", gr::Size_t{512U}}, {"frozen_construction", std::string("5g")}, {"decoder", std::string("sc")}}; }
 
-//! CRC-16/CCITT-FALSE in our own vocabulary, which is what the aided list decoder checks with.
+//! CRC-16/CCITT-FALSE in this module's vocabulary. The aided list decoder checks with it.
 [[nodiscard]] gr::property_map crcSettings() {
     return {{"crc_width", gr::Size_t{16U}}, {"crc_poly", std::uint64_t{0x1021ULL}}, {"crc_initial_value", std::uint64_t{0xFFFFULL}}, //
         {"crc_final_xor", std::uint64_t{0ULL}}, {"crc_input_reflected", false}, {"crc_result_reflected", false}};
@@ -243,9 +242,9 @@ int main() {
     using namespace boost::ut;
 
     /*
-     * First part: the wall is real. No installed header of this module names AFF3CT,
-     * which is what makes an AFF3CT version bump a change to one translation unit rather than to
-     * every consumer that ever included one of these blocks.
+     * First part. The adapter boundary holds. No installed header of this module names AFF3CT. An
+     * AFF3CT version bump then changes one translation unit, not every file that includes one of
+     * these blocks.
      */
     "no installed header of this module includes anything of AFF3CT's"_test = [] {
         for (const std::string name : {"Aff3ctWall.hpp", "LdpcBlocks.hpp", "PolarBlocks.hpp", "FecBlocks.hpp", "ConvBlocks.hpp", "InterleaveBlocks.hpp", "PunctureBlocks.hpp", "RsBlocks.hpp"}) {
@@ -258,14 +257,14 @@ int main() {
                 ++at;
                 const bool include = line.find("#include") != std::string::npos;
                 const bool foreign = line.find("aff3ct") != std::string::npos || line.find("AFF3CT") != std::string::npos || line.find("streampu") != std::string::npos || line.find("mipp") != std::string::npos;
-                // The wall's own file name and prose say AFF3CT often; only an include line matters.
+                // The adapter's own file name and prose mention AFF3CT often. Only an include line matters.
                 expect(!(include && foreign)) << name << "line" << at << line;
             }
         }
     };
 
-    // Second part: a configuration the wall cannot honor raises the graph's own
-    // exception type, naming the family, rather than letting a foreign one out.
+    // Second part. A configuration the adapter cannot honor raises the graph's own exception
+    // type, naming the family. No foreign exception type escapes.
     "a broken configuration is refused by the family that could not honor it"_test = [] {
         const auto says = [](const auto& call, std::string_view family) {
             try {
@@ -293,11 +292,11 @@ int main() {
         says([] { std::ignore = make<PolarEncode>({{"n", gr::Size_t{1000U}}, {"k", gr::Size_t{500U}}}); }, "Polar");
         says([] { std::ignore = make<PolarDecode>({{"n", gr::Size_t{256U}}, {"k", gr::Size_t{256U}}}); }, "Polar");
         says([] { std::ignore = make<PolarDecode>({{"n", gr::Size_t{256U}}, {"k", gr::Size_t{128U}}, {"decoder", std::string("ca_scl")}}); }, "Polar");
-        // The CRC kernel reads whole bytes, so an aided payload that is not a whole number of
-        // them is refused at configure rather than silently truncated.
+        // The CRC kernel reads whole bytes. An aided payload that is not a whole number of bytes
+        // is refused at configure time, not silently truncated.
         says([] { std::ignore = make<PolarEncode>(merged({{"n", gr::Size_t{256U}}, {"k", gr::Size_t{125U}}}, crcSettings())); }, "Polar");
-        // A construction that should be available says so by name if it is not, because "the release
-        // ships this" is exactly the claim a wrap is least able to check by reading.
+        // A construction that should be available is named in the error when it is missing.
+        // Reading the adapter's code cannot confirm that the release ships a construction.
         const auto builds = [](const auto& call, std::string_view what) {
             try {
                 call();
@@ -314,9 +313,9 @@ int main() {
     };
 
     /*
-     * The sign anchor. One known word, strong LLRs, one coded bit flipped. Under the
-     * wall's bridge the decode returns the word; under a bridge negated end to end it does not, and
-     * that single vector is what makes a silent convention flip impossible.
+     * The sign anchor. One known word, strong LLRs, one coded bit flipped. Under the adapter's
+     * bridge the decode returns the word. Under a bridge negated end to end it does not. That single
+     * vector makes a silent convention flip impossible.
      */
     "the LLR sign is anchored, per family"_test = [] {
         {
@@ -370,10 +369,9 @@ int main() {
     };
 
     /*
-     * The clean round trip, at both entry points. The hard entry is the coded bits
-     * presented at unit magnitude, which is the bridge a hard-decision receiver crosses; the soft
-     * entry is the same vector at a strong magnitude. Neither changes a decision, and the test says
-     * so rather than assuming it.
+     * The clean round trip, at both entry points. The hard entry is the coded bits at unit
+     * magnitude, the bridge a hard-decision receiver uses. The soft entry is the same vector at a
+     * strong magnitude. Neither changes a decision, and the test checks that instead of assuming it.
      */
     "every shipped construction round-trips clean at both entry points"_test = [] {
         for (const LdpcShape& shape : kLdpcShapes) {
@@ -404,13 +402,13 @@ int main() {
                 expect(eq(out.size(), 1UZ));
                 if (!out.empty()) {
                     expect(eq(differences(out[0UZ].signal_values, payload), 0UZ)) << "Polar sc" << magnitude;
-                    // Without a CRC there is no refusal to report, and the key is absent rather than zero.
+                    // Without a CRC there is no refusal to report, and the key is absent, not zero.
                     expect(out[0UZ].meta_information[0UZ].find(gr::property_map::key_type("uncorrectable_errors")) == out[0UZ].meta_information[0UZ].end());
                 }
             }
         }
         {
-            // The same shape without a CRC, decoded by the list decoder alone: it separates a fault in
+            // The same shape without a CRC, decoded by the list decoder alone. It separates a fault in
             // the list search from a fault in the CRC that chooses among its survivors.
             const std::vector<std::uint8_t> payload = randomBits(128UZ);
             const std::vector<std::uint8_t> coded   = encoded<PolarEncode>({{"n", gr::Size_t{256U}}, {"k", gr::Size_t{128U}}, {"design_snr_db", 2.5}}, payload);
@@ -440,9 +438,9 @@ int main() {
     };
 
     /*
-     * Both counters exercised, per family. Errors inside the code's strength are
-     * corrected and `corrected_errors` reports exactly how many coded bits the received word and the
-     * word decoded disagreed on; a saturated frame is refused, counted, and still published.
+     * Both counters exercised, per family. Errors within the code's strength are corrected.
+     * `corrected_errors` reports exactly how many coded bits differ between the received word and
+     * the decoded word. A saturated frame is refused, counted and still published.
      */
     "correction and refusal are both counted, per family"_test = [] {
         {
@@ -464,8 +462,8 @@ int main() {
                 expect(eq(metaCount(out[0UZ], "uncorrectable_errors"), gr::Size_t{0U}));
             }
 
-            // A frame of pure noise: the syndrome cannot be met, the count says so, and the estimate
-            // still rides out so that the graph does not stall on a bad frame.
+            // A frame of pure noise. The syndrome cannot be met, and the count records it. The
+            // estimate still goes out, and the graph does not stall on a bad frame.
             std::vector<float> saturated(576UZ);
             for (std::size_t i = 0UZ; i < saturated.size(); ++i) {
                 saturated[i] = ((next() & 1ULL) != 0ULL) ? 0.4F : -0.4F;
@@ -516,9 +514,9 @@ int main() {
     };
 
     /*
-     * The wrap's own contract: the AFF3CT objects are constructed once and reused, so a decoder must
-     * reset itself between frames. Three identical frames in one record decode identically; if any
-     * state leaked from one frame to the next they would not.
+     * The adapter's own contract. The AFF3CT objects are constructed once and reused, and a decoder
+     * must reset itself between frames. Three identical frames in one record decode identically.
+     * They would not if any state leaked from one frame to the next.
      */
     "a decoder built once decodes identical frames identically"_test = [] {
         const std::vector<std::uint8_t> payload = randomBits(64UZ);
@@ -547,8 +545,8 @@ int main() {
         expect(eq(metaCount(out[0UZ], "corrected_errors"), gr::Size_t{3U})) << "one flipped bit in each of three frames";
     };
 
-    // Adapter conformance: a misaligned record is a counted, stated drop and the next record is
-    // coded normally; a record's other facts cross verbatim.
+    // Adapter conformance. A misaligned record is dropped, counted and reported, and the next
+    // record is coded normally. A record's other keys pass through unchanged.
     "a misaligned record is a counted, stated drop"_test = [] {
         const std::vector<std::uint8_t> whole   = randomBits(128UZ);
         const std::vector<std::uint8_t> partial = randomBits(100UZ);

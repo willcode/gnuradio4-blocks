@@ -1,21 +1,21 @@
-/* The tier gate for the CCSDS coding row: the concatenated code — inner constraint-length-7
- * rate-1/2 code under the 'ccsds' convention, outer Reed-Solomon (255,223) at interleave 5 —
- * over a seeded additive white Gaussian noise channel, the decoded information bit error rate
- * read against the performance CCSDS itself publishes.
+/* The acceptance gate for the CCSDS coding row. The concatenated code is an inner
+ * constraint-length-7 rate-1/2 code under the 'ccsds' convention and an outer Reed-Solomon
+ * (255,223) at interleave 5. It runs over a seeded additive white Gaussian noise channel. The
+ * decoded information bit error rate is read against the performance CCSDS itself publishes.
  *
- * The published curve: CCSDS 130.1-G-3 (June 2020), figure 6-7, the I = 5 trace. Its stated
- * assumptions are matched here — unquantized soft-decision Viterbi decoding, ideal
- * synchronization, Eb/N0 counted per information bit so the two code rates are inside it. The
+ * The published curve is the I = 5 trace of CCSDS 130.1-G-3 (June 2020), figure 6-7. This test
+ * matches its stated assumptions. They are unquantized soft-decision Viterbi decoding, ideal
+ * synchronization, and Eb/N0 counted per information bit, which covers both code rates. The
  * operating points, the readings taken off the curve, the envelope and the frame counts were
- * fixed before the first run and none was changed after it. The envelope is asserted in both
- * directions: a rate far below the curve is as wrong as one far above it.
+ * fixed before the first run and not changed after it. The envelope is asserted in both
+ * directions. A rate far below the curve is as wrong as one far above it.
  *
- * The decode is the record-native shape the recipes run, not a streaming approximation: the
- * encoded marker's 52 state-independent symbols open each record and are the trellis's run-up,
- * twelve margin symbols close it so the codeblock's last bits keep their future, and the trim
- * discards exactly what the run-up and the margin decoded. What this gate certifies is that the
- * record-native chain sits on the published curve — that cutting the stream into records with
- * marker run-up costs nothing the curve would show.
+ * The decode uses the record-native shape the recipes run, not a streaming approximation. The
+ * encoded marker's 52 state-independent symbols open each record and serve as the trellis's
+ * run-up. Twelve margin symbols close it, and the codeblock's last bits keep their future. The
+ * trim discards exactly what the run-up and the margin decoded. This gate certifies that the
+ * record-native chain sits on the published curve. Cutting the stream into records with a marker
+ * run-up does not move the rate off the curve.
  */
 #include <boost/ut.hpp>
 
@@ -39,18 +39,18 @@ namespace {
 using Rs = gr::fec::ReedSolomonCcsds255_223;
 
 constexpr std::size_t kInterleave = 5UZ;
-constexpr std::size_t kInfoBytes  = 223UZ * kInterleave; // 1115: the transfer frame at pad 0
-constexpr std::size_t kWireBytes  = 255UZ * kInterleave; // 1275: the codeblock on the wire
+constexpr std::size_t kInfoBytes  = 223UZ * kInterleave; // 1115, the transfer frame at pad 0
+constexpr std::size_t kWireBytes  = 255UZ * kInterleave; // 1275, the codeblock on the wire
 constexpr double      kRate       = (223.0 / 255.0) * 0.5;
 
 constexpr std::string_view kAsm = "00011010110011111111110000011101";
 
-//! The operating points, read off figure 6-7's I = 5 trace at its 0.1 dB grid. The two-sided
-//! points sit where the estimator has power: a Reed-Solomon frame fails as a burst of hundreds
-//! of information bits at once, so a published BER of 2.2e-5 is a frame error rate near 4e-4 —
-//! a rate no frame count a qa can afford resolves in both directions. The 2.3 dB point is
-//! therefore judged from above only: a broken chain reads orders of magnitude high there, and
-//! reading low is the expected value of a sound one at this frame count.
+//! The operating points, read off the I = 5 trace of figure 6-7 at its 0.1 dB grid. The two-sided
+//! points sit where the estimator has power. A Reed-Solomon frame fails as a burst of hundreds of
+//! information bits at once. A published BER of 2.2e-5 is therefore a frame error rate near 4e-4.
+//! No frame count a qa test can run resolves that rate in both directions. The 2.3 dB point is
+//! therefore judged from above only. A broken chain reads orders of magnitude high there. A sound
+//! chain is expected to read low at this frame count.
 struct Point {
     double ebn0Db;
     double published;
@@ -89,7 +89,7 @@ struct Reading {
     [[nodiscard]] double ber() const { return bits == 0UZ ? 0.0 : static_cast<double>(bitErrors) / static_cast<double>(bits); }
 };
 
-//! One leg: seeded frames through the whole transmit and record-native receive chain at @p ebn0Db.
+//! One leg of seeded frames through the whole transmit and record-native receive chain at @p ebn0Db.
 [[nodiscard]] Reading runLeg(double ebn0Db) {
     gr::fec::ConvolutionalCode inner;
     boost::ut::expect(gr::fec::configureConvention(inner, "ccsds"));
@@ -118,7 +118,7 @@ struct Reading {
             b = static_cast<std::uint8_t>(next());
         }
 
-        // outer code: five codewords, interleaved onto the wire
+        // outer code, five codewords interleaved onto the wire
         gr::fec::deinterleaveCodewords(frame, plainWords, 223UZ, kInterleave);
         for (std::size_t w = 0UZ; w < kInterleave; ++w) {
             Rs::Block block{};
@@ -128,7 +128,7 @@ struct Reading {
         }
         gr::fec::interleaveCodewords(wireWords, codeblock, 255UZ, kInterleave);
 
-        // inner code: the marker, the codeblock's bits and a margin, one terminated stretch
+        // inner code over the marker, the codeblock's bits and a margin, as one terminated stretch
         txBits.clear();
         for (const char bit : kAsm) {
             txBits.push_back(bit == '1' ? 1U : 0U);
@@ -149,13 +149,13 @@ struct Reading {
             soft[k] = static_cast<float>(((coded[k] & 1U) != 0U ? 1.0 : -1.0) + sigma * gaussian());
         }
 
-        // the record: from the marker's 52 state-independent symbols through the codeblock and the margin
+        // the record, from the marker's 52 state-independent symbols through the codeblock and the margin
         const std::size_t recordSymbols = 52UZ + kWireBytes * 8UZ * 2UZ + 12UZ;
         const std::size_t recordBits    = recordSymbols / 2UZ;
         decodedBits.assign(recordBits, 0U);
         std::ignore = viterbi.decodeSoft(std::span<const float>(soft).subspan(12UZ, recordSymbols), decodedBits);
 
-        // the trim drops the run-up and the margin; what is left is the codeblock, bit for bit
+        // the trim drops the run-up and the margin. The codeblock remains, bit for bit.
         const std::span<const std::uint8_t> codeblockBits = std::span<const std::uint8_t>(decodedBits).subspan(26UZ, kWireBytes * 8UZ);
         std::vector<std::uint8_t>           rxBytes(kWireBytes, 0U);
         for (std::size_t i = 0UZ; i < codeblockBits.size(); ++i) {

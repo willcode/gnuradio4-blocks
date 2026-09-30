@@ -16,43 +16,42 @@
 #include <gnuradio-4.0/fec/RecordShape.hpp>
 
 /**
- * The wall between these blocks and AFF3CT.
+ * @brief Adapters between the FEC blocks and AFF3CT's LDPC and Polar codes.
  *
- * AFF3CT carries the LDPC and Polar families the algorithm layer does not implement, and it enters as a
- * build option rather than as a dependency: the module builds whole without it and the four
- * blocks that need it are registered only when `GR4_ENABLE_AFF3CT` is on. What crosses the wall
- * is this header, which names our own types and nothing of AFF3CT's — no include, no
- * exception type, no enumeration. The AFF3CT objects live behind a pointer to an implementation
- * type defined in `src/Aff3ctWall.cpp`, on the pattern the network module's libzmq split
- * established, so a version bump is a prefix change and a rebuild of one translation unit.
+ * AFF3CT provides the LDPC and Polar families that the algorithm layer does not implement. It
+ * enters as a build option, not as a dependency. The module builds whole without it, and the four
+ * blocks that need it are registered only when `GR4_ENABLE_AFF3CT` is on. The blocks see only
+ * this header. It names only this module's own types. It carries no AFF3CT include, exception
+ * type or enumeration. The AFF3CT objects live behind a pointer to an
+ * implementation type defined in `src/Aff3ctWall.cpp`. The network module's libzmq split set
+ * that pattern. A version bump is then a prefix change and a rebuild of one translation unit.
  *
- * Three things the wall does rather than passes through.
+ * The adapter does three things itself instead of passing them through.
  *
- * **The LLR sign.** The soft convention of these blocks is that a positive value carries a one and
- * the magnitude is confidence. AFF3CT's BPSK modem maps bit 0 to +1 and bit 1
- * to -1, so a positive AFF3CT LLR favors zero — the opposite sense. The wall negates on the way
- * in. That is stated here, asserted by a sign anchor in the QA, and never inherited: a decode
- * under the wrong sign returns the bitwise complement with nothing else to see.
+ * **The LLR sign.** In these blocks a positive soft value carries a one, and the magnitude is
+ * confidence. AFF3CT's BPSK modem maps bit 0 to +1 and bit 1 to -1. A positive AFF3CT LLR
+ * therefore favors zero, the opposite sense. The adapter negates each value on the way in. The
+ * rule is stated here and asserted by a sign anchor in the QA. It is never taken implicitly from
+ * AFF3CT. A decode under the wrong sign returns the bitwise complement with no other symptom.
  *
- * **The CRC.** The CRC-aided list decoder needs a CRC to choose its surviving path, and it is
- * `gr::digital::Crc` that computes it rather than AFF3CT's own table, so that one polynomial
- * vocabulary serves every block here. The wall wraps the kernel in the shape AFF3CT
- * expects and hands that over.
+ * **The CRC.** The CRC-aided list decoder needs a CRC to choose its surviving path.
+ * `gr::digital::Crc` computes it, not AFF3CT's own table. One polynomial vocabulary then serves
+ * every block here. The adapter wraps the kernel in the shape AFF3CT expects and passes it on.
  *
- * **The refusal.** An LDPC decode that exhausts its iterations with the syndrome still failing,
- * and a list decode with no survivor passing the CRC, are refusals the families can make and the
- * blocks report. The information estimate is emitted either way, as every other decoder in this
- * module emits its best answer with the counts saying what it is worth.
+ * **The refusal.** An LDPC decode can exhaust its iterations with the syndrome still failing. A
+ * list decode can end with no survivor passing the CRC. The families make these refusals, and the
+ * blocks report them. The block emits the information estimate in both cases. Every other decoder
+ * in this module also emits its best answer, with the counts saying what it is worth.
  *
- * Every AFF3CT exception is caught here and re-raised as `gr::exception` naming the family and
- * the configuration that caused it, so no foreign exception type reaches a graph.
+ * The adapter catches every AFF3CT exception and re-raises it as `gr::exception`, naming the
+ * family and the configuration that caused it. No foreign exception type reaches a graph.
  */
 namespace gr::blocks::fec::wall {
 
-//! What one soft decode reports back across the wall.
+//! What one soft decode reports back through the adapter.
 struct DecodeReport {
     std::size_t correctedErrors = 0UZ;   //!< coded bits between the sliced input and the codeword decoded
-    bool        refused         = false; //!< the family's own refusal: a failed syndrome, or no list survivor
+    bool        refused         = false; //!< the family's own refusal, a failed syndrome or no list survivor
 };
 
 //! The LDPC configuration, in our own spelling of AFF3CT's taxonomy.
@@ -84,15 +83,15 @@ struct PolarSettings {
     bool          crcResultReflected = false;
 };
 
-//! The constructions this build of the wall can name, for a refusal that lists what it does carry.
+//! The constructions this build of the adapter can name, for a refusal that lists what it does carry.
 [[nodiscard]] std::vector<std::string> ldpcStandards();
 
 /*!
  * @brief One LDPC code and its decoder, constructed once and reused for every record.
  *
- * The dimensions are fixed at construction: an LDPC decoder holds a graph and a message store
- * sized from the parity-check matrix, and rebuilding either per record would be quietly
- * quadratic. A settings change is a new object, which is what a graph rebuild is for.
+ * The dimensions are fixed at construction. An LDPC decoder holds a graph and a message store
+ * sized from the parity-check matrix. Rebuilding either per record would be quietly quadratic. A
+ * settings change needs a new object, which a graph rebuild provides.
  */
 class LdpcCodec {
 public:
@@ -108,7 +107,7 @@ public:
 
     void encode(std::span<const std::uint8_t> payload, std::span<std::uint8_t> coded);
 
-    //! @p llr is in our own sense: positive is a one. The wall negates it for AFF3CT.
+    //! @p llr is in this module's sense, where positive is a one. The adapter negates it for AFF3CT.
     [[nodiscard]] DecodeReport decode(std::span<const float> llr, std::span<std::uint8_t> payload);
 
 private:
@@ -126,7 +125,7 @@ public:
     PolarCodec(const PolarCodec&)            = delete;
     PolarCodec& operator=(const PolarCodec&) = delete;
 
-    [[nodiscard]] std::size_t payloadBits() const noexcept; //!< `k` less the CRC bits the wall appends
+    [[nodiscard]] std::size_t payloadBits() const noexcept; //!< `k` less the CRC bits the adapter appends
     [[nodiscard]] std::size_t codedBits() const noexcept;
 
     void encode(std::span<const std::uint8_t> payload, std::span<std::uint8_t> coded);
