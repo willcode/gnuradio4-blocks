@@ -476,8 +476,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         expect(eq(fir.sampleOffsetsOf("trigger_meta_info").size(), 1UZ)) << "fir_filter: a tag inside the stream reaches a sample";
 
         const auto iir = filter_test::runChained<FirFilter<float>, BasicFilter<float>>(upstream, {{"filter_type", std::string("IIR")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}}, 1000U, tags);
-        filter_test::expectAtStreamEnd(iir, 250UZ, {"trigger_name"}, "BasicFilter, IIR");
-        expect(that % iir.offsetsOf("tx_eob").empty()) << "BasicFilter, IIR: the framework's key filter drops a key it does not forward";
+        filter_test::expectAtStreamEnd(iir, 250UZ, {"trigger_name", "tx_eob"}, "BasicFilter, IIR");
     };
 
     "BasicDecimatingFilter in IIR mode publishes the tags of its partial last chunk at the end-of-stream index"_test = [] {
@@ -489,11 +488,10 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         expect(got.ran);
         expect(eq(got.samples, 200UZ)) << "the whole chunks' outputs";
         expect(that % (got.endIndex == std::optional<std::size_t>{200UZ})) << "the stream ends one past the last output";
-        for (const std::string_view key : {"trigger_time", "trigger_meta_info"}) {
+        for (const std::string_view key : {"trigger_time", "trigger_meta_info", "tx_eob"}) {
             expect(that % (got.offsetsOf(key) == std::vector<std::size_t>{200UZ})) << std::format("{} at the end-of-stream index", key);
             expect(that % got.sampleOffsetsOf(key).empty()) << std::format("{} on no sample", key);
         }
-        expect(that % got.offsetsOf("tx_eob").empty()) << "the framework's key filter drops a key it does not forward";
     };
 
     "Decimator publishes the tags of its partial last chunk at the end-of-stream index"_test = [] {
@@ -503,11 +501,10 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         expect(got.ran);
         expect(eq(got.samples, 200UZ)) << "the whole chunks' outputs";
         expect(that % (got.endIndex == std::optional<std::size_t>{200UZ})) << std::format("the stream ends one past the last output, tags seen: {}", gr::blocks::filter::testing::describe(got.tags));
-        for (const std::string_view key : {"trigger_time", "trigger_meta_info"}) {
+        for (const std::string_view key : {"trigger_time", "trigger_meta_info", "tx_eob"}) {
             expect(that % (got.offsetsOf(key) == std::vector<std::size_t>{200UZ})) << std::format("{} at the end-of-stream index", key);
             expect(that % got.sampleOffsetsOf(key).empty()) << std::format("{} on no sample", key);
         }
-        expect(that % got.offsetsOf("tx_eob").empty()) << "the framework's key filter drops a key it does not forward";
         expect(eq(got.sampleOffsetsOf("trigger_name").size(), 1UZ)) << "a tag inside the stream reaches a sample";
     };
 
@@ -517,8 +514,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         namespace filter_test = gr::blocks::filter::testing;
         const std::vector<gr::Tag> tags{{400UZ, gr::property_map{{gr::property_map::key_type{"trigger_meta_info"}, std::string("mid")}}}, {990UZ, gr::property_map{{gr::property_map::key_type{"trigger_name"}, std::string("burst")}}}, {999UZ, gr::property_map{{gr::property_map::key_type{"tx_eob"}, true}}}};
         const auto                 run = filter_test::runChained<FirFilter<float>, Decimator<float>>({{"taps", gr::filter::fir::design::kaiserLowpass(31, 0.1, 60.0)}, {"decimation", 4U}}, {{"decim", gr::Size_t{5}}}, 1000U, tags);
-        filter_test::expectAtStreamEnd(run, 50UZ, {"trigger_name"}, "FirFilter at M = 4, then Decimator at 5");
-        expect(that % run.offsetsOf("tx_eob").empty()) << "the framework's key filter drops a key it does not forward";
+        filter_test::expectAtStreamEnd(run, 50UZ, {"trigger_name", "tx_eob"}, "FirFilter at M = 4, then Decimator at 5");
         expect(eq(run.sampleOffsetsOf("trigger_meta_info").size(), 1UZ)) << "a tag inside the stream reaches a sample";
     };
 
