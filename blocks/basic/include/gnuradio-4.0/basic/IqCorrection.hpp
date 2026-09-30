@@ -21,7 +21,7 @@ GR_REGISTER_BLOCK(gr::blocks::basic::IqSwap, [T], [std::complex<float>])
 
 template<typename T>
 requires(gr::meta::complex_like<T>)
-struct IqSwap : Block<IqSwap<T>, UnfilteredTagPropagation> {
+struct IqSwap : Block<IqSwap<T>> {
     using Description = Doc<R""(
 @brief Exchanges the real and imaginary components of every sample, mirroring the spectrum about DC.
 
@@ -53,7 +53,7 @@ GR_REGISTER_BLOCK(gr::blocks::basic::DcOffsetCorrect, [T], [ std::complex<float>
 
 template<typename T>
 requires(gr::meta::complex_like<T> || std::floating_point<T>)
-struct DcOffsetCorrect : Block<DcOffsetCorrect<T>, UnfilteredTagPropagation> {
+struct DcOffsetCorrect : Block<DcOffsetCorrect<T>> {
     using Description = Doc<R""(
 @brief Subtracts a single-pole estimate of the mean, removing a converter's bias and an LO leaking into its own mixer.
 
@@ -88,7 +88,7 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
     /// `alpha`, the pole `1 - alpha` and `corner_hz` derive from the members. The framework calls settingsChanged()
     /// only for a batch that changes a value. The constructor derives them too. A block built at its declared defaults
     /// starts with the corner its settings describe.
-    explicit DcOffsetCorrect(property_map init = {}) : Block<DcOffsetCorrect<T>, UnfilteredTagPropagation>(std::move(init)) { configure(); }
+    explicit DcOffsetCorrect(property_map init = {}) : Block<DcOffsetCorrect<T>>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
 

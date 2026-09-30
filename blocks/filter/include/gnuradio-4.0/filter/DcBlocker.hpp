@@ -67,7 +67,7 @@ GR_REGISTER_BLOCK(gr::blocks::filter::DcBlocker, [T], [ float, std::complex<floa
 
 template<typename T>
 requires(std::same_as<T, float> || std::same_as<T, std::complex<float>>)
-struct DcBlocker : Block<DcBlocker<T>, UnfilteredTagPropagation> {
+struct DcBlocker : Block<DcBlocker<T>> {
     using Description = Doc<R""(
 @brief Removes DC with a narrower notch and less delay than a single-pole highpass of the same cost.
 
@@ -114,7 +114,7 @@ Processing Magazine, Mar. 2008, pp. 132-134.
 
     /// The pipeline is built from the members. The framework calls settingsChanged() only for a batch that changes a
     /// value. A block constructed at its declared defaults therefore starts with its boxcars and delay line in place.
-    explicit DcBlocker(property_map init = {}) : Block<DcBlocker<T>, UnfilteredTagPropagation>(std::move(init)) { build(); }
+    explicit DcBlocker(property_map init = {}) : Block<DcBlocker<T>>(std::move(init)) { build(); }
 
     void start() { _running = true; }
 

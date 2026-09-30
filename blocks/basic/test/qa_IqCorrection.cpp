@@ -135,7 +135,7 @@ struct Marker {
     gr::pmt::Value value;
 };
 
-/// Six keys at five offsets. `t0` is not in `gr::tag::kDefaultTags`, and both blocks pass all keys and keep it.
+/// Seven keys at six offsets. `t0` is not in `gr::tag::kDefaultTags`, and the default forwarder of both blocks keeps it.
 /// Built per call, because the suite runs at process exit, when namespace-scope objects are already destroyed.
 [[nodiscard]] std::array<Marker, 7UZ> markers() {
     return {{
@@ -152,6 +152,10 @@ struct Marker {
 constexpr std::size_t kAbsent = std::numeric_limits<std::size_t>::max();
 
 } // namespace
+
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<IqSwap<CF>>, "passes the every-key predicate: no Resampling<> or Stride<>, no asynchronous port, no tag policy other than UnfilteredTagPropagation and no forwardTags() override");
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<DcOffsetCorrect<CF>>);
+static_assert(gr::block::kUnfilteredTagPropagationAdmissible<DcOffsetCorrect<float>>);
 
 const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
     using namespace boost::ut;

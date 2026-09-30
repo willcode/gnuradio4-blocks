@@ -964,8 +964,8 @@ const boost::ut::suite<"DataSetToStream round trip"> roundTripTests = [] {
         expect(eq(result.samples.front(), sampleValue<float>(kTrigger[0UZ]))) << "and the output starts at 0, not at the input's absolute offset";
     };
 
-    // Under the scheduler, a reserved key survives one default forwarder and a non-reserved key does not
-    "one ordinary block downstream keeps the reserved keys only"_test = [] {
+    // Under the scheduler, one default forwarder keeps a reserved key and a non-reserved key, each at its offset
+    "one ordinary block downstream keeps every key at its offset"_test = [] {
         gr::test::RuntimeTest test;
 
         auto& source = test.emplace<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"sample_rate", kRoundTripRate}, {"n_samples_max", kRoundTripN}, {"name", "source"}, {"mark_tag", false}, {"repeat_tags", false}});
@@ -987,8 +987,8 @@ const boost::ut::suite<"DataSetToStream round trip"> roundTripTests = [] {
         expect(!sink._tags.empty());
         const std::vector<std::size_t> rateOffsets   = offsetsOf(std::span<const Tag>(sink._tags), "sample_rate");
         const std::vector<std::size_t> lengthOffsets = offsetsOf(std::span<const Tag>(sink._tags), "dataset_length");
-        expect(!rateOffsets.empty()) << "sample_rate is in kDefaultTags and survives the default forwarder";
-        expect(that % (lengthOffsets == std::vector<std::size_t>{})) << "dataset_length is not, and does not";
+        expect(that % (rateOffsets == std::vector<std::size_t>{0UZ})) << "sample_rate, in kDefaultTags, leaves on the record's first sample";
+        expect(that % (lengthOffsets == std::vector<std::size_t>{0UZ})) << "and so does dataset_length, a key the auto-forward set does not name";
     };
 };
 
