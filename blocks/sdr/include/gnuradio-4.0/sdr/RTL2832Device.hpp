@@ -60,7 +60,7 @@ inline constexpr std::uint8_t  kVendorOut    = 0x40;    // USB vendor request, h
 inline constexpr std::uint8_t  kVendorIn     = 0xC0;    // USB vendor request, device→host
 inline constexpr std::size_t   kBulkReadSize = 131'072; // 128 KB per transfer
 
-// the native read queue: 16 transfers of 64 KiB hold 1 MiB, 218 ms of samples at 2.4 MS/s
+// the native read queue, 16 transfers of 64 KiB holding 1 MiB, or 218 ms of samples at 2.4 MS/s
 inline constexpr std::size_t kStreamTransferSize  = 65'536;
 inline constexpr std::size_t kStreamTransferCount = 16;
 
@@ -601,7 +601,7 @@ struct RTL2832Device {
         return realRate;
     }
 
-    // tunes the LO, then drops every sample taken before the tune that readBulk has not handed out
+    // tunes the LO, then drops every sample taken before the tune that readBulk has not yet returned
     ValueResult setCenterFrequency(double freq) {
         auto tuned = setTunerFrequency(freq);
         if (!tuned) {
@@ -747,9 +747,9 @@ struct RTL2832Device {
 
     // data transfer
 
-    // up to maxLen bytes of the sample stream, 0 when none arrived within 100 ms; natively the first read after an open
-    // or a discardStream queues kStreamTransferCount transfers, which keep the stream flowing while the caller converts
-    // and publishes
+    // up to maxLen bytes of the sample stream, 0 when none arrived within 100 ms. Natively the first read after an open
+    // or a discardStream queues kStreamTransferCount transfers. They keep the stream flowing while the caller converts
+    // and publishes.
     std::expected<std::size_t, std::string> readBulk(std::uint8_t* dst, std::size_t maxLen) {
 #if !defined(__EMSCRIPTEN__)
         return _usb.queuedBulkRead(kBulkEndpoint, {dst, maxLen}, kStreamTransferCount, kStreamTransferSize, 100);
@@ -758,7 +758,7 @@ struct RTL2832Device {
 #endif
     }
 
-    // natively discards every queued transfer, then flushes the dongle's FIFO while no transfer is pending; the next
+    // natively discards every queued transfer, then flushes the dongle's FIFO while no transfer is pending. The next
     // readBulk queues new transfers and returns only samples taken after this call. The browser queue is left as it is
     Result discardStream() {
 #if !defined(__EMSCRIPTEN__)

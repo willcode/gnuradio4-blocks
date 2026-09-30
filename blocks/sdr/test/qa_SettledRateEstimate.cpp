@@ -9,9 +9,9 @@
 #include <numbers>
 #include <print>
 
-// The estimate is driven with sample counts and arrival times alone, as the RTL2832 source drives it: 32768 complex
-// samples per 64 KiB read at 250 kS/s, a 0.1 Hz corner, so a read arrives every 131 ms and the estimate settles after
-// 5 / (2 pi 0.1 Hz) = 7.96 s. No device is involved and no clock is read.
+// The estimate is driven with sample counts and arrival times alone, as the RTL2832 source drives it. The scene is
+// 32768 complex samples per 64 KiB read at 250 kS/s with a 0.1 Hz corner. A read arrives every 131 ms, and the
+// estimate settles after 5 / (2 pi 0.1 Hz) = 7.96 s. No device is involved and no clock is read.
 namespace {
 
 using gr::blocks::sdr::SettledRateEstimate;
@@ -20,9 +20,9 @@ constexpr double      kNominalRate = 250'000.0;
 constexpr std::size_t kChunk       = 32'768UZ;
 constexpr double      kUpdateHz    = kNominalRate / static_cast<double>(kChunk);
 constexpr float       kCutoffHz    = 0.1f;
-constexpr double      kStart       = 1'000.0; // an arbitrary origin, so that no case depends on time zero
+constexpr double      kStart       = 1'000.0; // an arbitrary origin, and no case depends on time zero
 
-// a stream of whole reads from a clock `ppm` fast, delivered on time from `tFirst`; returns the next arrival time
+// a stream of whole reads from a clock `ppm` fast, delivered on time from `tFirst`. Returns the next arrival time.
 double feed(SettledRateEstimate& estimate, double tFirst, double seconds, double ppm, auto&& onUpdate) {
     const double interval = static_cast<double>(kChunk) / (kNominalRate * (1.0 + ppm * 1e-6));
     double       t        = tFirst;
@@ -61,7 +61,7 @@ const boost::ut::suite<"SettledRateEstimate"> _settledRateTests = [] {
         expect(gt(nUpdates, 100UZ));
         expect(lt(largest, 1e-3)) << "a stream at exactly the configured rate moves the estimate";
 
-        // the same filter without priming, printed for comparison: it reads several times the rate after one second
+        // the same filter without priming, printed for comparison. It reads several times the rate after one second.
         gr::algorithm::SampleRateEstimator bare;
         bare.filter_cutoff_hz = kCutoffHz;
         bare.reset(kNominalRate, kUpdateHz);

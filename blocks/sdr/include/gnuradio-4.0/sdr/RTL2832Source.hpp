@@ -39,8 +39,8 @@ inline void convertToComplex(const std::uint8_t* raw, std::complex<float>* out, 
 
 GR_REGISTER_BLOCK("gr::blocks::sdr::RTL2832Source", gr::blocks::sdr::RTL2832Source, [T], [ uint8_t, std::complex<float> ])
 
-// reads dropped after a retune: natively the device discards its queued transfers and flushes its FIFO at the tune,
-// and the browser read queue keeps the samples WebUSB delivered before the tune
+// reads dropped after a retune. Natively the device discards its queued transfers and flushes its FIFO at the tune.
+// The browser read queue keeps the samples WebUSB delivered before the tune.
 #if defined(__EMSCRIPTEN__)
 inline constexpr std::uint8_t kPostRetuneDiscardReads = 3;
 #else
@@ -56,11 +56,11 @@ Operating modes:
   clk_in connected: forwards external timing tags (GPS/PPS) with clock-offset interpolation
   clk_in disconnected: emits best-effort wall-clock timestamps on every chunk
 
-Every timing tag carries `frequency`, the tuner frequency the device reported for its last tune; a tag carries no
+Every timing tag carries `frequency`, the tuner frequency the device reported for its last tune. A tag carries no
 `frequency` until the device has reported one. The first timing tag after the device opens carries the configured
-`sample_rate`. A later tag carries the estimated `sample_rate` and `ppm_error` only while the estimate is settled: it
-has held within 1000 ppm of the configured rate for five time constants of `ppm_estimator_cutoff`, and for at least
-1 s.)">;
+`sample_rate`. A later tag carries the estimated `sample_rate` and `ppm_error` only while the estimate is settled.
+A settled estimate has held within 1000 ppm of the configured rate for five time constants of
+`ppm_estimator_cutoff`, and for at least 1 s.)">;
 
     gr::PortIn<std::uint8_t, Optional> clk_in;
     gr::PortOut<T>                     out;
@@ -155,7 +155,7 @@ has held within 1000 ppm of the configured rate for five time constants of `ppm_
         thread_pool::Manager::defaultIoPool()->execute([this]() { ioReadLoop(); });
     }
 
-    // applies the settings to the open device and resets its buffer; returns the first refusal
+    // applies the settings to the open device, resets its buffer and returns the first refusal
     std::expected<void, std::string> configureOpenDevice() {
         auto check = [](auto&& result, std::string_view operation) -> std::expected<void, std::string> {
             if (!result) {
@@ -398,9 +398,9 @@ has held within 1000 ppm of the configured rate for five time constants of `ppm_
         std::ignore  = clkSpan.consume(nAvailable);
     }
 
-    // an already-read USB chunk is published whole: a gap in a continuous IQ stream is a phase discontinuity downstream.
-    // A retune applied while the chunk waits for room ends it early, because the rest holds samples of the old
-    // frequency. tryReserve is all-or-nothing, so each request asks for what the ring reports
+    // an already-read USB chunk is published whole, since a gap in a continuous IQ stream is a phase discontinuity
+    // downstream. A retune applied while the chunk waits for room ends it early, because the rest holds samples of the
+    // old frequency. tryReserve is all-or-nothing, and each request asks for what the ring reports.
     void publishSamples(auto& writer, const std::uint8_t* data, std::size_t nBytes, std::uint64_t tWallNs) {
         const std::size_t nOutputSamples = std::is_same_v<T, std::uint8_t> ? nBytes : nBytes / 2UZ;
 

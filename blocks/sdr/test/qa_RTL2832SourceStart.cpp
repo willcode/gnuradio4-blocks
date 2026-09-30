@@ -14,8 +14,8 @@
 
 #include <gnuradio-4.0/sdr/RTL2832Source.hpp>
 
-// Cases that never open a USB device, apart from qa_RTL2832Source, which opens the first dongle attached. A device index
-// past any count a bus can hold is refused after the enumeration, which reads descriptors and opens nothing.
+// These cases open no USB device. A device index past any count a bus can hold is refused after the enumeration,
+// which reads descriptors and opens nothing.
 
 namespace {
 
@@ -46,8 +46,8 @@ std::optional<std::expected<void, gr::Error>> runBounded(gr::scheduler::Simple<>
 const boost::ut::suite<"RTL2832Source start"> _rtlStartTests = [] {
     using namespace boost::ut;
 
-    // with a reader on the scheduler's messages, the scheduler forwards an error message and does not end the run on
-    // it: the run ends only if the source's start fails it
+    // With a reader on the scheduler's messages, the scheduler forwards an error message and does not end the run on
+    // it. The run ends only if the source's start fails it.
     "an RTL2832Source whose device cannot be opened fails the run of a host that reads messages"_test = [] {
         gr::Graph graph;
         auto&     source = graph.emplaceBlock<gr::blocks::sdr::RTL2832Source<std::complex<float>>>({{"device_index", std::uint32_t{1000U}}});
