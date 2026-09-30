@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/NbfmDemod.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/NbfmDemod.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_NBFMDEMOD_HPP
 #define GNURADIO_RECIPES_NBFMDEMOD_HPP
 
@@ -15,12 +15,12 @@ namespace gr::recipes {
 
 struct NbfmDemod {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(float sample_rate_, float deviation_) : sample_rate(std::move(sample_rate_)), deviation(std::move(deviation_)) {}
-        float sample_rate; // channel sample rate in hertz; required
-        float deviation; // nominal FM deviation in hertz; required
-        double tau = 7.5e-05; // de-emphasis time constant in seconds; 75 us is the common narrow-band choice
+        float sample_rate; // channel sample rate in hertz (required)
+        float deviation; // nominal FM deviation in hertz (required)
+        double tau = 7.5e-05; // de-emphasis time constant in seconds, commonly 75 us for narrow band
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -33,21 +33,21 @@ struct NbfmDemod {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel sample rate in hertz; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel sample rate in hertz (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sample_rate"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("nominal FM deviation in hertz; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("nominal FM deviation in hertz (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("deviation"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("de-emphasis time constant in seconds; 75 us is the common narrow-band choice"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("de-emphasis time constant in seconds, commonly 75 us for narrow band"));
             m9[std::pmr::string("default")] = gr::pmt::Value(7.5e-05);
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("tau"));
@@ -148,9 +148,9 @@ struct NbfmDemod {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("sample_rate")] = parameters.sample_rate;

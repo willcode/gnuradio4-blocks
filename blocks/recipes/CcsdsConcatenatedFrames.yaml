@@ -1,41 +1,46 @@
-# gr::recipes::CcsdsConcatenatedFrames — the CCSDS concatenated receive chain: soft channel symbols in,
-# transfer frames out.
+# gr::recipes::CcsdsConcatenatedFrames, the CCSDS concatenated receive chain from soft channel symbols to transfer
+# frames.
 #
-# The concatenated chain is the Reed-Solomon chain with the inner convolutional code in front of it, and the one
-# structural decision that shapes everything here is WHERE the marker is found: in the channel-symbol domain,
-# before any decoding. This tree's Viterbi is record-native — it decodes a bounded record, not a running stream —
-# so the record boundary must be known before the trellis runs, and the only thing in the symbol stream that can
-# mark it is the encoded marker itself.
+# The concatenated chain is the Reed-Solomon chain with the inner convolutional code in front of it. The chain finds
+# the marker in the channel-symbol domain, before any decoding. That decision shapes the rest of the recipe. The
+# Viterbi decoder here decodes one bounded record and not a running stream. The record boundary must therefore be
+# known before the trellis runs. The chain finds each record by its encoded attached sync marker.
 #
-# An encoded marker is not a constant: its first symbols depend on whatever data preceded it, because the inner
-# encoder's register still holds that data. From marker bit K-1 onward the register holds only the marker's own
-# bits, so its last 2*(32-6) = 52 encoded symbols are the same whatever came before — a genuine constant of the
-# channel, and the word the correlator searches for. `encoded_marker` carries that word and is required: it is a
-# function of the convention, derived — not transcribed — by gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional),
-# which a caller invokes with the same name it passes as `convolutional`. A definition cannot call a function,
-# which is why the derived word crosses this boundary as a parameter.
+# An encoded marker is not a constant. Its first symbols depend on the data before it, because the inner encoder's
+# register still holds that data. From marker bit K-1 onward the register holds only the marker's own bits. The last
+# 2*(32-6) = 52 encoded symbols are therefore the same whatever came before. They are a true constant of the channel,
+# and the correlator searches for that word. `encoded_marker` carries the word and is required. The word is a function
+# of the convention. gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional) derives it. A caller calls that
+# function with the same name it passes as `convolutional`. A definition cannot call a function. The derived word
+# therefore enters as a parameter.
 #
-# THE RECORD'S GEOMETRY, symbol by symbol. The correlator tags at the word's first symbol (tag_at code_start),
-# which sits 12 symbols into the encoded marker. From there the record carries:
-#     52                                  the marker's state-independent symbols — the trellis's run-up
+# The correlator tags at the word's first symbol (tag_at code_start). That symbol is 12 symbols into the encoded
+# marker. From there the record carries these symbols.
+#
+#     52                                  the marker's state-independent symbols, the trellis's run-up
 #   + (frame_length + 2*E*I) * 8 * 2      the codeblock's bits at the rate-1/2 expansion
 #   + 12                                  2*(K-1) symbols beyond the codeblock
-# The 12-symbol margin exists because an open decode's last K-1 information bits lack the future that would
-# resolve them; extracting the margin puts those unreliable bits outside the codeblock, where the trim drops
-# them. After the open decode the record is bits: 26 marker bits at the head (the run-up, spent), 6 margin bits
-# at the tail, and the codeblock between them — RecordTrim takes 26 and 6 off, the derandomizer takes 10.4.3's
-# sequence off the codeblock, and the rest is the Reed-Solomon chain unchanged.
 #
-# The rate-1/2 stream's pairing ambiguity — which symbol opens a (G1, G2) pair — needs no arm at all here:
-# the correlator searches every stream offset and the record is cut where the marker actually sits, so the
-# pairing is recovered from the marker's own position and a one-symbol shift of the input moves the tag by one
-# and changes nothing downstream. A chain whose framer anchored to stream parity would need two instances;
-# this one is self-aligning, and the qa asserts it decodes at either input offset.
+# An open decode's last K-1 information bits lack the later symbols that would resolve them. The 12-symbol margin
+# puts those unreliable bits outside the codeblock, and the trim drops them. After the open decode the record is bits.
+# It holds 26 marker bits of run-up at the head and 6 margin bits at the tail. The codeblock lies between
+# them. RecordTrim removes the 26 and the 6. The derandomizer removes 10.4.3's sequence from the codeblock. The rest is
+# the Reed-Solomon chain unchanged.
 #
-# The differential-precoding arm and the randomizer-off exception change the block set and are therefore
-# sibling-recipe territory, exactly as in CcsdsRsFrames.
+# A rate-1/2 stream has a pairing ambiguity in which symbol opens a (G1, G2) pair. This chain needs no arm for it. The
+# correlator searches every stream offset, and the record is cut where the marker sits. The pairing follows from the
+# marker's own position. A one-symbol shift of the input moves the tag by one symbol and changes nothing after it. A
+# chain whose framer anchored to stream parity would need two instances. This chain aligns itself, and the test
+# checks that it decodes at either input offset.
 #
-# Soft channel symbols at one value per symbol in; one DataSet<uint8> record per transfer frame, bytes, out.
+# `basis` has no default, and a wrong choice decodes nothing. `convolutional` names one of four conventions in use and
+# has no default.
+#
+# The differential-precoding arm and the randomizer-off exception change the block set. They belong in sibling
+# recipes, as in CcsdsRsFrames.
+#
+# The input is soft channel symbols at one value per symbol. The output is one DataSet<uint8> record of bytes per
+# transfer frame.
 definition_metadata:
   block_type: gr::recipes::CcsdsConcatenatedFrames
   plugin_name: GrRecipes
@@ -49,29 +54,29 @@ blocks:
     exported_parameters:
       - name: frame_length
         type: uint32
-        doc: "transfer frame octets, the standard's kI - Q; required, and a multiple of interleave"
+        doc: "transfer frame octets kI - Q, a multiple of interleave (required)"
       - name: error_capability
         type: uint32
-        doc: "E, the symbol-correction capability per codeword: 16 or 8; must agree with code"
+        doc: "symbol-correction capability E per codeword, 16 or 8, agreeing with code"
       - name: code
         type: string
-        doc: "the Reed-Solomon profile: ccsds_255_223 for E = 16, ccsds_255_239 for E = 8"
+        doc: "Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)"
       - name: basis
         type: string
-        doc: "conventional or dual; there is no default, because a wrong choice decodes nothing"
+        doc: "symbol basis, conventional or dual (required)"
       - name: convolutional
         type: string
-        doc: "the inner convention: ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted; four live conventions, no default"
+        doc: "inner code convention, ccsds, ccsds_uninverted, nasa_dsn or nasa_dsn_uninverted"
       - name: encoded_marker
         type: string
-        doc: "the marker's 52 state-independent encoded symbols, gr::blocks::digital::syncword::ccsdsEncodedAsm(convolutional); a definition cannot call the derivation, so its result is required here"
+        doc: "the marker's 52 state-independent encoded symbols (required)"
       - name: sync_errors
         type: uint32
-        doc: "the correlator's max_errors, in raw channel symbols of the 52-symbol word; an operating point, so required"
+        doc: "correlator max_errors in raw channel symbols of the 52-symbol word (required)"
       - name: interleave
         type: uint32
         default: !!uint32 1
-        doc: "I, the codewords of one codeblock: 1, 2, 3, 4, 5 or 8"
+        doc: "codewords I per codeblock, 1, 2, 3, 4, 5 or 8"
     graph:
       blocks:
         - id: "gr::blocks::digital::AccessCodeCorrelator<float32>"

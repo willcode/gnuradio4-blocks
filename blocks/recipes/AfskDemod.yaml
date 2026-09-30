@@ -1,42 +1,44 @@
-# gr::recipes::AfskDemod — audio frequency-shift keying from a real audio stream to soft symbols.
+# gr::recipes::AfskDemod, audio frequency-shift keying from a real audio stream to soft symbols.
 #
-# The modulation of the largest population of amateur satellites, and the one a soundcard hands you: two audio tones,
-# one per bit, on a REAL stream. Everything else in the tree starts from complex baseband, so the first thing this
-# recipe does is build an analytic signal — the Hilbert branch and the matching delay — and from there it is an
-# ordinary FSK receiver.
+# AFSK is the modulation of the largest population of amateur satellites. A sound card delivers it as audio. It uses
+# two audio tones, one per bit, on a real stream. The recipe first builds an analytic signal from a Hilbert branch and
+# a matching delay. From there it is an ordinary FSK receiver. The default `hilbert_taps` of 127 keeps the band from
+# 0.0125 to 0.4875 of the sample rate within 2 percent of unity.
 #
-# The derivations this recipe saves:
+# The recipe derives these values.
 #
-#   band center     = (mark_hz + space_hz) / 2, which the rotator translates to zero
-#   signed deviation = (mark_hz - space_hz) / 2
+#   band center        = (mark_hz + space_hz) / 2, translated to zero by the rotator
+#   signed deviation   = (mark_hz - space_hz) / 2
 #   discriminator gain = (sample_rate / decimation) / (2*pi*deviation)
 #                      = sample_rate / (decimation * pi * (mark_hz - space_hz))
-#   group delay of the real branch = (hilbert_taps - 1) / 2, exactly the Hilbert design's own
+#   real branch delay  = (hilbert_taps - 1) / 2, the Hilbert design's own group delay
 #   samples per symbol = sample_rate / (decimation * symbol_rate)
 #
-# THE SIGN IS THE POLARITY RULE. This tree's convention is that a positive soft decision is a one. A deviation taken
-# as (mark_hz - space_hz)/2 is NEGATIVE whenever the tone carrying a one is the lower of the two — which is Bell 202's
-# case — and the discriminator gain is negative with it, so the soft symbol carries the right sign without a separate
-# setting and without an inverting block. A chain that takes the magnitude instead receives every bit inverted and
-# nothing but a CRC downstream can tell.
+# The position of `space_hz` relative to `mark_hz` sets the output polarity. The recipe follows the convention that a
+# positive soft decision is a one. The deviation (mark_hz - space_hz)/2 is negative when the tone carrying a one is
+# the lower of the two. Bell 202 is such a case. The discriminator gain is then negative as well. The soft symbol
+# carries the right sign with no separate setting and no inverting block. A receiver that takes the magnitude of the
+# deviation delivers every bit inverted. Only a CRC then detects the inversion.
 #
-# Bell 202, the AX.25 tone pair, worked through as documentation and NOT as defaults: mark (a one) 1200 Hz, space
-# (a zero) 2200 Hz, 1200 Bd, band center 1700 Hz, signed deviation -500 Hz, modulation index h = 2*500/1200 = 0.8333.
-# Carson's rule gives 2*(500 + 600) = 2200 Hz occupied, so the complex-baseband cutoff is 1100 Hz = 0.9167 symbol
-# rates, which is `channel_bandwidth`'s default (in general (|h|/2 + 0.5), and h = 0.8333 gives 0.9167). At 48 kHz
-# with decimation 5 the discriminator gain is 48000 / (5*pi*(1200 - 2200)) = -3.055775 and the timing loop sees eight
-# samples per symbol. `mark_hz` and `space_hz` are required: a link's tone pair is an interoperability fact and a
-# default here would be a silent one.
+# Bell 202, the AX.25 tone pair, is worked through here as an example. Its values are not the defaults. Mark (a one)
+# is 1200 Hz and space (a zero) is 2200 Hz, at 1200 Bd. The band center is 1700 Hz and the signed deviation is
+# -500 Hz. The modulation index is h = 2*500/1200 = 0.8333. Carson's rule gives 2*(500 + 600) = 2200 Hz occupied.
+# The complex-baseband cutoff is then 1100 Hz, or 0.9167 symbol rates. That is the default of `channel_bandwidth`. In
+# general the cutoff is |h|/2 + 0.5 symbol rates, half of Carson's bandwidth. At 48 kHz with decimation 5 the
+# discriminator gain is 48000 / (5*pi*(1200 - 2200)) = -3.055775. The timing loop then runs at eight samples per
+# symbol. `mark_hz` and `space_hz` are required, and there is no default tone pair. A link's tone pair is an
+# interoperability fact. A default pair would let a wrong one pass unnoticed.
 #
-# Bell 202's tones are not orthogonal. At h = 0.8333 their correlation is |sin(pi*h)/(pi*h)| = 0.190986, so the
-# noncoherent bit error rate is 0.5*exp(-(Eb/N0)*(1-0.190986)/2) rather than the orthogonal 0.5*exp(-(Eb/N0)/2) — a
-# 0.92 dB penalty that grows as a ratio with Eb/N0, from 1.27x at 4 dB to 4.54x at 12. A gate quoting the orthogonal
-# reference would fail this chain for the modulation's reasons and not for its own.
+# Bell 202's tones are not orthogonal. At h = 0.8333 their correlation is |sin(pi*h)/(pi*h)| = 0.190986. The
+# noncoherent bit error rate is then 0.5*exp(-(Eb/N0)*(1-0.190986)/2). The orthogonal rate is 0.5*exp(-(Eb/N0)/2).
+# The difference is a 0.92 dB penalty. As a ratio of error rates it grows with Eb/N0, from 1.27x at 4 dB to 4.54x at
+# 12 dB. A test that compares against the orthogonal rate fails this chain because of the modulation and not the
+# receiver.
 #
-# `split` exists because a subgraph exports an input port to exactly ONE interior port while an output port fans out
-# freely: it is the node whose single output feeds both branches. It is a SampleDelay of zero, which is a copy.
+# A subgraph exports an input port to exactly one interior port. An output port fans out freely. `split` is the node
+# whose single output feeds both branches. It is a SampleDelay of zero, which copies its input.
 #
-# Real audio at sample_rate in; one soft symbol per symbol out, positive for a mark.
+# The input is real audio at sample_rate. The output is one soft symbol per symbol, positive for a mark.
 definition_metadata:
   block_type: gr::recipes::AfskDemod
   plugin_name: GrRecipes
@@ -50,32 +52,32 @@ blocks:
     exported_parameters:
       - name: sample_rate
         type: float32
-        doc: "input audio sample rate in hertz; required"
+        doc: "input audio sample rate in hertz (required)"
       - name: symbol_rate
         type: float32
-        doc: "symbol rate in hertz; required"
+        doc: "symbol rate in hertz (required)"
       - name: mark_hz
         type: float64
-        doc: "the tone that carries a ONE, in hertz; required, and there is no default tone pair"
+        doc: "tone carrying a one, in hertz (required)"
       - name: space_hz
         type: float64
-        doc: "the tone that carries a ZERO, in hertz; required. Its position relative to mark_hz is the output polarity"
+        doc: "tone carrying a zero, in hertz (required)"
       - name: decimation
         type: uint32
         default: !!uint32 1
-        doc: "decimation in the channel filter; pick it for about eight samples per symbol after it"
+        doc: "channel filter decimation giving about eight samples per symbol"
       - name: hilbert_taps
         type: uint32
         default: !!uint32 127
-        doc: "length of the Hilbert transformer, odd; 127 keeps the band from 0.0125 to 0.4875 of the rate within 2 percent of unity"
+        doc: "length of the Hilbert transformer, odd"
       - name: channel_bandwidth
         type: float64
         default: !!float64 0.9167
-        doc: "cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate; half of Carson's bandwidth, |h|/2 + 0.5"
+        doc: "pre-discriminator filter cutoff as a multiple of the symbol rate"
       - name: lowpass_bandwidth
         type: float64
         default: !!float64 0.5
-        doc: "cutoff of the post-discriminator lowpass, as a multiple of the symbol rate"
+        doc: "post-discriminator lowpass cutoff in multiples of the symbol rate"
       - name: noise_bandwidth
         type: float64
         default: !!float64 0.002

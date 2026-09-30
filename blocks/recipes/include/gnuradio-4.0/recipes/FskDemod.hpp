@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/FskDemod.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/FskDemod.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_FSKDEMOD_HPP
 #define GNURADIO_RECIPES_FSKDEMOD_HPP
 
@@ -15,17 +15,17 @@ namespace gr::recipes {
 
 struct FskDemod {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(float sample_rate_, float symbol_rate_, double modulation_index_) : sample_rate(std::move(sample_rate_)), symbol_rate(std::move(symbol_rate_)), modulation_index(std::move(modulation_index_)) {}
-        float sample_rate; // input sample rate in hertz; required
-        float symbol_rate; // symbol rate in hertz; required
-        double modulation_index; // h, the phase in units of pi one unit of symbol amplitude turns the carrier by; required, and signed: a negative value means the higher tone is the zero
-        double channel_bandwidth = 0.6; // cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate
-        double lowpass_bandwidth = 0.5; // cutoff of the post-discriminator lowpass, as a multiple of the symbol rate
+        float sample_rate; // input sample rate in hertz (required)
+        float symbol_rate; // symbol rate in hertz (required)
+        double modulation_index; // signed modulation index h (required), negative when the higher tone is zero
+        double channel_bandwidth = 0.6; // pre-discriminator filter cutoff in multiples of the symbol rate
+        double lowpass_bandwidth = 0.5; // post-discriminator lowpass cutoff in multiples of the symbol rate
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
         std::string detector = std::string("MuellerMuller"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
-        std::uint32_t preamble_symbols = std::uint32_t{0}; // alternating training symbols a burst opens with, which the timing preset is measured over; 0 disables the preset and the stream passes the stage through
+        std::uint32_t preamble_symbols = std::uint32_t{0}; // alternating training symbols a burst opens with, 0 to disable the preset
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -38,28 +38,28 @@ struct FskDemod {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sample_rate"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("symbol_rate"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("h, the phase in units of pi one unit of symbol amplitude turns the carrier by; required, and signed: a negative value means the higher tone is the zero"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed modulation index h (required), negative when the higher tone is zero"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("modulation_index"));
             e8 = gr::pmt::Value(std::move(m9));
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("pre-discriminator filter cutoff in multiples of the symbol rate"));
             m11[std::pmr::string("default")] = gr::pmt::Value(0.6);
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("channel_bandwidth"));
@@ -67,7 +67,7 @@ struct FskDemod {
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("cutoff of the post-discriminator lowpass, as a multiple of the symbol rate"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("post-discriminator lowpass cutoff in multiples of the symbol rate"));
             m13[std::pmr::string("default")] = gr::pmt::Value(0.5);
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("lowpass_bandwidth"));
@@ -91,7 +91,7 @@ struct FskDemod {
             t3.push_back(std::move(e16));
             gr::pmt::Value e18;
             gr::property_map m19;
-            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("alternating training symbols a burst opens with, which the timing preset is measured over; 0 disables the preset and the stream passes the stage through"));
+            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("alternating training symbols a burst opens with, 0 to disable the preset"));
             m19[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{0});
             m19[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m19[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("preamble_symbols"));
@@ -301,9 +301,9 @@ struct FskDemod {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("sample_rate")] = parameters.sample_rate;

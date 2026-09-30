@@ -2,8 +2,8 @@
  *
  * Reads the recipe catalog (index.yaml + definitions) and writes one generated typed
  * header per recipe into <out-include-dir>/gnuradio-4.0/recipes/. The YAML is the source
- * of truth; the emitted headers are committed and qa_Recipes diffs them against a fresh
- * emission, so running this tool is how a recipe change reaches the C++ surface. */
+ * of truth. The emitted headers are kept in the source tree, and qa_Recipes diffs them
+ * against a fresh emission. Running this tool carries a recipe change into the C++ headers. */
 #include <cstdio>
 #include <filesystem>
 #include <fstream>

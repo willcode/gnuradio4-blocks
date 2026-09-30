@@ -1,6 +1,6 @@
 add_ut_test(qa_Recipes)
-# gnuradio-core for the loader and the emitter; the shared block library so the interior registry ids the recipes name
-# are registered when the test runs.
+# gnuradio-core provides the loader and the emitter. The shared block libraries register the interior registry ids that
+# the recipes name when the test runs.
 target_link_libraries(
   qa_Recipes
   PRIVATE gnuradio-core
@@ -19,13 +19,13 @@ target_include_directories(qa_Recipes PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../to
                                               "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 target_compile_definitions(qa_Recipes PRIVATE RECIPES_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
-# the network family is optional, so the recipes' socket legs are built only where it is
+# The network family is optional. The recipes' socket legs are built only where it is present.
 if(TARGET gnuradio4::GrNetworkBlocksShared)
   target_link_libraries(qa_Recipes PRIVATE gnuradio4::GrNetworkBlocksShared)
   target_compile_definitions(qa_Recipes PRIVATE GNURADIO4_HAVE_NETWORK_BLOCKS)
 endif()
 
-# the burst gate: an AIS slot rendered, modulated, and taken back through FskDemod into HdlcDeframe
+# The burst gate renders and modulates an AIS slot and takes it back through FskDemod into HdlcDeframe.
 add_ut_test(qa_HdlcBursts)
 target_link_libraries(
   qa_HdlcBursts

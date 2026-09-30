@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/OfdmModulator.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/OfdmModulator.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_OFDMMODULATOR_HPP
 #define GNURADIO_RECIPES_OFDMMODULATOR_HPP
 
@@ -16,17 +16,17 @@ namespace gr::recipes {
 
 struct OfdmModulator {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t fft_len_, std::vector<std::int32_t> data_carriers_, std::vector<std::int32_t> pilot_carriers_, std::vector<float> pilot_symbols_, std::vector<float> sync_words_, std::uint32_t frame_len_, std::vector<std::uint32_t> cp_len_) : fft_len(std::move(fft_len_)), data_carriers(std::move(data_carriers_)), pilot_carriers(std::move(pilot_carriers_)), pilot_symbols(std::move(pilot_symbols_)), sync_words(std::move(sync_words_)), frame_len(std::move(frame_len_)), cp_len(std::move(cp_len_)) {}
-        std::uint32_t fft_len; // transform length, a power of two; one symbol is this many carriers; required
-        std::vector<std::int32_t> data_carriers; // signed logical carrier indices the data stream fills, in order; required
-        std::vector<std::int32_t> pilot_carriers; // signed logical carrier indices the pilot cycle fills; empty for a numerology without pilots; required
-        std::vector<float> pilot_symbols; // interleaved re,im read by (s * n_pilots + p) % len with s the symbol's data index in its frame; required
-        std::vector<float> sync_words; // interleaved re,im, a whole number of fft_len-carrier symbols, emitted verbatim at each frame's head; required
-        std::uint32_t frame_len; // data symbols per frame; required
-        std::vector<std::uint32_t> cp_len; // prefix samples: one entry is a constant, several are a per-symbol cycle restarting at each frame; required
-        std::uint32_t window_len = std::uint32_t{0}; // raised-cosine edge samples overlapped with the next symbol; 0 is off
+        std::uint32_t fft_len; // transform length and carriers per symbol, a power of two (required)
+        std::vector<std::int32_t> data_carriers; // signed logical carrier indices the data stream fills, in order (required)
+        std::vector<std::int32_t> pilot_carriers; // signed logical carrier indices of the pilot cycle, possibly empty (required)
+        std::vector<float> pilot_symbols; // pilot values as interleaved re,im (required)
+        std::vector<float> sync_words; // sync symbols as interleaved re,im, sent verbatim at each frame's head (required)
+        std::uint32_t frame_len; // data symbols per frame (required)
+        std::vector<std::uint32_t> cp_len; // prefix samples, a constant or a per-symbol cycle (required)
+        std::uint32_t window_len = std::uint32_t{0}; // raised-cosine edge samples overlapped with the next symbol, 0 for off
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -39,56 +39,56 @@ struct OfdmModulator {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("transform length, a power of two; one symbol is this many carriers; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("transform length and carriers per symbol, a power of two (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("fft_len"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the data stream fills, in order; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the data stream fills, in order (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("int32[]"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("data_carriers"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices the pilot cycle fills; empty for a numerology without pilots; required"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed logical carrier indices of the pilot cycle, possibly empty (required)"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("int32[]"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("pilot_carriers"));
             e8 = gr::pmt::Value(std::move(m9));
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("interleaved re,im read by (s * n_pilots + p) % len with s the symbol's data index in its frame; required"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("pilot values as interleaved re,im (required)"));
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32[]"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("pilot_symbols"));
             e10 = gr::pmt::Value(std::move(m11));
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("interleaved re,im, a whole number of fft_len-carrier symbols, emitted verbatim at each frame's head; required"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("sync symbols as interleaved re,im, sent verbatim at each frame's head (required)"));
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32[]"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sync_words"));
             e12 = gr::pmt::Value(std::move(m13));
             t3.push_back(std::move(e12));
             gr::pmt::Value e14;
             gr::property_map m15;
-            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("data symbols per frame; required"));
+            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("data symbols per frame (required)"));
             m15[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m15[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("frame_len"));
             e14 = gr::pmt::Value(std::move(m15));
             t3.push_back(std::move(e14));
             gr::pmt::Value e16;
             gr::property_map m17;
-            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("prefix samples: one entry is a constant, several are a per-symbol cycle restarting at each frame; required"));
+            m17[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("prefix samples, a constant or a per-symbol cycle (required)"));
             m17[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32[]"));
             m17[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("cp_len"));
             e16 = gr::pmt::Value(std::move(m17));
             t3.push_back(std::move(e16));
             gr::pmt::Value e18;
             gr::property_map m19;
-            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("raised-cosine edge samples overlapped with the next symbol; 0 is off"));
+            m19[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("raised-cosine edge samples overlapped with the next symbol, 0 for off"));
             m19[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{0});
             m19[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m19[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("window_len"));
@@ -195,9 +195,9 @@ struct OfdmModulator {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("fft_len")] = parameters.fft_len;

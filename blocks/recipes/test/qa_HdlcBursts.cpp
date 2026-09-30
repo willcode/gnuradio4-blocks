@@ -80,7 +80,7 @@ struct Rng {
 
 [[nodiscard]] std::vector<std::uint8_t> flagBits() { return {0U, 1U, 1U, 1U, 1U, 1U, 1U, 0U}; }
 
-/// @brief One slot's HDLC bit stream: opening flag, the octets least significant bit first and stuffed, closing flag.
+/// @brief One slot's HDLC bit stream, the stuffed octets least significant bit first between two flags.
 [[nodiscard]] std::vector<std::uint8_t> hdlcBits(std::span<const std::uint8_t> payload) {
     std::vector<std::uint8_t> octets(payload.begin(), payload.end());
     const auto                fcs = static_cast<std::uint16_t>(frameCheck().compute(payload));
@@ -94,7 +94,7 @@ struct Rng {
             const std::uint8_t value = (octet >> bit) & 1U;
             wire.push_back(value);
             if (value != 0U) {
-                if (++ones == 5U) { // a zero after five ones, so the payload can never forge the flag
+                if (++ones == 5U) { // a zero after five ones keeps the flag pattern out of the payload
                     wire.push_back(0U);
                     ones = 0U;
                 }
@@ -109,10 +109,10 @@ struct Rng {
 }
 
 /**
- * @brief One slot as channel bits: the training tone, then the NRZI-coded frame.
+ * @brief One slot as channel bits, the training tone followed by the NRZI-coded frame.
  *
- * NRZI holds the level on a one and transitions on a zero, so the encoder's state entering the flag decides whether
- * the alternation breaks there. Starting it at the training sequence's last symbol makes the flag's leading zero
+ * NRZI holds the level on a one and transitions on a zero. The encoder's state entering the flag decides whether the
+ * alternation breaks there. The encoder starts at the training sequence's last symbol. The flag's leading zero is then
  * one more transition, and the tone runs unbroken into the frame.
  */
 [[nodiscard]] std::vector<std::uint8_t> slotBits(std::span<const std::uint8_t> payload) {
@@ -130,7 +130,7 @@ struct Rng {
     return channel;
 }
 
-/// @brief The two-level PAM grid the modulator reads: one is +1, zero is -1.
+/// @brief The two-level PAM grid the modulator reads, with one as +1 and zero as -1.
 [[nodiscard]] std::vector<float> symbolsOf(std::span<const std::uint8_t> bits) {
     std::vector<float> symbols(bits.size());
     std::ranges::transform(bits, symbols.begin(), [](std::uint8_t bit) { return bit != 0U ? 1.F : -1.F; });
@@ -145,10 +145,10 @@ template<typename TBlock>
     return block;
 }
 
-/// @brief Runs @p symbols through `CpmModulate` at the AIS constants and hands back the complex baseband.
+/// @brief Runs @p symbols through `CpmModulate` at the AIS constants and returns the complex baseband.
 ///
-/// The modulator is driven directly rather than under a scheduler: one burst is a few hundred symbols, and standing
-/// a graph up for each of two hundred of them costs far more than the modulation does.
+/// The test drives the modulator directly and not under a scheduler. One burst is a few hundred symbols. Building a
+/// graph for each of two hundred bursts takes far longer than the modulation.
 [[nodiscard]] std::vector<CF> modulate(std::span<const float> symbols) {
     CpmModulate<float> shaper = make<CpmModulate<float>>({{"pulse", std::string("gaussian")}, {"bt", kBt}, {"modulation_index", kModIndex}, {"samples_per_symbol", static_cast<gr::Size_t>(kSps)}});
     shaper.start();
@@ -169,7 +169,7 @@ struct RecordSink : gr::Block<RecordSink> {
     std::vector<Record> _records{};
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
-        if (inSpan.size() == 0UZ) { // an empty call is not progress, and saying so is what lets the graph finish
+        if (inSpan.size() == 0UZ) { // an empty call is not progress, and reporting that lets the graph finish
             std::ignore = inSpan.consume(0UZ);
             return gr::work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
@@ -207,12 +207,12 @@ struct Received {
 };
 
 /**
- * @brief The abort runs the composite's own extractor counted, read off the interior block the recipe names.
+ * @brief The abort runs counted by the composite's own extractor, read from the interior block the recipe names.
  *
- * An abort abandons the frame in progress and produces no record, so it leaves by no port and the counter is the
- * only place it is stated. Reaching it goes through the subgraph the composite holds, matching the recipe's own
- * block name and checking the erased type before the cast; a run that finds neither answers with a value no run
- * can produce, so a failure to reach the block fails the assertion rather than passing it.
+ * An abort abandons the frame in progress and produces no record. It leaves by no port, and the counter alone records
+ * it. The function reaches the counter through the subgraph the composite holds. It matches the recipe's own block
+ * name and checks the erased type before the cast. A run that finds neither returns a value no run can produce. A
+ * failure to reach the block then fails the assertion and does not pass it.
  */
 [[nodiscard]] std::uint64_t abortsOf(const std::shared_ptr<gr::BlockModel>& composite) {
     using Extractor = gr::blocks::digital::DelimiterExtractor<std::uint8_t>;
@@ -230,8 +230,8 @@ struct Received {
 /**
  * @brief `FskDemod` into `HdlcDeframe` over @p stream, with white Gaussian noise added at @p esN0_db.
  *
- * The noise is added to the whole stream, so the silence either side of a burst is noise and the receiver has to
- * find the burst in it rather than being told where it is.
+ * The noise is added to the whole stream. The silence on either side of a burst is noise. The receiver must find the
+ * burst in it and is not told where it is.
  */
 [[nodiscard]] Received receive(std::span<const CF> stream, double noiseBandwidth, double esN0_db, std::uint64_t seed, std::uint32_t preambleSymbols = 0U) {
     auto loader = recipeLoader();
@@ -316,7 +316,7 @@ struct LabelSink : gr::Block<LabelSink> {
     return ~0ULL;
 }
 
-/// @brief One `FskDemod` run: the labels the deframer would be handed, and what the stage inside it counted.
+/// @brief One `FskDemod` run, with the labels the deframer would receive and the counts of the stage inside it.
 struct Demodulated {
     std::vector<std::uint8_t> labels{};
     std::uint64_t             detections = 0ULL;
@@ -324,7 +324,7 @@ struct Demodulated {
     std::uint64_t             refused    = 0ULL; ///< timing payloads the loop declined
 };
 
-/// @brief `FskDemod` alone over @p stream: the sliced labels the deframer would be handed.
+/// @brief The sliced labels of `FskDemod` alone over @p stream, as the deframer would receive them.
 [[nodiscard]] Demodulated demodulate(std::span<const CF> stream, double noiseBandwidth, double esN0_db, std::uint64_t seed, std::uint32_t preambleSymbols) {
     auto loader = recipeLoader();
     auto demod  = loader.instantiate("gr::recipes::FskDemod", {{"sample_rate", kSampleRate}, {"symbol_rate", kSymbolRate}, {"modulation_index", kModIndex}, {"noise_bandwidth", noiseBandwidth}, {"preamble_symbols", preambleSymbols}});
@@ -388,7 +388,7 @@ struct Sliced {
     std::size_t alignmentSpan = 0UZ; ///< symbols between the earliest slot alignment and the latest
 };
 
-/// @brief Each slot at its own best alignment in @p labels: where the demodulator put it, and what it got wrong.
+/// @brief Each slot at its own best alignment in @p labels, with where the demodulator put it and its errors.
 [[nodiscard]] Sliced slice(const Scene& scene, std::span<const std::uint8_t> labels) {
     constexpr long kSearch = 40L; // the chain's group delay is about fourteen symbols and every slot carries the same one
     Sliced         result{};
@@ -589,9 +589,9 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
             }
         }
         std::println("[record] best at Es/N0 20 dB: {} of {} payloads at noise_bandwidth {:.3f}; smallest bandwidth decoding all {}: {:.3f} (0 means none did)", best, kBursts, bestWidth, kBursts, smallestComplete);
-        // a second-order loop at critical damping settles in about 3/(Bn*T) symbols, so the 32 symbols of training and
-        // flag ahead of the data admit Bn*T of about 0.1, and the 0.002 a continuous link is sized for settles in the
-        // middle of the payload instead
+        // A second-order loop at critical damping settles in about 3/(Bn*T) symbols. The 32 symbols of training and
+        // flag ahead of the data allow Bn*T of about 0.1. At the 0.002 sized for a continuous link, the loop settles in
+        // the middle of the payload.
         expect(ge(best, byDefault)) << "a burst does not decode better on a loop sized for a continuous link";
         expect(gt(best, kBursts / 2UZ)) << "the training sequence is long enough for a loop that is sized for it";
 
@@ -620,8 +620,9 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
         stream.insert(stream.end(), pair.begin(), pair.end());
         stream.insert(stream.end(), 40UZ * kSps, CF{});
 
-        // the same two slots with a slot's worth of silence between them, as the control: at 20 dB the loop, not the
-        // noise, decides whether a slot decodes, so "both decode" is only meaningful against what a gap gives
+        // The control is the same two slots with a slot's worth of silence between them. At 20 dB the loop decides
+        // whether a slot decodes, and the noise does not. "Both decode" means something only against the result with a
+        // gap.
         std::vector<CF> spaced(40UZ * kSps, CF{});
         for (std::size_t k = 0UZ; k < 2UZ; ++k) {
             const std::vector<CF> burst = modulate(std::span<const float>(symbolsOf(std::span<const std::uint8_t>(slotBits(std::span<const std::uint8_t>(payloads[k]))))));
@@ -637,7 +638,7 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
         expect(eq(adjacent, 2UZ)) << "a slot that opens where the last one closed is not hidden by it";
         expect(ge(adjacent, separated));
 
-        // the transmitter stops after 100 bits of data: no closing flag arrives, so nothing may reach `out`
+        // The transmitter stops after 100 bits of data. No closing flag arrives, and nothing may reach `out`.
         std::vector<std::uint8_t> payload(kPayloadOctets);
         for (std::uint8_t& octet : payload) {
             octet = static_cast<std::uint8_t>(rng.next() & 0xFFULL);
@@ -657,10 +658,10 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
     };
 
     "the burst timing preset takes the loop bandwidth out of the decision"_test = [] {
-        // The same 200 slots and the same seeds as the leg above, which is the negative control: that leg runs the
-        // chain with the preset stage a wire and its counts are the ones this arm is read against. What the preset
-        // claims is not a better best but a flat table -- the bandwidth stops deciding whether a burst acquires --
-        // so the spread across the sweep is asserted as well as the counts.
+        // The same 200 slots and the same seeds as the leg above. That leg is the negative control. It runs the chain
+        // with the preset stage passing samples through, and this arm is read against its counts. The preset does not
+        // promise a better best case. It promises a flat table, where the bandwidth does not decide whether a burst
+        // acquires. The test therefore asserts the spread across the sweep as well as the counts.
         constexpr std::size_t kBursts = 200UZ;
         const Scene           scene   = bursts(kBursts, 0xA15ULL);
 
@@ -688,11 +689,11 @@ const boost::ut::suite<"hdlc bursts"> hdlcBurstTests = [] {
     };
 
     "the preset re-times the symbol stream and does not shorten it"_test = [] {
-        // A decode count cannot say why a slot was lost, so this reads the sliced labels against the transmitted
-        // bits directly. Two properties decide it. The stream must stay one label per symbol: a preset that takes a
-        // sample out of it walks every later slot's alignment earlier and costs one label a burst. And the last
-        // training symbol must be taken at the preset phase, because a differential decoder reads it together with
-        // the start flag's first bit, so slicing it at the phase the loop was holding inverts the flag.
+        // A decode count cannot show why a slot was lost. This leg reads the sliced labels against the transmitted bits
+        // directly. Two properties decide the result. The stream must stay one label per symbol. A preset that removes
+        // a sample moves every later slot's alignment earlier and loses one label per burst. The last training symbol
+        // must be taken at the preset phase. A differential decoder reads it together with the start flag's first bit.
+        // Slicing it at the phase the loop held before inverts the flag.
         constexpr std::size_t kBursts = 200UZ;
         const Scene           scene   = bursts(kBursts, 0xA15ULL);
 

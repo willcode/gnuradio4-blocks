@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/KissStreamDecode.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/KissStreamDecode.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_KISSSTREAMDECODE_HPP
 #define GNURADIO_RECIPES_KISSSTREAMDECODE_HPP
 
@@ -15,12 +15,12 @@ namespace gr::recipes {
 
 struct KissStreamDecode {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t max_payload_items_) : max_payload_items(std::move(max_payload_items_)) {}
-        std::uint32_t drop_head = std::uint32_t{0}; // items removed from the start of every input record before the KISS stream begins; RecordTrim's own default
-        std::uint32_t max_payload_items; // DelimiterExtractor's own bound on a decoded frame's items; required, there is no default
-        bool read_timestamp = false; // interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default
+        std::uint32_t drop_head = std::uint32_t{0}; // items removed from the start of each input record
+        std::uint32_t max_payload_items; // DelimiterExtractor's bound on a decoded frame's items (required)
+        bool read_timestamp = false; // read a command-9 control frame as the next data frame's timestamp
     };
 
     [[nodiscard]] static const gr::detail::YamlDefinitionsLoader::Definition& definition() {
@@ -33,7 +33,7 @@ struct KissStreamDecode {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("items removed from the start of every input record before the KISS stream begins; RecordTrim's own default"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("items removed from the start of each input record"));
             m5[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{0});
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("drop_head"));
@@ -41,14 +41,14 @@ struct KissStreamDecode {
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("DelimiterExtractor's own bound on a decoded frame's items; required, there is no default"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("DelimiterExtractor's bound on a decoded frame's items (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("max_payload_items"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("read a command-9 control frame as the next data frame's timestamp"));
             m9[std::pmr::string("default")] = gr::pmt::Value(false);
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("bool"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("read_timestamp"));
@@ -204,9 +204,9 @@ struct KissStreamDecode {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("drop_head")] = parameters.drop_head;

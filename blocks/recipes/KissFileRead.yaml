@@ -1,16 +1,21 @@
-# gr::recipes::KissFileRead — a KISS file read back to records: BasicFileSource<u8> → DelimiterExtractor<u8>(slip)
-# → KissDecode.
+# gr::recipes::KissFileRead, a KISS file read back to records.
 #
-# `KissFileWrite`'s exact counterpart: a byte stream has no record boundary of its own, so `DelimiterExtractor`
-# reconstructs one from the SLIP framing a KISS writer put on; `KissDecode` then strips the command byte and, with
-# `read_timestamp`, reads a command-9 frame into the next data record's `DataSet::timestamp`.
+# The chain is BasicFileSource<u8>, DelimiterExtractor<u8>(slip) and KissDecode. It is the counterpart of
+# `KissFileWrite`. A byte stream has no record boundary of its own. `DelimiterExtractor` rebuilds each record from the
+# SLIP framing a KISS writer added. `KissDecode` then strips the command byte. With `read_timestamp` it reads a
+# command-9 frame into the next data record's `DataSet::timestamp`. `read_timestamp` keeps KissDecode's own default.
 #
-# The SLIP profile is the same one `KissFileWrite` spells, because the two recipes are read against each other:
-# end delimiter 0xC0 ("11000000", MSB first), byte escaping, introducer 0xDB (219), map {0xDC (220) -> 0xC0 (192),
-# 0xDD (221) -> 0xDB (219)}, eight bits per item.
+# The SLIP profile is the one `KissFileWrite` spells out, and the two recipes are read against each other. The profile
+# has these settings.
 #
-# `max_payload_items` is `DelimiterExtractor`'s own required bound and carries no default here either: a peer's
-# frame length is not this recipe's to assume. `file_name` is required for the same reason `KissFileWrite`'s is.
+#   end delimiter    0xC0 ("11000000", MSB first)
+#   escaping         byte escaping
+#   introducer       0xDB (219)
+#   map              {0xDC (220) -> 0xC0 (192), 0xDD (221) -> 0xDB (219)}
+#   bits per item    8
+#
+# `max_payload_items` is `DelimiterExtractor`'s own required bound and has no default here. The recipe does not assume
+# a peer's frame length. `file_name` is required, as it is in `KissFileWrite`.
 definition_metadata:
   block_type: gr::recipes::KissFileRead
   plugin_name: GrRecipes
@@ -24,14 +29,14 @@ blocks:
     exported_parameters:
       - name: file_name
         type: string
-        doc: "the KISS file's path; required, there is no default"
+        doc: "path of the KISS file (required)"
       - name: max_payload_items
         type: uint32
-        doc: "DelimiterExtractor's own bound on a decoded frame's items; required, there is no default"
+        doc: "DelimiterExtractor's bound on a decoded frame's items (required)"
       - name: read_timestamp
         type: bool
         default: !!bool false
-        doc: "interpret a command-9 control frame as a timestamp for the next data frame; KissDecode's own default"
+        doc: "read a command-9 control frame as the next data frame's timestamp"
     graph:
       blocks:
         - id: "gr::blocks::fileio::BasicFileSource<uint8>"

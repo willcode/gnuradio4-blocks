@@ -1,9 +1,9 @@
-/* The recipes gate: every recipe listed in blocks/recipes/index.yaml loads through the
- * standard YAML-definitions machinery and instantiates as a composite block with its
- * exported ports in place. A recipe is data; this is the test that keeps it honest. A
- * general recipe's required parameters are part of the contract: instantiating it bare
- * must refuse by name, and instantiating it with the parameters must derive the interior
- * settings and keep deriving them when a parameter changes live. */
+/* The recipes gate. Every recipe listed in blocks/recipes/index.yaml loads through the
+ * standard YAML definitions machinery. It instantiates as a composite block with its
+ * exported ports in place. A recipe is data, and this test checks it. A general recipe's
+ * required parameters are part of its contract. Instantiating it with no parameters must
+ * refuse by name. Instantiating it with the parameters must derive the interior settings,
+ * and derive them again when a parameter changes live. */
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -101,7 +101,7 @@ std::vector<std::string> exportedNames(const gr::property_map& portsMap) {
 
 [[nodiscard]] std::string stringOf(const gr::pmt::Value& value) { return std::string(value.value_or(std::string_view{})); }
 
-/// what one frequency accounts for in a real stream: its amplitude, and its share of the stream's mean square
+/// the amplitude of one frequency in a real stream, and its share of the stream's mean square
 struct ToneReading {
     double amplitude{};
     double powerShare{};
@@ -126,8 +126,10 @@ struct ToneReading {
     return {amplitude, meanSquare > 0.0 ? 0.5 * amplitude * amplitude / meanSquare : 0.0};
 }
 
-/// @brief Drives @p name over @p input under the scheduler and hands back what the sink saw. A recipe's numbers only
-/// mean something if the chain they configure demodulates, so every functional case below goes through a real graph.
+/// @brief Runs @p name over @p input under the scheduler and returns what the sink received.
+///
+/// A recipe's numbers mean something only if the chain they configure demodulates. Each functional case below runs
+/// through a real graph.
 template<typename TIn, typename TOut>
 [[nodiscard]] std::vector<TOut> runRecipe(std::string_view name, const gr::property_map& parameters, const std::vector<TIn>& input) {
     using gr::blocks::testing::ProcessFunction;
@@ -169,7 +171,7 @@ struct CcsdsRecordSink : gr::Block<CcsdsRecordSink> {
     }
 };
 
-// ─── the four KISS recipes (criterion 14): a record source, a byte source that never ends, a graph runner ────────
+// ─── the four KISS recipes, with a record source, an endless byte source and a graph runner ──────────────────────
 
 /// @brief A source of prepared records, feeding a composite's `in` port and reporting DONE once exhausted.
 struct KissRecordSource : gr::Block<KissRecordSource> {
@@ -177,9 +179,9 @@ struct KissRecordSource : gr::Block<KissRecordSource> {
     GR_MAKE_REFLECTABLE(KissRecordSource, out);
     std::vector<gr::DataSet<std::uint8_t>> _records{};
     std::size_t                            _pos = 0UZ;
-    // A chain that ends in a socket outlives its own record queue: the peer may still be connecting when the last
-    // record is consumed, so the source can be told to idle instead of ending the graph under it. Left false it
-    // reports the plain, natural DONE that lets a graph writing to a file terminate on its own.
+    // A chain ending in a socket outlives its own record queue. The peer may still be connecting when the last
+    // record is consumed. The source can then idle instead of ending the graph. Left false, it reports DONE, and a
+    // graph writing to a file terminates on its own.
     bool _neverDone = false;
 
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
@@ -211,8 +213,10 @@ struct KissRecordSource : gr::Block<KissRecordSource> {
 
 // the socket legs need the optional network family
 #ifdef GNURADIO4_HAVE_NETWORK_BLOCKS
-/// @brief Runs a graph in a background thread until explicitly stopped — `KissServe`'s sink and its own I/O thread
-/// have no natural end, so the test owns the teardown rather than waiting on scheduler.runAndWait() to return.
+/// @brief Runs a graph in a background thread until it is stopped.
+///
+/// `KissServe`'s sink and its I/O thread have no natural end. The test performs the teardown and does not wait for
+/// scheduler.runAndWait() to return.
 struct KissGraphRunner {
     gr::scheduler::Simple<> scheduler;
     std::thread             worker;
@@ -245,8 +249,10 @@ template<typename F>
     return ready();
 }
 
-/// @brief An ephemeral loopback port: bind a throwaway socket to port 0, read back what the kernel chose, close it —
-/// which is what leaves `KissServe`'s own listener free to bind that same port a moment later.
+/// @brief An ephemeral loopback port, taken from a throwaway socket bound to port 0.
+///
+/// The socket reads back the port the kernel chose and closes. `KissServe`'s own listener can then bind that port a
+/// moment later.
 [[nodiscard]] std::uint16_t reserveKissPort() {
     const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     boost::ut::expect(fd >= 0) << "could not open a socket to reserve a port";
@@ -293,8 +299,10 @@ struct KissByteSink : gr::Block<KissByteSink> {
 };
 #endif // GNURADIO4_HAVE_NETWORK_BLOCKS
 
-/// @brief The bytes `KissFileWrite` puts in a file for @p records, which is the KISS-over-SLIP wire form of the
-/// encode-frame-flatten chain `KissServe` also carries. @p path is written and removed again.
+/// @brief The bytes `KissFileWrite` writes to a file for @p records.
+///
+/// The bytes are the KISS-over-SLIP wire form of the encode, frame and flatten chain `KissServe` also carries.
+/// @p path is written and then removed.
 [[nodiscard]] std::vector<std::uint8_t> kissWireForm(const std::vector<gr::DataSet<std::uint8_t>>& records, gr::property_map writeParameters, const std::string& path) {
     std::filesystem::remove(path);
     writeParameters["file_name"] = std::pmr::string(path);
@@ -326,7 +334,7 @@ struct KissByteSink : gr::Block<KissByteSink> {
     return wire;
 }
 
-/// @brief What `KissFileRead` decodes back out of @p wire, through a file it is given and then relieved of.
+/// @brief The records `KissFileRead` decodes from @p wire, through a file at @p path that is written and then removed.
 [[nodiscard]] std::vector<gr::DataSet<std::uint8_t>> kissReadBack(std::span<const std::uint8_t> wire, gr::property_map readParameters, const std::string& path) {
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -353,7 +361,7 @@ struct KissByteSink : gr::Block<KissByteSink> {
     return sink._records;
 }
 
-/// @brief A deterministic bit stream, so a failure is the chain's and never the draw's.
+/// @brief A deterministic bit stream. A failure then comes from the chain and not from the random draw.
 [[nodiscard]] std::vector<int> sourceBits(std::size_t count, std::uint64_t seed = 0x9e3779b97f4a7c15ULL) {
     std::vector<int> bits(count);
     std::uint64_t    state = seed;
@@ -366,9 +374,10 @@ struct KissByteSink : gr::Block<KissByteSink> {
     return bits;
 }
 
-/// @brief The best agreement between the recovered signs and @p bits over any lag up to @p maxLag, and the lag it was
-/// found at. Every chain here carries filter and loop delays the recipe does not compensate, so the alignment is
-/// searched rather than derived; what is measured is the agreement, not the lag.
+/// @brief The best agreement between the recovered signs and @p bits over lags up to @p maxLag, and its lag.
+///
+/// Each chain here carries filter and loop delays that the recipe does not compensate. The alignment is therefore
+/// searched and not derived. The test measures the agreement and not the lag.
 struct Agreement {
     double      fraction = 0.0;
     std::size_t lag      = 0UZ;
@@ -401,7 +410,7 @@ struct Agreement {
     return best;
 }
 
-/// @brief Phase-continuous binary FSK on a REAL carrier: the audio a soundcard hands an AFSK receiver.
+/// @brief Phase-continuous binary FSK on a real carrier, the audio a sound card delivers to an AFSK receiver.
 [[nodiscard]] std::vector<float> afskAudio(std::span<const int> bits, double sampleRate, double symbolRate, double markHz, double spaceHz) {
     const auto         perSymbol = static_cast<std::size_t>(sampleRate / symbolRate);
     std::vector<float> audio;
@@ -519,8 +528,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
 
         expect(loader.instantiate("gr::recipes::FskDemodAudio") == nullptr) << "the general recipe must not instantiate with hidden defaults";
 
-        // the generic leg above only requires that a refusal carry the family's key; this one requires that THIS
-        // recipe refuse, and that the message name both parameters a link cannot be guessed at without
+        // The generic leg above requires only that a refusal carry the family's key. This leg requires that this recipe
+        // refuse, and that the message name both parameters a link needs.
         bool        indexed = false;
         const auto& defs    = loader.definitionForBlockName();
         for (const auto& [name, definition] : defs) {
@@ -553,7 +562,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ));
         expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end());
 
-        // the two derivations the recipe exists to save, at the 9600-baud packet radio the arm is written around
+        // the two derivations the recipe performs, at the 9600-baud packet radio rate it targets
         const auto lowpass = interiorByName(composite, "lowpass");
         expect(lowpass != nullptr);
         if (lowpass != nullptr) {
@@ -577,7 +586,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
     "SampleClockOffset turns parts per million into a resampling rate, and re-derives live"_test = [] {
         auto loader = makeRecipeLoader();
 
-        // a clock error has a meaningful zero, so unlike the general demod this one defaults and instantiates
+        // A clock error has a meaningful zero. Unlike the general demodulators, this recipe has defaults and
+        // instantiates with no parameters.
         auto nominal = loader.instantiate("gr::recipes::SampleClockOffset");
         expect(nominal != nullptr) << "a defaulted clock offset is a valid, and inert, channel";
 
@@ -882,9 +892,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
     };
 
     "WbfmMonoDemod hands back the modulating tone at the deviation ratio"_test = [] {
-        // A recipe's numbers only mean something if the chain they configure demodulates. The signal is one
-        // audio tone at a stated peak deviation; the recipe's `deviation` is the reference full deviation, so
-        // the audio the chain hands back must be that tone at exactly the ratio of the two, and nothing else.
+        // The signal is one audio tone at a stated peak deviation. The recipe's `deviation` is the reference full
+        // deviation. The chain's audio must be that tone at exactly the ratio of the two, and nothing else.
         using CF = std::complex<float>;
         using gr::blocks::testing::ProcessFunction;
 
@@ -924,7 +933,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const auto finished = scheduler.runAndWait();
         expect(finished.has_value()) << (finished.has_value() ? std::string{} : finished.error().message);
 
-        // the resampler's filter is not compensated, so the first samples are its ramp-up rather than the tone
+        // The resampler's filter is not compensated. The first samples are its ramp-up and not the tone.
         constexpr std::size_t kSkip   = 2000UZ;
         constexpr std::size_t kWindow = 9600UZ; // 200 cycles of the tone at the audio rate
         expect(ge(sink._samples.size(), kSkip + kWindow)) << std::format("audio samples produced: {}", sink._samples.size()) << boost::ut::fatal;
@@ -939,7 +948,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         auto loader = makeRecipeLoader();
         expect(loader.instantiate("gr::recipes::AfskDemod") == nullptr) << "the tone pair is an interoperability fact and has no default";
 
-        // Bell 202 at 48 kHz with decimation 5: eight samples per symbol into the timing loop
+        // Bell 202 at 48 kHz with decimation 5 gives eight samples per symbol into the timing loop
         constexpr double kSampleRate = 48000.0;
         constexpr double kSymbolRate = 1200.0;
         constexpr double kMark       = 1200.0;
@@ -1024,10 +1033,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             expect(eq(inputs.size(), 1UZ) && eq(outputs.size(), 1UZ)) << name;
             expect(std::ranges::find(inputs, "in") != inputs.end() && std::ranges::find(outputs, "out") != outputs.end()) << name;
 
-            // BpskDemod and DbpskDemod write BpskFrontEnd's five stages out rather than naming it: the graph importer
-            // creates an interior block from its id alone and never hands it the block's parameters, so a nested
-            // recipe with a required parameter refuses. The three must therefore derive the same five settings, and
-            // this is the assertion that says the copies have not drifted.
+            // BpskDemod and DbpskDemod write out BpskFrontEnd's five stages and do not name it. The three recipes must
+            // derive the same five settings. This check shows that the copies agree.
             const auto reads = [&composite, name](std::string_view block, const char* key) {
                 const auto interior = interiorByName(composite, block);
                 boost::ut::expect(interior != nullptr) << name << ": " << block << boost::ut::fatal;
@@ -1060,8 +1067,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         expect(interiorByName(differential, "phasor") != nullptr) << "and the differential arm has a phasor where the coherent one has a loop";
         expect(interiorByName(differential, "costas") == nullptr) << "and no carrier loop at all";
 
-        // the limitation the two files are written around, pinned so that it is a finding and not a habit: a nested
-        // recipe with a required parameter cannot be built, because the importer never forwards the parameters
+        // BpskFrontEnd refuses to instantiate without its required parameters.
         expect(loader.instantiate("gr::recipes::BpskFrontEnd") == nullptr) << "which is the refusal a nested instantiation would run into";
     };
 
@@ -1097,7 +1103,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             expect(eq(static_cast<float>(numericOf(*gain)), static_cast<float>(kSampleRate / (kSymbolRate * std::numbers::pi * kModulationIndex)))) << "the gain is FskDemod's, unchanged";
         }
 
-        // and the signed index inverts it, which is the polarity rule FskDemod's header now states
+        // A negative index inverts the gain. This is the polarity rule of FskDemod's header.
         auto* wrapper = dynamic_cast<gr::GraphWrapper<gr::Graph>*>(composite.get());
         expect(wrapper != nullptr) << boost::ut::fatal;
         gr::property_map change;
@@ -1131,8 +1137,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const std::vector<float> soft = runRecipe<float, float>("gr::recipes::AfskDemod", parameters, audio);
         expect(ge(soft.size(), kBits - 40UZ)) << std::format("one soft symbol per symbol: {} out of {}", soft.size(), kBits) << boost::ut::fatal;
 
-        // the mark carries a one and is the LOWER tone, so the polarity is right only if the deviation's sign reached
-        // the discriminator: an uninverted match is the assertion, and the inverted one is what a wrong sign gives
+        // The mark carries a one and is the lower tone. The polarity is right only if the deviation's sign reached the
+        // discriminator. The test asserts an uninverted match. A wrong sign gives the inverted match.
         const Agreement upright  = bestAgreement(std::span<const float>(soft), std::span<const int>(bits), 8UZ, 40UZ, false);
         const Agreement anyPhase = bestAgreement(std::span<const float>(soft), std::span<const int>(bits), 8UZ, 40UZ, true);
         expect(ge(upright.fraction, 0.99)) << std::format("{:.4f} of symbols recovered at lag {}", upright.fraction, upright.lag);
@@ -1161,7 +1167,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const std::vector<std::complex<float>> out = runRecipe<std::complex<float>, std::complex<float>>("gr::recipes::BpskFrontEnd", parameters, wave);
         expect(ge(out.size(), kSymbols / 2UZ)) << std::format("one complex sample per symbol: {}", out.size()) << boost::ut::fatal;
 
-        // squaring removes the BPSK modulation, so the per-symbol phase advance of z^2 is twice the residual carrier
+        // Squaring removes the BPSK modulation. The per-symbol phase advance of z^2 is then twice the residual carrier.
         const std::size_t settled = out.size() / 2UZ;
         double            level   = 0.0;
         double            advance = 0.0;
@@ -1176,9 +1182,9 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         level /= static_cast<double>(counted);
         const double residualHz = (advance / static_cast<double>(counted)) * 0.5 * kSymbolRate / (2.0 * std::numbers::pi);
 
-        // the AGC levels the SAMPLE stream's mean magnitude to one; what is read here is the magnitude at the symbol
-        // instants after the matched filter, which sits above that mean for a shaped signal. 1.216 is the measured
-        // figure and the bound is around it, not around one.
+        // The AGC levels the mean magnitude of the sample stream to one. The test reads the magnitude at the symbol
+        // instants after the matched filter. For a shaped signal that magnitude lies above the mean. 1.216 is the
+        // measured figure, and the bound is around it and not around one.
         expect(that % (std::abs(level - 1.0) < 0.3)) << std::format("the AGC delivers unit amplitude for the loops downstream: measured {:.4f}", level);
         expect(that % (std::abs(residualHz) < 0.1 * kOffsetHz)) << std::format("the frequency-locked loop leaves {:.2f} Hz of a {:.0f} Hz offset", residualHz, kOffsetHz);
     };
@@ -1200,8 +1206,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const std::vector<float> soft = runRecipe<std::complex<float>, float>("gr::recipes::BpskDemod", parameters, wave);
         expect(ge(soft.size(), kSymbols / 2UZ)) << std::format("soft symbols: {}", soft.size()) << boost::ut::fatal;
 
-        // an order-2 Costas loop has a 180-degree ambiguity, so the recovered stream may be the transmitted one
-        // inverted; resolving that is a framing question and not this recipe's
+        // An order-2 Costas loop has a 180-degree ambiguity. The recovered stream may be the transmitted one inverted.
+        // Resolving that belongs to the framing and not to this recipe.
         const std::size_t nSkip = soft.size() / 4UZ;
         const Agreement   found = bestAgreement(std::span<const float>(soft).subspan(nSkip), std::span<const int>(bits).subspan(nSkip), 0UZ, 40UZ, true);
         expect(ge(found.fraction, 0.99)) << std::format("{:.4f} of symbols recovered at lag {}, {}", found.fraction, found.lag, found.inverted ? "inverted" : "upright");
@@ -1213,8 +1219,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         constexpr std::size_t kDecimation = 4UZ;
         constexpr std::size_t kSymbols    = 1500UZ;
 
-        // differentially encoded: the transmitted symbol is the running product, so the receiver's decision on
-        // adjacent pairs hands back the source bits without ever learning the carrier phase
+        // Differentially encoded. The transmitted symbol is the running product. The receiver's decision on adjacent
+        // pairs returns the source bits with no estimate of the carrier phase.
         const std::vector<int> bits = sourceBits(kSymbols);
         std::vector<int>       encoded(bits.size());
         int                    running = 1;
@@ -1244,8 +1250,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
     };
 
     "FskDemodDcBlock removes the offset FskDemod has no answer to"_test = [] {
-        // A discriminator turns a frequency offset into a DC offset, and past half a level every symbol decides
-        // wrong. The strict comparison is the only honest justification for an extra block.
+        // A discriminator turns a frequency offset into a DC offset. Past half a level every symbol is decided wrong.
+        // The strict comparison justifies the extra block.
         constexpr double      kSampleRate = 96000.0;
         constexpr double      kSymbolRate = 9600.0;
         constexpr double      kIndex      = 0.5;
@@ -1318,8 +1324,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
                 b = draw();
             }
 
-            // the transmit side, from the tree's own kernels: the frame's octets are wire-domain strings, so a
-            // dual link first maps them to field elements, encodes, and maps the whole codeblock back out
+            // The transmit side uses the gr::fec kernels. The frame's octets are wire-domain strings. A dual-basis link
+            // maps them to field elements, encodes, and maps the whole codeblock back.
             const bool                dual = std::string_view(arm.basis) == "dual";
             std::vector<std::uint8_t> infoWords(frame);
             if (dual) {
@@ -1352,14 +1358,14 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
                 }
             }
 
-            // the randomizer, byte for byte: XORing the sequence's bytes MSB first is XORing its bits in order
+            // The randomizer, byte for byte. XORing the sequence's bytes MSB first XORs its bits in order.
             gr::digital::ScramblerConfig randomizer{};
             gr::digital::configureScrambler(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
             std::vector<std::uint8_t> randomized(codeblock.size());
             gr::digital::scramble(randomizer, std::span<const std::uint8_t>(codeblock), std::span<std::uint8_t>(randomized));
 
-            // the stream: garbage, the marker, the codeblock's bits, garbage — as soft values, with two of the
-            // marker's bits flipped to spend the stated error budget
+            // The stream is garbage, the marker, the codeblock's bits and garbage, as soft values. Two of the marker's
+            // bits are flipped to use the stated error budget.
             constexpr std::string_view kAsm = "00011010110011111111110000011101";
             std::vector<float>         soft;
             for (std::size_t i = 0UZ; i < 41UZ; ++i) {
@@ -1474,8 +1480,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
             soft.push_back((symbol & 1U) != 0U ? 0.9f : -0.9f);
         }
         for (std::size_t i = 0UZ; i < 60UZ; ++i) {
-            // the code-start correlator delays its output by the marker's own length, so the framer
-            // finishes the record 52 symbols after the stream's payload does — the tail feeds that
+            // The code-start correlator delays its output by the marker's own length. The framer finishes the record 52
+            // symbols after the stream's payload ends, and the tail supplies those symbols.
             soft.push_back((draw() & 1U) != 0U ? 0.9f : -0.9f);
         }
 
@@ -1483,9 +1489,9 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         const gr::property_map base{{"frame_length", kFrameLength}, {"error_capability", kE}, {"code", std::string("ccsds_255_223")}, {"basis", std::string("conventional")}, //
             {"convolutional", std::string("ccsds")}, {"encoded_marker", marker}, {"sync_errors", gr::Size_t{2U}}, {"interleave", kDepth}};
 
-        // the pairing is recovered from the marker's own position: a one-symbol shift of the whole
-        // stream moves the tag by one and changes nothing downstream, so ONE instance decodes at
-        // either offset — the ambiguity a parity-anchored chain would need two instances for
+        // The pairing is recovered from the marker's own position. A one-symbol shift of the whole stream moves the tag
+        // by one and changes nothing after it. One instance decodes at either offset. A parity-anchored chain would
+        // need two instances for this ambiguity.
         std::ignore             = asmBitAt;
         std::size_t cleanFrames = 0UZ;
         for (const std::size_t offset : {0UZ, 1UZ}) {
@@ -1626,8 +1632,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         };
         const gr::property_map encodeParams{{"kiss_port", gr::Size_t{7U}}, {"emit_timestamp", true}};
 
-        // `KissServe` is `KissFileWrite` with the file swapped for a socket, so what the file holds is exactly what
-        // the socket must carry: the reference is the sibling recipe's own output, not a wire form spelled out here
+        // `KissServe` is `KissFileWrite` with the file replaced by a socket. The socket must carry exactly what the
+        // file holds. The reference is the sibling recipe's own output and not a wire form written out here.
         const std::vector<std::uint8_t> wire = kissWireForm(seeded, encodeParams, (std::filesystem::temp_directory_path() / "qa_recipes_kiss_serve_reference.bin").string());
         expect(that % (wire.size() > 4UZ)) << boost::ut::fatal;
 
@@ -1646,7 +1652,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         gr::Graph serverGraph;
         auto&     source       = serverGraph.emplaceBlock<KissRecordSource>();
         source._records        = seeded;
-        source._neverDone      = true; // the test owns the teardown; DONE here would tear the sink down before a peer connects
+        source._neverDone      = true; // the test performs the teardown, and DONE here would stop the sink before a peer connects
         const auto chain       = serverGraph.addBlock(std::move(composite));
         const auto sourceModel = gr::graph::findBlock(serverGraph, source);
         expect(sourceModel.has_value()) << boost::ut::fatal;
@@ -1683,8 +1689,8 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
 #endif // GNURADIO4_HAVE_NETWORK_BLOCKS
 
     "KissStreamDecode reassembles a KISS stream split at every stride, mid-frame and mid-escape alike"_test = [] {
-        // frameA's payload deliberately contains both SLIP-significant bytes, so the wire form needs escaping —
-        // exactly where a split must not desynchronize DelimiterExtractor's machine
+        // frameA's payload contains both SLIP-significant bytes on purpose, and the wire form needs escaping. A split
+        // at an escape must not desynchronize DelimiterExtractor's machine.
         const gr::DataSet<std::uint8_t> frameA = kissPayload({0x11U, 0xC0U, 0x22U, 0xDBU, 0x33U});
         const gr::DataSet<std::uint8_t> frameB = kissPayload({0x44U, 0x55U});
 
@@ -1695,9 +1701,9 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         auto                   loader = makeRecipeLoader();
         const gr::property_map readParams{{"drop_head", gr::Size_t{0U}}, {"max_payload_items", gr::Size_t{4096U}}};
 
-        // every stride from one byte a record up to one byte short of the whole stream: some of them put a record
-        // boundary between an escape introducer and the byte it escapes, and some put one between the two frames,
-        // which are the splits a record-domain decoder gets wrong and the ones this recipe exists for
+        // Every stride from one byte per record up to one byte short of the whole stream. Some strides put a record
+        // boundary between an escape introducer and the byte it escapes. Some put one between the two frames. A
+        // record-domain decoder gets those splits wrong, and this recipe exists for them.
         for (std::size_t stride = 1UZ; stride < wire.size(); ++stride) {
             std::vector<gr::DataSet<std::uint8_t>> fragments;
             for (std::size_t at = 0UZ; at < wire.size(); at += stride) {

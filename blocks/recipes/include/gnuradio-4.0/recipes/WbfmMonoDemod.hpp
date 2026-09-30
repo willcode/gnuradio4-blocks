@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/WbfmMonoDemod.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/WbfmMonoDemod.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_WBFMMONODEMOD_HPP
 #define GNURADIO_RECIPES_WBFMMONODEMOD_HPP
 
@@ -15,14 +15,14 @@ namespace gr::recipes {
 
 struct WbfmMonoDemod {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(float sample_rate_) : sample_rate(std::move(sample_rate_)) {}
-        float sample_rate; // front-end sample rate in hertz; required
-        std::uint32_t channel_decimation = std::uint32_t{1}; // input samples per channel sample; pick it so sample_rate / channel_decimation is 200 to 400 kHz. 1 is a pass-through
-        double offset_hz = 0.0; // where the station sits relative to the front end's center, in hertz; 0 leaves the tuner inert
-        float deviation = 75000.0f; // peak FM deviation in hertz; 75 kHz is the broadcast figure
-        double tau = 7.5e-05; // de-emphasis time constant in seconds; 75 us in the Americas and South Korea, 50 us elsewhere, 0 bypasses
+        float sample_rate; // front-end sample rate in hertz (required)
+        std::uint32_t channel_decimation = std::uint32_t{1}; // input samples per channel sample, 1 for a pass-through
+        double offset_hz = 0.0; // station offset from center in hertz (0 leaves the tuner inert)
+        float deviation = 75000.0f; // peak FM deviation in hertz, 75 kHz for broadcast
+        double tau = 7.5e-05; // de-emphasis time constant in seconds, 0 to bypass
         float audio_rate = 48000.0f; // output audio sample rate in hertz
     };
 
@@ -36,14 +36,14 @@ struct WbfmMonoDemod {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("front-end sample rate in hertz; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("front-end sample rate in hertz (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sample_rate"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input samples per channel sample; pick it so sample_rate / channel_decimation is 200 to 400 kHz. 1 is a pass-through"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input samples per channel sample, 1 for a pass-through"));
             m7[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("channel_decimation"));
@@ -51,7 +51,7 @@ struct WbfmMonoDemod {
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("where the station sits relative to the front end's center, in hertz; 0 leaves the tuner inert"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("station offset from center in hertz (0 leaves the tuner inert)"));
             m9[std::pmr::string("default")] = gr::pmt::Value(0.0);
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("offset_hz"));
@@ -59,7 +59,7 @@ struct WbfmMonoDemod {
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("peak FM deviation in hertz; 75 kHz is the broadcast figure"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("peak FM deviation in hertz, 75 kHz for broadcast"));
             m11[std::pmr::string("default")] = gr::pmt::Value(75000.0f);
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("deviation"));
@@ -67,7 +67,7 @@ struct WbfmMonoDemod {
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("de-emphasis time constant in seconds; 75 us in the Americas and South Korea, 50 us elsewhere, 0 bypasses"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("de-emphasis time constant in seconds, 0 to bypass"));
             m13[std::pmr::string("default")] = gr::pmt::Value(7.5e-05);
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("tau"));
@@ -252,9 +252,9 @@ struct WbfmMonoDemod {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("sample_rate")] = parameters.sample_rate;

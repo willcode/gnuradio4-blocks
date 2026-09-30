@@ -1,5 +1,5 @@
-// GENERATED FILE — do not edit. Source of truth: blocks/recipes/FskDemodDcBlock.yaml.
-// Regenerate with gr4-recipe-gen; qa_Recipes diffs this file against a fresh emission.
+// Generated from blocks/recipes/FskDemodDcBlock.yaml, the source of truth. Do not edit.
+// Regenerate with gr4-recipe-gen. qa_Recipes diffs this file against a fresh emission.
 #ifndef GNURADIO_RECIPES_FSKDEMODDCBLOCK_HPP
 #define GNURADIO_RECIPES_FSKDEMODDCBLOCK_HPP
 
@@ -15,15 +15,15 @@ namespace gr::recipes {
 
 struct FskDemodDcBlock {
     struct Parameters {
-        // required parameters are constructor arguments: omitting one is a compile error,
-        // the same requirement the loader enforces at run time
+        // Required parameters are constructor arguments. Omitting one is a compile error.
+        // The loader enforces the same requirement at run time.
         Parameters(float sample_rate_, float symbol_rate_, double modulation_index_) : sample_rate(std::move(sample_rate_)), symbol_rate(std::move(symbol_rate_)), modulation_index(std::move(modulation_index_)) {}
-        float sample_rate; // input sample rate in hertz; required
-        float symbol_rate; // symbol rate in hertz; required
-        double modulation_index; // h, the phase in units of pi one unit of symbol amplitude turns the carrier by; required, and signed: a negative value means the higher tone is the zero
-        double channel_bandwidth = 0.6; // cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate
-        double lowpass_bandwidth = 0.5; // cutoff of the post-discriminator lowpass, as a multiple of the symbol rate
-        std::uint32_t dc_block_length = std::uint32_t{128}; // boxcar length D of the DC blocker; its notch corner is about sample_rate/D and must stay well under the symbol rate
+        float sample_rate; // input sample rate in hertz (required)
+        float symbol_rate; // symbol rate in hertz (required)
+        double modulation_index; // signed modulation index h (required), negative when the higher tone is zero
+        double channel_bandwidth = 0.6; // pre-discriminator filter cutoff in multiples of the symbol rate
+        double lowpass_bandwidth = 0.5; // post-discriminator lowpass cutoff in multiples of the symbol rate
+        std::uint32_t dc_block_length = std::uint32_t{128}; // boxcar length D of the DC blocker, corner about sample_rate/D
         double noise_bandwidth = 0.002; // closed-loop noise bandwidth of the timing recovery, normalized to the symbol rate
         std::string detector = std::string("MuellerMuller"); // timing error detector: MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl or SignumTimesSlopeMl
     };
@@ -38,28 +38,28 @@ struct FskDemodDcBlock {
             gr::Tensor<gr::pmt::Value> t3;
             gr::pmt::Value e4;
             gr::property_map m5;
-            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz; required"));
+            m5[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("input sample rate in hertz (required)"));
             m5[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m5[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("sample_rate"));
             e4 = gr::pmt::Value(std::move(m5));
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz; required"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol rate in hertz (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("symbol_rate"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("h, the phase in units of pi one unit of symbol amplitude turns the carrier by; required, and signed: a negative value means the higher tone is the zero"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("signed modulation index h (required), negative when the higher tone is zero"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("modulation_index"));
             e8 = gr::pmt::Value(std::move(m9));
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("cutoff of the filter ahead of the discriminator, as a multiple of the symbol rate"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("pre-discriminator filter cutoff in multiples of the symbol rate"));
             m11[std::pmr::string("default")] = gr::pmt::Value(0.6);
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("channel_bandwidth"));
@@ -67,7 +67,7 @@ struct FskDemodDcBlock {
             t3.push_back(std::move(e10));
             gr::pmt::Value e12;
             gr::property_map m13;
-            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("cutoff of the post-discriminator lowpass, as a multiple of the symbol rate"));
+            m13[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("post-discriminator lowpass cutoff in multiples of the symbol rate"));
             m13[std::pmr::string("default")] = gr::pmt::Value(0.5);
             m13[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("float64"));
             m13[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("lowpass_bandwidth"));
@@ -75,7 +75,7 @@ struct FskDemodDcBlock {
             t3.push_back(std::move(e12));
             gr::pmt::Value e14;
             gr::property_map m15;
-            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("boxcar length D of the DC blocker; its notch corner is about sample_rate/D and must stay well under the symbol rate"));
+            m15[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("boxcar length D of the DC blocker, corner about sample_rate/D"));
             m15[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{128});
             m15[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m15[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("dc_block_length"));
@@ -274,9 +274,9 @@ struct FskDemodDcBlock {
         return kDefinition;
     }
 
-    // Builds the composite through the same instantiation path the loader uses — the
-    // bindings attach identically, so live parameter changes behave identically — and
-    // adds it to `graph`. No YAML is parsed and no file is read.
+    // Builds the composite through the loader's instantiation path and adds it to `graph`.
+    // The bindings attach as they do in the loader, and live parameter changes behave the same.
+    // No YAML is parsed and no file is read.
     static std::shared_ptr<gr::BlockModel> emplace(gr::Graph& graph, Parameters parameters) {
         gr::property_map values;
         values[std::pmr::string("sample_rate")] = parameters.sample_rate;
