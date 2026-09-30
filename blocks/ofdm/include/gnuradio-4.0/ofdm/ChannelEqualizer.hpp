@@ -48,7 +48,7 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::OfdmChannelEqualizer)
  *   single-pole per-carrier smoother of coefficient `alpha` takes the result. The interpolation weights are a table
  *   built once at configure time. Per symbol, one `polar` per carrier remains. A phase interpolation cannot avoid
  *   that transcendental.
- * - `none` equalizes on the sync word's estimate alone. The tests measure tracking against this mode.
+ * - `none` equalizes on the sync word's estimate alone.
  *
  * Equalization is zero-forcing, `Y[c]/H[c]`. The reciprocal is kept beside the estimate, and a symbol costs one
  * multiply per carrier and no divide. An MMSE variant and a decision-directed channel update would each swap a

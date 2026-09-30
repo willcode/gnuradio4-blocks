@@ -23,8 +23,8 @@
  * blocks that need it are registered only when `GR4_ENABLE_AFF3CT` is on. The blocks see only
  * this header. It names only this module's own types. It carries no AFF3CT include, exception
  * type or enumeration. The AFF3CT objects live behind a pointer to an
- * implementation type defined in `src/Aff3ctWall.cpp`. The network module's libzmq split set
- * that pattern. A version bump is then a prefix change and a rebuild of one translation unit.
+ * implementation type defined in `src/Aff3ctWall.cpp`. A version bump is then a prefix change
+ * and a rebuild of one translation unit.
  *
  * The adapter does three things itself instead of passing them through.
  *
@@ -91,7 +91,7 @@ struct PolarSettings {
  *
  * The dimensions are fixed at construction. An LDPC decoder holds a graph and a message store
  * sized from the parity-check matrix. Rebuilding either per record would be quietly quadratic. A
- * settings change needs a new object, which a graph rebuild provides.
+ * settings change builds a new object in the block's `rebuild()`.
  */
 class LdpcCodec {
 public:

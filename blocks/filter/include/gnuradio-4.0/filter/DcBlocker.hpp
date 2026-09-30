@@ -76,11 +76,11 @@ match the cascade's group delay. That delay is an exact integer, `D-1` for two b
 subtraction is therefore aligned to the sample. The response is exactly `|1 - A(f)^stages|` with
 `A(f) = sin(pi*D*f/fs) / (D*sin(pi*f/fs))`. It is zero at DC and returns to 1 at every multiple of `fs/D`.
 
-The long form is the default. It is both the flatter and the narrower of the two. At `D = 32` its -3 dB corner sits
-at `0.419 * fs/D`, against `0.573 * fs/D` for the short form. It costs twice the delay and twice the boxcars.
-`length` and `long_form` are construction-time. Changing either would invalidate the pipeline state and the group
-delay at the same moment. `length` must be at least two and `reseed_interval` at least one, or the settings change
-throws.
+The long form is the default. It is both the flatter and the narrower of the two. At `D = 32` its -3 dB corner sits at
+`0.419 * fs/D`, against `0.573 * fs/D` for the short form. It costs twice the delay and twice the boxcars. A longer
+`length` narrows the notch. `length` and `long_form` are construction-time. Changing either would invalidate the
+pipeline state and the group delay at the same moment. `length` must be at least two and `reseed_interval` at least one,
+or the settings change throws.
 
 Each boxcar's running sum is recomputed exactly whenever the absolute sample offset is a multiple of
 `reseed_interval`, oldest sample first. Otherwise the sum is updated incrementally. The recomputation stops a long
@@ -96,7 +96,7 @@ Processing Magazine, Mar. 2008, pp. 132-134.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "length", Doc<"boxcar length D, construction-time, a longer one narrows the notch">>   length          = 32U;
+    Annotated<gr::Size_t, "length", Doc<"boxcar length D, construction-time">>                                   length          = 32U;
     Annotated<bool, "long_form", Doc<"true for four boxcars and 2D-2 delay, false for two and D-1">>             long_form       = true;
     Annotated<gr::Size_t, "reseed_interval", Doc<"absolute sample offsets that are a multiple reseed the sums">> reseed_interval = 4096U;
     Annotated<gr::Size_t, "group_delay", Doc<"read-only, D-1 for the short form and 2D-2 for the long one">>     group_delay     = 62U;
@@ -112,8 +112,8 @@ Processing Magazine, Mar. 2008, pp. 132-134.
     gr::Size_t _builtLength{};   /// the length the current pipeline was built for
     bool       _builtLongForm{}; /// and the form
 
-    /// The pipeline is built from the members. A settings batch that changes no value makes no call. A block
-    /// constructed at its declared defaults therefore starts with its boxcars and delay line in place.
+    /// The pipeline is built from the members. The framework calls settingsChanged() only for a batch that changes a
+    /// value. A block constructed at its declared defaults therefore starts with its boxcars and delay line in place.
     explicit DcBlocker(property_map init = {}) : Block<DcBlocker<T>, UnfilteredTagPropagation>(std::move(init)) { build(); }
 
     void start() { _running = true; }
@@ -123,7 +123,7 @@ Processing Magazine, Mar. 2008, pp. 132-134.
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
         // The block enforces the documented contract. Rebuilding the pipeline mid-stream is not unsafe, since
         // `build()` reassigns every buffer. It does discard the history and move `group_delay`. The block's latency
-        // would then change under any downstream alignment, and no tag would report it. The test compares the
+        // would then change under any downstream alignment, and no tag would report it. The check compares the
         // values in force and not the keys the transaction carried. A transaction can restage a value that did not
         // move.
         if (_running && (length.value != _builtLength || long_form.value != _builtLongForm)) {

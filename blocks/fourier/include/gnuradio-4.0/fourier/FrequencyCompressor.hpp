@@ -114,7 +114,7 @@ sub-frame tail and ends with the stream.
 
     /// @brief State the output rate on the next sample published after it moved, if the block was told a rate at all.
     ///
-    /// The test compares the divisor last stated, not the keys a settings transaction carried. A transaction can
+    /// The check compares the divisor last stated, not the keys a settings transaction carried. A transaction can
     /// restage a value that did not move. A redundant rate tag would leave downstream to decide to ignore it.
     void stateRate(OutputSpanLike auto& outSpan) {
         if (divisor.value == _statedDivisor) {

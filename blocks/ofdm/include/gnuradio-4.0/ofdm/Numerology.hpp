@@ -194,8 +194,7 @@ inline void requireCyclicPrefix(std::span<const gr::Size_t> cycle, gr::Size_t ff
  * A record is a dozen containers and a map. Building one from nothing per symbol costs more than the transform that
  * produced it. An output port returns a slot it has already used, and the assignment reuses that slot's storage.
  * Vectors keep their capacity, strings their buffers, and the map its nodes. Per record, only the values and the few
- * meta entries that change remain to write. The FFT block of the fourier module keeps its record template the same
- * way for the same reason.
+ * meta entries that change remain to write.
  */
 class SymbolRecordShape {
 public:

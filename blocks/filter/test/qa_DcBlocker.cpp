@@ -288,7 +288,7 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
 
     "length and long_form are refused while the block runs; reseed_interval is not"_test = [] {
         // A refused settings change stays staged and re-applies. A block that has refused once goes on refusing.
-        // Each case therefore gets its own block, as in qa_LinearEqualizer for the same reason.
+        // Each case therefore gets its own block.
         const auto running = [](gr::property_map settings) {
             auto block = std::make_unique<DcBlocker<float>>(std::move(settings));
             block->settings().init();

@@ -48,13 +48,13 @@ namespace detail {
 /// The documentation the two banks share, so their settings read the same way.
 using ChannelizerSettingsDoc = Doc<R""(
 `n_channels` is M. `taps` supplies an explicit prototype. When `taps` is empty, a prototype is designed in the family
-`prototype` names. `root_nyquist`, the default, is a root-raised cosine of excess bandwidth `transition` covering
-`span` channel spacings. Its squared responses sum flat across the bank. An analysis and a synthesis bank then cancel
-each other. It still rejects 61 to 72 dB across the channel counts this bank accepts. `lowpass` is a Kaiser at half a
-channel spacing with `attenuation_db` of stopband rejection and a transition of `transition` channel spacings. It
-rejects some 30 dB more and costs more taps. It does not reconstruct at all. `boxcar` is one channel long. The bank is
-then a plain block transform whose inverse is its own synthesis. The lowpass search designs to a target. The other
-families have no target and are measured.
+`prototype` names. `root_nyquist`, the default, is a root-raised cosine of excess bandwidth `transition` covering `span`
+channel spacings. The span sets its rejection. Its squared responses sum flat across the bank. An analysis and a
+synthesis bank then cancel each other. It still rejects 61 to 72 dB across the channel counts this bank accepts.
+`lowpass` is a Kaiser at half a channel spacing with `attenuation_db` of stopband rejection and a transition of
+`transition` channel spacings. It rejects some 30 dB more and costs more taps. It does not reconstruct at all. `boxcar`
+is one channel long. The bank is then a plain block transform whose inverse is its own synthesis. The lowpass search
+designs to a target. The other families have no target and are measured.
 
 Critical sampling forces a choice between isolation and reconstruction. The three families are the corners of that
 choice. The table gives, at sixteen channels, the worst leakage into a channel two or more away and the
@@ -108,7 +108,7 @@ channel rate and not the input rate.
     Annotated<double, "attenuation_db", Unit<"dB">, Doc<"stopband target of the lowpass search">>                                                    attenuation_db = 60.0;
     Annotated<double, "transition", Doc<"excess bandwidth in channel spacings, lowpass transition or root-Nyquist rolloff">>                         transition     = 0.5;
     Annotated<std::string, "prototype", Visible, Doc<"'root_nyquist', 'lowpass' to reject the most, or 'boxcar' to reconstruct critically sampled">> prototype      = std::string("root_nyquist");
-    Annotated<gr::Size_t, "span", Doc<"channel spacings the root_nyquist prototype covers, setting its rejection, at least 2">>                      span           = 16U;
+    Annotated<gr::Size_t, "span", Doc<"channel spacings the root_nyquist prototype covers, at least 2">>                                             span           = 16U;
     Annotated<gr::Size_t, "oversample", Visible, Doc<"1 for critical sampling, 2 for a commutator stride of M/2">>                                   oversample     = 1U;
 
     GR_MAKE_REFLECTABLE(PolyphaseChannelizer, in, out, n_channels, taps, designed_taps, stopband_db, ripple_db, design_ok, attenuation_db, transition, prototype, span, oversample);
@@ -118,9 +118,9 @@ channel rate and not the input rate.
     std::size_t                         _channels = 4UZ;
     std::size_t                         _stride   = 4UZ;
 
-    /// The bank is built from the members. A settings batch that changes no value makes no call. A block constructed
-    /// at its declared defaults must still start with its ports plumbed. The graph reads the port collection once, at
-    /// the first connection.
+    /// The bank is built from the members. The framework calls settingsChanged() only for a batch that changes a
+    /// value. A block constructed at its declared defaults must still start with its ports plumbed. The graph reads
+    /// the port collection once, at the first connection.
     explicit PolyphaseChannelizer(property_map init = {}) : Block<PolyphaseChannelizer<F>, NoTagPropagation, Resampling<1UZ, 1UZ, false>>(std::move(init)) { rebuild(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
@@ -232,7 +232,7 @@ block carries it around the bank.
     Annotated<double, "attenuation_db", Unit<"dB">, Doc<"stopband target of the lowpass search">>                                                    attenuation_db = 60.0;
     Annotated<double, "transition", Doc<"excess bandwidth in channel spacings, lowpass transition or root-Nyquist rolloff">>                         transition     = 0.5;
     Annotated<std::string, "prototype", Visible, Doc<"'root_nyquist', 'lowpass' to reject the most, or 'boxcar' to reconstruct critically sampled">> prototype      = std::string("root_nyquist");
-    Annotated<gr::Size_t, "span", Doc<"channel spacings the root_nyquist prototype covers, setting its rejection, at least 2">>                      span           = 16U;
+    Annotated<gr::Size_t, "span", Doc<"channel spacings the root_nyquist prototype covers, at least 2">>                                             span           = 16U;
     Annotated<gr::Size_t, "oversample", Visible, Doc<"1 for critical sampling, 2 for a commutator stride of M/2">>                                   oversample     = 1U;
 
     GR_MAKE_REFLECTABLE(PolyphaseSynthesizer, in, out, n_channels, taps, designed_taps, stopband_db, ripple_db, design_ok, attenuation_db, transition, prototype, span, oversample);

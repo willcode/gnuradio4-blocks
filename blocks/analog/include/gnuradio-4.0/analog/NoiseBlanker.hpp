@@ -53,27 +53,28 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
 
 A sample whose power exceeds the tracked mean power by `threshold_db` opens a window of `blank_samples`. The
 `lookback_samples` before it are replaced too. `replacement` chooses how. The output is the input delayed by
-`delay_samples` in every case, including while disabled. The default `threshold_db = 9.32` blanks 0.17 % of a clean
-circular-complex-Gaussian stream.
+`delay_samples` in every case, including while disabled. Enabling the block restarts the warm-up. A change of
+`sample_rate` retunes the tracker and restarts the warm-up. `blank_samples` and `lookback_samples` together set the
+delay. The default `threshold_db = 9.32` blanks 0.17 % of a clean circular-complex-Gaussian stream.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<bool, "enabled", Doc<"false passes through with the same delay, true restarts the warm-up">, Visible>        enabled            = false;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate, retuning the tracker and restarting warm-up on change">> sample_rate        = 96000.f;
-    Annotated<double, "threshold_db", Unit<"dB">, Doc<"how far above the tracked mean power a sample must be">, Visible>   threshold_db       = 9.32;
-    Annotated<double, "averaging_time", Unit<"s">, Doc<"tracker time constant, 0 to use alpha directly">>                  averaging_time     = 0.01;
-    Annotated<double, "alpha", Doc<"the pole when averaging_time is 0, read back as the resolved value">>                  alpha              = 1e-3;
-    Annotated<gr::Size_t, "blank_samples", Doc<"length of the replaced run after a detection, part of the delay">>         blank_samples      = 7U;
-    Annotated<gr::Size_t, "lookback_samples", Doc<"samples before the detected one also replaced, part of the delay">>     lookback_samples   = 2U;
-    Annotated<std::string, "replacement", Doc<"'interpolate' (default), 'hold' or 'zero'">, Visible>                       replacement        = std::string("interpolate");
-    Annotated<bool, "retrigger", Doc<"restart the window on a detection inside one, up to max_window_samples">>            retrigger          = false;
-    Annotated<gr::Size_t, "max_window_samples", Doc<"cap on a retriggering window, 0 for 4 * blank_samples">>              max_window_samples = 0U;
-    Annotated<bool, "emit_tags", Doc<"publish a private noise_blanked tag at each replaced run, with its length">>         emit_tags          = false;
-    Annotated<gr::Size_t, "delay_samples", Doc<"observable lookback_samples + blank_samples, present when disabled">>      delay_samples      = 9U;
-    Annotated<double, "tracked_power", Doc<"observable censored mean power the threshold is taken against">>               tracked_power      = 0.0;
-    Annotated<double, "blanked_fraction", Doc<"observable slow average of the replaced duty">>                             blanked_fraction   = 0.0;
+    Annotated<bool, "enabled", Doc<"blanking switch">, Visible>                                                          enabled            = false;
+    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate">>                                                      sample_rate        = 96000.f;
+    Annotated<double, "threshold_db", Unit<"dB">, Doc<"how far above the tracked mean power a sample must be">, Visible> threshold_db       = 9.32;
+    Annotated<double, "averaging_time", Unit<"s">, Doc<"tracker time constant, 0 to use alpha directly">>                averaging_time     = 0.01;
+    Annotated<double, "alpha", Doc<"the pole when averaging_time is 0, read back as the resolved value">>                alpha              = 1e-3;
+    Annotated<gr::Size_t, "blank_samples", Doc<"length of the replaced run after a detection">>                          blank_samples      = 7U;
+    Annotated<gr::Size_t, "lookback_samples", Doc<"samples before the detected one also replaced">>                      lookback_samples   = 2U;
+    Annotated<std::string, "replacement", Doc<"'interpolate' (default), 'hold' or 'zero'">, Visible>                     replacement        = std::string("interpolate");
+    Annotated<bool, "retrigger", Doc<"restart the window on a detection inside one, up to max_window_samples">>          retrigger          = false;
+    Annotated<gr::Size_t, "max_window_samples", Doc<"cap on a retriggering window, 0 for 4 * blank_samples">>            max_window_samples = 0U;
+    Annotated<bool, "emit_tags", Doc<"publish a private noise_blanked tag at each replaced run, with its length">>       emit_tags          = false;
+    Annotated<gr::Size_t, "delay_samples", Doc<"observable lookback_samples + blank_samples, present when disabled">>    delay_samples      = 9U;
+    Annotated<double, "tracked_power", Doc<"observable censored mean power the threshold is taken against">>             tracked_power      = 0.0;
+    Annotated<double, "blanked_fraction", Doc<"observable slow average of the replaced duty">>                           blanked_fraction   = 0.0;
 
     GR_MAKE_REFLECTABLE(NoiseBlanker, in, out, enabled, sample_rate, threshold_db, averaging_time, alpha, blank_samples, lookback_samples, replacement, retrigger, max_window_samples, emit_tags, delay_samples, tracked_power, blanked_fraction);
 
@@ -98,9 +99,9 @@ circular-complex-Gaussian stream.
     std::uint32_t             _runPosition  = 0U;
     T                         _anchor{};
 
-    /// The coefficients and the delay line are derived from the members. A settings batch that changes no value
-    /// makes no call. A block constructed at its declared defaults therefore starts with the line its settings
-    /// describe.
+    /// The coefficients and the delay line are derived from the members. The framework calls settingsChanged() only
+    /// for a batch that changes a value. A block constructed at its declared defaults therefore starts with the line
+    /// its settings describe.
     explicit NoiseBlanker(property_map init = {}) : Block<NoiseBlanker<T>, NoTagPropagation>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {

@@ -33,6 +33,8 @@
  *
  * `epoch` applies to CUC and CDS alone and is refused for CCS and ASCII. `epoch_ns` is required when `epoch` is
  * 'custom' and refused otherwise. `tai_utc_offset_s` applies to CUC alone and is refused for CDS, CCS and ASCII.
+ * `fraction_digits` and `terminator` are refused for the binary codes at any value but their defaults. The decoder
+ * refuses any `p_field` for the ASCII codes.
  */
 namespace gr::blocks::ccsds {
 

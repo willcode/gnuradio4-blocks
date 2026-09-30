@@ -123,8 +123,8 @@ void fromFrame(const std::vector<int>& frame, std::span<std::uint8_t> bits) {
  *
  * Here a positive value carries a one. In AFF3CT it favors a zero. The conversion is a negation
  * alone, with no scaling. Every decoder behind this adapter is either a min-sum family, whose
- * decisions are invariant under a positive scale, or a sum-product one. The caller scales the
- * LLRs of a sum-product decoder by the channel it measured.
+ * decisions are invariant under a positive scale, or a sum-product one. A sum-product decoder
+ * needs LLRs scaled by the measured channel.
  */
 void toAff3ctLlr(std::span<const float> llr, std::vector<float>& frame) {
     frame.resize(llr.size());

@@ -1,7 +1,7 @@
 # The LDPC and Polar families come from AFF3CT. AFF3CT is an option, not a dependency. The module builds whole without
-# it, and the four blocks that need it are registered only when the gate is on. The network module splits libzmq the
-# same way, with one addition. The AFF3CT headers reach no installed header of this module. The adapter is a compiled
-# translation unit behind a pointer, and the block headers name this module's own types only.
+# it, and the four blocks that need it are registered only when the gate is on. The AFF3CT headers reach no installed
+# header of this module. The adapter is a compiled translation unit behind a pointer, and the block headers name this
+# module's own types only.
 option(GR4_ENABLE_AFF3CT "build the LDPC and Polar blocks against a pinned AFF3CT release" OFF)
 
 set(GR4_FEC_HAVE_AFF3CT FALSE)

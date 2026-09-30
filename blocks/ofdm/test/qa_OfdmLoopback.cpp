@@ -29,10 +29,9 @@
  * the Schmidl-Cox sync, prefix removal with its forward transform, the equalizer and the decoder. The test measures
  * the bit error rate at two pinned operating points.
  *
- * The specified chain has a separate IFFT and FFT between the allocator and the prefix blocks. The FFT block of the
- * fourier module carries no complex symbol record on either side, and that module has no inverse block. The
- * transforms are therefore inside CpInsert and CpRemove. They use the same library kernel, called once each. These
- * two are the blocks where the domains meet.
+ * A textbook chain has a separate IFFT and FFT between the allocator and the prefix blocks. Here the transforms are
+ * inside CpInsert and CpRemove. They use the same library kernel, called once each. These two are the blocks where
+ * the domains meet.
  */
 namespace qa_ofdm_loopback {
 

@@ -1,4 +1,4 @@
-/* The acceptance gate for the CCSDS coding row. The concatenated code is an inner
+/* The concatenated CCSDS code against its published curve. The code is an inner
  * constraint-length-7 rate-1/2 code under the 'ccsds' convention and an outer Reed-Solomon
  * (255,223) at interleave 5. It runs over a seeded additive white Gaussian noise channel. The
  * decoded information bit error rate is read against the performance CCSDS itself publishes.
@@ -6,9 +6,8 @@
  * The published curve is the I = 5 trace of CCSDS 130.1-G-3 (June 2020), figure 6-7. This test
  * matches its stated assumptions. They are unquantized soft-decision Viterbi decoding, ideal
  * synchronization, and Eb/N0 counted per information bit, which covers both code rates. The
- * operating points, the readings taken off the curve, the envelope and the frame counts were
- * fixed before the first run and not changed after it. The envelope is asserted in both
- * directions. A rate far below the curve is as wrong as one far above it.
+ * envelope is asserted in both directions. A rate far below the curve is as wrong as one far
+ * above it.
  *
  * The decode uses the record-native shape the recipes run, not a streaming approximation. The
  * encoded marker's 52 state-independent symbols open each record and serve as the trellis's

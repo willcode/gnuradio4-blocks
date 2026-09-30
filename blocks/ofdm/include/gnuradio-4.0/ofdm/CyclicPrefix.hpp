@@ -31,11 +31,9 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::CpInsert)
 /**
  * @brief Converts frequency-domain symbol records into a time-domain stream with cyclic prefixes.
  *
- * This block is one of the two where the domains meet. It takes the inverse transform as well as adding the prefix.
- * The FFT block of the fourier module takes a stream and emits a four-signal real `DataSet` of magnitude, phase and
- * parts. It neither accepts nor produces a `DataSet<complex<float>>` symbol, and that module has no inverse block.
- * The FFT block therefore cannot sit between a symbol source and this block. This block takes the transform on the
- * library kernel, the same kernel the fourier block uses. It reuses that kernel and adds no second FFT.
+ * This block is one of the two where the domains meet. It takes the inverse transform as well as adding the prefix,
+ * because it consumes complex symbol records. The transform runs on the library FFT kernel, and the block adds no
+ * second FFT.
  *
  * The transform is the inverse DFT with its `1/fft_len`. The library's transforms are unnormalized. This block
  * applies the scaling, and the forward transform of `CpRemove` returns the record it started from.
@@ -54,7 +52,7 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::CpInsert)
  * between. The tag is a transmit-side marker and never goes on air. `emit_trigger` turns it off.
  */
 struct CpInsert : Block<CpInsert, NoTagPropagation> {
-    using Description = Doc<"Converts DataSet<complex<float>> symbol records into a time-domain complex stream with cyclic prefixes. It takes the inverse transform, since the FFT block of the fourier module neither takes nor returns a complex symbol record. cp_len is a scalar or a per-symbol cycle restarting at each frame. Optional window_len raised-cosine samples smooth the symbol edges. A frame's first sample carries a trigger tag">;
+    using Description = Doc<"Converts DataSet<complex<float>> symbol records into a time-domain complex stream with cyclic prefixes. It takes the inverse transform, because it consumes complex symbol records. cp_len is a scalar or a per-symbol cycle restarting at each frame. Optional window_len raised-cosine samples smooth the symbol edges. A frame's first sample carries a trigger tag">;
 
     PortIn<DataSet<Complex>, Async> in;
     PortOut<Complex>                out;
@@ -284,8 +282,10 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
         rebuild();
     }
 
-    /// @brief Builds the cut, the transform buffers and the record shape from the members. It is idempotent.
-    /// `start()` runs it for a construction that moved no value and made no callback.
+    /// @brief Builds the cut, the transform buffers and the record shape from the members.
+    ///
+    /// It is idempotent. The framework calls settingsChanged() only for a batch that changes a value. `start()` runs it
+    /// when construction changed no value.
     void rebuild() {
         detail::requireFftLength(fft_len);
         detail::requireCyclicPrefix(std::span<const gr::Size_t>(cp_len.value), fft_len);

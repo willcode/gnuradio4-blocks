@@ -23,10 +23,9 @@
  * @brief `FieldRouter` routes a record by a CCSDS field that the decoder has written to metadata.
  *
  * One block serves two profiles, `"apid"` and `"virtual_channel"`. It has N output ports plus `other`, not one port
- * with a metadata filter. `basic::Selector` uses the same `std::vector<PortOut<T, Async>>` shape. The routing is
- * visible in the flowgraph. The block reads the field once, and the branch is a port assignment. It evaluates no
- * predicate per candidate. The port set is fixed. A graph that needs a metadata filter instead can read the field
- * the decoder has written, without this block.
+ * with a metadata filter. The ports are a `std::vector<PortOut<T, Async>>`. The routing is visible in the flowgraph.
+ * The block reads the field once, and the branch is a port assignment. It evaluates no predicate per candidate. The
+ * port set is fixed.
  */
 namespace gr::blocks::ccsds {
 

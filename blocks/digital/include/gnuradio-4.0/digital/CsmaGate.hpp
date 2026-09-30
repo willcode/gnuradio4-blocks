@@ -19,11 +19,11 @@
  * to one boolean and one counter. A record is atomic. There is no packet in flight to track and no length tag to
  * read.
  *
- * `sense` carries one carrier-sense observation per item, not per sample. Non-zero is busy and zero is clear. The
- * gate keeps only the newest item it has seen. It consumes the whole span every call and reads none of the values
- * it discards. `sense` is a required port, not `gr::Optional`. An unconnected sense port has two possible readings,
- * and both are silently wrong. Always clear gives a gate that never gates. Always busy gives a permanent stall. A
- * refused connection cannot be mistaken for either.
+ * `sense` carries one carrier-sense observation per item, not per sample. Non-zero is busy and zero is clear. The gate
+ * keeps only the newest item it has seen. It consumes the whole span every call and reads none of the values it
+ * discards. `sense` is a required port, not `gr::Optional`. An unconnected sense port has two possible readings, and
+ * both are silently wrong. Always clear gives a gate that never gates. Always busy gives a permanent stall. The
+ * scheduler still accepts a graph with `sense` unconnected. The gate then stays busy and releases no record.
  */
 namespace gr::blocks::digital {
 
@@ -45,9 +45,9 @@ waits through do not count it again. The number is records delayed, not calls wa
 calls that `sense` itself gated. Read together, the two tell a busy medium from a stalled graph. A CSMA gate
 otherwise looks the same in both cases.
 
-The gate is busy until a sense item shows a clear channel, at start and after any settings change. An unconfirmed
-channel cannot transmit over another station. A settings change or a `stop()` discards any release allowance.
-`nAllowanceDiscarded` counts the discarded releases.
+The gate is busy until a sense item shows a clear channel, at start and after any settings change. Holding while the
+channel is unconfirmed never transmits over another station. A settings change or a `stop()` discards any release
+allowance. `nAllowanceDiscarded` counts the discarded releases.
 */
 struct CsmaGate : Block<CsmaGate> {
     using Description = Doc<"CSMA gate that holds DataSet<uint8_t> records while the newest 'sense' item says busy and releases burst_records at a time when it says clear">;

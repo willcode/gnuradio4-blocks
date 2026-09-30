@@ -233,7 +233,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(eq(hMax.data_length, std::uint16_t{65535}));
         expect(eq(totalPacketOctets(hMax), std::size_t{65542}));
 
-        // the surveyed convention data_length = payload_octets produces a total one octet short
+        // a header built with the common mistake data_length = payload_octets claims a total one octet longer than the
+        // packet
         SpacePacketHeader wrong{.version = 0, .type = false, .secondary_header = false, .apid = 1, .sequence_flags = 3, .sequence_count = 0, .data_length = 100};
         expect(eq(totalPacketOctets(wrong), std::size_t{107})) << "a header built with data_length = payload_octets claims a total of 107 octets for a packet that occupies 106 on the wire";
     };
