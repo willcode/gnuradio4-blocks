@@ -32,9 +32,9 @@ using CF = std::complex<float>;
 constexpr std::size_t kFft        = 256UZ;
 constexpr float       kSampleRate = 48000.f;
 
-/// Emits a fixed sequence in bursts of a stated size, then ends the stream. The burst size is what makes chunk
-/// independence testable: the same samples presented differently must produce the same records. `tags` are stamped at
-/// their absolute sample index, which is how a setting is moved on a block inside a running graph.
+/// Emits a fixed sequence in bursts of a stated size, then ends the stream. The burst size makes chunk independence
+/// testable. The same samples presented differently must produce the same records. `tags` are stamped at their
+/// absolute sample index. A tag changes a setting on a block inside a running graph.
 template<typename T>
 struct BurstSource : gr::Block<BurstSource<T>> {
     gr::PortOut<T> out;
@@ -65,15 +65,15 @@ struct BurstSource : gr::Block<BurstSource<T>> {
     }
 };
 
-/// Takes at most `stride` records a call, so a small stride puts the block under back-pressure and makes the
-/// no-record-lost invariant testable: the records must be the same ones a sink that keeps up receives.
+/// Takes at most `stride` records a call. A small stride puts the block under back-pressure and makes the
+/// no-record-lost invariant testable. The records must match the ones a sink that keeps up receives.
 struct RecordSink : gr::Block<RecordSink> {
     gr::PortIn<gr::DataSet<float>, gr::Async> in;
 
     std::vector<gr::DataSet<float>> records{};
     std::size_t                     stride = std::numeric_limits<std::size_t>::max();
     std::size_t                     seen   = 0UZ;  ///< records taken, which `keep` does not change
-    bool                            keep   = true; ///< off drops what arrives, so a rate measurement is not a memory one
+    bool                            keep   = true; ///< off drops what arrives, so a rate measurement does not measure memory
 
     GR_MAKE_REFLECTABLE(RecordSink, in);
 
@@ -98,7 +98,7 @@ struct RecordSink : gr::Block<RecordSink> {
     return data;
 }
 
-/// Emits a fixed list of density records, then ends the stream. What feeds a detector its input.
+/// Emits a fixed list of density records, then ends the stream. It feeds a detector its input.
 struct RecordSource : gr::Block<RecordSource> {
     gr::PortOut<gr::DataSet<float>, gr::Async> out;
 
@@ -123,7 +123,7 @@ struct RecordSource : gr::Block<RecordSource> {
     }
 };
 
-/// @brief Seeded standard normal pairs, which is what a complex white-noise sample is made of.
+/// @brief Seeded standard normal pairs, the parts of a complex white-noise sample.
 struct GaussianNoise {
     std::uint64_t state = 0x243f6a8885a308d3ULL;
 
@@ -145,8 +145,8 @@ struct GaussianNoise {
  * @brief The five facts `DataSetToStream` admits a record on, in its own order. Returns the reason it would reject
  * the record, or nullptr.
  *
- * That predicate is a private static member of the block, so it cannot be called from here; these are the same five
- * conditions, restated. A record this rejects cannot be read by the Tier-1 consumer, whatever else it carries.
+ * That predicate is a private static member of the block and cannot be called from here. These are the same five
+ * conditions, restated. `DataSetToStream` cannot read a record this rejects, whatever else it carries.
  */
 [[nodiscard]] const char* admissionFailure(const gr::DataSet<float>& ds, std::size_t signalIndex = 0UZ) {
     if (ds.signal_names.empty()) {
@@ -222,8 +222,8 @@ template<typename TBlock>
     return sink.records;
 }
 
-/// @brief The relative variance of a record's bins — the estimator variance Welch's method trades against resolution,
-/// read across the bins of white noise, which are independent draws of the same distribution.
+/// @brief The relative variance of a record's bins. This is the estimator variance Welch's method trades against
+/// resolution. It is read across the bins of white noise, which are independent draws of the same distribution.
 [[nodiscard]] double relativeVariance(const gr::DataSet<float>& record) {
     const auto& values = record.signal_values;
     double      mean   = 0.;
@@ -253,13 +253,13 @@ template<typename TBlock>
     return static_cast<double>(detections.signal_values[best]) * static_cast<double>(fftSize) / static_cast<double>(sampleRate);
 }
 
-/// @brief What a record states its computation cost, beside the wall clock of the single `processBulk` call that
-/// produced it. The call brackets everything the stated figure covers and a little more — the segment's copy into the
-/// accumulator's buffer and the span bookkeeping — so a truthful figure lies inside the call and is a large part of it.
+/// @brief The computation cost a record states, beside the wall clock of the single `processBulk` call that produced
+/// it. The call brackets everything the stated figure covers and a little more. The extra is the segment's copy into
+/// the accumulator's buffer and the span bookkeeping. A truthful figure lies inside the call and is a large part of it.
 /// `settings` must name a length and whatever else makes one whole segment complete one record.
 ///
-/// The reading is taken after `warmup` records, because the first record a block makes carries the transform's plan and
-/// the first touch of every buffer with it and states a cost tens of times the standing one.
+/// The reading is taken after `warmup` records. The first record a block makes carries the transform's plan and the
+/// first touch of every buffer. It states a cost tens of times the standing one.
 template<typename TBlock>
 [[nodiscard]] std::pair<double, double> oneRecordCost(gr::property_map settings, std::size_t fftSize, std::size_t warmup = 2UZ) {
     TBlock block(std::move(settings));
@@ -284,9 +284,9 @@ template<typename TBlock>
     return reading;
 }
 
-/// @brief The same two figures for a graph that runs one record end to end, which is the reading a consumer of the
-/// record can take for itself: the graph's wall clock carries the scheduler's start-up, the source's copies and the
-/// record's copy out to the sink as well as the block's own computation.
+/// @brief The same two figures for a graph that runs one record end to end. A consumer of the record can take this
+/// reading for itself. The graph's wall clock covers the scheduler's start-up, the source's copies and the record's
+/// copy out to the sink, as well as the block's own computation.
 template<typename TBlock>
 [[nodiscard]] std::pair<double, double> oneRecordGraphCost(gr::property_map settings, std::size_t fftSize) {
     gr::test::RuntimeTest test;
@@ -306,8 +306,8 @@ template<typename TBlock>
     return {sink.records.empty() ? -1. : metaNumber(sink.records.front(), "compute_seconds", -1.), outside};
 }
 
-/// @brief The records a second one graph made, and how many it made: a fixed stream through one block into a sink that
-/// drops what it is handed. What the input cap costs is the difference between two of these.
+/// @brief The records per second one graph made, and how many it made. The graph runs a fixed stream through one block
+/// into a sink that drops what it receives. The cost of the input cap is the difference between two of these.
 template<typename TBlock>
 [[nodiscard]] std::pair<double, std::size_t> recordRate(gr::property_map settings, std::size_t samples) {
     gr::test::RuntimeTest test;
@@ -434,8 +434,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "a hop above fft_size transforms one segment in every hop and consumes the rest"_test = [] {
-        // The duty-cycle contract: 256 points out of every 1024 samples. What the block must NOT do is transform the
-        // other 768, and what it must still do is count them, so the rows stay where the stream put them.
+        // The duty-cycle contract takes 256 points out of every 1024 samples. The block must NOT transform the other
+        // 768. It must still count them, and the rows stay where the stream put them.
         constexpr std::size_t  kHop     = 1024UZ;
         constexpr std::size_t  kSamples = kHop * 10UZ;
         const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{kHop}}, {"sample_rate", kSampleRate}};
@@ -452,8 +452,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "a skipped gap changes nothing about the segments that are transformed"_test = [] {
-        // The same stream read at hop 1024 and at hop 256: the hop-1024 records must be bit-identical to every fourth
-        // hop-256 record, since each is the same 256 samples through the same window.
+        // The same stream read at hop 1024 and at hop 256. The hop-1024 records must be bit-identical to every fourth
+        // hop-256 record. Each is the same 256 samples through the same window.
         const auto             samples = tone(kFft * 16UZ, 32., kFft);
         const gr::property_map gapped{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{kFft * 4UZ}}, {"sample_rate", kSampleRate}};
         const gr::property_map dense{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
@@ -501,7 +501,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "a hop below fft_size is an overlap named in samples"_test = [] {
-        // The point of the samples spelling: a hop a fraction cannot express. 100 out of 256 is one of them.
+        // A hop in samples can express a hop no fraction expresses, such as 100 out of 256.
         const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{100U}}, {"sample_rate", kSampleRate}};
         const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
 
@@ -545,8 +545,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "window_param builds the window the library builds, and the record says which one it is"_test = [] {
-        // gqrx4's display is calibrated at Kaiser beta 6.76; the library's own default is 1.6, which costs about 45 dB
-        // of sidelobe. A block that cannot be told the beta cannot produce that display's spectrum.
+        // A display calibrated at Kaiser beta 6.76 needs that beta. The library's own default is 1.6, which costs about
+        // 45 dB of sidelobe. A block that cannot be told the beta cannot produce that display's spectrum.
         constexpr float kBeta = 6.76f;
 
         const auto build = [](gr::property_map settings) {
@@ -575,8 +575,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
             expect(omitted->_core.window[k] == library[k]) << "tap " << k << " does not match the library's own default";
         }
 
-        // The window changes the noise bandwidth, so a record that names the window without the parameter under-states
-        // its own calibration; both facts ride in the metadata.
+        // The window changes the noise bandwidth. A record that names the window without the parameter under-states
+        // its own calibration. Both facts go in the metadata.
         const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}, {"window_param", kBeta}};
         const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
         expect(!records.empty());
@@ -593,9 +593,9 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         }
         expect(approx(metaNumber(plain.front(), "window_param"), 1.6, 1e-5)) << "and with no parameter stated the record names the default the library used, not the zero the setting held";
 
-        // The calibration follows the parameter, which is the reason the record has to state it: a larger beta trades
-        // sidelobe level for a wider main lobe, so the noise bandwidth the reader divides out is a different number.
-        // The relationship is what is asserted; the figures are recorded rather than pinned.
+        // The calibration follows the parameter, and the record has to state it. A larger beta trades sidelobe level
+        // for a wider main lobe. The noise bandwidth the reader divides out then changes. The test asserts the
+        // relationship and records the figures without pinning them.
         const double statedEnbw  = metaNumber(records.front(), "enbw_bins");
         const double defaultEnbw = metaNumber(plain.front(), "enbw_bins");
         std::println("window_param: Kaiser ENBW {:.4f} bins at beta {:.2f}, {:.4f} at the default 1.6", statedEnbw, static_cast<double>(kBeta), defaultEnbw);
@@ -616,9 +616,9 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "the ceiling is a receiver's largest display size, and what it costs is stated"_test = [] {
-        // Accepting 2^22 is what the test can afford: a 2^22-point transform is about 15 ms and its record is 32 MiB,
-        // which belongs in a bench and not in a test budget. What must hold here is that the setting is taken, that
-        // the accumulator is built for the length, and that a size well above the old 65536 ceiling runs end to end.
+        // The test checks only that 2^22 is accepted. A 2^22-point transform takes about 15 ms and its record is
+        // 32 MiB, which belongs in a bench and not in a test. The setting must be taken, and the accumulator must be
+        // built for the length. A size well above 65536 must run end to end.
         constexpr gr::Size_t kCeiling = 4194304U;
 
         WelchPsd<CF> atCeiling({{"fft_size", kCeiling}, {"n_averages", gr::Size_t{1U}}, {"sample_rate", kSampleRate}});
@@ -636,8 +636,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         };
         expect(throws([&] { refused(kCeiling * 2U); })) << "and one size above it is not";
 
-        // A mid size, run whole: 65536 was the old ceiling, so this is the first length the amendment admits into a
-        // running graph rather than merely into a settings map.
+        // A mid size above 65536, run whole in a running graph and not only in a settings map.
         constexpr std::size_t  kMid = 65536UZ;
         const gr::property_map settings{{"fft_size", gr::Size_t{static_cast<unsigned>(kMid)}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
         const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kMid * 3UZ, 1024., kMid), 65536UZ);
@@ -665,7 +664,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "a stream ending mid-average flushes what it has, marked with its count"_test = [] {
-        // five whole segments where the setting asks for eight: the one record that comes out is the flush
+        // five whole segments where the setting asks for eight, so the one record that comes out is the flush
         const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{8U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}};
         const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 5UZ, 32., kFft), 4096UZ);
 
@@ -697,11 +696,11 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "a starved call says it lacks input rather than answering OK"_test = [] {
-        // `in.min_samples` does not keep an empty span away from this block: an asynchronous output port is by
-        // itself reason enough for the framework to run the block with no input at all, which is the path that
-        // lets a full accumulation flush. A call that neither takes nor makes anything and still answers OK tells
-        // the scheduler that it made progress, so the scheduler re-runs it at once and never parks -- and the
-        // framework's own zero-progress watch then names this block for a stall that is upstream of it.
+        // `in.min_samples` does not keep an empty span away from this block. The framework runs the block with no
+        // input because its output port is asynchronous. That path lets a full accumulation flush. A call that
+        // neither takes nor makes anything and answers OK reports progress to the scheduler. The scheduler then
+        // re-runs the block at once and does not park it. The framework's zero-progress watch would then name this
+        // block for a stall upstream of it.
         const auto fresh = [] {
             auto block = std::make_unique<WelchPsd<CF>>(gr::property_map{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});
             block->settings().init();
@@ -718,15 +717,15 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(starved->processBulk(noInput, outEmpty) == gr::work::Status::INSUFFICIENT_INPUT_ITEMS) << "an empty span is a lack of input, not progress";
         expect(eq(outEmpty.count, 0UZ)) << "and nothing is published on that path";
 
-        // One sample is still nothing this block can use: it holds a sample back so the end-of-stream epilogue
-        // has a span to run on, which is what `in.min_samples = 2` asks the framework for.
+        // One sample is still nothing this block can use. It holds a sample back for the end-of-stream epilogue,
+        // and `in.min_samples = 2` asks the framework for that.
         const std::vector<CF>                                     single{CF{1.f, 0.f}};
         gr::blocks::testing::span::InputSpan<CF>                  oneSample{std::span<const CF>(single)};
         gr::blocks::testing::span::OutputSpan<gr::DataSet<float>> outOne{std::span<gr::DataSet<float>>(room)};
         expect(starved->processBulk(oneSample, outOne) == gr::work::Status::INSUFFICIENT_INPUT_ITEMS) << "one sample is the held-back sample and nothing else";
         expect(eq(oneSample.consumed, 0UZ)) << "and it stays in the buffer";
 
-        // A span it can work with answers OK, so the status distinguishes the two cases rather than reporting one.
+        // A span the block can work with answers OK, and the status tells the two cases apart.
         auto                                                      fed     = fresh();
         const std::vector<CF>                                     samples = tone(kFft + 1UZ, 32., kFft);
         gr::blocks::testing::span::InputSpan<CF>                  hasInput{std::span<const CF>(samples)};
@@ -803,9 +802,9 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "a live fft_size change reaches a block inside a running graph, through a tag"_test = [] {
-        // The framework's own path for a setting that moves mid-stream: a tag whose key names a setting the block did
-        // not have written at construction. fft_size is therefore left at its 1024 default here, which is what makes
-        // it auto-updatable; the source stamps the change at a known sample and the records either side are read.
+        // The framework changes a setting mid-stream through a tag whose key names a setting not written at
+        // construction. fft_size is left at its 1024 default here, which keeps it auto-updatable. The source stamps
+        // the change at a known sample, and the test reads the records on either side.
         constexpr std::size_t kFirst  = 1024UZ; // the block's default
         constexpr std::size_t kSecond = 256UZ;
         constexpr std::size_t kAt     = 4096UZ; // the change lands here, on a segment boundary of the old grid
@@ -845,7 +844,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(atFirst > 0UZ) << "records at the first length";
         expect(atSecond > 0UZ) << "and records at the second, which is the whole point";
 
-        // The stream position keeps counting the same stream across the change: sample_start never goes backwards.
+        // The stream position keeps counting the same stream across the change, and sample_start does not go back.
         for (std::size_t r = 1UZ; r < records.size(); ++r) {
             expect(metaNumber(records[r], "sample_start") > metaNumber(records[r - 1UZ], "sample_start")) << "record " << r << " went backwards in the stream";
         }
@@ -861,16 +860,16 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         block._core.streamAt = 999ULL;
         block._core.pending.assign(7UZ, CF{});
 
-        block.start(); // the framework's own second run; the block keeps no state that a stop would have to clear
+        block.start(); // the framework's second run, with no state a stop would have to clear
         expect(!block._flushed) << "a second run's flush must not be suppressed by the first run's";
         expect(eq(block._core.streamAt, std::uint64_t{0ULL})) << "and the grid is anchored at the new stream's origin";
         expect(block._core.pending.empty());
     };
 
     "criterion 2: halving n_averages doubles the estimator variance, within an envelope"_test = [] {
-        // Welch's own statistics: n independent periodograms of white noise average to a per-bin estimate whose
-        // variance is the square of its mean over n. The ratio between 32 and 64 averages is therefore 2, and the
-        // measured figure is recorded rather than merely bounded. Segments do not overlap, so they are independent.
+        // By Welch's statistics, n independent periodograms of white noise average to a per-bin estimate whose
+        // variance is the square of its mean over n. The ratio between 32 and 64 averages is therefore 2. The test
+        // records the measured figure as well as bounding it. Segments do not overlap, so they are independent.
         GaussianNoise   noise;
         std::vector<CF> samples(kFft * 64UZ * 4UZ);
         std::ranges::generate(samples, [&noise] { return noise(); });
@@ -899,11 +898,11 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "criterion 3: a windowed tone's sub-bin frequency, with the bias each window costs"_test = [] {
-        // The fixture is the real thing: a complex exponential through the block's own window and transform, read by
-        // PeakDetect's three-point parabolic refinement. The refinement is exact for a parabola and a windowed main
-        // lobe is not one, so the bias is measured per window and recorded rather than assumed away.
+        // The fixture is a complex exponential through the block's own window and transform, read by PeakDetect's
+        // three-point parabolic refinement. The refinement is exact for a parabola, and a windowed main lobe is not
+        // one. The test measures and records the bias per window.
         constexpr double kCenterBin = 32.;
-        constexpr double kMargin    = 0.06; // bins; the measured bias at 0.3 and 0.5 sits well inside this
+        constexpr double kMargin    = 0.06; // bins, well above the measured bias at 0.3 and 0.5
 
         for (const std::string& windowName : {std::string("Hann"), std::string("Blackman")}) {
             for (const double offset : {0.0, 0.3, 0.5}) {
@@ -1005,7 +1004,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     "max_hold keeps the largest density each bin reached, never the average"_test = [] {
-        // a tone for the first half of the stream and silence after: the mean falls, the hold does not
+        // a tone for the first half of the stream and silence after, where the mean falls and the hold does not
         std::vector<CF> samples = tone(kFft * 8UZ, 32., kFft);
         std::fill(samples.begin() + static_cast<std::ptrdiff_t>(kFft * 4UZ), samples.end(), CF{});
 
@@ -1023,10 +1022,10 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(holdPeak > meanPeak) << "the hold keeps the loud half, the mean divides it away";
     };
 
-    // `threads` buys the transform threads and changes nothing else. At 2^18 the second thread moves the transform
-    // off SimdFFT and onto the four-step split, which is a different factorization of the same DFT, so the records
-    // agree to the two engines' rounding rather than bit for bit -- the bound is against the record's own peak,
-    // because a bin far down the skirt has no absolute scale of its own.
+    // `threads` gives the transform threads and changes nothing else. At 2^18 the second thread moves the transform
+    // from SimdFFT to the four-step split, a different factorization of the same DFT. The records agree to the two
+    // engines' rounding and not bit for bit. The bound is set against the record's own peak, because a bin far down
+    // the skirt has no absolute scale of its own.
     "threads change what a transform costs and not what it says"_test = [] {
         constexpr std::size_t kLong = 1UZ << 18UZ;
 
@@ -1079,9 +1078,9 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(eq(block._core.pending.size(), 60UZ)) << "and the buffered samples survive it";
         expect(eq(block._core.streamAt, std::uint64_t{9000ULL})) << "and the stream position";
 
-        // Whether the accumulation survives is the block's own rule, and it is pinned against the callback rather
-        // than against settings(): a change through settings() re-stages every key the block was explicitly given,
-        // not only the one that moved, so that path cannot show which key the block acted on.
+        // The block's own rule decides whether the accumulation survives. The test pins it against the callback and
+        // not against settings(). A change through settings() re-stages every key the block was given, not only the
+        // one that changed. That path cannot show which key the block acted on.
         block._core.segments = 5UZ;
         block.threads        = 8U;
         expect(nothrow([&] { block.settingsChanged({}, gr::property_map{{"threads", gr::Size_t{8U}}}); }));
@@ -1095,9 +1094,9 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(throws([&] { live(block, {{"threads", gr::Size_t{0U}}}); })) << "zero threads is not a thread count";
     };
 
-    // The tuning belongs in the record, not in the signal name: a consumer that stacks records on an absolute axis
-    // reads one number rather than parsing one out of a string. It changes nothing about the estimate, so like
-    // `signal_name` it must not restart an average that is part way through -- a receiver retunes mid-stream.
+    // The tuning belongs in the record and not in the signal name. A consumer that stacks records on an absolute axis
+    // reads one number and parses no string. The tuning changes nothing about the estimate. Like `signal_name` it
+    // must not restart an average that is part way through, because a receiver retunes mid-stream.
     "center_frequency reaches the record and restarts nothing"_test = [] {
         constexpr double       kCenter = 435.5e6;
         const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{4U}}, {"sample_rate", kSampleRate}, {"center_frequency", kCenter}};
@@ -1133,8 +1132,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(eq(block._core.pending.size(), 60UZ)) << "with every buffered sample kept";
         expect(eq(block._core.gridStart, std::uint64_t{0ULL})) << "and the grid where it was";
 
-        // as for `threads`: the block's own rule is pinned against the callback, because a change through settings()
-        // re-stages every key the block was explicitly given rather than only the one that moved
+        // As for `threads`, the block's own rule is pinned against the callback. A change through settings()
+        // re-stages every key the block was given, not only the one that changed.
         block._core.segments   = 5UZ;
         block.center_frequency = 144.5e6;
         expect(nothrow([&] { block.settingsChanged({}, gr::property_map{{"center_frequency", 144.5e6}}); }));
@@ -1151,9 +1150,9 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(eq(block._core.transform.threads, 2UZ)) << "the setting reaches the transform at construction";
     };
 
-    // A consumer pacing itself by what a record costs the block cannot read that cost off the thread it waits on:
-    // above one thread the transform runs on a pool and the calling thread's processor clock stops counting it. The
-    // record states a wall-clock reading around its whole computation instead, which covers every thread.
+    // A consumer that paces itself by a record's cost cannot read that cost from the thread it waits on. Above one
+    // thread the transform runs on a pool, and the calling thread's processor clock does not count it. The record
+    // states a wall-clock reading around its whole computation instead, which covers every thread.
     "every record states the wall clock computing it cost"_test = [] {
         const auto samples = tone(kFft * 16UZ, 32., kFft);
 
@@ -1193,8 +1192,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         check("Spectrogram", [](std::size_t size, gr::Size_t threads) { return oneRecordCost<Spectrogram<CF>>({{"fft_size", static_cast<gr::Size_t>(size)}, {"overlap", 0.0}, {"sample_rate", kSampleRate}, {"threads", threads}}, size); });
     };
 
-    // The reading a consumer can take for itself is the graph's own wall clock, and a record's figure is one part of
-    // it: the scheduler's start-up, the source's copies and the record's copy out to the sink are the rest.
+    // A consumer can take the graph's own wall clock for itself, and a record's figure is one part of it. The
+    // scheduler's start-up, the source's copies and the record's copy out to the sink are the rest.
     "the stated cost is consistent with an outside reading of a single-record graph"_test = [] {
         constexpr std::size_t kSize = 1UZ << 18UZ;
 
@@ -1213,8 +1212,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     };
 
     // A record is made of at least one hop of stream, so a span of one hop cannot complete two of them. The cap is
-    // therefore the effective hop, which only the block knows: a hop of zero takes its value from `overlap`, and a
-    // stated hop may sit either side of the transform length.
+    // therefore the effective hop, which only the block knows. A hop of zero takes its value from `overlap`, and a
+    // stated hop may sit on either side of the transform length.
     "the input span is held to one hop, so a work call makes at most one record"_test = [] {
         const auto live = [](auto& target, gr::property_map changes) {
             std::ignore = target.settings().set(std::move(changes));
@@ -1234,8 +1233,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
             std::ignore = target.processBulk(in, out);
             return out.count;
         };
-        // Four calls of exactly the cap: the most any one of them made, and what they made between them, so a cap that
-        // held by making nothing at all is not mistaken for one that paced the records.
+        // Four calls of exactly the cap. The test reads the most any one call made and the total they made. A cap
+        // that held by making nothing is then not mistaken for one that paced the records.
         const auto overFourCalls = [&recordsInOneCall](auto& target) {
             std::size_t most  = 0UZ;
             std::size_t total = 0UZ;
@@ -1285,8 +1284,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         const auto smallHop = [](bool capped) { return recordRate<WelchPsd<CF>>({{"fft_size", gr::Size_t{512U}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{256U}}, {"sample_rate", kSampleRate}, {"one_record_per_call", capped}}, kSmallStream); };
         const auto largeHop = [](bool capped) { return recordRate<WelchPsd<CF>>({{"fft_size", gr::Size_t{8192U}}, {"n_averages", gr::Size_t{1U}}, {"hop", gr::Size_t{1U << 20U}}, {"sample_rate", kSampleRate}, {"one_record_per_call", capped}}, kLargeStream); };
 
-        // The two arms are interleaved and the best of each is taken, because the second of two separate runs inherits
-        // a machine the first warmed and a rate read that way is a reading of the order they were run in.
+        // The two arms are interleaved, and the best of each is taken. The second of two separate runs inherits a
+        // machine the first warmed. A rate read that way would reflect the order of the runs.
         const auto compare = [](std::string_view name, auto shape) {
             double      on       = 0.;
             double      off      = 0.;

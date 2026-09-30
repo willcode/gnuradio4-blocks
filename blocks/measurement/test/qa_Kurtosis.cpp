@@ -24,8 +24,8 @@ using gr::blocks::measurement::Kurtosis;
 using CF = std::complex<float>;
 
 /// @brief Emits a fixed sample sequence in bursts of a stated size, then ends the stream, optionally carrying one
-/// `sample_rate` and one `n_dropped_samples` tag at stated absolute indices. The burst size is what makes chunk
-/// independence testable: the same samples presented differently must produce the same records.
+/// `sample_rate` and one `n_dropped_samples` tag at stated absolute indices. The burst size makes chunk independence
+/// testable. The same samples presented differently must produce the same records.
 template<typename T>
 struct SampleSource : gr::Block<SampleSource<T>> {
     gr::PortOut<T> out;
@@ -74,7 +74,7 @@ struct RecordSink : gr::Block<RecordSink> {
     }
 };
 
-/// @brief Seeded standard normal pairs, xorshift plus Box-Muller: a real component and a complex sample from one call.
+/// @brief Seeded standard normal pairs from xorshift and Box-Muller, a real component or a complex sample per call.
 struct GaussianNoise {
     std::uint64_t state;
 
@@ -102,7 +102,7 @@ struct GaussianNoise {
     }
 };
 
-/// @brief Everything a criterion reads out of one run, captured while the block is still alive.
+/// @brief Everything a test reads out of one run, captured while the block is still alive.
 struct Run {
     std::vector<gr::DataSet<float>> records;
 
@@ -220,8 +220,8 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     using namespace boost::ut;
     using namespace qa_kurtosis;
 
-    // criterion 1: seeded circular complex and real Gaussian, each window's excess_kurtosis inside the closed-form
-    // bias band (2.3), and the population of readings itself spread the way (2.4) says a window's estimate should be.
+    // Seeded circular complex and real Gaussian input. Each window's excess_kurtosis lies inside the closed-form bias
+    // band. The readings spread as the closed-form variance of a window's estimate predicts.
     "criterion 1: Gaussian excess kurtosis sits inside its derived bias-and-spread envelope"_test = [] {
         constexpr std::size_t kWindow = 4096UZ;
         constexpr std::size_t kTrials = 400UZ;
@@ -267,7 +267,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         expect(std::abs(sdComplex - spreadComplex) < 0.10 * spreadComplex) << "complex per-window spread outside 10% of the derived value";
         expect(std::abs(sdReal - spreadReal) < 0.10 * spreadReal) << "real per-window spread outside 10% of the derived value";
 
-        // criterion 2, the Gaussian point: K = m4/m2^2 reads 2 within this same band, on the un-shifted channel.
+        // The Gaussian point. K = m4/m2^2 reads 2 within the same band, on the un-shifted channel.
         std::vector<double> complexNormalized;
         for (const auto& r : complexRecords) {
             complexNormalized.push_back(static_cast<double>(r.signal_values.at(1UZ)));
@@ -277,13 +277,13 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         expect(std::abs(meanK - (2. + biasComplex)) < semComplex) << "circular complex Gaussian must read K=2 within criterion 1's band";
     };
 
-    // criterion 2: the three other closed values, each measured over a single large window so the ensemble average
-    // the derivation assumes is well approximated.
+    // The three other closed values. Each is measured over a single large window, which approximates the ensemble
+    // average the derivation assumes.
     "criterion 2: constant modulus, two equal tones, and a real sinusoid read their exact excess values"_test = [] {
         constexpr std::size_t kWindow = 1UZ << 18U; // 262144
 
-        // constant modulus: |z| = A with a random phase. Exact K=1, excess=-1, whatever the window (no dependence on
-        // phase distribution at all: |z|^4/|z|^2^2 = A^4/A^4 = 1 sample by sample).
+        // Constant modulus, |z| = A with a random phase. K=1 and excess=-1 exactly, for any window. The result does
+        // not depend on the phase distribution, since |z|^4/|z|^2^2 = A^4/A^4 = 1 sample by sample.
         {
             GaussianNoise    noise(0x1234567890abcdefULL);
             std::vector<CF>  samples(kWindow);
@@ -301,8 +301,8 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             }
         }
 
-        // two equal complex tones: |z|^2 = 2 + 2*cos(D) with D the difference phase, swept over many, non-integer
-        // cycles across the window so its distribution over the window is close to uniform.
+        // Two equal complex tones, |z|^2 = 2 + 2*cos(D) with D the difference phase. D sweeps many non-integer
+        // cycles across the window, and its distribution over the window is close to uniform.
         {
             std::vector<CF>  samples(kWindow);
             constexpr double kBin1 = 41.0;
@@ -322,8 +322,8 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             }
         }
 
-        // a real sinusoid: m4=3A^4/8, m2=A^2/2, K=3/2, excess=-1.5 exactly for a whole number of cycles, and close to
-        // it for any long window since the boundary effect is O(1/N).
+        // A real sinusoid with m4=3A^4/8 and m2=A^2/2. K=3/2 and excess=-1.5 exactly for a whole number of cycles.
+        // Any long window comes close, since the boundary effect is O(1/N).
         {
             std::vector<float> samples(kWindow);
             constexpr double   kBin = 977.0;
@@ -340,9 +340,9 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         }
     };
 
-    // criterion 3: the closed-form impulsive excess, `x = g + b*A`, g standard Gaussian and b Bernoulli(p), measured
-    // over a scaled-down number of windows (the kernel's own qa already pins the Monte Carlo reference at the full
-    // scale; this reproduces the shape at a size this binary's ~5s budget affords).
+    // The closed-form impulsive excess of `x = g + b*A`, with g standard Gaussian and b Bernoulli(p). It is measured
+    // over a reduced number of windows. The kernel's own test pins the Monte Carlo reference at full scale. This test
+    // reproduces the shape within a run time of about 5 s.
     "criterion 3: the impulsive closed form, positive where the structured signals are negative"_test = [] {
         constexpr std::size_t kWindow = 1UZ << 16U; // 65536
         constexpr std::size_t kTrials = 60UZ;
@@ -378,8 +378,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         }
     };
 
-    // criterion 4: an all-zero window is degenerate and reported so, never silently; a stream ending mid-window
-    // flushes what it actually covered.
+    // An all-zero window is degenerate and reported as degenerate. A stream ending mid-window flushes what it covered.
     "criterion 4: a degenerate window is reported false and never a NaN, and a partial window states its own coverage"_test = [] {
         const auto everyChannelFinite = [](const gr::DataSet<float>& record, std::string_view what) {
             for (std::size_t k = 0UZ; k < 3UZ; ++k) {
@@ -420,7 +419,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         }
     };
 
-    // criterion 5: window refusals at staging, naming the bound.
+    // Window refusals at staging, naming the bound.
     "criterion 5: window below 8 or above 2^24 refuses at staging"_test = [] {
         const auto refused = [](gr::property_map settings) {
             Kurtosis<float> block(std::move(settings));
@@ -433,7 +432,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         expect(nothrow([&] { refused({{"window", gr::Size_t{1U << 24U}}}); })) << "the ceiling itself is admitted";
     };
 
-    // criterion 18 (Kurtosis half): before the first window, coverage() reads 0.
+    // Before the first window, coverage() reads 0.
     "criterion 18: coverage() reads 0 before the first window closes"_test = [] {
         Kurtosis<CF> block;
         block.settings().init();
@@ -443,8 +442,8 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         expect(eq(block.nWindows(), std::uint64_t{0ULL}));
     };
 
-    // criterion 19: chunk independence in both domains, at chunk sizes landing off and exactly on window boundaries
-    // and on the tagged sample, with the counters compared alongside the records.
+    // Chunk independence in both domains. The chunk sizes land off and exactly on window boundaries and on the tagged
+    // sample. The counters are compared alongside the records.
     "criterion 19: chunk independence, bit-identical records and counters at every chunk size"_test = [] {
         const auto sweep = [](const auto& samples, std::string_view domain) {
             using Sample                   = std::remove_cvref_t<decltype(samples.front())>;
@@ -483,8 +482,8 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         sweep(realSamples, "real");
     };
 
-    // the settings §4.2 names and the record keys §4.4 does: emit_records off, the producer label, the rate the
-    // record states, and the reserved sample_rate tag moving that rate the way it moves every other block's.
+    // The settings and the record keys. The test covers emit_records off, the producer label and the rate the record
+    // states. The reserved sample_rate tag changes that rate, as it does for every other block.
     "settings and record metadata: emit_records, signal_name, sample_rate by setting and by tag"_test = [] {
         GaussianNoise   noise(0x6a09e667f3bcc908ULL);
         std::vector<CF> samples(2UZ * 4096UZ);
@@ -514,7 +513,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             }
         }
         {
-            // The reserved tag on the stream, at the first sample, is what the framework turns into a settings change.
+            // The framework turns the reserved tag at the first sample into a settings change.
             const Run tagged = runWith<CF>({{"window", gr::Size_t{4096U}}}, samples, 1024UZ, Tagging{.rate = 32000.f, .rateAt = 0UZ, .drop = 0U, .dropAt = 0UZ});
             expect(eq(tagged.records.size(), 2UZ));
             for (const auto& record : tagged.records) {
@@ -533,9 +532,9 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         }
     };
 
-    // §4.3's settings change: a new `window` discards the partial accumulation rather than carrying a piece of the
-    // old length into the new one, and says so in nWindowResets(). Driven on the block itself: a settings key that is
-    // not one of the reserved stream tags does not reach a running block from the stream.
+    // A new `window` discards the partial accumulation and does not carry part of the old length into the new one.
+    // nWindowResets() counts the discard. The test drives the block itself. A settings key that is not a reserved
+    // stream tag does not reach a running block from the stream.
     "a window change discards the partial accumulation and counts the reset"_test = [] {
         Kurtosis<float> block({{"window", gr::Size_t{1024U}}});
         block.settings().init();

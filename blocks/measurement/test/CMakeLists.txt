@@ -1,8 +1,8 @@
 add_ut_test(qa_SpectralEstimate)
-# reaches SimdFFT, whose always_inline helpers do not inline at the qa tier's default level
+# reaches SimdFFT, whose always_inline helpers do not inline at the default optimization level of the qa tests
 gr_pin_test_optimization(qa_SpectralEstimate -O2)
-# gr-testing carries TestSpans.hpp, which this test includes; without it the header resolves only where the blocks tree
-# is already installed into the prefix being built against
+# gr-testing carries TestSpans.hpp, which this test includes. Without it the header resolves only where the blocks tree
+# is already installed into the prefix being built against.
 target_link_libraries(qa_SpectralEstimate PRIVATE gnuradio4::gr-measurement gnuradio4::gr-testing)
 
 add_ut_test(qa_Detectors)
@@ -26,8 +26,8 @@ add_ut_test(qa_Autocorrelation)
 gr_pin_test_optimization(qa_Autocorrelation -O2)
 target_link_libraries(qa_Autocorrelation PRIVATE gnuradio4::gr-measurement)
 
-# the recorded-air legs, in their own executable because exit 77 is a whole binary's status: folded into
-# qa_Autocorrelation an absent recording would skip the synthetic gate with it
+# The recorded-air cases, in their own executable because exit 77 is the status of a whole binary. Inside
+# qa_Autocorrelation an absent recording would also skip the synthetic cases.
 add_ut_test(qa_AutocorrelationRecording)
 gr_pin_test_optimization(qa_AutocorrelationRecording -O2)
 target_link_libraries(qa_AutocorrelationRecording PRIVATE gnuradio4::gr-measurement gnuradio4::gr-analog

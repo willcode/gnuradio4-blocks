@@ -34,16 +34,16 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::Kurtosis, [T], [ float, std::complex<
 /**
  * @brief The normalized fourth moment over a stream-absolute window, as excess kurtosis and its un-shifted form.
  *
- * A sink with a record port, not a 1:1 block: the stream is consumed and nothing passed through. Each window's
- * `gr::measurement::KurtosisAccumulator<T>` figures are published to a pollable slot at the window's close, and one
- * `DataSet<float>` record is emitted when `emit_records` is set. `input_domain` rides in the record because the two
- * domains have different Gaussian references (2 complex, 3 real) and a reader of `excess_kurtosis` alone cannot tell
- * which reference applies.
+ * The block is a sink with a record port. It consumes the stream and passes nothing through. At each window's close
+ * the `gr::measurement::KurtosisAccumulator<T>` figures go to a pollable slot. One `DataSet<float>` record is
+ * emitted when `emit_records` is set. The record carries `input_domain`, because the two domains have different
+ * Gaussian references, 2 for complex and 3 for real. A reader of `excess_kurtosis` alone cannot tell which
+ * reference applies.
  *
- * A window whose accumulated `sum|x|^2` is exactly zero is degenerate: both kurtosis channels are reported as `0.f`
- * and `valid` is written false, counted in `nDegenerateWindows()`, rather than a NaN a consumer would have to test
- * for. `window` below eight samples is refused: at that floor the estimator's own spread already exceeds the range
- * of values it is meant to resolve, so a shorter window is not a measurement.
+ * A window whose accumulated `sum|x|^2` is exactly zero is degenerate. Both kurtosis channels read `0.f`, `valid` is
+ * false, and `nDegenerateWindows()` counts the window. A consumer never has to test for a NaN. A `window` below eight
+ * samples is refused. At that size the estimator's own spread exceeds the range of values it resolves, and the
+ * reading is not a measurement.
  */
 template<typename T>
 requires(std::same_as<T, float> || std::same_as<T, std::complex<float>>)
@@ -51,9 +51,10 @@ struct Kurtosis : Block<Kurtosis<T>, NoTagPropagation> {
     using Description = Doc<R""(
 @brief Excess kurtosis and the un-shifted normalized fourth moment over a stream-absolute window.
 
-A sink. Every `window` samples the block reports `excess_kurtosis` (0 for a Gaussian of the input's own domain),
-`normalized_fourth_moment` (`m4/m2^2` itself) and `mean_power`, both through a pollable slot and, when `emit_records`,
-one `DataSet<float>` record. An all-zero window is reported with `valid = false` rather than a NaN.
+The block is a sink. Every `window` samples it reports `excess_kurtosis`, `normalized_fourth_moment` and `mean_power`.
+`excess_kurtosis` is 0 for a Gaussian of the input's own domain. `normalized_fourth_moment` is `m4/m2^2`. The figures
+go to a pollable slot, and to one `DataSet<float>` record when `emit_records` is set. An all-zero window is reported
+with `valid = false` and no NaN.
 )"">;
 
     static constexpr bool kComplexDomain = std::same_as<T, std::complex<float>>;
@@ -61,17 +62,17 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
     PortIn<T>                                in;
     PortOut<DataSet<float>, Async, Optional> measurements;
 
-    Annotated<gr::Size_t, "window", Visible, Doc<"samples per reading; below 8 or above 2^24 is refused; a change restarts the window">> window       = 4096U;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate stated in every record; must be positive and finite">>                  sample_rate  = 96000.f;
-    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per completed window">>                              emit_records = true;
-    Annotated<std::string, "signal_name", Doc<"producer label carried in the record's extra metadata">>                                  signal_name  = std::string("kurtosis");
+    Annotated<gr::Size_t, "window", Visible, Doc<"samples per reading, from 8 to 2^24, a change restarts the window">> window       = 4096U;
+    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate stated in every record, positive and finite">>        sample_rate  = 96000.f;
+    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per completed window">>            emit_records = true;
+    Annotated<std::string, "signal_name", Doc<"producer label carried in the record's extra metadata">>                signal_name  = std::string("kurtosis");
 
     GR_MAKE_REFLECTABLE(Kurtosis, in, measurements, window, sample_rate, emit_records, signal_name);
 
     gr::measurement::KurtosisAccumulator<T> _acc{};
     gr::measurement::MeasurementSlot<3UZ>   _slot{}; ///< excess_kurtosis, normalized_fourth_moment, mean_power
 
-    /// @brief One `n_dropped_samples` tag: where it sits on the stream, and how many samples it says went missing.
+    /// @brief One `n_dropped_samples` tag, with its stream position and the number of samples it reports missing.
     struct DroppedTag {
         std::uint64_t at;
         std::uint64_t count;
@@ -85,7 +86,7 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
     std::uint64_t               _streamAt{0ULL};        ///< absolute index of the next input sample
     std::uint64_t               _windowStartAt{0ULL};   ///< absolute index of the first sample of the window now filling
     bool                        _flushed{false};        ///< the end-of-stream record has gone out
-    bool                        _configured{false};     ///< a later settings change is a change rather than the first configuration
+    bool                        _configured{false};     ///< true after the first configuration, when a settings change is a change
     std::vector<DroppedTag>     _droppedTags{};         ///< the dropped-sample tags sitting on the samples this call takes
     std::uint64_t               _droppedInWindow{0ULL}; ///< their summed count over the window now filling
     std::vector<DataSet<float>> _pending{};             ///< records built at a window's close and not yet published
@@ -120,12 +121,12 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
         _droppedTags.clear();
         _pending.clear();
         _slot.publish({0., 0., 0.}, 0ULL);
-        // A block built entirely from defaults stages nothing, so `settingsChanged` has not necessarily run by now.
-        // From here on every settings change is a change to a running block, and the window reset rule applies to it.
+        // A block built entirely from defaults stages nothing, and `settingsChanged` may not have run yet. From here
+        // on every settings change is a change to a running block, and the window reset rule applies to it.
         _configured = true;
-        // The framework runs `processEpilogue` only over a non-empty trailing span, and that epilogue is what flushes
-        // a partial window at end of stream. `processBulk` therefore leaves the last sample of a call unconsumed, and
-        // asking for two keeps that from stalling the steady state.
+        // The framework runs `processEpilogue` only over a non-empty trailing span. That epilogue flushes a partial
+        // window at end of stream. `processBulk` leaves the last sample of a call unconsumed. Asking for two samples
+        // keeps that from stalling the steady state.
         in.min_samples = 2UZ;
     }
 
@@ -133,7 +134,7 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
     [[nodiscard]] double excessKurtosis() const noexcept { return _slot.read().first[0]; }
     /// @brief `m4/m2^2` of the same window, un-shifted. Callable from any thread.
     [[nodiscard]] double normalizedFourthMoment() const noexcept { return _slot.read().first[1]; }
-    /// @brief Mean power of the same window, against the same full-scale reference the tier's spectral records use.
+    /// @brief Mean power of the same window, against the full-scale reference of the module's spectral records.
     [[nodiscard]] double meanPower() const noexcept { return _slot.read().first[2]; }
     /// @brief Fraction of `window` the last reading covers, 0 before the first window closes. Any thread.
     [[nodiscard]] double coverage() const noexcept { return std::min(1., static_cast<double>(_slot.read().second) / static_cast<double>(std::max(window.value, 1U))); }
@@ -149,7 +150,7 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
         const bool               wantRecords = emit_records.value && outSpan.isConnected;
         std::size_t              made        = drain(outSpan, 0UZ);
 
-        // The last sample of a call is held back so the end-of-stream epilogue always has a span to run on.
+        // The last sample of a call is held back. The end-of-stream epilogue then has a span to run on.
         const std::size_t offer = input.size() >= 2UZ ? input.size() - 1UZ : input.size();
         const std::size_t take  = std::min(offer, wantRecords ? roomFor(outSpan, made) : std::numeric_limits<std::size_t>::max());
 
@@ -162,8 +163,8 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
         return take == 0UZ && made == 0UZ && !input.empty() ? work::Status::INSUFFICIENT_OUTPUT_ITEMS : work::Status::OK;
     }
 
-    /// @brief End of stream: fold the trailing samples, then flush the partial window with the count it actually
-    /// covers, reported and never suppressed.
+    /// @brief At end of stream, folds in the trailing samples and flushes the partial window. The reading states the
+    /// sample count it covers and is not suppressed.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const bool wantRecords = emit_records.value && outSpan.isConnected;
         scanDroppedTags(inSpan, inSpan.size());
@@ -187,8 +188,8 @@ one `DataSet<float>` record. An all-zero window is reported with `valid = false`
     }
 
 private:
-    /// @brief The `n_dropped_samples` tags sitting on the @p count samples this call takes, bounded so that a tag
-    /// belonging to a later call is neither counted twice nor attributed to the window now filling.
+    /// @brief The `n_dropped_samples` tags on the @p count samples this call takes. The bound keeps a tag of a later
+    /// call from being counted twice or attributed to the window now filling.
     void scanDroppedTags(InputSpanLike auto& inSpan, std::size_t count) {
         _droppedTags.clear();
         const std::uint64_t base = _streamAt;

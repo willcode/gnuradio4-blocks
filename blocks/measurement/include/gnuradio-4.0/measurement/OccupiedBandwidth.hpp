@@ -25,18 +25,18 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::OccupiedBandwidth)
 /**
  * @brief The band holding a stated fraction of a density record's total power, with its edges.
  *
- * The walk is the cumulative sum from both ends: the lower edge is where `(1 - fraction) / 2` of the total has
- * accumulated from below, the upper edge where the same has accumulated from above, and the bandwidth is the
- * distance between them. That symmetric definition is the one the occupied-bandwidth figure in a regulatory mask
- * means, and it does not assume the signal is centered.
+ * The walk takes the cumulative sum from both ends. The lower edge is where `(1 - fraction) / 2` of the total has
+ * accumulated from below. The upper edge is where the same share has accumulated from above. The bandwidth is the
+ * distance between them. This symmetric definition is the one a regulatory mask's occupied-bandwidth figure uses. It
+ * does not assume the signal is centered.
  *
- * The block emits one record per input record and also publishes to a slot a graph can poll — bandwidth, lower edge
- * and upper edge — for consumers that want a reading without consuming records. The reading is whole or absent
- * rather than partial, so there is no coverage to report: `nRecords()` is zero until the first record has been
- * measured, and that zero is what says the three readings have never been written.
+ * The block emits one record per input record. It also publishes the bandwidth, the lower edge and the upper edge
+ * to a slot a graph can poll, for a consumer that wants a reading without consuming records. A reading is whole or
+ * absent, never partial, and has no coverage to report. `nRecords()` is zero until the first record is measured.
+ * That zero shows the three readings have not been written.
  */
 struct OccupiedBandwidth : Block<OccupiedBandwidth, NoTagPropagation> {
-    using Description = Doc<"Occupied bandwidth of a spectral density record: the band holding a stated fraction of the total power, with its edges, as a record and as a pollable reading">;
+    using Description = Doc<"Measures the occupied bandwidth of a spectral density record. The band holds a stated fraction of the total power. The block publishes the band and its edges as a record and as a pollable reading.">;
 
     PortIn<DataSet<float>, Async>  in;
     PortOut<DataSet<float>, Async> out;
@@ -45,7 +45,7 @@ struct OccupiedBandwidth : Block<OccupiedBandwidth, NoTagPropagation> {
 
     GR_MAKE_REFLECTABLE(OccupiedBandwidth, in, out, fraction);
 
-    gr::measurement::MeasurementSlot<3UZ> _slot{}; ///< bandwidth, lower edge, upper edge — all in hertz
+    gr::measurement::MeasurementSlot<3UZ> _slot{}; ///< bandwidth, lower edge and upper edge in hertz
     std::uint64_t                         _records = 0ULL;
 
     void settingsChanged(const property_map& /*old*/, const property_map& /*new*/) {
@@ -54,8 +54,8 @@ struct OccupiedBandwidth : Block<OccupiedBandwidth, NoTagPropagation> {
         }
     }
 
-    /// @brief A fresh run reads nothing until it has measured something: the slot is republished, not merely counted
-    /// down, or the readers would go on returning the last run's numbers.
+    /// @brief Clears the readings for a new run. The slot is republished and not only counted down. The readers then
+    /// do not return the last run's numbers.
     void start() {
         _records = 0ULL;
         _slot.publish({0.0, 0.0, 0.0}, 0ULL);
@@ -70,7 +70,7 @@ struct OccupiedBandwidth : Block<OccupiedBandwidth, NoTagPropagation> {
     /// @brief The band's upper edge in hertz, on the record's own axis.
     [[nodiscard]] double upperEdge() const noexcept { return _slot.read().first[2UZ]; }
 
-    /// @brief The records measured so far; zero means the readings above have never been written.
+    /// @brief The records measured so far. Zero means the readings above have not been written.
     [[nodiscard]] std::uint64_t nRecords() const noexcept { return _slot.read().second; }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
@@ -121,7 +121,7 @@ private:
         ++_records;
         _slot.publish({static_cast<double>(width), static_cast<double>(lower), static_cast<double>(upper)}, _records);
 
-        // The source record's own facts carry through, so the measurement stays placed on the stream it was made of.
+        // The source record's own facts carry through, and the measurement keeps its place on the source stream.
         property_map carried;
         if (!record.meta_information.empty()) {
             carried = record.meta_information[0UZ];
@@ -141,8 +141,8 @@ private:
         return ds;
     }
 
-    /// @brief A float the source record stated, or a non-finite value when it stated none — which is what tells
-    /// `makeScalarRecord` to leave the key out rather than write a zero a consumer would divide by.
+    /// @brief A float the source record stated, or a non-finite value when it stated none. A non-finite value makes
+    /// `makeScalarRecord` leave the key out. A consumer then never divides by a written zero.
     [[nodiscard]] static float carriedFloat(const property_map& map, std::string_view key) {
         if (const auto it = map.find(property_map::key_type(key)); it != map.end()) {
             if (const auto* value = it->second.get_if<float>()) {

@@ -1,17 +1,17 @@
-/* The recorded-air legs for the autocorrelation: four captures, each read for the period it is known to carry.
+/* The recorded-air cases for the autocorrelation. Each of four captures is read for the period it is known to carry.
  *
- * They stand beside the synthetic criteria and never instead of them, and they live in their own executable because
- * a skip is the whole binary's exit status: folding them into the synthetic gate would let an absent recording skip
- * that gate too. Three of the four captures have no metadata file, so those are read as the raw interleaved pairs
- * their names describe; the LTE downlink has a metadata sidecar and is read through the SigMF source.
+ * They add to the synthetic cases and do not replace them. They live in their own executable because a skip is the
+ * exit status of a whole binary. In the synthetic executable an absent recording would skip the synthetic cases too.
+ * Three of the four captures have no metadata file. Those are read as the raw interleaved pairs their names describe.
+ * The LTE downlink has a metadata sidecar and is read through the SigMF source.
  *
  * The directory arrives as GR4_RECORDINGS_DIR. With the directory or a file absent the run prints the path it
- * looked for and exits 77, which CTest is told is a skip.
+ * looked for and exits 77, which CTest treats as a skip.
  *
- * Every leg reads the head of its capture and sweeps coarsely, which is what each criterion needs and no more.
- * ENABLE_LONG_TESTS restores the spans and the sweep steps the criteria were first recorded over: whole captures,
- * one-megahertz and 2.5-kilohertz offset grids, and both FM stations. The values a leg asserts are the same in
- * either arm, since each is a peak position or a closed form computed from the run's own averages.
+ * Every case reads the head of its capture and sweeps coarsely, enough for its assertion. ENABLE_LONG_TESTS restores
+ * the full spans and sweep steps. Those are whole captures, one-megahertz and 2.5-kilohertz offset grids, and both FM
+ * stations. The values a case asserts are the same in either arm. Each is a peak position or a closed form computed
+ * from the run's own averages.
  */
 
 #include <algorithm>
@@ -65,7 +65,7 @@ constexpr std::string_view kP25      = "wpd_20260811_152707_483125000_125000_cf3
 
 [[nodiscard]] std::filesystem::path capturePath(std::string_view name) { return std::filesystem::path(recordingsDirectory()) / name; }
 
-/// @brief Interleaved IEEE float pairs, which is what the `_fc.raw` and `_cf32` captures hold.
+/// @brief Interleaved IEEE float pairs, the format of the `_fc.raw` and `_cf32` captures.
 [[nodiscard]] std::vector<CF> readCf32(const std::filesystem::path& path, std::size_t items, std::size_t skipItems = 0UZ) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -89,8 +89,8 @@ constexpr std::string_view kP25      = "wpd_20260811_152707_483125000_125000_cf3
     return out;
 }
 
-/// @brief Interleaved little-endian int16 pairs, read as magnitudes: the envelope kind squares them anyway, and a
-/// magnitude stream is half the memory of the complex one over a thirty-second capture.
+/// @brief Interleaved little-endian int16 pairs, read as magnitudes. The envelope kind squares them anyway. A magnitude
+/// stream takes half the memory of the complex one over a thirty-second capture.
 [[nodiscard]] std::size_t forEachCs16Magnitude(const std::filesystem::path& path, std::size_t items, auto&& onBatch) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -119,7 +119,7 @@ constexpr std::string_view kP25      = "wpd_20260811_152707_483125000_125000_cf3
     return total;
 }
 
-/// @brief Multiply by a complex exponential, which puts a station at @p offsetHz at zero frequency.
+/// @brief Multiplies by a complex exponential that moves a station at @p offsetHz to zero frequency.
 [[nodiscard]] std::vector<CF> tune(std::span<const CF> in, double offsetHz, double sampleRate) {
     std::vector<CF> out(in.size());
     const double    step = -kTwoPi * offsetHz / sampleRate;
@@ -130,7 +130,7 @@ constexpr std::string_view kP25      = "wpd_20260811_152707_483125000_125000_cf3
     return out;
 }
 
-/// @brief The valid part of a convolution, which is what a channel filter hands on.
+/// @brief The valid part of a convolution, the part a channel filter passes on.
 [[nodiscard]] std::vector<CF> applyFir(std::span<const CF> in, std::span<const float> taps) {
     if (in.size() < taps.size()) {
         return {};
@@ -154,7 +154,7 @@ constexpr std::string_view kP25      = "wpd_20260811_152707_483125000_125000_cf3
     return in.empty() ? 0. : total / static_cast<double>(in.size());
 }
 
-/// One averaged estimate, which is what every leg below reports.
+/// One averaged estimate, the result every case below reports.
 struct Estimate {
     std::vector<float> magnitude{};
     double             scatter{};
@@ -269,8 +269,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         constexpr std::size_t length = 16384UZ;
         constexpr std::size_t lags   = 300UZ;
         constexpr double      period = 1. / 19000.;
-        // Both spans buy confidence rather than the peak's position: the pilot is a steady tone, the averages set
-        // how far the estimate's own threshold sits below it, and the station search only ranks ten offsets.
+        // Both spans add confidence and do not move the peak. The pilot is a steady tone. The averages set how far
+        // the estimate's own threshold sits below it. The station search only ranks ten offsets.
         const std::size_t windows     = longRun() ? 300UZ : 40UZ;
         const std::size_t probeLength = longRun() ? 262144UZ : 65536UZ;
         const double      expected    = period * rate; // 107.79 samples
@@ -283,10 +283,9 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             const std::vector<CF> raw = readCf32(capturePath(name), windows * length + 1024UZ); // room for the channel filter's own group delay
             expect(fatal(ge(raw.size(), windows * length))) << std::format("{}: enough samples", name);
 
-            // Which station the leg reads is the capture's own answer, not an assumption: broadcast channels sit at
-            // odd tenths of a megahertz, so every carrier in a 2.048 MHz span around a whole tenth is an odd
-            // multiple of 100 kHz away from it, and the strongest of those after the channel filter is the one whose
-            // pilot is worth looking for.
+            // The capture decides which station the case reads. Broadcast channels sit at odd tenths of a megahertz.
+            // Every carrier in a 2.048 MHz span around a whole tenth is then an odd multiple of 100 kHz away from it.
+            // The case looks for the pilot of the strongest of those after the channel filter.
             double                    bestOffset = 100000.;
             double                    bestPower  = -1.;
             const std::span<const CF> probeSpan(raw.data(), std::min<std::size_t>(raw.size(), probeLength));
@@ -317,7 +316,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             const Estimate wideArm     = estimate<CF>(config, std::span<const CF>(widened));
             const Estimate untunedArm  = estimate<CF>(config, std::span<const CF>(raw));
 
-            // the discriminator's own output, which is where the pilot is simply a tone
+            // the discriminator's output, where the pilot is a plain tone
             gr::blocks::analog::QuadratureDemod<float> demod;
             std::vector<float>                         discriminated(channel.size());
             std::ignore                     = demod.processBulk(std::span<const CF>(channel), std::span<float>(discriminated));
@@ -348,8 +347,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         constexpr std::size_t lags   = 2000UZ;
         constexpr std::size_t tunedK = 50UZ;
         constexpr double      closed = 1024. / 15360.;
-        // the whole-span estimate is a reading, not an assertion; the span it takes has only to hold the averages
-        // the tuned sweep below then reads from its head
+        // The whole-span estimate is a reading and not an assertion. Its span only has to hold the averages the tuned
+        // sweep below reads from its head.
         const std::size_t full = longRun() ? 300UZ : 56UZ;
 
         const std::vector<CF> samples = readThroughSigMf(capturePath(kLte), full * length);
@@ -372,8 +371,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         std::println("criterion 18: the offset sweep, N={} K={}, +/-4.5 MHz channel filter ({} taps)", length, tunedK, channel.size());
         double bestHeight = -1.;
         double bestOffset = 0.;
-        // the arm the criterion asserts is at +4 MHz, which both grids land on; the finer one resolves how flat the
-        // sweep is between the carriers
+        // The asserted arm is at +4 MHz, where both grids land. The finer grid resolves how flat the sweep is between
+        // the carriers.
         const int reach  = longRun() ? 10 : 4;
         const int stride = longRun() ? 1 : 4;
         for (int step = -reach; step <= reach; step += stride) {
@@ -399,14 +398,14 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         constexpr std::size_t ungatedLength = 8192UZ;
         constexpr std::size_t frameLength   = 240UZ;
         constexpr std::size_t frameLags     = 16UZ;
-        // The ungated curve is flat, so its averages buy confidence and nothing else, and the crude gate's median is
-        // taken over whatever span it opens over. The framer's own pass reads the capture whole in either arm: it
-        // yields about one long frame per second of air and the case asks for five of them.
+        // The ungated curve is flat, and its averages add confidence alone. The crude gate takes its median over the
+        // span it opens over. The framer's own pass reads the whole capture in either arm. It yields about one long
+        // frame per second of air, and the case asks for five.
         const std::size_t ungatedWindows = longRun() ? 900UZ : 150UZ;
         const std::size_t gateSpan       = longRun() ? 40'000'000UZ : 8'000'000UZ;
 
-        // the ungated window, which is arithmetic rather than analysis: a burst at a 1.3e-4 duty cycle contributes
-        // 1.3e-4 of a window's variance, and what the estimate reads instead is the receiver's own envelope wander
+        // The ungated window. A burst at a 1.3e-4 duty cycle contributes 1.3e-4 of a window's variance. The estimate
+        // reads the receiver's own envelope wander instead.
         std::vector<float> head;
         head.reserve(ungatedWindows * ungatedLength);
         std::ignore = forEachCs16Magnitude(capturePath(kAdsb), ungatedWindows * ungatedLength, [&head](std::span<const float> batch, std::size_t /*at*/) { head.insert(head.end(), batch.begin(), batch.end()); });
@@ -429,7 +428,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         std::println("    no lag between 0.5 and 3.0 us is distinguishable: the whole run spans {:.4f} on a curve that never falls to the scatter", flatSpread);
         expect(static_cast<double>(ungatedArm.magnitude[2UZ]) > 20. * ungatedArm.scatter) << "the derived null at 1 us is nowhere to be seen in an ungated window";
 
-        // the crude magnitude gate: eight times the median of the span it opens over
+        // the crude magnitude gate, at eight times the median of the span it opens over
         std::vector<float> sampled;
         sampled.reserve(gateSpan / 64UZ + 1UZ);
         const std::size_t seen = forEachCs16Magnitude(capturePath(kAdsb), gateSpan, [&sampled](std::span<const float> batch, std::size_t at) {
@@ -481,7 +480,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         }
         std::println("");
 
-        // the framer's own gate: the positions the pulse-position scanner nominates as whole long frames
+        // the framer's own gate, at the positions the pulse-position scanner nominates as whole long frames
         gr::digital::PpmScanner scanner;
         scanner.prepare(gr::digital::modeS(), 1UZ);
         scanner.threshold = 2.0F;
@@ -506,8 +505,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
                 }
                 const auto whole = std::span<const float>(work).subspan(offset, frameLength);
                 framed.insert(framed.end(), whole.begin(), whole.end());
-                // the same frame's own bits, rendered as the envelope the pulse-position rule defines: the control
-                // that says whether the derived pair is absent from the capture or from the arithmetic
+                // The same frame's own bits, rendered as the envelope the pulse-position rule defines. This control
+                // shows whether the derived pair is absent from the capture or from the arithmetic.
                 for (std::size_t bit = 0UZ; bit < 112UZ; ++bit) {
                     const bool one = whole[16UZ + 2UZ * bit] > whole[16UZ + 2UZ * bit + 1UZ];
                     rendered.push_back(one ? 1.f : 0.f);
@@ -533,17 +532,17 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         }
         std::println("");
 
-        // The same frames' own bits, rendered as the envelope the pulse-position rule defines, are the control: what
-        // they read is a closed form of the frames' own bit statistics, so what the capture's arm reads instead is a
-        // fact about the receiver's envelope and not about the arithmetic.
+        // The control is the same frames' own bits, rendered as the envelope the pulse-position rule defines. The
+        // control reads a closed form of the frames' own bit statistics. A different reading on the capture's arm is
+        // then a fact about the receiver's envelope and not about the arithmetic.
         //
-        // Over a 112-bit data field the mean-removed envelope is exactly +/-1/2 in each half slot, so with `b` the
-        // excess of equal over unequal adjacent bit pairs as a fraction of the 111 pairs a frame holds, the unbiased
+        // Over a 112-bit data field the mean-removed envelope is exactly +/-1/2 in each half slot. Let `b` be the
+        // excess of equal over unequal adjacent bit pairs, as a fraction of the 111 pairs a frame holds. The unbiased
         // estimate over K such frames is exactly
         //     |R(1.0 us)|/R(0) = |b|      and      |R(0.5 us)|/R(0) = [112 + 111 b] / 223.
         // The pulse-position rule's derived pair, a maximum of 1/2 and a null at one microsecond, is the balanced
-        // case b = 0; a finite set of frames is not balanced, and the one-microsecond reading is that imbalance and
-        // nothing else.
+        // case b = 0. A finite set of frames is not balanced. The one-microsecond reading measures that imbalance
+        // alone.
         std::size_t adjacent    = 0UZ;
         std::size_t transitions = 0UZ;
         for (std::size_t frame = 0UZ; frame + 224UZ <= rendered.size(); frame += 224UZ) {
@@ -569,8 +568,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         expect(std::abs(static_cast<double>(idealArm.magnitude[2UZ]) - derivedOne) < 1e-3) << std::format("the one-microsecond reading is the frames' own bit imbalance {:.5f} and nothing else", derivedOne);
         expect(static_cast<double>(idealArm.magnitude[2UZ]) < 0.25 * static_cast<double>(idealArm.magnitude[1UZ])) << "so the pulse-position rule's null stands far below its maximum";
 
-        // What gating buys on the capture itself is structure where there was none: the ungated curve never falls,
-        // and the gated one does.
+        // On the capture itself, gating shows structure where the ungated curve has none. The ungated curve does not
+        // fall, and the gated one does.
         double ungatedFloor = 1.;
         for (std::size_t lag = 1UZ; lag <= 6UZ; ++lag) {
             ungatedFloor = std::min(ungatedFloor, static_cast<double>(ungatedArm.magnitude[lag]));
@@ -586,7 +585,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         constexpr std::size_t windows = 45UZ;
         constexpr double      symbol  = rate / 4800.; // 26.042 samples
 
-        // the loudest block of the capture, which is where a channel is actually keyed
+        // the loudest block of the capture, where a channel is keyed
         constexpr std::size_t blockSize = 100'000UZ;
         constexpr std::size_t blocks    = 90UZ;
         std::size_t           bestBlock = 0UZ;

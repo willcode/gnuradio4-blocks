@@ -56,17 +56,17 @@ template<typename TBlock, typename T>
     return outSpan.count == 0UZ ? 0.0 : static_cast<double>(records[0UZ].signal_values[0UZ]);
 }
 
-/// @brief The window, the transform and the power accumulation with no record built: the floor a record is measured
-/// against, so criterion 7's question — whether emission dominates the transform — is answered by a difference.
+/// @brief The window, the transform and the power accumulation without building a record. It is the floor a record is
+/// measured against. The difference shows whether emission dominates the transform.
 [[nodiscard]] double segmentsOnly(gr::blocks::measurement::detail::SegmentAccumulator<CF>& core, std::span<const CF> input) {
-    // The pending buffer is topped up a segment at a time, exactly as the block's own fold does: filling it with the
-    // whole call and erasing a hop at a time would make the arm quadratic and measure the wrong thing.
+    // The pending buffer is topped up a segment at a time, as the block's own fold does. Filling it with the whole
+    // call and erasing a hop at a time would make the arm quadratic and measure the wrong thing.
     std::size_t taken = 0UZ;
     for (;;) {
         while (core.pending.size() >= core.fftSize) {
             core.accumulateFront();
             if (core.segments >= core.nAverages) {
-                core.segments = 0UZ; // the accumulator is reused in place; nothing is emitted
+                core.segments = 0UZ; // the accumulator is reused in place, and nothing is emitted
             }
         }
         if (taken == input.size()) {

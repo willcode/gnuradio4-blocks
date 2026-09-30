@@ -161,11 +161,11 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
     using namespace boost::ut;
     using namespace qa_unwrap;
 
-    // criterion 9: exact at a scale a float accumulator has already failed at (the kernel qa's own pinned scene:
-    // 5,242,881 samples at 0.4 cycles/sample give 2,097,152 cycles exactly). The full 10^9-cycle scene this criterion
-    // names takes on the order of 2*10^9 samples to reach — tens of seconds even at the kernel's own ns/sample bench
-    // — so, as the kernel qa's own `ENABLE_LONG_TESTS` arm records, it is not part of the default ~5s run; this
-    // reproduces the same demonstration at the scale the kernel qa already measured and pinned.
+    // Exact at a scale where a float accumulator has already failed. The kernel test pins the same scene, where
+    // 5,242,881 samples at 0.4 cycles/sample give 2,097,152 cycles exactly. A full 10^9-cycle scene needs on the order
+    // of 2*10^9 samples, tens of seconds even at the kernel's own cost per sample. The kernel test runs it only under
+    // `ENABLE_LONG_TESTS`, outside the default run of about 5 s. This test repeats the demonstration at the scale the
+    // kernel test pins.
     "criterion 9: exact where a float accumulator has already stopped working"_test = [] {
         constexpr double      kCyclesPerSample = 0.4;
         constexpr std::size_t kTotal           = 5'242'881UZ;
@@ -189,8 +189,8 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         const double unwrappedRadians = 2. * std::numbers::pi * static_cast<double>(measuredCycles) + static_cast<double>(measuredPhase);
         expect(std::abs(unwrappedRadians - trueRadians) < 1e-3) << "cycles and phase together must reconstruct the true unwrapped phase";
 
-        // A float accumulator over the same ramp, run alongside: wrong by more than one whole cycle, its spacing
-        // printed rather than asserted (that number is a fact about IEEE754 at this magnitude, not a block contract).
+        // A float accumulator over the same ramp, run alongside, is wrong by more than one whole cycle. Its spacing is
+        // printed and not asserted. That number is a fact about IEEE754 at this magnitude and not a block contract.
         float       floatAccumulator  = 0.f;
         double      doubleAccumulator = 0.;
         const float step              = static_cast<float>(2. * std::numbers::pi * kCyclesPerSample);
@@ -205,8 +205,8 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(floatError > 2. * std::numbers::pi) << "a float accumulator over this ramp must be wrong by more than one whole cycle";
     };
 
-    // criterion 10: correctness below Nyquist, the aliased result at or above it, and (per F14) the suspect-step
-    // hook's own threshold crossing, which the derivation places at 0.47 cycles/sample rather than at 0.6.
+    // Correct below Nyquist and aliased at or above it. The suspect-step hook crosses its threshold at 0.47
+    // cycles/sample, as the derivation places it, and not at 0.6.
     "criterion 10: unwraps exactly below Nyquist, aliases at or above it, and the suspect hook fires below both"_test = [] {
         constexpr std::size_t kTotal = 1'000'000UZ;
 
@@ -219,8 +219,8 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         }
 
         {
-            // 0.6 cycles/sample aliases to -0.4: the wrapped step (1.2*pi wraps to -0.8*pi) is indistinguishable
-            // from the one -0.4 cycles/sample produces, which is exactly the ambiguity the precondition names.
+            // 0.6 cycles/sample aliases to -0.4. The wrapped step, 1.2*pi wrapped to -0.8*pi, cannot be told from the
+            // step -0.4 cycles/sample produces. The precondition names this ambiguity.
             const Run    run_         = run(gr::property_map{}, 0.6, kTotal, 8192UZ);
             const double aliasRadians = 2. * std::numbers::pi * (-0.4) * static_cast<double>(kTotal - 1UZ);
             const double unwrapped    = 2. * std::numbers::pi * static_cast<double>(run_.cycles.back()) + static_cast<double>(run_.phase.back());
@@ -229,9 +229,9 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         }
 
         {
-            // the default max_step_fraction = 0.9 sets the threshold at 0.9*pi; at 0.6 fs the observed step is
-            // 0.8*pi, under it, so the hook does not fire — recorded rather than asserted per criterion 10's original
-            // text, since F14 found no fraction-of-pi threshold separates the two sides of Nyquist here.
+            // The default max_step_fraction = 0.9 sets the threshold at 0.9*pi. At 0.6 fs the observed step is 0.8*pi,
+            // under it, and the hook does not fire. The count is recorded and not asserted. No fraction-of-pi
+            // threshold separates the two sides of Nyquist here.
             gr::test::RuntimeTest runtimeTest;
             auto&                 source    = runtimeTest.emplace<ToneSource>();
             auto&                 block     = runtimeTest.emplace<PhaseUnwrap>();
@@ -248,8 +248,8 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
             expect(eq(block.nSuspectSteps(), std::uint64_t{0ULL})) << "F14: the hook does not fire at 0.6 fs, which is why the criterion moved to 0.47 fs";
         }
         {
-            // 0.47 cycles/sample: the step is 0.94*pi, over the default 0.9*pi threshold, so this is where the
-            // observability hook does fire, per F14's amendment to criterion 10.
+            // At 0.47 cycles/sample the step is 0.94*pi, over the default 0.9*pi threshold. The observability hook
+            // fires here.
             gr::test::RuntimeTest runtimeTest;
             auto&                 source    = runtimeTest.emplace<ToneSource>();
             auto&                 block     = runtimeTest.emplace<PhaseUnwrap>();
@@ -267,7 +267,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         }
     };
 
-    // criterion 11: the reset rule, on the same stream with only the flag differing.
+    // The reset rule, on the same stream with only the flag differing.
     "criterion 11: a n_dropped_samples tag resets the count exactly when reset_on_discontinuity is set"_test = [] {
         constexpr std::size_t kTotal  = 10000UZ;
         constexpr std::size_t kDropAt = 4000UZ;
@@ -325,7 +325,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         }
     };
 
-    // criterion 18 (PhaseUnwrap half): before any sample, cycles() reads 0.
+    // Before any sample, cycles() reads 0.
     "criterion 18: cycles() reads 0 before any sample is processed"_test = [] {
         PhaseUnwrap block;
         block.settings().init();
@@ -334,8 +334,8 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(eq(block._unwrapper.cycles(), std::int64_t{0LL}));
     };
 
-    // §6.3's `origin`: `zero` subtracts the first sample's phase so the output starts at exactly zero, and neither
-    // setting changes the differences, which is what a consumer usually reads.
+    // `origin = zero` subtracts the first sample's phase, and the output starts at exactly zero. Neither setting
+    // changes the differences, which a consumer usually reads.
     "origin: 'zero' starts at exactly zero and leaves every difference untouched"_test = [] {
         constexpr std::size_t kTotal  = 4000UZ;
         constexpr double      kRate   = 0.137;
@@ -367,8 +367,9 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(worst < 1e-5) << "neither origin changes the differences";
     };
 
-    // §6.3's refusals, and `max_step_fraction` as a live setting: it moves the hook's threshold without disturbing
-    // the count, so the same stream reads a different nSuspectSteps() at a different fraction and the same cycles.
+    // The refusals, and `max_step_fraction` as a live setting. The setting moves the hook's threshold without
+    // disturbing the count. The same stream reads a different nSuspectSteps() at a different fraction and the same
+    // cycles.
     "max_step_fraction: refused outside (0, 1], live over the same stream, and never touching the count"_test = [] {
         const auto staged = [](gr::property_map settings) {
             PhaseUnwrap block(std::move(settings));
@@ -380,7 +381,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(nothrow([&] { staged({{"max_step_fraction", 1.0}}); })) << "one itself is admitted";
         expect(throws([&] { staged({{"origin", std::string("elsewhere")}}); })) << "origin takes two values and no others";
 
-        // 0.42 cycles/sample steps by 0.84*pi: under the default 0.9 fraction, over a fraction of 0.8.
+        // 0.42 cycles/sample steps by 0.84*pi, under the default 0.9 fraction and over a fraction of 0.8.
         constexpr std::size_t kTotal = 2000UZ;
         const Run             loose  = run({{"max_step_fraction", 0.9}}, 0.42, kTotal, 4096UZ);
         const Run             tight  = run({{"max_step_fraction", 0.8}}, 0.42, kTotal, 4096UZ);
@@ -394,9 +395,9 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(eq(loose.nSaturations, std::uint64_t{0ULL})) << "2^63 turns are not reachable from a seeded scene";
     };
 
-    // §6.4's second reset case: a change of `origin` returns the count to zero and re-takes the origin. Driven on
-    // the block itself: a settings key that is not one of the reserved stream tags does not reach a running block
-    // from the stream.
+    // The second reset case. A change of `origin` returns the count to zero and re-takes the origin. The test drives
+    // the block itself. A settings key that is not a reserved stream tag does not reach a running block from the
+    // stream.
     "an origin change resets the count and raises nResets()"_test = [] {
         PhaseUnwrap block;
         block.settings().init();
@@ -427,7 +428,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(eq(block.nResets(), std::uint64_t{1ULL})) << "re-stating the origin it already has is not a change";
     };
 
-    // §8: the two output streams state their units, and nothing else is invented.
+    // The two output streams state their units, and the cycle count carries none.
     "the two outputs carry their signal_unit, rad on phase and none on cycles"_test = [] {
         const Run r = run(gr::property_map{}, 0.1, 2000UZ, 4096UZ);
         std::println("signal_unit: cycles '{}', phase '{}'", tagString(r.cycleTags, 0ULL, "signal_unit"), tagString(r.phaseTags, 0ULL, "signal_unit"));
@@ -435,7 +436,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(eq(tagString(r.phaseTags, 0ULL, "signal_unit"), std::string("rad"))) << "the residual is in radians";
     };
 
-    // criterion 19: chunk independence, bit-identical cycles and phase streams and counters, at every chunk size.
+    // Chunk independence, with bit-identical cycles and phase streams and counters at every chunk size.
     "criterion 19: chunk independence, bit-identical for every chunk size"_test = [] {
         constexpr std::size_t kTotal  = 3UZ * 4096UZ + 777UZ;
         constexpr std::size_t kDropAt = 4096UZ; // a tagged sample landing exactly on a chunk boundary at burst 4096

@@ -99,8 +99,8 @@ struct Branches {
     std::vector<CF> s; ///< the transmitted signal, when the scene needs it back
 };
 
-/// @brief `r_i = h_i * s + n_i`, with `s` and both noises independent circular complex Gaussian; `noisePower` per
-/// branch (equal). `signalPower` scales `s` before the channel.
+/// @brief `r_i = h_i * s + n_i`, with `s` and both noises independent circular complex Gaussian. `noisePower` is the
+/// equal noise power per branch. `signalPower` scales `s` before the channel.
 [[nodiscard]] Branches twoBranch(Rng& rng, std::size_t n, CF h0, CF h1, double signalPower, double noisePower) {
     Branches b;
     b.r0.resize(n);
@@ -119,8 +119,8 @@ struct Branches {
     return b;
 }
 
-/// @brief Everything a criterion needs out of one run, captured while the block is still alive (the `RuntimeTest` it
-/// lives in is local to `run()`, so nothing here may be a pointer into it).
+/// @brief Everything a test needs out of one run, captured while the block is still alive. The `RuntimeTest` it lives
+/// in is local to `run()`, and nothing here may point into it.
 struct Run {
     std::vector<CF>                 out;
     std::vector<CF>                 ortho;
@@ -153,8 +153,8 @@ struct Run {
     auto&                 block = test.emplace<PolarizationCombiner>(std::move(settings));
     auto&                 outS  = test.emplace<Collector<CF>>();
     auto&                 recS  = test.emplace<RecordSink>();
-    // A collector with nothing wired to its input would not stage, so the scene without an `ortho` consumer has no
-    // collector at all rather than an idle one.
+    // A collector with nothing wired to its input would not stage. The scene without an `ortho` consumer has no
+    // collector at all, not an idle one.
     Collector<CF>* orthoS = connectOrtho ? &test.emplace<Collector<CF>>() : nullptr;
 
     src0.samples = r0;
@@ -169,8 +169,8 @@ struct Run {
         std::ignore = test.connect(block, "ortho", *orthoS, "in");
     }
     std::ignore = test.connect(block, "measurements", recS, "in");
-    // A bounded deadline rather than an unbounded wait: a graph that fails to end fails an assertion instead of
-    // hanging the binary. Every scene here is a few tens of thousands of samples.
+    // A bounded deadline. A graph that fails to end fails an assertion and does not hang the binary. Every scene here
+    // is a few tens of thousands of samples.
     const bool inTime = test.runWithin(std::chrono::seconds(20));
 
     Run result;
@@ -239,7 +239,7 @@ struct Run {
 struct Projection {
     std::complex<double> gain{};          ///< the least-squares complex gain of @p reference in @p measured
     double               signalPower{};   ///< the power that gain accounts for
-    double               residualPower{}; ///< what is left, which under (7.1) is the noise
+    double               residualPower{}; ///< what is left, the noise under the scene's signal model
 };
 
 [[nodiscard]] Projection project(std::span<const CF> measured, std::span<const CF> reference, std::size_t from, std::size_t to) {
@@ -275,20 +275,19 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
     using namespace boost::ut;
     using namespace qa_polcomb;
 
-    // criterion 12: MRC gain over a branch, at equal branches (3.0103 dB, within 0.05 dB) and at -6 dB relative
-    // (0.9691 dB), against the derived envelope: weight-estimation loss under 0.011 dB at M>=512, plus the
-    // SNR-measurement spread 4.343/sqrt(N) dB, which at N = 65536 is 0.017 dB.
+    // MRC gain over a branch, at equal branches (3.0103 dB, within 0.05 dB) and at -6 dB relative (0.9691 dB). The
+    // envelope is the weight-estimation loss, under 0.011 dB at M>=512, plus the SNR-measurement spread
+    // 4.343/sqrt(N) dB, which at N = 65536 is 0.017 dB.
     "criterion 12: MRC gain over a branch, inside its derived envelope"_test = [] {
         constexpr std::size_t kN      = 65536UZ;
         constexpr gr::Size_t  kWindow = 8192U; // shorter than the stream, so `out` is really combined and not passed through
         constexpr std::size_t kFrom   = static_cast<std::size_t>(kWindow);
         Rng                   rng(0x243f6a8885a308d3ULL);
 
-        // The measurement is made on the streams: the output's signal-to-noise ratio against the transmitted signal,
-        // over the windows after the first (window 0 is the startup passthrough), against the better branch's over
-        // the same range. The envelope is the spec's two named contributions — the weight-estimation loss, under
-        // 0.011 dB at M >= 512, and the ratio-measurement spread 4.343/sqrt(N), which over 57344 samples is
-        // 0.018 dB.
+        // The measurement is made on the streams. It compares the output's signal-to-noise ratio against the
+        // transmitted signal with the better branch's, over the windows after the first. Window 0 is the startup
+        // passthrough. The envelope has two contributions. The weight-estimation loss is under 0.011 dB at M >= 512.
+        // The ratio-measurement spread is 4.343/sqrt(N), which over 57344 samples is 0.018 dB.
         const auto arm = [kWindow](const Branches& b, double nominalGainDb, std::string_view what) {
             const Run r = run({{"window", kWindow}}, b.r0, b.r1, 8192UZ);
             expect(r.endedOnItsOwn) << what;
@@ -312,8 +311,8 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         arm(twoBranch(rng, kN, CF{1.f, 0.f}, 0.5f * CF(static_cast<float>(std::cos(2.)), static_cast<float>(std::sin(2.))), 1., 0.1), 0.9691, "-6 dB relative branch");
     };
 
-    // criterion 13: the estimator's internal identity, on arbitrary data with no assumed model: the two branch SNRs
-    // sum in linear terms to the combined SNR, to 1e-9 relative — the algebraic identity (7.6) states.
+    // The estimator's internal identity, on arbitrary data with no assumed model. The two branch SNRs sum in linear
+    // terms to the combined SNR, to 1e-9 relative. The identity is algebraic.
     "criterion 13: branchSnrDb(0) and branchSnrDb(1) sum in linear terms to combinedSnrDb()"_test = [] {
         Rng             rng(0x9e3779b97f4a7c15ULL);
         std::vector<CF> r0(8192UZ);
@@ -323,9 +322,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
 
         const Run r = run({{"window", gr::Size_t{8192U}}}, r0, r1, 4096UZ);
 
-        // The identity is only a test if the figures it relates are real numbers: an eigenvalue swap that drives a
-        // ratio to zero reads -inf dB, which the block now reports as the finite placeholder 0, and 1 + 1 == ... is
-        // not the identity. So each figure is asserted finite and strictly positive before it is used.
+        // The identity tests something only when the figures it relates are real numbers. An eigenvalue swap that
+        // drives a ratio to zero reads -inf dB. The block reports that as the finite placeholder 0, and a sum of
+        // placeholders is not the identity. Each figure is asserted finite and strictly positive before it is used.
         std::println("criterion 13: branch0 {:.6f} dB, branch1 {:.6f} dB, combined {:.6f} dB", r.branch0Db, r.branch1Db, r.combinedDb);
         expect(std::isfinite(r.branch0Db) && std::isfinite(r.branch1Db) && std::isfinite(r.combinedDb)) << "no figure may be an infinity";
         expect(r.combinedDb > r.branch0Db && r.combinedDb > r.branch1Db) << "the combined figure must exceed either branch's";
@@ -342,7 +341,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(std::abs(sum - combined) < 1e-9 * std::max(1., combined)) << "the additive identity must hold to 1e-9 relative on arbitrary data";
     };
 
-    // criterion 14: the estimate recovers the channel, within the covariance's own relative standard error.
+    // The estimate recovers the channel, within the covariance's own relative standard error.
     "criterion 14: relativePhase and amplitudeRatio recover the channel, within 4/sqrt(M)"_test = [] {
         constexpr std::size_t kM = 262144UZ;
         Rng                   rng(0x1234567890abcdefULL);
@@ -355,9 +354,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(std::abs(r.amplitudeRatio - 2.) < tolerance) << "amplitudeRatio must recover |h0|/|h1| = 2 within the same tolerance";
     };
 
-    // criterion 15: the orthogonal output nulls the transmitted signal, below -40 dB of what `out` carries of it, and
-    // the orthogonal weight vector nulls the *true* channel `h` the scene injected — which `v^H v_perp == 0` cannot
-    // show, since `v_perp` is built from `v` and their inner product is zero however wrong `v` is.
+    // The orthogonal output nulls the transmitted signal, below -40 dB of what `out` carries of it. The orthogonal
+    // weight vector nulls the *true* channel `h` the scene injected. `v^H v_perp == 0` cannot show that. `v_perp` is
+    // built from `v`, and their inner product is zero however wrong `v` is.
     "criterion 15: the orthogonal output nulls, on the correlation and on the injected channel"_test = [] {
         constexpr std::size_t kWindow  = 8192UZ;
         constexpr std::size_t kWindows = 3UZ;
@@ -373,7 +372,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             return;
         }
 
-        // window 0 is the passthrough startup; windows 1 and 2 carry weights solved from a real (stationary) channel.
+        // Window 0 is the passthrough startup. Windows 1 and 2 carry weights solved from a real, stationary channel.
         std::complex<double> corrOut{};
         std::complex<double> corrOrtho{};
         for (std::size_t k = kWindow; k < kWindow * kWindows; ++k) {
@@ -384,9 +383,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         std::println("criterion 15: |corr(s,ortho)| / |corr(s,out)| = {:.2f} dB (must be below -40)", ratioDb);
         expect(ratioDb < -40.) << "the orthogonal output must carry the transmitted signal at least 40 dB below what out carries";
 
-        // The channel the scene injected, which the block never saw: the orthogonal weights must annihilate it and
-        // the combining weights must not. An estimate that has drifted away from the true polarization fails this
-        // even though `v^H v_perp` would still be zero.
+        // The channel the scene injected, which the block did not see. The orthogonal weights must null it, and the
+        // combining weights must not. An estimate that has drifted from the true polarization fails this check, even
+        // though `v^H v_perp` would still be zero.
         const std::complex<double> trueH0       = static_cast<std::complex<double>>(h0);
         const std::complex<double> trueH1       = static_cast<std::complex<double>>(h1);
         const double               throughOut   = std::abs(std::conj(r.weight0) * trueH0 + std::conj(r.weight1) * trueH1);
@@ -397,8 +396,8 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(nullDb < -40.) << "the orthogonal weights must annihilate the channel the scene injected";
     };
 
-    // criterion 16: selection mode follows the stronger branch across exactly one crossover; mrc on the same stream
-    // reads a positive gain throughout.
+    // Selection mode follows the stronger branch across exactly one crossover. mrc on the same stream reads a positive
+    // gain throughout.
     "criterion 16: selection mode switches exactly once at a branch crossover; mrc stays positive throughout"_test = [] {
         constexpr std::size_t kWindow  = 2048UZ;
         constexpr std::size_t kWindows = 4UZ;
@@ -425,17 +424,17 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
 
         const Run mrcRun = run({{"window", gr::Size_t{kWindow}}, {"mode", std::string("mrc")}, {"emit_records", true}}, r0, r1, 4096UZ);
         expect(ge(mrcRun.records.size(), 3UZ)) << "at least the three post-startup windows must have produced records";
-        for (std::size_t i = 1UZ; i < mrcRun.records.size(); ++i) { // record 0 describes window 0's own solve; still a valid combine
+        for (std::size_t i = 1UZ; i < mrcRun.records.size(); ++i) { // record 0 describes window 0's own solve, still a valid combine
             const float gainDb = mrcRun.records[i].signal_values.at(5UZ);
             std::println("criterion 16: mrc record {} combining_gain_db = {:.3f}", i, gainDb);
             expect(gainDb > 0.f) << std::format("record {}: mrc must show a positive gain over the stronger branch throughout", i);
         }
     };
 
-    // criterion 17: saturation is counted, never silent, at both stated bounds.
+    // Saturation is counted at both stated bounds.
     "criterion 17: saturation is counted at both bounds, and a degenerate ratio leaves branch 0 unchanged"_test = [] {
-        // (a) a noiseless two-branch input: no noise in either branch, so lambda_- = 0 exactly (small integer
-        // covariance entries, computed without rounding) and the SNR figures saturate at 60 dB / 1e6 linear.
+        // (a) A noiseless two-branch input. With no noise in either branch, lambda_- = 0 exactly, from small integer
+        // covariance entries computed without rounding. The SNR figures saturate at 60 dB, 1e6 linear.
         {
             constexpr std::size_t kWindow = 1024UZ;
             std::vector<CF>       r0(kWindow, CF{1.f, 0.f});
@@ -446,9 +445,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             expect(std::abs(r.combinedDb - 60.) < 1e-6) << "the saturated figure must read exactly 60 dB (1e6 linear)";
         }
 
-        // (b) branch 1 carries only independent structure (an exactly orthogonal deterministic sequence, so the
-        // cross-covariance is exactly zero, not merely small): the amplitude ratio saturates and the weights
-        // degenerate to branch 0 alone, checked by comparing `out` to branch 0 bit for bit.
+        // (b) Branch 1 carries only independent structure, an exactly orthogonal deterministic sequence. The
+        // cross-covariance is exactly zero, not merely small. The amplitude ratio saturates, and the weights
+        // degenerate to branch 0 alone. The test compares `out` to branch 0 bit for bit.
         {
             constexpr std::size_t kWindow  = 1024UZ;
             constexpr std::size_t kWindows = 3UZ;
@@ -484,7 +483,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         }
     };
 
-    // §7.6/§8: the record states the rate it was measured at, unconditionally, from the block's own setting.
+    // The record states the rate it was measured at, from the block's own setting, in every case.
     "the record states its sample_rate, and a non-positive one refuses at staging"_test = [] {
         Rng             rng(0x9e3779b97f4a7c15ULL);
         std::vector<CF> r0(4096UZ);
@@ -521,8 +520,8 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(throws([&] { staged({{"sample_rate", 0.f}}); })) << "a rate of zero is not a rate";
     };
 
-    // §7.5's normalizations are two exact scalars, and they are measurably different on the same stream: unit_noise
-    // keeps ||v|| = 1 so the output signal power is P|h|^2, unit_signal scales it to exactly 1.
+    // The two normalizations are exact scalars, and they differ measurably on the same stream. unit_noise keeps
+    // ||v|| = 1, and the output signal power is P|h|^2. unit_signal scales it to exactly 1.
     "normalize: unit_noise and unit_signal scale the output differently, each to its stated value"_test = [] {
         constexpr std::size_t kWindow  = 4096UZ;
         constexpr std::size_t kWindows = 4UZ;
@@ -539,21 +538,21 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         const double noisePower  = outputSignalPower("unit_noise");
         const double signalPower = outputSignalPower("unit_signal");
         std::println("normalize: unit_noise output signal power {:.5f} (nominal |h|^2 = 1.25), unit_signal {:.5f} (nominal 1)", noisePower, signalPower);
-        // The envelope is the measurement's own: the mean |s|^2 the projection divides by has a relative spread of
-        // 1/sqrt(12288) = 0.9 % over the range measured, and the weights come from the window before each.
+        // The envelope comes from the measurement. The mean |s|^2 the projection divides by has a relative spread of
+        // 1/sqrt(12288) = 0.9 % over the measured range. The weights come from the window before each.
         expect(std::abs(noisePower - 1.25) < 0.05) << "unit_noise keeps ||v|| = 1, so the output signal power is P|h|^2 = 1.25";
         expect(std::abs(signalPower - 1.) < 0.05) << "unit_signal scales the output's signal power to 1";
         expect(std::abs(noisePower - signalPower) > 0.1) << "the two normalizations must really differ on this stream";
     };
 
-    // §7.5's smoothing, under the unequal branch noise §7.2's whitening is for: the one-pole blend runs on the
-    // whitened weights, so the orthogonal channel it rebuilds still nulls. Blending the unwhitened weights instead
-    // leaves an orthogonal vector that carries the signal at a level this catches.
+    // Weight smoothing under unequal branch noise, the case whitening serves. The one-pole blend runs on the whitened
+    // weights, and the orthogonal channel it rebuilds still nulls. A blend of the unwhitened weights leaves an
+    // orthogonal vector that carries the signal at a level this test catches.
     "weight_smoothing under unequal branch noise still nulls the orthogonal channel"_test = [] {
         constexpr std::size_t kWindow  = 4096UZ;
         constexpr std::size_t kWindows = 5UZ;
         constexpr double      kNoise0  = 0.02;
-        constexpr double      kNoise1  = 0.20; // a 10:1 imbalance, which is what makes whitening visible
+        constexpr double      kNoise1  = 0.20; // a 10:1 imbalance, large enough to make whitening visible
 
         Rng             rng(0x2545f4914f6cdd1dULL);
         const CF        h0 = CF{1.f, 0.f};
@@ -583,8 +582,8 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(throughOut > 0.5) << "the combined output must still carry the signal";
         expect(nullDb < -30.) << "the smoothed orthogonal channel must still null the signal under unequal branch noise";
 
-        // and the whitened combination is worth what §7.2 says it is: SNR_0/N_0 + SNR_1/N_1 rather than the
-        // equal-noise answer. 1/0.02 + 0.25/0.2 = 51.25 linear, 17.10 dB.
+        // The whitened combination reaches SNR_0/N_0 + SNR_1/N_1 and not the equal-noise answer.
+        // 1/0.02 + 0.25/0.2 = 51.25 linear, 17.10 dB.
         const double snrOut = measuredSnrDb(r.out, s, 2UZ * kWindow, s.size());
         std::println("weight_smoothing: measured output SNR {:.3f} dB (optimum 10*log10(1/0.02 + 0.25/0.2) = {:.3f} dB)", snrOut, 10. * std::log10(1. / kNoise0 + 0.25 / kNoise1));
         expect(std::abs(snrOut - 10. * std::log10(1. / kNoise0 + 0.25 / kNoise1)) < 0.3) << "the whitened combination must reach the unequal-noise optimum";
@@ -604,8 +603,8 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(eq(r.out.size(), r0.size())) << "the stream is unaffected";
     };
 
-    // §7.3's `ortho` is optional in both directions: nothing connected to it, and the arithmetic switched off with
-    // something connected. Neither may stall the combined output.
+    // `ortho` is optional in both directions, with nothing connected to it and with the arithmetic switched off while
+    // it is connected. Neither case may stall the combined output.
     "emit_orthogonal and the ortho connection each gate the second output without stalling the first"_test = [] {
         Rng             rng(0xbf58476d1ce4e5b9ULL);
         std::vector<CF> r0(8192UZ);
@@ -628,13 +627,12 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         }
     };
 
-    // criterion 18 (PolarizationCombiner half): before the first window, out/ortho pass branches 0/1 through
-    // unchanged, and every estimate reads 0.
+    // Before the first window, out and ortho pass branches 0 and 1 through unchanged, and every estimate reads 0.
     "criterion 18: startup passes branch 0 and branch 1 through unchanged, and coverage() reads 0"_test = [] {
-        // the readers, checked before any sample is processed at all: a run through a complete RuntimeTest graph
-        // always reaches end of stream, and PolarizationCombiner's own end-of-stream flush (spec's own "the partial
-        // window is published as a final record") updates coverage() and the estimates by the time the graph
-        // returns — so the "before the first window" reading is checked on a freshly started block directly.
+        // The readers, checked before any sample is processed. A run through a complete RuntimeTest graph reaches end
+        // of stream. The block's end-of-stream flush publishes the partial window as a final record. It updates
+        // coverage() and the estimates before the graph returns. The "before the first window" reading is therefore
+        // checked on a freshly started block directly.
         PolarizationCombiner block;
         block.settings().init();
         std::ignore = block.settings().applyStagedParameters();
@@ -644,8 +642,8 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         expect(eq(block.amplitudeRatio(), 0.));
         expect(eq(block.nWindows(), std::uint64_t{0ULL}));
 
-        // the passthrough itself, over an actual stream shorter than one window (so it never closes and the
-        // end-of-stream flush the paragraph above works around never has real weights to publish over what streamed).
+        // The passthrough itself, over a stream shorter than one window. The window does not close, and the
+        // end-of-stream flush has no real weights to publish over what streamed.
         Rng             rng(0x0f0f0f0f0f0f0f0fULL);
         std::vector<CF> r0(2000UZ);
         std::vector<CF> r1(2000UZ);
@@ -661,7 +659,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         }
     };
 
-    // criterion 19: chunk independence, bit-identical out/ortho streams, records and counters at every chunk size.
+    // Chunk independence, with bit-identical out and ortho streams, records and counters at every chunk size.
     "criterion 19: chunk independence, bit-identical for every chunk size"_test = [] {
         Rng            rng(0x5deece66dULL);
         const Branches b         = twoBranch(rng, 3UZ * 1024UZ + 777UZ, CF{1.f, 0.f}, 0.6f * CF(static_cast<float>(std::cos(1.1)), static_cast<float>(std::sin(1.1))), 1., 0.15);

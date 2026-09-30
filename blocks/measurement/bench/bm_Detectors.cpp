@@ -29,7 +29,7 @@ void init(TBlock& block) {
     block.start();
 }
 
-/// @brief A density record shaped like something a receiver sees: a noise floor, a band, and a few tones over it.
+/// @brief A density record shaped like a received spectrum, with a noise floor, a band and a few tones over it.
 [[nodiscard]] gr::DataSet<float> densityRecord(std::uint64_t& state) {
     const auto next = [&state] {
         state ^= state << 13U;
