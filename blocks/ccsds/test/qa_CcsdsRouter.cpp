@@ -168,7 +168,7 @@ const boost::ut::suite<"CcsdsRouter"> ccsdsRouterTests = [] {
         expect(eq(router.nOther, std::uint64_t{1}));
         expect(eq(router.nMissingKey, std::uint64_t{0})) << "the held-back record is counted on the call that routes it, not on the one that could not";
 
-        // the same span again, with room this time: the two held-back records go through and are counted once
+        // the same span again, with room this time. The two held-back records go through and are counted once.
         std::vector<Record>             otherBuf2(4UZ);
         InputSpan<Record>               inSpan2{std::span<const Record>(records).subspan(1UZ)};
         std::vector<OutputSpan<Record>> outs2{OutputSpan<Record>{std::span<Record>(out0)}};

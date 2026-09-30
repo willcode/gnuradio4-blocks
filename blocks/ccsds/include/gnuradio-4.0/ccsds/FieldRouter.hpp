@@ -20,13 +20,13 @@
 #include <gnuradio-4.0/ccsds/RecordHelpers.hpp>
 
 /**
- * @brief `FieldRouter`, routing a record by a CCSDS field the decode already wrote to metadata.
+ * @brief `FieldRouter` routes a record by a CCSDS field that the decoder has written to metadata.
  *
- * One block, two profiles (`"apid"` or `"virtual_channel"`), N output ports plus `other` rather than one port with
- * a metadata filter — `basic::Selector` already carries `std::vector<PortOut<T, Async>>`, the routing is visible
- * in the flowgraph, and the record is parsed once with the branch a port assignment rather than a predicate
- * re-evaluated per candidate. The mitigation for a fixed port set is that the decode has already written the
- * field, so a graph that wants the metadata-filter shape does not need this block at all.
+ * One block serves two profiles, `"apid"` and `"virtual_channel"`. It has N output ports plus `other`, not one port
+ * with a metadata filter. `basic::Selector` uses the same `std::vector<PortOut<T, Async>>` shape. The routing is
+ * visible in the flowgraph. The block reads the field once, and the branch is a port assignment. It evaluates no
+ * predicate per candidate. The port set is fixed. A graph that needs a metadata filter instead can read the field
+ * the decoder has written, without this block.
  */
 namespace gr::blocks::ccsds {
 
@@ -35,12 +35,11 @@ GR_REGISTER_BLOCK(gr::blocks::ccsds::FieldRouter)
 /*!
 @brief Routes a `DataSet<std::uint8_t>` by `ccsds_apid` or `ccsds_vcid`, one output port per named value.
 
-A record whose value equals `values[i]` goes to `outputs[i]`; anything else, including a record whose key is
-absent or holds something other than a `gr::Size_t`, goes to `other`, counted and never assigned a value: a value
-of the wrong type reads as absent, because a record that has crossed a network can carry anything under a key, and
-inventing a routing value for one would send it somewhere on the strength of a guess. With `other` unconnected an
-unmatched record is a counted drop, which is the one place this block lets a record vanish, and only because the
-graph's author declined the port that was offered.
+A record whose value equals `values[i]` goes to `outputs[i]`. Any other record goes to `other` and is counted in
+`nOther`. That includes a record whose key is absent or holds a type other than `gr::Size_t`. A value of the wrong
+type reads as absent. A record that has crossed a network can carry anything under a key, and the block assigns it
+no guessed value. With `other` unconnected, the block drops an unmatched record and counts it in `nOther`. `values`
+is refused when it is empty, holds duplicates or holds a value wider than the field.
 */
 struct FieldRouter : Block<FieldRouter> {
     using Description = Doc<"Routes a CCSDS record by APID or virtual channel identifier, one output port per named value plus an `other` catch-all">;
@@ -49,8 +48,8 @@ struct FieldRouter : Block<FieldRouter> {
     std::vector<PortOut<DataSet<std::uint8_t>, Async>> outputs;
     PortOut<DataSet<std::uint8_t>, Async, Optional>    other;
 
-    Annotated<std::string, "field", Doc<"'apid' (reads ccsds_apid) or 'virtual_channel' (reads ccsds_vcid); required">, Visible>                                                            field{};
-    Annotated<std::vector<gr::Size_t>, "values", Doc<"the field value routed to each output port, in order; required, refused empty or with duplicates or an out-of-width value">, Visible> values{};
+    Annotated<std::string, "field", Doc<"required field, 'apid' (ccsds_apid) or 'virtual_channel' (ccsds_vcid)">, Visible> field{};
+    Annotated<std::vector<gr::Size_t>, "values", Doc<"required field value of each output port, in port order">, Visible>  values{};
 
     GR_MAKE_REFLECTABLE(FieldRouter, in, outputs, other, field, values);
 
@@ -60,7 +59,7 @@ struct FieldRouter : Block<FieldRouter> {
 
     bool                      _configured = false;
     const char*               _key        = "ccsds_apid";
-    std::vector<std::int32_t> _valueToPort{}; // indexed by field value; -1 means no matching output port
+    std::vector<std::int32_t> _valueToPort{}; // indexed by field value, -1 for no matching output port
 
     void settingsChanged(const property_map&, const property_map&) { rebuild(); }
     void start() { rebuild(); }
@@ -138,11 +137,11 @@ struct FieldRouter : Block<FieldRouter> {
                 portIndex = static_cast<std::size_t>(_valueToPort[*value]);
             }
 
-            // The room test comes before every count, so a record held back for want of room is counted once, on
-            // the call that routes it, and not again on each call that could not.
+            // The room test comes before every count. A record held back for lack of room is counted once, on the call
+            // that routes it.
             if (portIndex.has_value()) {
                 if (madePerPort[*portIndex] >= outs[*portIndex].size()) {
-                    break; // no room on the port this record is bound for; retry next call
+                    break; // no room on this record's port, retry next call
                 }
                 outs[*portIndex][madePerPort[*portIndex]] = record;
                 ++madePerPort[*portIndex];

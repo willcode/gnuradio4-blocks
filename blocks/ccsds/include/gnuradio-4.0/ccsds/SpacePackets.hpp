@@ -24,18 +24,18 @@
 #include <gnuradio-4.0/ccsds/RecordHelpers.hpp>
 
 /**
- * @brief The space packet extraction machine as a block, the packet decoder, and both transmit-side blocks.
+ * @brief The space packet extraction block, the packet decoder, and both transmit-side blocks.
  *
- * 133.0-B-2's packets are laid end to end through a virtual channel's data fields; `SpacePacketExtract` is
- * `gr::ccsds::PacketExtractor` wearing ports, one instance per virtual channel as 132.0-B-3 4.3.2.1's NOTE
- * requires and this block enforces via a required `virtual_channel` setting. `SpacePacketDecode` reads a whole
- * packet's primary header into metadata; `SpacePacketEncode` and `SpacePacketSegment` are the transmit side.
+ * 133.0-B-2 packets lie end to end through the data fields of a virtual channel. `SpacePacketExtract` runs one
+ * `gr::ccsds::PacketExtractor` per virtual channel (132.0-B-3 4.3.2.1 NOTE). Its required `virtual_channel` setting
+ * enforces one instance per channel. `SpacePacketDecode` reads the primary header of a whole packet into metadata.
+ * `SpacePacketEncode` and `SpacePacketSegment` form the transmit side.
  */
 namespace gr::blocks::ccsds {
 
 namespace packets_detail {
 
-/// @brief Add one set of extraction counters into a running total, so a rebuilt kernel's history survives.
+/// @brief Adds one set of extraction counters into a running total. A rebuilt kernel's history then survives.
 inline void accumulate(gr::ccsds::PacketExtractor::Counters& total, const gr::ccsds::PacketExtractor::Counters& add) noexcept {
     total.packets += add.packets;
     total.idle_packets += add.idle_packets;
@@ -54,22 +54,22 @@ inline void accumulate(gr::ccsds::PacketExtractor::Counters& total, const gr::cc
 GR_REGISTER_BLOCK(gr::blocks::ccsds::SpacePacketExtract)
 
 /*!
-@brief One virtual channel's packet extraction, `gr::ccsds::PacketExtractor` behind ports, 132.0-B-3 4.3.2.
+@brief Extracts the packets of one virtual channel with `gr::ccsds::PacketExtractor`, 132.0-B-3 4.3.2.
 
-One zone per input record, zero to many whole packets out. `virtual_channel` has no default: 4.3.2.1's NOTE
-requires one instance per virtual channel, and a default would let two channels' packets interleave into one
-reassembly state silently. There is no `fail` or `idle` output port — a dropped fragment is octets of unknown
-extent and an idle packet is padding, and the counters below say more than either would.
+The block takes one zone per input record and emits zero or more whole packets. `virtual_channel` has no default.
+4.3.2.1's NOTE requires one instance per virtual channel. A default would let the packets of two channels interleave
+silently in one reassembly state. There is no `fail` or `idle` output port. A dropped fragment is octets of unknown
+extent, and an idle packet is padding. The counters report more than either port would.
 */
 struct SpacePacketExtract : Block<SpacePacketExtract> {
-    using Description = Doc<"Space packet extraction for one virtual channel: zones in, whole space packets out, recovering a boundary from the first header pointer after any loss (132.0-B-3 4.3.2)">;
+    using Description = Doc<"Extracts whole space packets from the zones of one virtual channel and recovers a boundary from the first header pointer after any loss (132.0-B-3 4.3.2)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "virtual_channel", Doc<"the VCID this instance serves; required, one instance per channel">, Visible>    virtual_channel{detail::kUnset};
-    Annotated<gr::Size_t, "count_modulus", Doc<"256 for TM, 16777216 or 268435456 for AOS; must be a power of two">>               count_modulus{gr::ccsds::kTmCountModulus};
-    Annotated<gr::Size_t, "max_packet_length", Doc<"the reassembly bound; refused above the sixteen-bit field's derived maximum">> max_packet_length{static_cast<gr::Size_t>(gr::ccsds::kMaxPacketOctets)};
+    Annotated<gr::Size_t, "virtual_channel", Doc<"required VCID of this instance, one instance per channel">, Visible>   virtual_channel{detail::kUnset};
+    Annotated<gr::Size_t, "count_modulus", Doc<"power of two, 256 for TM, 16777216 or 268435456 for AOS">>               count_modulus{gr::ccsds::kTmCountModulus};
+    Annotated<gr::Size_t, "max_packet_length", Doc<"reassembly bound, at most the sixteen-bit field's derived maximum">> max_packet_length{static_cast<gr::Size_t>(gr::ccsds::kMaxPacketOctets)};
 
     GR_MAKE_REFLECTABLE(SpacePacketExtract, in, out, virtual_channel, count_modulus, max_packet_length);
 
@@ -112,8 +112,8 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
         gr::ccsds::PacketExtractor::Config config{};
         config.max_packet_length = max_packet_length.value;
         config.count_modulus     = count_modulus.value;
-        // The reconfigured extractor starts with an empty partial and no frame count, which is what a new
-        // configuration requires; its counters are a history of the stream and are carried across instead.
+        // The reconfigured extractor starts with an empty partial and no frame count, as a new configuration
+        // requires. Its counters are a history of the stream and carry across.
         packets_detail::accumulate(_carried, _extractor.counters());
         _extractor = gr::ccsds::PacketExtractor(config);
         nDiscardedPending += _pending.size();
@@ -192,8 +192,8 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
                 const std::size_t                   pendingBefore = _pending.size();
                 const std::span<const std::uint8_t> zone(record.signal_values);
                 _extractor.feed(zone, static_cast<std::uint16_t>(*fhp), *count, [&](std::span<const std::uint8_t> packet) {
-                    // A gap is a property of the boundary between two zones, so it belongs on one record: the
-                    // zone's own cause rides its first packet and is taken off the rest.
+                    // A gap is a property of the boundary between two zones and belongs on one record. The zone's
+                    // own cause goes on its first packet and is removed from the rest.
                     const bool            firstOfZone = _pending.size() == pendingBefore;
                     DataSet<std::uint8_t> packetRecord;
                     packetRecord.signal_values.assign(packet.begin(), packet.end());
@@ -207,8 +207,8 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
                     _pending.push_back(std::move(packetRecord));
                 });
 
-                // The gap is detected before any packet of this zone is emitted, so the count is settled here; a
-                // zone that detects one and completes nothing holds it for the next packet to come out.
+                // The gap is detected before any packet of this zone is emitted, and the count is settled here. A
+                // zone that detects a gap and completes no packet holds it for the next packet out.
                 _pendingGap += _extractor.counters().frames_lost - beforeLost;
                 if (_pendingGap > 0ULL && _pending.size() > pendingBefore) {
                     property_map& map = _pending[pendingBefore].meta_information[0UZ];
@@ -238,15 +238,14 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::SpacePacketDecode)
 
 /*!
-@brief One whole space packet per record becomes its packet data field, with the primary header in metadata, 133.0-B-2 4.1.4.
+@brief Decodes one whole space packet per record into its data field and primary header metadata, 133.0-B-2 4.1.4.
 
-The secondary header, if the flag says one is present, is not split from the user data field: 4.1.4.2.1.4 says its
-contents are managed and there is no length field, so there is nothing structural left to parse. A packet whose
-declared length disagrees with the record's own length is refused rather than trimmed, because trimming would
-publish a payload nobody vouches for.
+The block does not split a secondary header from the user data field. 4.1.4.2.1.4 says its contents are managed
+and gives no length field. Nothing structural remains to parse. The block refuses a packet whose declared length
+differs from the record's length. Trimming it would publish an unverified payload.
 */
 struct SpacePacketDecode : Block<SpacePacketDecode> {
-    using Description = Doc<"Space packet decode: one whole packet per record becomes its packet data field, with the primary header written to metadata (133.0-B-2 4.1.4)">;
+    using Description = Doc<"Decodes one whole space packet per record into its packet data field and writes the primary header to metadata (133.0-B-2 4.1.4)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
@@ -325,22 +324,23 @@ struct SpacePacketDecode : Block<SpacePacketDecode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::SpacePacketEncode)
 
 /*!
-@brief One record of user data per record in, one whole space packet out, 133.0-B-2 4.1.
+@brief Encodes each record of user data as one whole space packet, 133.0-B-2 4.1.
 
-The sequence count is the one counter this module's encoders own outright rather than leaving to a setting:
-4.1.3.4.3.3 makes it the sequential count of every packet a user application emits, one counter per APID,
-continuous modulo 16384 — a plain counter with a one-sentence increment rule, unlike AX.25's window-driven `N(S)`.
+The block owns the sequence count and does not take it from a setting. 4.1.3.4.3.3 makes it the sequential count of
+every packet a user application emits. There is one counter per APID, continuous modulo 16384. It is a plain counter
+with a one-sentence increment rule, unlike the window-driven `N(S)` of AX.25. The block does not segment user data.
+`sequence_flags` therefore defaults to 3, unsegmented ('11').
 */
 struct SpacePacketEncode : Block<SpacePacketEncode> {
-    using Description = Doc<"Space packet encode: one record of user data becomes a whole space packet, with a per-APID sequence count (133.0-B-2 4.1)">;
+    using Description = Doc<"Encodes one record of user data as a whole space packet with a per-APID sequence count (133.0-B-2 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "apid", Doc<"0 to 2046; required, and 2047 is refused because it is reserved for the idle packets that fill a zone">, Visible> apid{detail::kUnset};
-    Annotated<bool, "packet_type", Doc<"false telemetry, true telecommand, 4.1.3.3.2.3">>                                                                packet_type           = false;
-    Annotated<bool, "secondary_header_flag", Doc<"4.1.3.3.3.2">>                                                                                         secondary_header_flag = false;
-    Annotated<gr::Size_t, "sequence_flags", Doc<"defaults to 3, unsegmented ('11'), the only value a non-segmenting block can honestly write">>          sequence_flags{3U};
+    Annotated<gr::Size_t, "apid", Doc<"required APID, 0 to 2046, 2047 being reserved for idle packets">, Visible> apid{detail::kUnset};
+    Annotated<bool, "packet_type", Doc<"false telemetry, true telecommand, 4.1.3.3.2.3">>                         packet_type           = false;
+    Annotated<bool, "secondary_header_flag", Doc<"4.1.3.3.3.2">>                                                  secondary_header_flag = false;
+    Annotated<gr::Size_t, "sequence_flags", Doc<"sequence flags, default 3 for unsegmented ('11')">>              sequence_flags{3U};
 
     GR_MAKE_REFLECTABLE(SpacePacketEncode, in, out, apid, packet_type, secondary_header_flag, sequence_flags);
 
@@ -355,8 +355,8 @@ struct SpacePacketEncode : Block<SpacePacketEncode> {
     std::array<std::uint16_t, gr::ccsds::kIdleApid> _sequenceCounters{};
 
     void settingsChanged(const property_map&, const property_map&) { rebuild(); }
-    // 4.1.3.4.3.3's count is the sequential count of the packets one application has produced, so it spans a
-    // reconfiguration of how they are labeled and restarts only when the block itself does.
+    // The count of 4.1.3.4.3.3 is the sequential count of the packets one application has produced. It spans a
+    // reconfiguration of their labels and restarts only when the block itself restarts.
     void start() {
         rebuild();
         _sequenceCounters.fill(0U);
@@ -440,7 +440,7 @@ struct SpacePacketEncode : Block<SpacePacketEncode> {
             if (status == gr::ccsds::WriteStatus::ok) {
                 status = gr::ccsds::writeSpacePacketHeader(header, std::span<std::uint8_t>(packet.signal_values));
             }
-            if (status != gr::ccsds::WriteStatus::ok) { // publishing the all-zero header would claim a packet nobody built
+            if (status != gr::ccsds::WriteStatus::ok) { // an all-zero header would describe a packet that was never built
                 ++nRefusedHeader;
                 continue;
             }
@@ -467,45 +467,46 @@ struct SpacePacketEncode : Block<SpacePacketEncode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::SpacePacketSegment)
 
 /*!
-@brief Space packets in, fixed-length zones out with their first header pointers — the transmit half of 132.0-B-3 4.3.2.
+@brief Packs space packets into fixed-length zones with first header pointers, the transmit half of 132.0-B-3 4.3.2.
 
-Packets accumulate; whenever `zone_length` octets are available one zone is emitted with the pointer set to the
-offset of the first packet that starts in it, or `kFhpNoPacketStart` when the whole zone continues one already
-begun. 132.0-B-3 4.1.4.6's fill trigger is release time, a scheduling property this tree's data-driven graphs do
-not have, so a padded or idle zone is emitted only where `flush` asks for one, and never on a timer of the
-block's own. Such a zone pads whatever is buffered out to `zone_length`; with nothing buffered it is a whole zone
-of fill — under `fill = "oid"` the PN sequence under the reserved pointer of 4.1.4.6's Only Idle Data frame, and
-under `fill = "idle_packet"` one idle packet filling the zone from its first octet, whose pointer is therefore 0.
-The two are different objects and the pointer is what tells them apart: the receiver discards an Only Idle Data
-zone whole, and parses the idle packet and discards it by its APID.
+Packets accumulate in a buffer. Whenever `zone_length` octets are available, the block emits one zone. Its pointer
+is the offset of the first packet that starts in it. The pointer is `kFhpNoPacketStart` when the whole zone
+continues a packet already begun. The fill trigger of 132.0-B-3 4.1.4.6 is release time, a scheduling property that
+a data-driven graph does not have. The block therefore emits a padded or idle zone only when `flush` asks for one.
+It never emits one on a timer of its own. Such a zone pads the buffered octets out to `zone_length` with the PN
+sequence. With nothing buffered, it is a whole zone of fill. Under `fill = "oid"` the fill is the PN sequence,
+under the reserved pointer of the Only Idle Data frame of 4.1.4.6. Under `fill = "idle_packet"` the fill is one idle
+packet that starts at the zone's first octet, and the pointer is 0. The two are different objects, and the pointer
+tells them apart. The receiver discards an Only Idle Data zone whole. It parses the idle packet and discards it by
+its APID.
 
-`flush` asks twice, and the two are different questions. Raising it while the stream runs is an edge: the buffer
-goes out at the next call and once only, so a setting left at `true` does not turn every call into a padded zone.
-And while it is set, the end of the stream takes whatever is still buffered — the framework's end-of-stream hook
-runs over a span the block deliberately left unconsumed, which is why a call keeps the last record of its input
-while `flush` is set and asks for two records at a time so that keeping one cannot stall the steady state.
+`flush` acts in two ways. Raising it while the stream runs is an edge. The buffer goes out once, at the next call.
+A setting left at `true` does not turn every call into a padded zone. While `flush` is set, the end of the stream
+also sends whatever is still buffered. The framework's end-of-stream hook runs over a span the block left
+unconsumed. A call therefore keeps the last record of its input while `flush` is set. It asks for two records at a
+time, and keeping one back cannot stall the steady state.
 
-The octets survive a settings change. A `zone_length` or `fill` change is a property of the link the zones are
-going onto, not of the packets already handed over, and the accumulated starts are offsets into the buffer that
-any zone length in the validated range addresses — so the change takes effect at the next zone boundary and the
-packets in hand are still sent.
+The buffered octets survive a settings change. A `zone_length` or `fill` change is a property of the link, not of
+the packets already received. The accumulated starts are offsets into the buffer, and every zone length in the
+validated range can address them. The change takes effect at the next zone boundary, and the buffered packets are
+still sent.
 
-`zone_length` is bounded at 2046 octets because the pointer is eleven bits with two reserved values and so names
-positions 0 to 2045: a longer zone has octets no pointer can point at, and a packet starting in one of them would
-be announced by a reserved value that means the opposite.
+`zone_length` is at most 2046 octets. The pointer has eleven bits with two reserved values and names positions 0 to
+2045. A longer zone has octets no pointer can name. A packet starting in one of them would be announced by a
+reserved value that means the opposite.
 */
 struct SpacePacketSegment : Block<SpacePacketSegment> {
-    using Description = Doc<"Space packet segmentation: whole packets accumulate into fixed-length zones with a computed first header pointer, padded with idle fill on an explicit flush and at end of stream (132.0-B-3 4.3.2, transmit side)">;
+    using Description = Doc<"Packs whole space packets into fixed-length zones with a computed first header pointer. It pads with idle fill on an explicit flush and at end of stream (132.0-B-3 4.3.2, transmit side)">;
 
     // `in` is synchronous because the framework offers its end-of-stream hook a span only where a synchronous
     // input still holds items, and that hook is what sends the last zone.
     PortIn<DataSet<std::uint8_t>>         in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "zone_length", Doc<"octets per emitted data field or packet zone; required, 1 to 2046">, Visible>                                                                                                                    zone_length{0U};
-    Annotated<gr::Size_t, "idle_apid", Doc<"the APID for a generated idle packet, 0 to 2047, 4.1.3.3.4.4">>                                                                                                                                    idle_apid{static_cast<gr::Size_t>(gr::ccsds::kIdleApid)};
-    Annotated<std::string, "fill", Doc<"what a flush with nothing buffered emits: 'oid' (the 4.1.4.6.2 PN sequence) or 'idle_packet' (one whole idle packet); a short leftover is always padded with the PN sequence">>                        fill{std::string("oid")};
-    Annotated<bool, "flush", Doc<"raising this emits the buffer once as a padded or idle zone, and while it is set the end of the stream emits what is left; the stand-in for the release-time trigger a data-driven graph has no clock for">> flush = false;
+    Annotated<gr::Size_t, "zone_length", Doc<"required octets per emitted data field or packet zone, 1 to 2046">, Visible> zone_length{0U};
+    Annotated<gr::Size_t, "idle_apid", Doc<"the APID for a generated idle packet, 0 to 2047, 4.1.3.3.4.4">>                idle_apid{static_cast<gr::Size_t>(gr::ccsds::kIdleApid)};
+    Annotated<std::string, "fill", Doc<"empty-buffer flush output, 'oid' (4.1.4.6.2 PN sequence) or 'idle_packet'">>       fill{std::string("oid")};
+    Annotated<bool, "flush", Doc<"on raise, emit the buffer once, and at stream end while set">>                           flush = false;
 
     GR_MAKE_REFLECTABLE(SpacePacketSegment, in, out, zone_length, idle_apid, fill, flush);
 
@@ -529,9 +530,9 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
         _buffer.clear();
         _starts.clear();
         _oidFill.reset();
-        // A run that begins with `flush` already set owes its zone to the end of its stream, not to its first
-        // call: there is nothing buffered yet, and an idle zone in front of the first packet announces idle time
-        // the link never had.
+        // A run that begins with `flush` already set sends its zone at the end of its stream, not at its first call.
+        // Nothing is buffered yet. An idle zone in front of the first packet would announce idle time the link never
+        // had.
         _flushArmed = false;
     }
 
@@ -541,8 +542,8 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
             throw gr::exception("zone_length is required and has no default");
         }
         if (zone_length.value > gr::ccsds::kFhpOnlyIdleData) {
-            // eleven pointer bits less the two reserved values name positions 0 to 2045, so 2046 octets is the
-            // longest zone whose every position a pointer can hold
+            // eleven pointer bits less the two reserved values name positions 0 to 2045. 2046 octets is the longest
+            // zone whose every position a pointer can hold.
             throw gr::exception(std::format("zone_length must not exceed {} octets, got {}: the first header pointer cannot name a position beyond {}", gr::ccsds::kFhpOnlyIdleData, zone_length.value, gr::ccsds::kFhpOnlyIdleData - 1U));
         }
         if (idle_apid.value > gr::ccsds::kIdleApid) {
@@ -551,15 +552,15 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
         if (fill.value != "oid" && fill.value != "idle_packet") {
             throw gr::exception(std::format("fill must be 'oid' or 'idle_packet', got '{}'", fill.value));
         }
-        // A raised `flush` arms one zone; an unrelated change while it is still armed leaves it armed, and
-        // clearing `flush` before that zone went out withdraws the request.
+        // A raised `flush` arms one zone. An unrelated change leaves an armed zone armed. Clearing `flush` before
+        // that zone goes out withdraws the request.
         _flushArmed = flush.value && (_flushArmed || !_flushWas);
         _flushWas   = flush.value;
-        // Two at a time, so that keeping the last record of a call back for the end-of-stream hook cannot stall a
-        // stream the framework would otherwise hand over one record per call.
+        // Two at a time. Keeping the last record of a call back for the end-of-stream hook then cannot stall a stream
+        // that the framework would otherwise deliver one record per call.
         in.min_samples = flush.value ? 2UZ : 1UZ;
-        // The buffer and its starts are octets a caller has already handed over, and they cross the rebuild: the
-        // starts are offsets into the buffer, and every zone length this accepts can address them.
+        // The buffer and its starts hold octets already received, and they carry across the rebuild. The starts are
+        // offsets into the buffer, and every zone length this accepts can address them.
         _configured = true;
     }
 
@@ -579,9 +580,9 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
             return work::Status::ERROR;
         }
 
-        // While `flush` is set the last record of a call stays where it is, so that the end-of-stream hook has a
-        // span to run on and the zone it holds is sent. A call carrying a single record is one a caller drove by
-        // hand rather than one the framework composed, and takes it.
+        // While `flush` is set, the last record of a call stays in place. The end-of-stream hook then has a span to
+        // run on, and the zone it holds is sent. A call with a single record comes from a caller driving the block by
+        // hand, not from the framework, and the block takes that record.
         const std::size_t offer    = flush.value && inSpan.size() >= 2UZ ? inSpan.size() - 1UZ : inSpan.size();
         std::size_t       consumed = 0UZ;
         std::size_t       made     = 0UZ;
@@ -600,7 +601,7 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
         return work::Status::OK;
     }
 
-    /// @brief End of stream: take the records held back, then send what is buffered as one padded zone.
+    /// @brief At the end of the stream, takes the records held back and sends what is buffered as one padded zone.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         if (!_configured) {
             outSpan.publish(0UZ);
@@ -611,8 +612,8 @@ struct SpacePacketSegment : Block<SpacePacketSegment> {
         std::size_t made     = 0UZ;
         accumulate(inSpan, inSpan.size(), outSpan, consumed, made);
 
-        // An empty buffer here has already gone out whole; a zone of nothing but fill behind it would announce
-        // idle time on a link that has ended.
+        // An empty buffer here has already gone out whole. A zone of fill alone after it would announce idle time
+        // on a link that has ended.
         if (flush.value && !_buffer.empty() && made < outSpan.size()) {
             emitFlushZone(outSpan, made);
             _flushArmed = false;
@@ -689,10 +690,10 @@ private:
             _buffer.insert(_buffer.end(), pad.begin(), pad.end());
         }
 
-        // A zone of PN fill holds no packet at all, which is what 4.1.2.7.6.5's reserved value announces. A zone
-        // filled with an idle packet holds one, starting at its first octet: the pointer says 0 and the receiver
-        // parses the packet and discards it by its APID (4.1.3.3.4.4), which is the discard the standard names.
-        // Anything buffered is a packet or the tail of one, and `pointerFor` says which.
+        // A zone of PN fill holds no packet, and the reserved value of 4.1.2.7.6.5 announces that. A zone filled
+        // with an idle packet holds one, starting at its first octet. The pointer says 0. The receiver parses the
+        // packet and discards it by its APID (4.1.3.3.4.4), the discard the standard names. Anything buffered is a
+        // packet or the tail of one, and `pointerFor` says which.
         const gr::Size_t      pointer = filledWithIdlePacket ? gr::Size_t{0U} : (wasEmpty ? gr::ccsds::kFhpOnlyIdleData : pointerFor());
         DataSet<std::uint8_t> zone;
         zone.signal_values.assign(_buffer.begin(), _buffer.begin() + static_cast<std::ptrdiff_t>(zone_length.value));

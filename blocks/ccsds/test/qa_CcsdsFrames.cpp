@@ -79,8 +79,8 @@ struct TmPorts {
     std::vector<Record> ocf{};
 };
 
-/// Drive a TM decode with the two optional ports connected or not, an unconnected port being the case that has to
-/// publish nothing and count everything.
+/// Drives a TM decode with the two optional ports connected or not. An unconnected port must publish nothing and
+/// count everything.
 template<typename TBlock>
 [[nodiscard]] TmPorts driveTm(TBlock& block, std::span<const Record> in, bool shConnected = true, bool ocfConnected = true, std::size_t room = 64UZ) {
     std::vector<Record> outBuf(room);
@@ -114,7 +114,7 @@ template<typename TBlock>
         .first_header_pointer                  = 0};
 }
 
-/// A TM frame of `frameLength` octets: the header written over a zero-filled record.
+/// A TM frame of `frameLength` octets, the header written over a zero-filled record.
 [[nodiscard]] std::vector<std::uint8_t> tmFrame(const gr::ccsds::TmPrimaryHeader& header, std::size_t frameLength) {
     std::vector<std::uint8_t> frame(frameLength, 0U);
     std::ignore = gr::ccsds::writeTmPrimaryHeader(header, frame);
@@ -233,7 +233,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(eq(hMax.data_length, std::uint16_t{65535}));
         expect(eq(totalPacketOctets(hMax), std::size_t{65542}));
 
-        // the surveyed convention: data_length = payload_octets produces a total one octet short
+        // the surveyed convention data_length = payload_octets produces a total one octet short
         SpacePacketHeader wrong{.version = 0, .type = false, .secondary_header = false, .apid = 1, .sequence_flags = 3, .sequence_count = 0, .data_length = 100};
         expect(eq(totalPacketOctets(wrong), std::size_t{107})) << "a header built with data_length = payload_octets claims a total of 107 octets for a packet that occupies 106 on the wire";
     };
@@ -274,7 +274,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(eq(frameGap(2U << 24U, 0xFFFFFFU, kAosCycleCountModulus).lost, gr::Size_t{1U << 24U}));
     };
 
-    // ---- criterion 14: every decode refusal under its own counter, each followed by a record that decodes ----
+    // ---- every decode refusal under its own counter, each followed by a record that decodes ----
 
     "TmFrameDecode refuses each way and recovers on the next record"_test = [] {
         auto block = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}});
@@ -297,7 +297,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         std::vector<std::uint8_t> badGeometry = tmFrame(geometryHeader, 20UZ);
         expect(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 13}, std::span<std::uint8_t>(badGeometry).subspan(kTmPrimaryHeaderSize)) == WriteStatus::ok);
 
-        // '11' is the only segment length identifier 4.1.2.7.5.2 admits under a zero sync flag: reported, refusing nothing
+        // 4.1.2.7.5.2 admits only '11' as segment length identifier under a zero sync flag.
+        // The frame is reported, not refused.
         TmPrimaryHeader reservedHeader           = tmHeader(0U, 0U, 0U);
         reservedHeader.segment_length_id         = 1U;
         const std::vector<std::uint8_t> reserved = tmFrame(reservedHeader, 20UZ);
@@ -327,7 +328,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             recordOf(tmFrame(elsewhere, 20UZ)),                                 //
             recordOf(tmFrame(tmHeader(0U, 0U, 0U), 20UZ), {{"crc_ok", false}}), //
             recordOf(tmFrame(tmHeader(0U, 1U, 1U), 20UZ), {{"crc_ok", true}}),  //
-            recordOf(tmFrame(tmHeader(0U, 2U, 2U), 20UZ)),                      // no crc_ok key: no check was claimed, so it passes
+            recordOf(tmFrame(tmHeader(0U, 2U, 2U), 20UZ)),                      // no crc_ok key, no check claimed, and the record passes
         };
         const TmPorts ports = driveTm(block, records, false, false);
 
@@ -379,7 +380,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         const std::vector<std::uint8_t> noData       = frameOf(4U, 6UZ);   // a declared total of 5 octets is the header alone
         std::vector<std::uint8_t>       wrongVersion = frameOf(9U, 10UZ);
         wrongVersion[0] |= 0x40U;
-        const std::vector<std::uint8_t> good = frameOf(9U, 10UZ); // a declared total of 10 octets: five of data field
+        const std::vector<std::uint8_t> good = frameOf(9U, 10UZ); // a declared total of 10 octets, five of them data field
 
         const std::vector<Record> out = drive1(block, std::vector<Record>{recordOf(tooShort), recordOf(claimsMore), recordOf(noData), recordOf(wrongVersion), recordOf(good)});
 
@@ -438,7 +439,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         std::vector<std::uint8_t> frame(6 + 20 + 10 + 4, 0U);
         TmPrimaryHeader           header{.version = 0, .spacecraft_id = 1, .virtual_channel = 0, .ocf_present = true, .master_frame_count = 0, .vc_frame_count = 0, .secondary_header = true, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = 0};
         expect(writeTmPrimaryHeader(header, frame) == WriteStatus::ok);
-        TmSecondaryHeaderId shId{.version = 0, .length = 19}; // 20-octet secondary header: 19 octets of data behind the id octet
+        TmSecondaryHeaderId shId{.version = 0, .length = 19}; // 20-octet secondary header, 19 octets of data after the id octet
         expect(writeTmSecondaryHeaderId(shId, std::span<std::uint8_t>(frame).subspan(kTmPrimaryHeaderSize)) == WriteStatus::ok);
         Clcw clcw{.control_word_type = false, .version = 0, .status = 0, .cop_in_effect = 0, .virtual_channel = 0, .reserved = 0, .no_rf_available = false, .no_bit_lock = false, .lockout = false, .wait = false, .retransmit = false, .farm_b_counter = 0, .reserved_bit = 0, .report_value = 0};
         expect(writeClcw(clcw, std::span<std::uint8_t>(frame).last(4UZ)) == WriteStatus::ok);
@@ -584,12 +585,12 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         }
     };
 
-    // ---- criterion 8 at the block: the gap values on the record, the counters, and the report cap ----
+    // ---- the gap values on the record, the counters, and the report cap, at the block ----
 
     "frame count gaps at the block, and the report cap"_test = [] {
         {
             auto block = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}});
-            // counts 0, 1, 5, 5 on one channel: three frames lost across the jump, then a repeat
+            // counts 0, 1, 5, 5 on one channel. Three frames are lost across the jump, then one repeats.
             const std::vector<Record> records{recordOf(tmFrame(tmHeader(0U, 0U, 0U), 20UZ)), recordOf(tmFrame(tmHeader(0U, 1U, 1U), 20UZ)), //
                 recordOf(tmFrame(tmHeader(0U, 5U, 5U), 20UZ)), recordOf(tmFrame(tmHeader(0U, 6U, 5U), 20UZ))};
             const TmPorts             ports = driveTm(block, records, false, false);
@@ -605,8 +606,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             expect(eq(block.nDuplicateFrames, std::uint64_t{1}));
         }
         {
-            // the virtual channel's count is continuous while the master channel's jumps: frames of another
-            // virtual channel went missing, which is what the two counters are separate to say
+            // the virtual channel's count is continuous while the master channel's jumps. Frames of another
+            // virtual channel went missing, and the two separate counters show that.
             auto                      block = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}});
             const std::vector<Record> records{recordOf(tmFrame(tmHeader(0U, 0U, 0U), 20UZ)), recordOf(tmFrame(tmHeader(0U, 3U, 1U), 20UZ))};
             const TmPorts             ports = driveTm(block, records, false, false);
@@ -618,7 +619,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             expect(eq(block.nFramesLost, std::uint64_t{0}));
         }
         {
-            // max_frames_lost_report caps the total, not the report: the record still carries the gap it saw
+            // max_frames_lost_report caps the total, not the report. The record still carries the gap it saw.
             auto                      block = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}, {"max_frames_lost_report", gr::Size_t{2}}});
             const std::vector<Record> records{recordOf(tmFrame(tmHeader(0U, 0U, 0U), 20UZ)), recordOf(tmFrame(tmHeader(0U, 5U, 5U), 20UZ))};
             const TmPorts             ports = driveTm(block, records, false, false);
@@ -648,7 +649,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             }
         }
         {
-            // the same interleave with channel 0 losing three frames: the register that sees the gap is that channel's
+            // the same interleave with channel 0 losing three frames. That channel's register sees the gap.
             auto                      block = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}});
             const std::vector<Record> records{recordOf(tmFrame(tmHeader(0U, 0U, 0U), 20UZ)), recordOf(tmFrame(tmHeader(1U, 1U, 100U), 20UZ)), //
                 recordOf(tmFrame(tmHeader(0U, 2U, 4U), 20UZ)), recordOf(tmFrame(tmHeader(1U, 3U, 101U), 20UZ))};
@@ -691,22 +692,22 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(!metaBool(failBuf[0], "crc_ok"));
         expect(eq(okBuf[0].signal_values.size(), std::size_t{20})) << "discard_crc strips the field before the decode sees the frame";
 
-        // the decode behind the ok port gates on what CrcCheck wrote, so a graph that wires the fail port to it anyway
-        // still drops the frame under a named counter
+        // the decode behind the ok port gates on what CrcCheck wrote. A graph that wires the fail port to it anyway
+        // still drops the frame under a named counter.
         auto          block = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}, {"require_crc_ok", true}});
         const TmPorts ports = driveTm(block, std::vector<Record>{okBuf[0], failBuf[0]}, false, false);
         expect(eq(ports.out.size(), 1UZ));
         expect(eq(block.nCrcFailed, std::uint64_t{1}));
     };
 
-    // ---- the encoders: their counts, their fill, and what they refuse ----
+    // ---- the encoders' counts, fill and refusals ----
 
     "TmFrameEncode wraps both counts at 256"_test = [] {
         auto block = make<TmFrameEncode>({{"frame_length", gr::Size_t{20}}, {"spacecraft_id", gr::Size_t{42}}, {"virtual_channel", gr::Size_t{1}}});
 
         std::vector<Record> in;
         for (std::size_t i = 0UZ; i < 258UZ; ++i) {
-            in.push_back(recordOf(std::vector<std::uint8_t>(14UZ, 0xA5U))); // 20 - 6 octets: the data field exactly
+            in.push_back(recordOf(std::vector<std::uint8_t>(14UZ, 0xA5U))); // 20 - 6 octets, the data field exactly
         }
         const std::vector<Record> frames = drive1(block, in, 300UZ);
         expect(eq(frames.size(), 258UZ));
@@ -728,8 +729,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
     "AosFrameEncode carries the cycle when the 24-bit count wraps"_test = [] {
         auto block = make<AosFrameEncode>({{"frame_length", gr::Size_t{30}}, {"spacecraft_id", gr::Size_t{7}}, {"virtual_channel", gr::Size_t{3}}, {"data_unit", std::string("m_pdu")}, {"vcfc_cycle_use", true}});
-        // 2^24 frames is more than a unit test can emit, so the count is seeded one short of the wrap and the two
-        // frames either side of it are the ones asserted
+        // 2^24 frames is more than a unit test can emit. The count is seeded one short of the wrap, and the test
+        // asserts the two frames on either side of it.
         block._vcCount = kAosCountModulus - 1U;
 
         const std::vector<Record> frames = drive1(block, std::vector<Record>{recordOf(std::vector<std::uint8_t>(22UZ, 0U)), recordOf(std::vector<std::uint8_t>(22UZ, 0U))});
@@ -852,11 +853,13 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
         std::vector<std::uint8_t> stream = firstPacket;
         stream.insert(stream.end(), secondPacket.begin(), secondPacket.end());
-        // stream is 162 octets (136 + 26); zones: zone0 [0,50) fhp 0 (firstPacket starts here); zone1 [50,100)
-        // is a pure continuation of firstPacket and is the one dropped below; zone2 [100,150) holds firstPacket's
-        // last 36 octets [100,136) followed by secondPacket's first 14 octets [136,150), so its fhp is 36, the
-        // local offset where secondPacket starts; zone3 [150,162) is secondPacket's remaining 12 octets, a pure
-        // continuation, sized exactly (no padding, so no zero-filled octets can misparse as further packets).
+        // The stream is 162 octets (136 + 26), in four zones.
+        // zone0 [0,50) has fhp 0, where firstPacket starts.
+        // zone1 [50,100) is a pure continuation of firstPacket and is the one dropped below.
+        // zone2 [100,150) holds firstPacket's last 36 octets [100,136) and secondPacket's first 14 octets [136,150).
+        // Its fhp is 36, the local offset where secondPacket starts.
+        // zone3 [150,162) holds secondPacket's remaining 12 octets as a pure continuation. It is sized exactly, with
+        // no padding, and no zero-filled octets can misparse as further packets.
         std::vector<std::uint8_t> zone0(stream.begin(), stream.begin() + 50);
         std::vector<std::uint8_t> zone2(stream.begin() + 100, stream.begin() + 150);
         std::vector<std::uint8_t> zone3(stream.begin() + 150, stream.end());
@@ -879,8 +882,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             }
         }
         {
-            // the count not dropped: zone1's slot filled by a differently-sized span of garbage, so the count is
-            // continuous but the residue length disagrees with the pointer once zone2's 36 octets are appended.
+            // the count not dropped. Garbage of a different size fills zone1's slot. The count is continuous, but
+            // the residue length disagrees with the pointer once zone2's 36 octets are appended.
             PacketExtractor           extractor;
             std::vector<Record>       emitted;
             const auto                emit = [&emitted](std::span<const std::uint8_t> packet) { emitted.push_back(recordOf(std::vector<std::uint8_t>(packet.begin(), packet.end()))); };
@@ -981,8 +984,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
     };
 
     "segment then extract is the identity"_test = [] {
-        // 2046 rather than 2048: eleven pointer bits less the two reserved values address positions 0 to 2045, so a
-        // zone of 2048 octets has two positions no first header pointer can name.
+        // 2046, not 2048. Eleven pointer bits less the two reserved values address positions 0 to 2045. A zone of
+        // 2048 octets has two positions no first header pointer can name.
         for (const gr::Size_t zoneLen : {gr::Size_t{223}, gr::Size_t{1115}, gr::Size_t{2046}}) {
             auto segment = make<SpacePacketSegment>({{"zone_length", zoneLen}});
             auto extract = make<SpacePacketExtract>({{"virtual_channel", gr::Size_t{0}}});

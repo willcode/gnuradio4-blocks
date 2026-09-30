@@ -16,10 +16,10 @@
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 /*
- * The module's regression guard rather than a budget: these blocks run per frame or per packet, not per bit, so no
- * figure here gates anything and the bench exists to catch a change that turns a per-frame cost into a per-byte one.
- * Take every figure pinned to one named performance core; a figure taken unpinned mixes core types and compares with
- * nothing, including itself.
+ * These benchmarks guard the module against regressions. They set no budget. These blocks run per frame or per
+ * packet, not per bit. No figure here gates anything. The bench catches a change that turns a per-frame cost into a
+ * per-byte cost. Take every figure pinned to one named performance core. An unpinned figure mixes core types and
+ * compares with nothing, not even itself.
  */
 
 using Record = gr::DataSet<std::uint8_t>;
@@ -77,7 +77,8 @@ template<typename TBlock>
 
 constexpr std::size_t kFramesPerCall = 256UZ;
 
-/// A 2046-octet TM frame, the longest zone a first header pointer can address: primary header, no secondary header, no OCF.
+/// A 2046-octet TM frame, the longest zone a first header pointer can address.
+/// It has a primary header, no secondary header and no OCF.
 [[nodiscard]] std::vector<Record> tmFrames() {
     std::vector<Record> frames;
     frames.reserve(kFramesPerCall);
@@ -90,9 +91,9 @@ constexpr std::size_t kFramesPerCall = 256UZ;
     return frames;
 }
 
-/// A 2046-octet zone tiled exactly by 62 whole 33-octet space packets, so the walk ends on the zone's last octet and
-/// no fragment is carried between calls: the figure is the extraction walk and nothing else. 33 divides 2046, and 2046
-/// is the longest zone whose every position a first header pointer can name.
+/// A 2046-octet zone tiled exactly by 62 whole 33-octet space packets. The walk ends on the zone's last octet, and no
+/// fragment is carried between calls. The figure measures the extraction walk alone. 33 divides 2046, and 2046 is the
+/// longest zone whose every position a first header pointer can name.
 [[nodiscard]] std::vector<std::uint8_t> extractionZone() {
     constexpr std::size_t     kPacketOctets = 33UZ;
     std::vector<std::uint8_t> zone;
