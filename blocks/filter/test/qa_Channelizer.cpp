@@ -61,9 +61,9 @@ void apply(TBlock& block, gr::property_map settings) {
 /**
  * @brief One period of the tone at `spacings / over` channel spacings of a `channels`-wide bank.
  *
- * A rational offset keeps the period finite, so a cycling source repeats the tone exactly rather than approximating
- * it. An `over` of one puts the tone at a channel center; anything else offsets it, which is what separates a family
- * that concentrates a bin-centered tone from one that isolates a band.
+ * A rational offset keeps the period finite. A cycling source then repeats the tone exactly. An `over` of one puts
+ * the tone at a channel center. Any other value offsets it. The offset separates a family that concentrates a
+ * bin-centered tone from one that isolates a band.
  */
 [[nodiscard]] std::vector<CF> tonePeriod(std::size_t channels, std::size_t spacings, std::size_t over = 1UZ) {
     const std::size_t length = channels * over;
@@ -108,8 +108,8 @@ void apply(TBlock& block, gr::property_map settings) {
 /**
  * @brief The worst channel at least two away from `bin`, relative to `bin` itself, in dB.
  *
- * Two away is where a bank's isolation is its own rather than the crossover it shares with its neighbor, and the
- * distance wraps because channel `M-1` sits next to channel zero.
+ * Two away, the bank's isolation is its own and not the crossover it shares with its neighbor. The distance wraps
+ * because channel `M-1` sits next to channel zero.
  */
 [[nodiscard]] double leakageDb(std::span<const std::vector<CF>> samples, std::size_t bin, std::size_t skip) {
     const double selected = meanPower(samples[bin], skip);
@@ -141,10 +141,10 @@ struct BankRun {
 };
 
 /**
- * @brief Runs a channelizer in a graph: a source cycling `values`, the bank, and one sink per channel.
+ * @brief Runs a channelizer in a graph with a source cycling `values`, the bank, and one sink per channel.
  *
- * The channel count comes from the bank's own port vector after the settings are applied, which is what a graph has to
- * work with when it wires a runtime-sized collection.
+ * The channel count comes from the bank's own port vector after the settings are applied. A graph that wires a
+ * runtime-sized collection has only that count to work with.
  */
 [[nodiscard]] BankRun runInGraph(gr::property_map settings, std::span<const CF> values, gr::Size_t nSamples, std::span<const gr::Tag> inputTags = {}) {
     using namespace boost::ut;
@@ -250,8 +250,8 @@ struct CascadeRun {
 /**
  * @brief Drives the bank's `processBulk` over `input`, taking the chunk sizes from `chunks` in turn.
  *
- * Each chunk is truncated to a whole number of commutator steps, which is what `input_chunk_size` makes the framework
- * hand over. An empty `chunks` presents the whole input in one call.
+ * Each chunk is truncated to a whole number of commutator steps. The framework passes the same chunks under
+ * `input_chunk_size`. An empty `chunks` presents the whole input in one call.
  */
 [[nodiscard]] std::vector<std::vector<CF>> drive(PolyphaseChannelizer<float>& bank, std::span<const CF> input, std::span<const std::size_t> chunks) {
     const std::size_t channels = bank._channels;
@@ -314,8 +314,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
                     worst = std::max(worst, meanPower(run.samples[channel], skip));
                 }
             }
-            // The default root-Nyquist family trades isolation for the flat sum a cascade needs, and what it rejects
-            // narrows with the bank: 61 dB at four channels against 68 at sixteen. The gate clears the narrower of them.
+            // The default root-Nyquist family trades isolation for the flat sum a cascade needs. Its rejection narrows
+            // with the bank, 61 dB at four channels against 68 at sixteen. The gate clears the narrower of them.
             expect(lt(10.0 * std::log10(worst / selected), -55.0)) << std::format("a {}-channel bank leaves the tone out of every other channel", width);
         }
     };
@@ -332,8 +332,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(16U * channels))) << "a span of sixteen spacings over four branches runs sixty-four taps";
             expect(std::ranges::equal(std::span(bank->designed_taps.value).first(designed.size()), designed)) << "at the default span of sixteen and rolloff of a half";
             expect(bank->taps.value.empty()) << "and with nothing in the supplied setting";
-            // This family's length is the caller's span rather than a search against attenuation_db, so it is measured
-            // rather than aimed and design_ok has nothing to fail against. What the span achieved is in stopband_db.
+            // This family's length is the caller's span, not a search against attenuation_db. It is measured and not
+            // aimed, and design_ok has nothing to fail against. stopband_db holds what the span achieved.
             expect(bank->design_ok.value) << "a family that was never given a target reports no failure to meet one";
             expect(lt(bank->stopband_db.value, 0.0)) << "and reports the rejection its span did achieve";
         }
@@ -366,17 +366,17 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             }
         }
 
-        // A narrow transition needs a prototype longer than the search's own starting estimate, which is the case that
-        // has to grow rather than bisect down from it.
+        // A narrow transition needs a prototype longer than the search's starting estimate. The search must then grow
+        // and cannot bisect down from the estimate.
         {
             const auto bank = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"transition", 0.05}, {"attenuation_db", 80.0}});
             expect(bank->design_ok.value) << "the search grows to meet a target its estimate falls short of";
             expect(le(bank->stopband_db.value, -80.0)) << "and lands at or past the eighty decibels asked for";
         }
 
-        // The alias band is a property of the commutator stride: decimating by M/oversample folds every multiple of
-        // oversample/M onto baseband, so a stride of M/2 puts the stop edge a whole spacing further out, where the
-        // same prototype is far lower. One filter, two measurements.
+        // The alias band depends on the commutator stride. Decimating by M/oversample folds every multiple of
+        // oversample/M onto baseband. A stride of M/2 puts the stop edge a whole spacing further out, where the same
+        // prototype is far lower. One filter gives two measurements.
         {
             constexpr gr::Size_t wide = 16U;
 
@@ -426,8 +426,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             expect(std::ranges::all_of(std::span(running).subspan(supplied.size()), [](float tap) { return tap == 0.f; })) << "the padding is zero";
             expect(std::ranges::equal(bank->taps.value, supplied)) << "and the setting still reads back exactly the ten that were supplied";
 
-            // A supplied prototype is measured on the same terms as a designed one: nothing was aimed at a target, and
-            // the two figures are the response of the vector handed in, taken at the alias edge the stride implies.
+            // A supplied prototype is measured on the same terms as a designed one. It has no target. The two figures
+            // are the response of the supplied vector at the alias edge the stride implies.
             const auto measured = gr::filter::measureChannelizerPrototype(supplied, static_cast<std::size_t>(channels), 0.5, 1UZ);
             expect(bank->design_ok.value) << "a supplied prototype is not reported as missing a target it never had";
             expect(eq(bank->stopband_db.value, measured.stopbandDb)) << "the block reports what the library measured of the taps it was handed";
@@ -467,7 +467,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         apply(*bank, {{"transition", 0.2}, {"attenuation_db", 120.0}});
         expect(gt(bank->designed_taps.value.size(), asLowpass)) << "so does a deeper stopband";
 
-        // The boxcar family reads neither of the two settings the other families design from: it is one channel long.
+        // The boxcar family is one channel long and reads neither of the two settings the other families design from.
         apply(*bank, {{"prototype", std::string("boxcar")}});
         expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(channels))) << "the boxcar prototype is exactly one channel long";
         const float flat = 1.f / static_cast<float>(channels);
@@ -481,7 +481,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         apply(*bank, {{"span", gr::Size_t(32)}});
         expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(32U * channels))) << "a wider span lengthens the running prototype";
 
-        // The root-Nyquist family sets its rejection by the span it covers and never reads the stopband target.
+        // The root-Nyquist family sets its rejection by the span it covers and does not read the stopband target.
         const std::vector<float> beforeAttenuation = bank->designed_taps.value;
         apply(*bank, {{"attenuation_db", 40.0}});
         expect(std::ranges::equal(bank->designed_taps.value, beforeAttenuation)) << "a stopband target does not reach the root-Nyquist design";
@@ -496,7 +496,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
         expect(bank->taps.value.empty()) << "none of it wrote a prototype into the supplied setting";
 
-        // A supplied prototype outranks the design settings, and clearing it hands them back.
+        // A supplied prototype outranks the design settings. Clearing it gives control back to them.
         const std::vector<float> supplied(64UZ, 0.5f);
         apply(*bank, {{"taps", supplied}});
         expect(eq(bank->designed_taps.value.size(), supplied.size())) << "the supplied prototype runs";
@@ -577,8 +577,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             expect(lt(residual, -55.0)) << "the reconstruction residual clears -55 dB on the defaults alone";
         }
 
-        // The lowpass family crosses over 6 dB down, where two neighbors sum to half the power, and that 3 dB dip caps
-        // what a cascade of two of them can return however deep the stopband goes. The commutator stride is the same.
+        // The lowpass family crosses over 6 dB down, where two neighbors sum to half the power. That 3 dB dip caps what
+        // a cascade of two of them can return, however deep the stopband goes. The commutator stride is the same.
         {
             const auto run = runRoundTrip({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"transition", 0.2}, {"oversample", gr::Size_t(2)}}, input, nSamples);
             expect(eq(run.samples.size(), static_cast<std::size_t>(nSamples))) << "the lowpass cascade holds its rate too";
@@ -589,8 +589,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             expect(gt(residual, -30.0)) << "the lowpass family carries a signal through without reconstructing it";
         }
 
-        // A prototype exactly one channel long makes the bank a block transform whose inverse is its own synthesis, so
-        // the cascade cancels to the arithmetic's own floor without the commutator stride the other families need.
+        // A prototype exactly one channel long makes the bank a block transform whose inverse is its own synthesis. The
+        // cascade cancels to the arithmetic's floor without the commutator stride the other families need.
         {
             const auto run = runRoundTrip({{"n_channels", channels}, {"prototype", std::string("boxcar")}}, input, nSamples);
             expect(eq(run.prototypeLength, static_cast<std::size_t>(channels))) << "the prototype is one channel long";
@@ -602,8 +602,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             expect(lt(residual, -100.0)) << "the boxcar family is the one that reconstructs critically sampled";
         }
 
-        // What it pays for that is isolation. A tone a quarter of a spacing off center spreads across the bank, where
-        // the default family holds it in, so the two figures pin the trade from both ends.
+        // The cost is isolation. A tone a quarter of a spacing off center spreads across the bank, and the default
+        // family holds it in. The two figures pin the trade from both ends.
         {
             constexpr std::size_t bin    = 4UZ;
             constexpr gr::Size_t  nTone  = 128U * channels;
