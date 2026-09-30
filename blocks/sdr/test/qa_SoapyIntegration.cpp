@@ -1091,7 +1091,8 @@ const boost::ut::suite<"LimeSDR hardware"> limeTests = [] {
 };
 
 int main() {
-    // SoapySDR loads every module it finds on these paths the first time a device is made or enumerated
+    // the first device made or enumerated loads every module under SOAPY_SDR_ROOT and SOAPY_SDR_PLUGIN_PATH, both set
+    // by the initializer of kHardwareRequested
     const auto modules = soapy::getSoapySDRModules();
     std::println(stderr, "[qa_SoapyIntegration] {} SoapySDR module(s): {}", modules.size(), gr::join(modules, ", "));
 }
