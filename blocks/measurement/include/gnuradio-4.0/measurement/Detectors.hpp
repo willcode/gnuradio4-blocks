@@ -142,8 +142,8 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::PeakDetect)
  * without re-tuning. Peaks closer together than `min_distance_hz` collapse to the strongest, taken in order of
  * level. A single emitter's shoulder then does not appear as a second signal.
  *
- * A record that yields no detection emits no record. An empty `DataSet` fails the record admission predicates,
- * whose first check is a positive extent. A missing output record for a PSD input means nothing was found.
+ * A record that yields no detection emits no record. An empty `DataSet` has no positive extent and is not a valid
+ * record, so the block emits none. A missing output record for a PSD input means nothing was found.
  * `nEmptyResults()` counts those cases beside `nRecords()`. A graph can then tell "nothing found" from "nothing ran".
  */
 struct PeakDetect : Block<PeakDetect, NoTagPropagation> {
@@ -279,8 +279,8 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::CfarDetect)
  * whose skirt does not fall to half power inside the record reports zero. Its `frequency` is the cell's own and is
  * not refined. A CFAR cell is a decision about one bin, and this detector states no sub-bin position.
  *
- * A record that yields no detection emits no record, because an empty `DataSet` fails the record admission
- * predicates. `nEmptyResults()` counts those cases beside `nRecords()`.
+ * A record that yields no detection emits no record. An empty `DataSet` has no positive extent and is not a valid
+ * record. `nEmptyResults()` counts those cases beside `nRecords()`.
  */
 struct CfarDetect : Block<CfarDetect, NoTagPropagation> {
     using Description = Doc<"Runs cell-averaging CFAR detection on a spectral density record at a stated design false-alarm rate. A record that finds nothing emits no record and is counted by nEmptyResults().">;

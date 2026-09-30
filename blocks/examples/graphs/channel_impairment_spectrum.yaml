@@ -21,10 +21,9 @@
 # `enbw_bins` times the bin width turns the peak density back into the tone's own power.
 #
 # `tone` is paced to wall-clock time. The graph runs at 1 MS/s, and the drift is in real seconds. A
-# host reads the records through the DataSetSink registry under the signal name `psd`. Studio
-# substitutes its own gr::studio::* waterfall or series sink, whose `in` is a port collection. A bare
-# `in` on one connects nothing and passes no data, with no error. Write those edges as `in#0`.
-# DataSetSink's `in` is a plain port and is written as one.
+# host reads the records through the DataSetSink registry under the signal name `psd`. A port
+# collection is addressed by index. An edge to one is written `in#0`. DataSetSink's `in` is a plain
+# port and is written as one.
 blocks:
   - id: gr::blocks::basic::SignalGenerator<complex<float32>>
     parameters:

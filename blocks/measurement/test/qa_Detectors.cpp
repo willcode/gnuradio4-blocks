@@ -224,8 +224,8 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
     };
 
     "an empty result emits no record and is counted, so nothing-found still differs from nothing-ran"_test = [] {
-        // An empty DataSet fails the record admission predicates, whose first check is a positive extent. The empty
-        // result cannot travel as a record, and the counter carries it instead.
+        // An empty DataSet has no positive extent and is not a valid record. The empty result cannot travel as a
+        // record, and the counter carries it instead.
         std::vector<gr::DataSet<float>> quiet;
         for (std::size_t r = 0UZ; r < 3UZ; ++r) {
             quiet.push_back(densityRecord(std::vector<float>(kBins, 1.f)));

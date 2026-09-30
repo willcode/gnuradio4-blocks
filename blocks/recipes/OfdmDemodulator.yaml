@@ -1,7 +1,7 @@
 # gr::recipes::OfdmDemodulator, the receive half of an OFDM link from baseband to equalized carriers.
 #
-# The recipe mirrors OfdmModulator for the same reason. The sync block, the prefix removal and the equalizer all read
-# the same numerology. A graph does not make three settings agree.
+# The recipe states the receive numerology once, as OfdmModulator does for the transmit side. The sync block, the
+# prefix removal and the equalizer all read the same numerology. A graph does not make three settings agree.
 #
 # The input is complex baseband. The output is the equalized data carriers, one record per symbol, in data_carriers
 # order. A constellation decoder can take that output directly. The optional channel port carries the least-squares
@@ -28,8 +28,10 @@
 #
 # r_floor is the received energy below which the timing metric's ratio is meaningless. It therefore depends on scale.
 # A link is tuned around a quarter of the energy that a correlation window of fft_len/2 samples holds during the
-# preamble. Set it from the link's own level. The default only keeps a silent input from triggering. A frame's own
-# length keeps it from being detected twice.
+# preamble. Set it from the link's own level. The default only keeps a silent input from triggering.
+#
+# min_gap is the dead time after a trigger. Its default of one symbol is enough, as a frame's own length keeps one
+# frame from being detected twice.
 definition_metadata:
   block_type: gr::recipes::OfdmDemodulator
   plugin_name: GrRecipes

@@ -5,7 +5,7 @@
 # loop removes the phase. The constellation then lies on the real axis, and the real part is the soft decision.
 #
 # `order` is written as a literal 2 and is not exported. A BPSK recipe with a settable order is a PSK recipe. That is a
-# different name, a different set of parameters and a different acceptance test. `detector_gain` is written as a
+# different name, a different set of parameters and a different test. `detector_gain` is written as a
 # literal 1.0 and is not left at the block's default. 1.0 is the slope of the order-2 detector's S-curve at unit
 # amplitude. BpskFrontEnd's AGC delivers unit amplitude. The number is chosen and not inherited.
 #
@@ -47,7 +47,7 @@ blocks:
       - name: decimation
         type: uint32
         default: !!uint32 1
-        doc: "channel filter decimation giving about four samples per symbol"
+        doc: "channel filter decimation, chosen for about four samples per symbol"
       - name: channel_bandwidth
         type: float64
         default: !!float64 0.75

@@ -315,7 +315,7 @@ private:
      * The blend is renormalized and its gauge re-fixed. It is then unwhitened with the fresh estimate's own
      * normalization scalar, and the orthogonal complement is rebuilt. A blend of the unwhitened weights would mix two
      * vectors in different noise bases. With unequal branch noises the orthogonal channel would then fail to null the
-     * signal. `noise_powers` sets unequal branch noises.
+     * signal. `noise_powers` states unequal branch noise powers.
      */
     [[nodiscard]] static gr::measurement::PolarizationEstimate smoothed(const gr::measurement::PolarizationEstimate& fresh, const gr::measurement::PolarizationEstimate& prior, double g, std::span<const double> noisePowers) {
         const double sqrtN0 = noisePowers.empty() ? 1. : std::sqrt(noisePowers[0]);

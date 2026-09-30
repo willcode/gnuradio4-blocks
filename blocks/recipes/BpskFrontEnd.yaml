@@ -63,7 +63,7 @@ blocks:
       - name: decimation
         type: uint32
         default: !!uint32 1
-        doc: "channel filter decimation giving about four samples per symbol"
+        doc: "channel filter decimation, chosen for about four samples per symbol"
       - name: channel_bandwidth
         type: float64
         default: !!float64 0.75

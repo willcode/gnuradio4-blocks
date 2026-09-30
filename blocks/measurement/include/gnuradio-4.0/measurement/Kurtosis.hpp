@@ -86,7 +86,7 @@ with `valid = false` and no NaN.
     std::uint64_t               _streamAt{0ULL};        ///< absolute index of the next input sample
     std::uint64_t               _windowStartAt{0ULL};   ///< absolute index of the first sample of the window now filling
     bool                        _flushed{false};        ///< the end-of-stream record has gone out
-    bool                        _configured{false};     ///< true after the first configuration, when a settings change is a change
+    bool                        _configured{false};     ///< once true, a change of `window` resets the window
     std::vector<DroppedTag>     _droppedTags{};         ///< the dropped-sample tags sitting on the samples this call takes
     std::uint64_t               _droppedInWindow{0ULL}; ///< their summed count over the window now filling
     std::vector<DataSet<float>> _pending{};             ///< records built at a window's close and not yet published

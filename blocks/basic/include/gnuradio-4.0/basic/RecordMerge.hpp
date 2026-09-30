@@ -29,9 +29,8 @@ struct RecordMerge : Block<RecordMerge<T>, NoTagPropagation> {
 
 A decoder chain can end in several record streams that form one stream of events. Examples are the frames that
 passed a check, the frames that failed it, and the records a framer refused. Each stage states its own outcome on its
-own port. Each record carries the key that names its outcome. A consumer of the merged stream selects an outcome by
-that key. An asynchronous output that is not read fills its edge and stops the block that writes it. An unattached
-output stops the chain. It does not lose a count.
+own port. An asynchronous output that nobody reads fills its edge and stops the block that writes it. Every failure
+port therefore needs a reader, and this block is one.
 
 **Nothing is dropped.** A record is consumed only in the call that publishes it. A full output span delays the
 record to a later call. **Nothing is reordered within an input.** One input's records reach `out` in the order they

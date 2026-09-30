@@ -19,8 +19,8 @@ struct CcsdsRsFrames {
         // The loader enforces the same requirement at run time.
         Parameters(std::uint32_t frame_length_, std::uint32_t error_capability_, std::string code_, std::string basis_, std::uint32_t sync_errors_) : frame_length(std::move(frame_length_)), error_capability(std::move(error_capability_)), code(std::move(code_)), basis(std::move(basis_)), sync_errors(std::move(sync_errors_)) {}
         std::uint32_t frame_length; // transfer frame octets kI - Q, a multiple of interleave (required)
-        std::uint32_t error_capability; // symbol-correction capability E per codeword, 16 or 8, agreeing with code
-        std::string code; // Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)
+        std::uint32_t error_capability; // symbol-correction capability E per codeword, 16 or 8, agreeing with code (required)
+        std::string code; // Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8) (required)
         std::string basis; // symbol basis, conventional or dual (required)
         std::uint32_t sync_errors; // marker correlator max_errors in bits of the 32-bit ASM (required)
         std::uint32_t interleave = std::uint32_t{1}; // codewords I per codeblock, 1, 2, 3, 4, 5 or 8
@@ -43,14 +43,14 @@ struct CcsdsRsFrames {
             t3.push_back(std::move(e4));
             gr::pmt::Value e6;
             gr::property_map m7;
-            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol-correction capability E per codeword, 16 or 8, agreeing with code"));
+            m7[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("symbol-correction capability E per codeword, 16 or 8, agreeing with code (required)"));
             m7[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m7[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("error_capability"));
             e6 = gr::pmt::Value(std::move(m7));
             t3.push_back(std::move(e6));
             gr::pmt::Value e8;
             gr::property_map m9;
-            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8)"));
+            m9[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("Reed-Solomon profile ccsds_255_223 (E = 16) or ccsds_255_239 (E = 8) (required)"));
             m9[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("string"));
             m9[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("code"));
             e8 = gr::pmt::Value(std::move(m9));

@@ -21,7 +21,7 @@ struct DbpskDemod {
         float sample_rate; // input sample rate in hertz (required)
         float symbol_rate; // symbol rate in hertz (required)
         double frequency_offset = 0.0; // carrier offset from the front end's center in hertz
-        std::uint32_t decimation = std::uint32_t{1}; // channel filter decimation giving about four samples per symbol
+        std::uint32_t decimation = std::uint32_t{1}; // channel filter decimation, chosen for about four samples per symbol
         double channel_bandwidth = 0.75; // cutoff of the channel filter as a multiple of the symbol rate
         double rolloff = 0.35; // excess bandwidth of the transmit shaping filter, in [0, 1]
         double fll_noise_bandwidth = 0.01; // frequency-locked loop noise bandwidth in Bn*T per sample
@@ -65,7 +65,7 @@ struct DbpskDemod {
             t3.push_back(std::move(e8));
             gr::pmt::Value e10;
             gr::property_map m11;
-            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel filter decimation giving about four samples per symbol"));
+            m11[std::pmr::string("doc")] = gr::pmt::Value(std::pmr::string("channel filter decimation, chosen for about four samples per symbol"));
             m11[std::pmr::string("default")] = gr::pmt::Value(std::uint32_t{1});
             m11[std::pmr::string("type")] = gr::pmt::Value(std::pmr::string("uint32"));
             m11[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("decimation"));

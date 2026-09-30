@@ -75,7 +75,7 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
     Annotated<bool, "enabled", Doc<"false for a bit-exact pass-through with the estimate held">, Visible>     enabled     = false;
     Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate, written into a passing tag">>               sample_rate = 96000.f;
     Annotated<double, "tau", Unit<"s">, Doc<"time constant of the estimate, corner 1/(2*pi*tau) Hz">>         tau         = 1.0;
-    Annotated<double, "alpha", Doc<"pole 1/(1 + tau*sample_rate), derived on each settings change">>          alpha       = 0.0;
+    Annotated<double, "alpha", Doc<"derived smoothing coefficient 1/(1 + tau*sample_rate)">>                  alpha       = 0.0;
     Annotated<double, "corner_hz", Unit<"Hz">, Doc<"derived highpass -3 dB point, alpha*sample_rate/(2*pi)">> corner_hz   = 0.0;
 
     GR_MAKE_REFLECTABLE(DcOffsetCorrect, in, out, enabled, sample_rate, tau, alpha, corner_hz);
@@ -85,9 +85,9 @@ The block is 1:1, so every input tag key passes through at its own offset, `samp
     double _real          = 0.0;
     double _imag          = 0.0;
 
-    /// The pole, `alpha` and `corner_hz` derive from the members. A settings batch that changes no value does not call
-    /// settingsChanged(). The constructor derives them too. A block built at its declared defaults starts with the
-    /// corner its settings describe.
+    /// `alpha`, the pole `1 - alpha` and `corner_hz` derive from the members. A settings batch that changes no value
+    /// does not call settingsChanged(). The constructor derives them too. A block built at its declared defaults starts
+    /// with the corner its settings describe.
     explicit DcOffsetCorrect(property_map init = {}) : Block<DcOffsetCorrect<T>, UnfilteredTagPropagation>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }

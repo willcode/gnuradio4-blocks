@@ -1,9 +1,9 @@
 # gr::recipes::SampleClockOffset, sampling-clock frequency error in parts per million.
 #
-# Two radios differ slightly in sample rate. A receiver whose clock runs `ppm` parts per million fast reads the
-# transmitter's stream slightly compressed in time. That appears as a symbol-timing drift, and a recovery loop has to
-# track it. The model is a resampling by 1 + ppm*1e-6. Positive ppm produces more output samples than input samples.
-# That is the convention for a receiver clock that runs fast.
+# Two radios differ slightly in sample rate. A receiver whose clock runs `ppm` parts per million fast reads each
+# transmitted symbol over slightly more samples than nominal. That appears as a symbol-timing drift, and a recovery loop
+# has to track it. The model is a resampling by 1 + ppm*1e-6. Positive ppm produces more output samples than input
+# samples. That is the convention for a receiver clock that runs fast.
 #
 # The derivation is small, and the machinery behind it is not. A rate change has to re-origin tags. A tag's sample
 # offset means something different on either side of a resampler. ArbitraryRateResampler re-origins tags. Its
