@@ -9,9 +9,9 @@
 
 #include <gnuradio-4.0/Tag.hpp>
 
-// Minimal ReaderSpanLike/WriterSpanLike pair, so a processBulk can be driven at an exact record count and with an exact
-// amount of output room without standing up a graph and a scheduler. The record adapters here carry no tags, so the tag
-// members are present for the concepts' sake and do nothing.
+// A minimal ReaderSpanLike and WriterSpanLike pair. It drives a processBulk at an exact record count and with an exact
+// amount of output room, without a graph or a scheduler. The record blocks here carry no tags. The tag members exist
+// for the concepts and do nothing.
 namespace gr::blocks::ax25::test {
 
 struct TagReaderSpan : std::span<const gr::Tag> {

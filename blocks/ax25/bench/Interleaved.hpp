@@ -13,8 +13,10 @@
 
 namespace gr::blocks::ax25::bench {
 
-/// @brief One thing being measured. `body` processes `unitsPerCall` units and returns a value derived from its output,
-/// which is summed and printed so the optimizer cannot delete the work.
+/// @brief One measured arm.
+///
+/// `body` processes `unitsPerCall` units and returns a value derived from its output. The harness sums and prints
+/// these values. The printed sum keeps the optimizer from deleting the work.
 struct Arm {
     std::string             label;
     std::function<double()> body;
@@ -23,10 +25,10 @@ struct Arm {
 /**
  * @brief Run every arm once per repeat, in the same order, and report the best with its spread.
  *
- * Interleaving is what makes the arms comparable: a clock ramp, a thermal excursion or a neighbor's build lands on all
- * of them alike rather than on whichever ran last. The first pass is the warm-up and is discarded. The figure is the
- * best of the rest, because the best is the one the machine is capable of and every larger number is something else
- * that happened; the spread is printed beside it so a run that was disturbed says so.
+ * Interleaving makes the arms comparable. A clock ramp, a thermal excursion or another build on the machine affects
+ * every arm alike. The first pass is a warm-up and is discarded. The reported figure is the best of the remaining
+ * passes. The best time shows what the machine can do. Every larger time includes some other delay. The spread is
+ * printed beside the figure and shows when a run was disturbed.
  */
 inline void report(std::span<Arm> arms, std::size_t unitsPerCall, std::size_t repeats, std::string_view unit) {
     std::vector<double> best(arms.size(), 1e300);

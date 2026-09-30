@@ -25,14 +25,13 @@
 #include "TestSpans.hpp"
 
 /*
- * The frame these blocks build and read is a fixed byte layout, so the tests pin it where it is checkable by hand and
- * pin the composition where it has to hold end to end.
+ * The frame these blocks build and read is a fixed byte layout. The tests pin the layout where it can be checked by
+ * hand. They pin the composition where it must hold end to end.
  *
- * The anchors come first: a twenty-one byte UI frame and a repeated hop, both written out as literal bytes rather than
- * computed, because bytes computed the way the block computes them would only agree with themselves. The control table
- * follows, one frame per named type. The refusals prove that a malformed record costs one record rather than the
- * stream, and the chain proves that what leaves an encoder over a bit-stuffed link with a frame check sequence in
- * front of it comes back the same frame.
+ * The anchors come first. They are a twenty-one byte UI frame and a repeated hop, both written out as literal bytes.
+ * Bytes computed the way the block computes them would only agree with themselves. The control table follows, one
+ * frame per named type. The refusal tests show that a malformed record costs one record and not the stream. The chain
+ * test sends encoded frames over a bit-stuffed link with a frame check sequence and gets the same frames back.
  */
 namespace qa_ax25 {
 
@@ -48,13 +47,13 @@ using gr::blocks::digital::DelimiterFramer;
 
 using Record = gr::DataSet<std::uint8_t>;
 
-/// Anchor A: destination APRS, source N0CALL, no repeaters, UI, PID 0xF0, command, poll/final clear, info ":TEST".
+/// Anchor A is a UI command frame from N0CALL to APRS with no repeaters, PID 0xF0, poll/final clear and info ":TEST".
 constexpr std::array<std::uint8_t, 21UZ> kAnchorA{{0x82U, 0xA0U, 0xA4U, 0xA6U, 0x40U, 0x40U, 0xE0U, //
     0x9CU, 0x60U, 0x86U, 0x82U, 0x98U, 0x98U, 0x61U,                                                //
     0x03U, 0xF0U,                                                                                   //
     0x3AU, 0x54U, 0x45U, 0x53U, 0x54U}};
 
-/// Anchor B: the repeater subfield WIDE1-1 with its H bit set and the address field ending on it.
+/// Anchor B is the repeater subfield WIDE1-1 with its H bit set, closing the address field.
 constexpr std::array<std::uint8_t, 7UZ> kAnchorB{{0xAEU, 0x92U, 0x88U, 0x8AU, 0x62U, 0x40U, 0xE3U}};
 
 constexpr std::array<std::uint8_t, 5UZ> kInfo{{0x3AU, 0x54U, 0x45U, 0x53U, 0x54U}};
@@ -78,7 +77,7 @@ template<typename TBlock>
     return block;
 }
 
-/// One record as the chain carries it: a flat byte array with its extent, its name and its own metadata.
+/// One record as the chain carries it, a flat byte array with its extent, its name and its own metadata.
 [[nodiscard]] Record recordOf(std::vector<std::uint8_t> bytes, gr::property_map meta = {}) {
     Record record;
     record.signal_values = std::move(bytes);
@@ -191,8 +190,8 @@ struct RecordSource : gr::Block<RecordSource> {
 /**
  * @brief Flattens each framed record onto a stream, keeping a copy of what it flattened.
  *
- * The copies are what lets one graph run be read from both ends. `_flipAt` inverts one wire item on the way past,
- * which is the corrupted frame of the chain test.
+ * The copies let a test read one graph run from both ends. `_flipAt` inverts one wire item as it passes. The chain
+ * test uses it to corrupt a frame.
  */
 struct RecordToStream : gr::Block<RecordToStream> {
     gr::PortIn<Record, gr::Async>        in;
@@ -243,7 +242,7 @@ struct RecordSink : gr::Block<RecordSink> {
 };
 
 /**
- * @brief Runs a graph to completion under the simple scheduler, stopping it rather than hanging if it wedges.
+ * @brief Runs a graph to completion under the simple scheduler and stops it if it hangs.
  *
  * @p collect runs while the scheduler still owns the graph, because the references `emplaceBlock` returned point into
  * blocks the scheduler destroys with itself.
@@ -269,7 +268,7 @@ void runGraph(gr::Graph flow, TCollect&& collect) {
     collect();
 }
 
-/// The HDLC profile of the delimiter blocks: the flag, bit stuffing, and each payload byte unpacked least significant bit first.
+/// The HDLC profile of the delimiter blocks, with the flag, bit stuffing, and each payload byte unpacked LSB first.
 [[nodiscard]] gr::property_map hdlcFraming() {
     return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"stuff_after_ones", gr::Size_t{5}}, {"abort_ones", gr::Size_t{7}}, //
         {"bits_per_item", gr::Size_t{1}}, {"max_payload_items", gr::Size_t{8192}}, {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("LsbFirst")}};
@@ -397,7 +396,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             expect(that % (built.out[0UZ].signal_values == bytes)) << "the whole frame, the repeater subfield among it";
         }
 
-        // the same hop without the marker leaves the H bit clear, which is what a transmitter of new frames sends
+        // the same hop without the marker leaves the H bit clear, as a transmitter of new frames sends it
         Ax25Encode   plain = make<Ax25Encode>({{"destination", std::string("APRS")}, {"source", std::string("N0CALL")}, {"via", std::string("WIDE1-1")}});
         const Driven quiet = feed(plain, std::span<const Record>(payloads));
         expect(eq(quiet.out.size(), 1UZ));
@@ -417,8 +416,8 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             gr::Size_t       nrValue;
             gr::Size_t       nsValue;
         };
-        // an I frame with N(S) = 3, N(R) = 5 and the poll bit set, then one supervisory frame of each kind, then the
-        // nine unnumbered modifiers with their poll/final bits clear
+        // an I frame with N(S) = 3, N(R) = 5 and the poll bit set. Then one supervisory frame of each kind. Then the
+        // nine unnumbered modifiers with their poll/final bits clear.
         const std::vector<Case> cases{{0xB6U, "I", true, true, true, true, 5U, 3U}, //
             {0x41U, "RR", false, false, true, false, 2U, 0U}, {0x05U, "RNR", false, false, true, false, 0U, 0U}, {0x09U, "REJ", false, false, true, false, 0U, 0U}, {0x0DU, "SREJ", false, false, true, false, 0U, 0U}, {0x03U, "UI", false, true, false, false, 0U, 0U}, {0x0FU, "DM", false, false, false, false, 0U, 0U}, {0x2FU, "SABM", false, false, false, false, 0U, 0U}, {0x43U, "DISC", false, false, false, false, 0U, 0U}, {0x63U, "UA", false, false, false, false, 0U, 0U}, {0x6FU, "SABME", false, false, false, false, 0U, 0U}, {0x87U, "FRMR", false, false, false, false, 0U, 0U}, {0xAFU, "XID", false, false, false, false, 0U, 0U}, {0xE3U, "TEST", false, false, false, false, 0U, 0U}};
 
@@ -452,7 +451,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             expect(that % (back[0UZ].signal_values == std::vector<std::uint8_t>(kInfo.begin(), kInfo.end()))) << std::format("{}: what follows the header is the information field", one.type);
         }
 
-        // an unlisted unnumbered modifier is still a frame: type "U" with the poll/final-masked byte recorded
+        // an unlisted unnumbered modifier is still a frame, of type "U" with the poll/final-masked byte recorded
         for (const std::uint8_t control : {std::uint8_t{0x23U}, std::uint8_t{0x33U}}) {
             std::vector<std::uint8_t> bytes(kAnchorA.begin(), kAnchorA.begin() + 14);
             bytes.push_back(control);
@@ -476,7 +475,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
         const std::vector<std::uint8_t> noControl(kAnchorA.begin(), kAnchorA.begin() + 14);
         // a UI frame ending at its control byte, with no protocol identifier behind it
         const std::vector<std::uint8_t> noPid(kAnchorA.begin(), kAnchorA.begin() + 15);
-        // ten subfields whose extension bits are all clear, so the address field never closes
+        // ten subfields with every extension bit clear. The address field does not close.
         std::vector<std::uint8_t> unclosed(70UZ, 0x40U);
         for (std::size_t i = 6UZ; i < unclosed.size(); i += 7UZ) {
             unclosed[i] = 0x60U;
@@ -552,8 +551,8 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             messages.push_back(std::move(bytes));
         }
 
-        // the records carry no keys of their own here: a byte stream is where a sender's metadata stops, so what the
-        // far end can be held to is the frame's own facts and what the receiving stages wrote about it
+        // the records carry no keys of their own here. A byte stream does not carry a sender's metadata. The far end is
+        // checked against the frame's own keys and the keys the receiving blocks wrote.
         const auto build = [&messages] {
             std::vector<Record> records;
             for (const std::vector<std::uint8_t>& message : messages) {
@@ -575,8 +574,8 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             expect(metaBool(clean.received[which], "crc_ok")) << std::format("frame {}: what CrcCheck wrote about the frame crosses the decoder verbatim", which);
         }
 
-        // one flipped wire bit, chosen inside the third frame and inside a run of ones short enough that no stuffing
-        // decision either side of it changes: the frame keeps its length and fails only its check sequence
+        // one flipped wire bit inside the third frame, in a run of ones short enough that no stuffing decision on
+        // either side changes. The frame keeps its length and fails only its check sequence.
         expect(ge(clean.framed.size(), 3UZ));
         if (clean.framed.size() < 3UZ) {
             return;
@@ -655,7 +654,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
         expect(eq(decoder.nRecords, 3ULL));
         expect(nothrow([&decoder] { decoder.stop(); }));
 
-        // room for fewer records than arrived: the rest stay in the buffer for the next call
+        // room for fewer records than arrived. The rest stay in the buffer for the next call.
         Ax25Encode          narrow = make<Ax25Encode>(addressing);
         std::vector<Record> scratch(2UZ);
         InputSpan<Record>   inSpan(std::span<const Record>(payloads), 0UZ);
@@ -666,13 +665,13 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
     };
 
     "the address filter matches by address, direction and an optional digipeater, over Ax25Decode's own keys"_test = [] {
-        // anchor A, decoded for real: destination APRS, source N0CALL, SSID unstated (0), no repeaters
+        // anchor A decoded, with destination APRS, source N0CALL, SSID unstated (0) and no repeaters
         const std::vector<Record> anchorAFrames{recordOf(std::vector<std::uint8_t>(kAnchorA.begin(), kAnchorA.end()))};
         Ax25Decode                anchorADecoder;
         const std::vector<Record> anchorA = decoded(std::span<const Record>(anchorAFrames), anchorADecoder);
         expect(eq(anchorA.size(), 1UZ));
 
-        // a two-hop path, one hop repeated and one not, built through Ax25Encode/Ax25Decode rather than by hand
+        // a two-hop path, one hop repeated and one not, built through Ax25Encode and Ax25Decode instead of by hand
         const gr::property_map    twoHopAddressing{{"destination", std::string("APRS")}, {"source", std::string("N0CALL")}, {"via", std::string("WIDE1-1*,WIDE2-2")}};
         const std::vector<Record> twoHopPayload{recordOf(std::vector<std::uint8_t>(kInfo.begin(), kInfo.end()))};
         Ax25Encode                twoHopEncoder = make<Ax25Encode>(twoHopAddressing);
@@ -726,8 +725,8 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
         expect(throws([] { std::ignore = make<Ax25AddressFilter>({{"address", std::string("APRS")}, {"direction", std::string("sideways")}}); })) << "direction must name one of the three values";
         expect(throws([] { std::ignore = make<Ax25AddressFilter>({{"address", std::string("n0call")}, {"direction", std::string("source")}}); })) << "the address grammar is checked the same way Ax25Encode checks it";
 
-        // digipeater is read under the same grammar as address: refused when staged if it is not a callsign, and an
-        // SSID left unstated matches any, exactly as it does for the primary address
+        // digipeater follows the grammar of address. It is refused at staging when it is not a callsign. An unstated
+        // SSID matches any SSID, as it does for the primary address.
         expect(throws([] { std::ignore = make<Ax25AddressFilter>({{"address", std::string("APRS")}, {"direction", std::string("either")}, {"digipeater", std::string("wide1-1")}}); })) << "a lowercase callsign is no callsign";
         expect(throws([] { std::ignore = make<Ax25AddressFilter>({{"address", std::string("APRS")}, {"direction", std::string("either")}, {"digipeater", std::string("WIDE1-1*")}}); })) << "the repeated marker belongs to the frame, not to the setting";
         expect(throws([] { std::ignore = make<Ax25AddressFilter>({{"address", std::string("APRS")}, {"direction", std::string("either")}, {"digipeater", std::string("WIDE1-99")}}); })) << "99 is no SSID";
@@ -744,7 +743,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             return;
         }
 
-        // criterion 5: with `fail` unconnected a non-matching record is a counted stated drop and nothing stalls
+        // with `fail` unconnected, a non-matching record is counted and dropped, and nothing stalls
         {
             Ax25AddressFilter         filter = make<Ax25AddressFilter>({{"address", std::string("NOBODY")}, {"direction", std::string("either")}});
             const std::vector<Record> three{anchorA[0UZ], anchorA[0UZ], anchorA[0UZ]};
@@ -758,7 +757,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
             expect(eq(filter.nFailed, std::uint64_t{3ULL})) << "the count is all an unconnected port leaves behind";
         }
 
-        // a connected `fail` with room for one refusal: the rest wait for the next call rather than being lost
+        // a connected `fail` with room for one refusal. The rest wait for the next call and are not lost.
         {
             Ax25AddressFilter         filter = make<Ax25AddressFilter>({{"address", std::string("NOBODY")}, {"direction", std::string("either")}});
             const std::vector<Record> three{anchorA[0UZ], anchorA[0UZ], anchorA[0UZ]};
@@ -811,7 +810,7 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
         expect(eq(other.nFailed, std::uint64_t{2ULL}));
         expect(eq(other.nMissingKey, std::uint64_t{1ULL})) << "only the record carrying neither key is a missing key";
 
-        // metadata is identical on both ports: the frame's facts were the decode's to write
+        // metadata is identical on both ports, because the decoder wrote the frame's keys
         Ax25AddressFilter split  = make<Ax25AddressFilter>({{"address", std::string("APRS")}, {"direction", std::string("destination")}});
         const Filtered    routed = runFilter(split, std::span<const Record>(std::vector<Record>{anchorA[0UZ], neither}));
         expect(eq(routed.ok.size(), 1UZ));

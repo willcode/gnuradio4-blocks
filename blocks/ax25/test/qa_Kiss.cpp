@@ -26,10 +26,9 @@
 #include "TestSpans.hpp"
 
 /*
- * KISS is one byte, so the tests are about what that byte decides. The anchor pins the byte and the SLIP wire form it
- * sits inside; the chain proves that an AX.25 frame handed to a terminal node controller and read back off one comes
- * home with its port intact; and the parameter frame proves that a controller announcing its own timing costs a count
- * rather than a frame either side of it.
+ * KISS adds one byte. The tests cover what that byte decides. The anchor pins the byte and the SLIP wire form around
+ * it. The chain test shows that an AX.25 frame passed through KISS and SLIP in both directions keeps its port. The
+ * parameter frame test shows that a controller announcing its own timing costs a count and no data frame.
  */
 namespace qa_kiss {
 
@@ -44,7 +43,7 @@ using gr::blocks::digital::DelimiterFramer;
 
 using Record = gr::DataSet<std::uint8_t>;
 
-/// Anchor A: the twenty-one byte UI frame the KISS anchor wraps.
+/// Anchor A is the twenty-one byte UI frame that the KISS anchor wraps.
 constexpr std::array<std::uint8_t, 21UZ> kAnchorA{{0x82U, 0xA0U, 0xA4U, 0xA6U, 0x40U, 0x40U, 0xE0U, //
     0x9CU, 0x60U, 0x86U, 0x82U, 0x98U, 0x98U, 0x61U,                                                //
     0x03U, 0xF0U,                                                                                   //
@@ -52,7 +51,7 @@ constexpr std::array<std::uint8_t, 21UZ> kAnchorA{{0x82U, 0xA0U, 0xA4U, 0xA6U, 0
 
 constexpr std::array<std::uint8_t, 5UZ> kInfo{{0x3AU, 0x54U, 0x45U, 0x53U, 0x54U}};
 
-/// A terminal node controller's TXDELAY parameter frame: port 2, command 1, one parameter byte.
+/// A terminal node controller's TXDELAY parameter frame for port 2, command 1, with one parameter byte.
 constexpr std::array<std::uint8_t, 2UZ> kTxDelay{{0x21U, 0x19U}};
 
 struct Rng {
@@ -84,7 +83,7 @@ template<typename TBlock>
     return record;
 }
 
-/// The nine bytes of a command-9 timestamp frame: the command byte, then @p milliseconds big-endian.
+/// The nine bytes of a command-9 timestamp frame, the command byte followed by @p milliseconds big-endian.
 [[nodiscard]] std::vector<std::uint8_t> stampFrame(std::uint64_t milliseconds) {
     std::vector<std::uint8_t> bytes(9UZ, 0x00U);
     bytes[0UZ] = 0x09U;
@@ -166,8 +165,8 @@ struct RecordSource : gr::Block<RecordSource> {
 /**
  * @brief Flattens each framed record onto the wire, splicing `_inject` in behind the record at `_injectAfter`.
  *
- * The injection is how a terminal node controller's own parameter frame reaches the chain: it arrives on the wire
- * between two data frames, already delimited, exactly as a controller sends one.
+ * The injection stands for a terminal node controller's own parameter frame. It arrives on the wire between two data
+ * frames, already delimited, as a controller sends one.
  */
 struct RecordToStream : gr::Block<RecordToStream> {
     gr::PortIn<Record, gr::Async>        in;
@@ -239,7 +238,7 @@ void runGraph(gr::Graph flow, TCollect&& collect) {
     collect();
 }
 
-/// SLIP framing, which serves KISS byte for byte: 0xC0 between frames, 0xDB the introducer and its two escapes.
+/// SLIP framing, which carries KISS byte for byte. 0xC0 separates frames, and 0xDB introduces the two escape codes.
 [[nodiscard]] gr::property_map slipFraming() {
     return {{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("byte_escape")}, //
         {"escape_item", gr::Size_t{0xDB}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{1024}}};
@@ -381,8 +380,8 @@ const boost::ut::suite<"kiss"> kissTests = [] {
             messages.push_back(std::move(bytes));
         }
 
-        // the records carry no keys of their own here: a byte stream is where a sender's metadata stops, so what the
-        // far end can be held to is the frame's own facts and what the receiving stages wrote about it
+        // the records carry no keys of their own here. A byte stream does not carry a sender's metadata. The far end is
+        // checked against the frame's own keys and the keys the receiving blocks wrote.
         const auto build = [&messages] {
             std::vector<Record> records;
             for (const std::vector<std::uint8_t>& message : messages) {
@@ -407,7 +406,7 @@ const boost::ut::suite<"kiss"> kissTests = [] {
         check(kissChain(addressing, 2U, build()), 0ULL);
 
         // the same run with a TXDELAY frame spliced onto the wire behind the second data frame, delimited as a
-        // controller sends one; neither of its two parameter bytes is 0xC0 or 0xDB, so nothing about it needs escaping
+        // controller sends one. Neither of its two bytes is 0xC0 or 0xDB, and the frame needs no escaping.
         const std::vector<std::uint8_t> parameter{0xC0U, kTxDelay[0UZ], kTxDelay[1UZ], 0xC0U};
         check(kissChain(addressing, 2U, build(), parameter, 2UZ), 1ULL);
     };
@@ -455,7 +454,7 @@ const boost::ut::suite<"kiss"> kissTests = [] {
         }
         expect(eq(decoder.nRecords, 3ULL));
 
-        // room for fewer records than arrived: the rest stay in the buffer for the next call
+        // room for fewer records than arrived. The rest stay in the buffer for the next call.
         KissEncode          narrow = make<KissEncode>({{"kiss_port", gr::Size_t{4}}});
         std::vector<Record> scratch(2UZ);
         InputSpan<Record>   inSpan(std::span<const Record>(records), 0UZ);
@@ -633,10 +632,10 @@ const boost::ut::suite<"kiss"> kissTests = [] {
     };
 
     "the counters are complete after every call, and stop() only reports them"_test = [] {
-        // GR4 runs a block's stop() on the thread that asked for the stop: requestStop() reaches
-        // SchedulerBase::stop(), which walks the graph calling changeStateTo(REQUESTED_STOP), and that invokes this
-        // block's stop() while its own worker may still be inside processBulk. So stop() may read the counters and
-        // nothing else, and the pending stamp has to survive it untouched.
+        // GR4 runs a block's stop() on the thread that asked for the stop. requestStop() reaches SchedulerBase::stop(),
+        // which walks the graph calling changeStateTo(REQUESTED_STOP). That call invokes this block's stop() while its
+        // own worker may still be inside processBulk. stop() may therefore read the counters alone, and the pending
+        // stamp must survive it untouched.
         KissDecode   decoder = make<KissDecode>({{"read_timestamp", true}});
         const Driven back    = feed(decoder, std::span<const Record>(std::vector<Record>{recordOf(stampFrame(1'700'000'000'000ULL))}));
         expect(eq(back.out.size(), 0UZ));
@@ -653,7 +652,7 @@ const boost::ut::suite<"kiss"> kissTests = [] {
         expect(eq(decoder.nRecords, records));
     };
 
-    // Criterion 7: with the two settings false, each block's output is what a chain that sets neither gets.
+    // With both timestamp settings false, each block produces plain KISS output.
     "read_timestamp false leaves KISS decode alone, and a command-9 frame counts as a control frame"_test = [] {
         std::vector<std::uint8_t> data{0x00U};
         data.insert(data.end(), kAnchorA.begin(), kAnchorA.end());

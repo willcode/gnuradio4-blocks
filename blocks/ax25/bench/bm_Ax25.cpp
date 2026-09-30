@@ -13,12 +13,12 @@
 #include <gnuradio-4.0/ax25/Kiss.hpp>
 
 /*
- * The module's regression guard rather than a budget. The address arithmetic is a few shifts a byte over frames of
- * tens of bytes at kilobit link rates, so no figure here gates anything; what the arms are for is that a change
- * turning a per-frame cost into a per-byte one shows up as a number that moved.
+ * These benchmarks guard the module against regressions. They set no budget. The address arithmetic costs a few shifts
+ * per byte, over frames of tens of bytes, at kilobit link rates. No figure here gates anything. A change that turns a
+ * per-frame cost into a per-byte cost shows up as a figure that moved.
  *
- * The unit is one frame, because that is what these blocks process: a record is a frame whatever its length, and a
- * per-byte figure would average the fixed address work over a payload size nobody chose.
+ * The unit is one frame, because these blocks process frames. A record is one frame of any length. A per-byte figure
+ * would average the fixed address work over an arbitrary payload size.
  */
 namespace {
 
@@ -32,7 +32,7 @@ using Record = gr::DataSet<std::uint8_t>;
 constexpr std::size_t kFramesPerCall = 4096UZ;
 constexpr std::size_t kRepeats       = 9UZ;
 
-/// The reader and writer spans a `processBulk` needs, with no tag handling: the measurement is the record path.
+/// The reader and writer spans a `processBulk` needs, with no tag handling. The arms measure the record path alone.
 struct TagSpan : std::span<const gr::Tag> {
     using value_type = gr::Tag;
     bool consume(std::size_t) const noexcept { return true; }
@@ -117,7 +117,7 @@ struct Rng {
     return batch;
 }
 
-/// The same payloads as assembled frames, which is what the decode arms read.
+/// The same payloads as assembled frames. The decode arms read these.
 [[nodiscard]] std::vector<Record> frames(const gr::property_map& settings, std::size_t infoBytes) {
     Ax25Encode          block  = make<Ax25Encode>(settings);
     std::vector<Record> source = payloads(infoBytes);
@@ -130,7 +130,7 @@ struct Rng {
     return built;
 }
 
-/// The same frames with a KISS data command byte in front, which is what `KissDecode` reads.
+/// The same frames with a KISS data command byte in front. `KissDecode` reads these.
 [[nodiscard]] std::vector<Record> kissFrames(const gr::property_map& settings, std::size_t infoBytes) {
     KissEncode          block  = make<KissEncode>({{"kiss_port", gr::Size_t{2}}});
     std::vector<Record> source = frames(settings, infoBytes);
