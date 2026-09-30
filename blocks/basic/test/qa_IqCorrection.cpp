@@ -57,9 +57,8 @@ struct Change {
 /**
  * @brief Drive a processOne block sample by sample, applying @p changes at their absolute offsets.
  *
- * The chunk size is what the framework would hand a work() call. For a block with no per-call state the outputs must
- * not depend on it: a later processBulk "optimization" that hoisted the `enabled` test out of the loop would break
- * exactly this.
+ * The chunk size stands for the span the framework gives a work() call. For a block with no per-call state the
+ * outputs must not depend on it. A processBulk that hoisted the `enabled` test out of the loop would fail this.
  */
 template<typename TBlock>
 [[nodiscard]] std::vector<CF> drive(TBlock& block, std::span<const CF> input, std::size_t chunkSize = 0UZ, std::span<const Change> changes = {}) {
@@ -94,7 +93,7 @@ template<typename TBlock>
 struct Random {
     std::uint64_t state = 0x243f6a8885a308d3ULL;
 
-    [[nodiscard]] double gaussian() noexcept { // Box-Muller over a splitmix stream: deterministic on every box
+    [[nodiscard]] double gaussian() noexcept { // Box-Muller over a splitmix stream, deterministic on every machine
         const double u1 = uniform();
         const double u2 = uniform();
         return std::sqrt(-2.0 * std::log(u1 + 1e-300)) * std::cos(2.0 * kPi * u2);
@@ -113,7 +112,7 @@ struct Random {
 [[nodiscard]] std::vector<CF> noise(std::size_t count, std::uint64_t seed, double offset = 0.0) {
     Random          rng{seed};
     std::vector<CF> samples(count);
-    for (CF& sample : samples) { // unit rms per component pair: each component has variance 1/2
+    for (CF& sample : samples) { // unit rms per component pair, each component with variance 1/2
         sample = CF(static_cast<float>(rng.gaussian() * std::numbers::sqrt2 / 2.0 + offset), static_cast<float>(rng.gaussian() * std::numbers::sqrt2 / 2.0 + offset));
     }
     return samples;
@@ -136,8 +135,8 @@ struct Marker {
     gr::pmt::Value value;
 };
 
-/// Six keys at five offsets; `t0` is not in `gr::tag::kDefaultTags` and both blocks keep it, being pass-all.
-/// Built per call: the suite runs at process exit, when namespace-scope objects are already destroyed.
+/// Six keys at five offsets. `t0` is not in `gr::tag::kDefaultTags`, and both blocks pass all keys and keep it.
+/// Built per call, because the suite runs at process exit, when namespace-scope objects are already destroyed.
 [[nodiscard]] std::array<Marker, 7UZ> markers() {
     return {{
         {"trigger_name", 0UZ, gr::pmt::Value(std::string("alpha"))},
@@ -201,8 +200,8 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             expect(lt(meanMagnitude(std::span<const CF>(y).last(64UZ)), 1e-6)) << std::format("alpha {}: H(1) = 0 exactly, so a constant is nulled", wanted);
         }
 
-        // alpha = 1e-8 needs 1.4e9 samples to reach 1e-6 by simulation. H(1) = 0 means the closed form below,
-        // and that is what is asserted: the decay is exactly (1-alpha)^(n+1) and its limit is zero.
+        // alpha = 1e-8 needs 1.4e9 samples to reach 1e-6 by simulation. H(1) = 0 gives the closed form below, and
+        // the test asserts it. The decay is exactly (1-alpha)^(n+1), and its limit is zero.
         constexpr double      kAlpha = 1e-8;
         DcOffsetCorrect<CF>   slow   = make<DcOffsetCorrect<CF>>({{"enabled", true}, {"sample_rate", kRate}, {"tau", tauFor(kAlpha, static_cast<double>(kRate))}});
         const std::vector<CF> y      = drive(slow, std::span<const CF>(flat(1000000UZ, CF(1.f, 1.f))), 4096UZ);
@@ -245,7 +244,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             const double        alpha = 1.0 / (1.0 + product);
             DcOffsetCorrect<CF> block = make<DcOffsetCorrect<CF>>({{"enabled", true}, {"sample_rate", kRate}, {"tau", product / static_cast<double>(kRate)}});
 
-            // The closed form, on a noise-free offset. Unit-rms noise cannot resolve this to 2 %: the tracker's own
+            // The closed form, on a noise-free offset. Unit-rms noise cannot resolve this to 2 %. The tracker's own
             // output noise is sqrt(alpha/2) per component, which at fs*tau = 1e3 is 0.022 against an offset of 0.05.
             const std::size_t count = static_cast<std::size_t>(6.0 * product);
             std::ignore             = drive(block, std::span<const CF>(flat(count, CF(static_cast<float>(kOffset), 0.f))), 4096UZ);
@@ -324,8 +323,8 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             DcOffsetCorrect<CF>    complexBlock = make<DcOffsetCorrect<CF>>(settings);
             DcOffsetCorrect<float> realBlock    = make<DcOffsetCorrect<float>>(settings);
             for (std::size_t i = 0UZ; i < complexIn.size(); ++i) {
-                // The imaginary component is zeroed so the complex block's real lane sees the
-                // identical arithmetic; both estimates then update from the same values.
+                // The imaginary component is zeroed, and the complex block's real lane sees the
+                // same arithmetic. Both estimates then update from the same values.
                 const CF    fromComplex = complexBlock.processOne(CF(complexIn[i].real(), 0.f));
                 const float fromReal    = realBlock.processOne(complexIn[i].real());
                 expect(eq(fromComplex.real(), fromReal)) << std::format("enabled={} sample {}", on, i);
@@ -456,10 +455,10 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
     };
 
     "a run of exact zeros leaves the estimate at zero, not at a subnormal"_test = [] {
-        // The estimate is a double and the pole at a device rate is very close to one: at 10 MS/s with tau = 1 s,
-        // alpha = 1e-7, and an estimate of 0.05 needs 7 054 006 510 zeros - 705 s of stream - to reach the smallest
-        // normal. Only the pole sets the count, so the case runs at tau*fs = 9, where alpha = 0.1 and the count is
-        // 6 696 for a real component at 0.05 and 6 691 for an imaginary one at 0.03.
+        // The estimate is a double, and the pole at a device rate is very close to one. At 10 MS/s with tau = 1 s,
+        // alpha = 1e-7. An estimate of 0.05 then needs 7 054 006 510 zeros, 705 s of stream, to reach the smallest
+        // normal. Only the pole sets the count. The case runs at tau*fs = 9, where alpha = 0.1. The count is 6 696
+        // for a real component at 0.05 and 6 691 for an imaginary one at 0.03.
         constexpr float       kRate  = 96000.f;
         constexpr std::size_t kZeros = 8000UZ;
 
@@ -472,10 +471,10 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         expect(eq(std::fpclassify(block.dcEstimate().real()), FP_ZERO)) << "the real estimate is exactly zero, not the smallest subnormal";
         expect(eq(std::fpclassify(block.dcEstimate().imag()), FP_ZERO)) << "and so is the imaginary one, the two being flushed separately";
 
-        // The port is float, so the output underflows to exactly zero once the estimate passes 7e-46, some 160 samples
-        // into the decay and long before the double state reaches its own smallest normal: the float subnormals on the
-        // way through 1e-40 are the estimate genuinely passing through that range. What the tail must not hold is a
-        // subnormal left behind by a state that stopped decaying.
+        // The port is float. The output underflows to exactly zero once the estimate passes 7e-46, some 160 samples
+        // into the decay. The double state reaches its own smallest normal much later. The float subnormals near
+        // 1e-40 come from the estimate passing through that range. The tail must not hold a subnormal left by a state
+        // that stopped decaying.
         const std::span<const CF> tail      = std::span<const CF>(got).last(kZeros / 2UZ);
         const auto                subnormal = [](CF sample) { return std::fpclassify(sample.real()) == FP_SUBNORMAL || std::fpclassify(sample.imag()) == FP_SUBNORMAL; };
         expect(eq(std::ranges::count_if(tail, subnormal), std::ptrdiff_t{0})) << "no output in the tail is subnormal";
@@ -483,10 +482,10 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
     };
 
     "the flush changes nothing above the subnormal range"_test = [] {
-        // The recursion as it stood, sample by sample against the block, over a step and the decay that follows it.
-        // The comparison stops as soon as both components are below 1e-300, which at alpha = 0.1 is some 6 528 zeros,
-        // while the flush cannot fire before 6 696: every sample compared is one the flush had no part in, and the
-        // final estimate being non-zero says so.
+        // The recursion without the flush, sample by sample against the block, over a step and the decay after it.
+        // The comparison stops once both components are below 1e-300. At alpha = 0.1 that takes some 6 528 zeros.
+        // The flush cannot fire before 6 696. The flush acts on no compared sample, and the non-zero final estimate
+        // confirms it.
         constexpr float       kRate = 96000.f;
         constexpr std::size_t kStep = 500UZ;
 
@@ -582,7 +581,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
 
         // With DISABLE_SENSITIVE_TESTS set the test prints the figures and asserts nothing, with ENABLE_BENCHMARK_TESTS
         // set it asserts the tight bounds, and otherwise it asserts the loose bounds. The tight bounds need a harness
-        // that controls placement and clock speed; the loose bounds still catch a regression that changes the shape.
+        // that controls placement and clock speed. The loose bounds still catch a regression that changes the shape.
         if (std::getenv("DISABLE_SENSITIVE_TESTS") != nullptr) {
             std::println("DISABLE_SENSITIVE_TESTS is set: the figures are printed and not asserted on");
             return;
@@ -592,13 +591,13 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
 
         expect(lt(best[1UZ] / best[0UZ], copyBound)) << "IqSwap disabled costs a copy and no more";
         expect(lt(best[3UZ] / best[0UZ], copyBound)) << "DcOffsetCorrect disabled costs a copy and no more";
-        // A block pays one more store-to-load forward on the loop-carried estimate than the same two lines over locals
-        // do, because its state lives in an object the compiler cannot promote to registers: about half as much again
-        // per sample, which is the margin these bounds leave.
+        // A block adds one store-to-load forward on the loop-carried estimate over the same two lines on locals. Its
+        // state lives in an object the compiler cannot promote to registers. The cost is about half as much again per
+        // sample. These bounds leave that margin.
         //
-        // The test builds at the build type's optimization level, the level bm_IqCorrection builds at. The bounds on
-        // the enabled arm carry the margins set for an -O1 build of this test, where the subnormal flush's two compares
-        // and two conditional stores cost about 3.7 ns of the arm.
+        // The test builds at the build type's optimization level, as bm_IqCorrection does. The bounds on the enabled
+        // arm carry the margins set for an -O1 build of this test. There the subnormal flush's two compares and two
+        // conditional stores cost about 3.7 ns of the arm.
         expect(lt(best[4UZ], pinned ? 11.0 : 18.0)) << std::format("DcOffsetCorrect enabled at {:.3f} ns/sample", best[4UZ]);
     };
 };

@@ -141,7 +141,7 @@ template<typename T>
     return packet;
 }
 
-/// @brief A single-signal record of @p nSamples bytes, the length the acceptance pair's transmitter cuts.
+/// @brief A single-signal record of @p nSamples bytes.
 [[nodiscard]] Record<std::uint8_t> makeByteRecord(std::size_t nSamples, std::size_t offset) {
     Record<std::uint8_t> record;
     record.signal_values.resize(nSamples);
@@ -216,7 +216,7 @@ template<typename T>
     return offsets;
 }
 
-// ─── graph-side blocks, so that Packet<T> is exercised as a real port item and not only through a mock span ───────
+// ─── graph-side blocks, which carry Packet<T> as a real port item and not only through a mock span ────────────────
 
 template<typename TItem>
 struct ItemSource : gr::Block<ItemSource<TItem>> {
@@ -265,8 +265,8 @@ struct Collector : gr::Block<Collector<TItem>> {
     }
 };
 
-/// @brief Flips one byte of one packet, which is what "corrupted in flight" is: the CRC field still states the
-/// original, so the damage is only visible to a receiver that recomputes.
+/// @brief Flips one byte of one packet, as a payload corrupted in flight. The CRC field still states the original.
+/// Only a receiver that recomputes the CRC sees the damage.
 struct PacketCorrupter : gr::Block<PacketCorrupter> {
     gr::PortIn<gr::Packet<std::uint8_t>>             in;
     gr::PortOut<gr::Packet<std::uint8_t>, gr::Async> out;
@@ -752,7 +752,7 @@ const boost::ut::suite<"PacketToDataSet"> packetToDataSetTests = [] {
     };
 };
 
-// ─── under the scheduler: the round trip, the reject path and the gate's own chain ────────────────────────────────
+// ─── under the scheduler, the round trip, the reject path and the CRC chain ───────────────────────────────────────
 
 const boost::ut::suite<"PacketToDataSet under the scheduler"> schedulerTests = [] {
     using namespace boost::ut;
@@ -918,7 +918,7 @@ const boost::ut::suite<"PacketToDataSet under the scheduler"> schedulerTests = [
         expect(eq(hoppedReasons, 0UZ)) << "discard_reason is not a reserved key, so the default forwarder drops it";
     };
 
-    // The acceptance gate's own chain, in one process, with the leg that could not be built before
+    // The full CRC chain in one process, from CrcAppend through a corrupted packet to CrcCheck
     "a payload corrupted in flight leaves by CrcCheck's fail port, exactly once"_test = [] {
         constexpr std::size_t kRecords     = 4UZ;
         constexpr std::size_t kRecordBytes = 250UZ;

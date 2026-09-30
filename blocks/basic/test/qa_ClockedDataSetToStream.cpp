@@ -71,7 +71,7 @@ struct StreamSink : gr::Block<StreamSink> {
     }
 };
 
-//! Run records against a clock of the given length; returns the emitted stream.
+//! Runs records against a clock of the given length and returns the emitted stream.
 [[nodiscard]] std::vector<float> run(std::size_t clockItems, std::vector<gr::DataSet<float>> records, gr::property_map settings = {}) {
     gr::Graph flow;
     auto&     clk  = flow.emplaceBlock<ClockSource>();
@@ -134,8 +134,8 @@ int main() {
     };
 
     "overlapping records resolve in arrival order"_test = [] {
-        // The first record covers positions 10..14; the second, arriving after it, covers
-        // 12..16. Positions 10..14 come from the first, 15..16 from the second's tail.
+        // The first record covers positions 10..14. The second, arriving after it, covers
+        // 12..16. Positions 10..14 come from the first and 15..16 from the second's tail.
         const std::vector<float> out = run(15UZ, {record(10ULL, {1.f, 2.f, 3.f, 4.f, 5.f}), record(12ULL, {6.f, 7.f, 8.f, 9.f, 10.f})});
         expect(eq(out.size(), 25UZ));
         const std::vector<float> want{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 9, 10, 0, 0, 0, 0, 0, 0, 0, 0};

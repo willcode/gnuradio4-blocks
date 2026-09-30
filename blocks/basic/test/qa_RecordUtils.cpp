@@ -13,9 +13,9 @@
 #include <gnuradio-4.0/basic/RecordUtils.hpp>
 
 /*
- * The two record utilities own an item span and a routing decision and nothing else, so the tests
- * drive processBulk directly: every record's fate — trimmed, passed, or rejected with its stated
- * reason — is asserted by value, and the counters are read off the block afterwards.
+ * The two record utilities act on an item span and a routing decision alone. The tests drive
+ * processBulk directly. Each record's outcome is asserted by value, whether trimmed, passed, or
+ * rejected with its stated reason. The counters are read from the block afterwards.
  */
 namespace {
 

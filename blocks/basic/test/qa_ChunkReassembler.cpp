@@ -21,13 +21,11 @@
 #include <gnuradio-4.0/basic/ChunkReassembler.hpp>
 #include <gnuradio-4.0/basic/PacketToDataSet.hpp>
 
-// Criteria 1-14 of spec-chunk-reassembly.md §10. Criterion 13 (the degenerate descriptor) is exercised
-// against the landed kernel, gr::packet::ChunkReassembler, directly: the block only ever configures the two shipped
-// formats, and both require their defining field (index for "indexed", offset for "offset"), so a descriptor with
-// neither is not reachable through the block's own settings — it is reachable only through pushDescriptor(), the
-// hook shape a protocol-specific format would use. Everything else is driven through the block, span to span, on
-// the pattern blocks/basic/test/qa_DataSetToPacket.cpp uses, because the graph a scheduler would add contributes
-// nothing here: a chunk's fate is decided by processBulk alone.
+// The degenerate descriptor test drives the engine, gr::packet::ChunkReassembler, directly. The block configures
+// only its two formats. Each format requires its defining field, the index for "indexed" and the offset for
+// "offset". The block's settings cannot produce a descriptor with neither. Only pushDescriptor() can, the hook a
+// protocol-specific format uses. Every other test drives the block span to span, as qa_DataSetToPacket.cpp does.
+// processBulk alone decides what happens to a chunk, and a scheduler graph adds nothing to that.
 
 namespace {
 
@@ -105,7 +103,7 @@ struct Capture {
     bool                 stalled  = false;
 };
 
-// ─── graph-side blocks for criterion 12, which needs a real port and a real downstream block's own tag handling ────
+// ─── graph-side blocks for the packet admission test, which needs real ports and a real downstream block ─────────
 
 template<typename TItem>
 struct ItemSource : gr::Block<ItemSource<TItem>> {
@@ -114,7 +112,7 @@ struct ItemSource : gr::Block<ItemSource<TItem>> {
 
     std::vector<TItem> _items{};
     std::size_t        _emitted    = 0UZ;
-    std::size_t        _maxPerCall = 0UZ; ///< 0: as many as the span holds
+    std::size_t        _maxPerCall = 0UZ; ///< 0 for as many as the span holds
 
     gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
         const std::size_t room   = _maxPerCall == 0UZ ? outSpan.size() : std::min(outSpan.size(), _maxPerCall);
@@ -144,8 +142,8 @@ struct GraphCollector : gr::Block<GraphCollector<TItem>> {
     }
 };
 
-/// @brief Drive @p block over @p records. @p room caps every output span alike; 0 means "one slot per record".
-/// @p inputChunk caps how many records one processBulk call is offered; 0 means the whole remainder.
+/// @brief Drives @p block over @p records. @p room caps every output span alike, and 0 gives one slot per record.
+/// @p inputChunk caps the records offered to one processBulk call, and 0 offers the whole remainder.
 [[nodiscard]] Capture run(ChunkReassembler& block, std::span<const Record> records, bool outConnected = true, bool incompleteConnected = true, bool rejectConnected = true, std::size_t room = 0UZ, std::size_t inputChunk = 0UZ) {
     Capture           capture;
     const std::size_t theRoom = room == 0UZ ? std::max(records.size(), 1UZ) : room;
@@ -261,7 +259,7 @@ struct Fields {
     return record;
 }
 
-/// @brief A deterministic, non-repeating byte pattern: byte `i` of the reference file is `(i * 131 + 7) mod 256`.
+/// @brief A deterministic byte pattern. Byte `i` of the reference file is `(i * 131 + 7) mod 256`.
 [[nodiscard]] std::vector<std::uint8_t> referenceFile(std::size_t length) {
     std::vector<std::uint8_t> bytes(length);
     for (std::size_t i = 0UZ; i < length; ++i) {
@@ -276,7 +274,7 @@ constexpr std::size_t kFullChunks  = 36UZ; // 8192 = 36 * 224 + 128
 constexpr std::size_t kLastChunk   = 128UZ;
 constexpr std::size_t kTotalChunks = 37UZ;
 
-/// @brief The "basic" indexed layout most criteria share: id(4)@0, index(4)@4, size(4)@8, payload@12.
+/// @brief The indexed layout most tests share, id(4)@0, index(4)@4, size(4)@8 and payload@12.
 constexpr Layout kBasicLayout{.idOffset = 0UZ, .idBytes = 4UZ, .indexOffset = 4UZ, .indexBytes = 4UZ, .payloadOffset = 12UZ, .sizeOffset = 8UZ, .sizeBytes = 4UZ};
 
 [[nodiscard]] gr::property_map basicSettings(gr::Size_t maxOpenFiles = 8U, std::uint64_t maxFileBytes = 1UZ << 20UZ, std::uint64_t evictAfterRecords = 0ULL, bool requireCrcOk = false, bool publishIncomplete = false, bool newFileOnRegression = true) {
@@ -391,12 +389,10 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         const std::vector<std::uint8_t> file   = referenceFile(kFileBytes);
         const auto                      chunks = splitIntoChunks(file, kChunkSize);
 
-        // Every chunk but the last is pushed immediately followed by its own duplicate; the last chunk (whichever
-        // index happens to complete the file) is pushed once only. A file is retired the instant it completes
-        // (F15: "a retransmission arriving after a file completed and was released opens a new file"), so there is
-        // no push after the completing one that could still land on this same file — 36 of the 37 chunks are the
-        // most this scene can duplicate against one open file, and that bound holds for any push order, not just
-        // this one.
+        // Every chunk but the last is pushed twice in a row. The last chunk, whichever index completes the file, is
+        // pushed once. A file is retired when it completes. A retransmission after that opens a new file. No push
+        // after the completing one can land on this file. At most 36 of the 37 chunks can be duplicated against one
+        // open file, in any push order.
         auto                block = make(basicSettings());
         std::vector<Record> records;
         for (std::size_t k = 0UZ; k < chunks.size(); ++k) {
@@ -454,9 +450,9 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             }
             records.push_back(encodeChunk(1ULL, index, kFileBytes, payload));
         }
-        for (std::uint64_t k = 0ULL; k < 60ULL; ++k) { // another file, well past the 50-record staleness window; its
-            // declared size is far larger than what is ever pushed, so it stays incomplete and never itself
-            // completes on 'out' (which would otherwise defeat this scene's "nothing on out" assertion)
+        for (std::uint64_t k = 0ULL; k < 60ULL; ++k) { // another file, well past the 50-record staleness window
+            // Its declared size is far larger than the bytes pushed. It stays incomplete and publishes nothing on
+            // 'out', which keeps this test's "nothing on out" assertion valid.
             const std::vector<std::uint8_t> filler(kChunkSize, static_cast<std::uint8_t>(k));
             records.push_back(encodeChunk(2ULL, k, 1'000'000ULL, filler));
         }
@@ -508,13 +504,12 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
     "max_open_files evicts the least recently touched and admits the new file"_test = [] {
         auto block = make(basicSettings(2U, 1UZ << 16UZ, 0ULL, false, true));
 
-        // each file declares 128 bytes and receives one 64-byte chunk at index 0 — the file's last index, since 128
-        // bytes at a chunk size of 224 is one chunk — so it stays open (incomplete) at half coverage rather than
-        // completing and retiring itself before cap pressure ever gets to act on it
+        // Each file declares 128 bytes and receives one 64-byte chunk at index 0. At a chunk size of 224 that is the
+        // file's last index. The file stays open at half coverage. It does not complete before the cap acts on it.
         const std::vector<std::uint8_t> small(64UZ, 0xAAU);
         std::vector<Record>             records;
         records.push_back(encodeChunk(1ULL, 0ULL, 128ULL, small)); // file 1 opens, touched
-        records.push_back(encodeChunk(2ULL, 0ULL, 128ULL, small)); // file 2 opens, touched; cap now at 2
+        records.push_back(encodeChunk(2ULL, 0ULL, 128ULL, small)); // file 2 opens, touched, cap reached at 2
         records.push_back(encodeChunk(3ULL, 0ULL, 128ULL, small)); // opening file 3 evicts the least-recently-touched (file 1)
 
         const Capture capture = run(block, std::span<const Record>(records));
@@ -547,12 +542,12 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
 
         const Layout                    bigLayout{.idOffset = 0UZ, .idBytes = 4UZ, .indexOffset = 4UZ, .indexBytes = 8UZ, .payloadOffset = 16UZ, .sizeOffset = 12UZ, .sizeBytes = 4UZ};
         const std::vector<std::uint8_t> payload(16UZ, 0x55U);
-        // A one-chunk file: chunk 0 is the last chunk, so a payload short of the chunk size is what this file's
-        // last chunk is, and the scene is about the index guard rather than about coverage geometry.
+        // A one-chunk file. Chunk 0 is the last chunk, so a payload shorter than the chunk size is valid. The test
+        // checks the index guard and not the coverage geometry.
         constexpr std::uint64_t kDeclaredSize = 16ULL;
 
-        // An index whose product with the chunk size wraps a 64-bit register: 1 000 000 * ((2^64 - 1)/1e6 + 1) is
-        // 448 384 modulo 2^64, which is inside both the declared size and the cap, so an engine that multiplied
+        // An index whose product with the chunk size wraps a 64-bit register. 1 000 000 * ((2^64 - 1)/1e6 + 1) is
+        // 448 384 modulo 2^64. That offset lies inside both the declared size and the cap. An engine that multiplied
         // first would place this chunk at byte 448 384 and accept it. The guard divides instead.
         constexpr std::uint64_t hugeIndex = (std::numeric_limits<std::uint64_t>::max() / kBigChunkSize) + 1ULL;
         static_assert(hugeIndex * kBigChunkSize == 448'384ULL, "the scene only tests the guard if the product wraps");
@@ -571,7 +566,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             expect(eq(capture.out.front().signal_values.size(), payload.size()));
         }
 
-        // Q3's own cap, refused where the configuration is offered rather than by building a two-gigabyte file.
+        // The packet size cap of 2^31 - 1, refused when the configuration is offered. No two-gigabyte file is built.
         expect(throws([] { std::ignore = make(basicSettings(8U, 2'147'483'648ULL)); })) << "max_file_bytes above 2^31 - 1";
         expect(nothrow([] { std::ignore = make(basicSettings(8U, 2'147'483'647ULL)); })) << "and the cap itself is admissible";
     };
@@ -597,16 +592,16 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         constexpr std::uint64_t         kTotal     = 24ULL * kCellBytes; // 12 covered cells, 12 gaps if every other one lands
         const std::vector<std::uint8_t> cell(kCellBytes, 0x11U);
         std::vector<Record>             records;
-        // alternating chunks (even cells only): each is disjoint from every other, so each opens its own interval.
-        // max_gaps = 4 caps the interval count at max_gaps + 1 = 5, so five disjoint cells (0,2,4,6,8) fill the cap
-        // exactly and are all still accepted.
+        // Alternating chunks, even cells only. Each is disjoint from the others and opens its own interval.
+        // max_gaps = 4 caps the interval count at max_gaps + 1 = 5. Five disjoint cells (0, 2, 4, 6, 8) fill the
+        // cap exactly and are all accepted.
         for (std::uint64_t cell_i = 0ULL; cell_i < 10ULL; cell_i += 2ULL) {
             records.push_back(makeRecord(buildBytes(offsetLayout, Fields{.id = 1ULL, .offset = cell_i * kCellBytes, .size = kTotal}, cell)));
         }
         const Capture partial = run(block, std::span<const Record>(records));
         expect(eq(block._engine->counters().refused_too_fragmented, 0ULL)) << "five disjoint intervals is exactly the cap, still accepted";
 
-        // a sixth disjoint cell would need a sixth interval: refused
+        // a sixth disjoint cell would need a sixth interval and is refused
         std::vector<Record> overflow{makeRecord(buildBytes(offsetLayout, Fields{.id = 1ULL, .offset = 10ULL * kCellBytes, .size = kTotal}, cell))};
         const Capture       overflowCapture = run(block, std::span<const Record>(overflow));
         expect(eq(block._engine->counters().refused_too_fragmented, 1ULL));
@@ -629,7 +624,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         std::vector<Record> records;
         for (const auto& [index, payload] : chunks) {
             if (index == 3ULL) {
-                continue; // withheld: the last chunk (which reaches the declared size) still arrives
+                continue; // withheld, and the last chunk still arrives with the declared size
             }
             records.push_back(encodeChunk(1ULL, index, kFileBytes, payload));
         }
@@ -642,7 +637,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         const std::vector<std::uint8_t> file   = referenceFile(kFileBytes);
         const auto                      chunks = splitIntoChunks(file, kChunkSize);
 
-        // (a) total_size alone completes — basicSettings() already declares size only
+        // (a) total_size alone completes, and basicSettings() declares the size only
         {
             auto                block = make(basicSettings());
             std::vector<Record> records;
@@ -681,9 +676,9 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
                 expect(eq(metaValue<gr::Size_t>(metaOf(capture.out.front()), "file_chunks").value_or(0U), static_cast<gr::Size_t>(kTotalChunks)));
             }
         }
-        // (d) a second, differing declaration on the same chunk index increments nDeclarationConflicts and the
-        // first stands; asserted with the conflicting re-declaration inserted early and late in the stream, both
-        // producing the same completed file.
+        // (d) A second, differing declaration on the same chunk index increments nDeclarationConflicts. The first
+        // declaration stands. The conflicting declaration is inserted early and late in the stream. Both runs
+        // produce the same completed file.
         const auto conflictScene = [&](std::size_t insertAfter) {
             auto                block = make(basicSettings());
             std::vector<Record> records;
@@ -701,9 +696,9 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             }
         };
         conflictScene(0UZ);                 // right after the first declaration
-        conflictScene(chunks.size() - 2UZ); // late, but still before the file's completing chunk — completion
-                                            // retires the file at once, so nothing pushed after it could land on
-                                            // this same open file (F15's post-completion-reopens rule)
+        conflictScene(chunks.size() - 2UZ); // late, but before the file's completing chunk
+                                            // Completion retires the file at once. A chunk pushed after it opens
+                                            // a new file.
     };
 
     // New file on index regression
@@ -722,7 +717,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             std::vector<Record> records;
             records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 0ULL, .size = 3ULL * 16ULL}, payloadA)));
             records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 1ULL, .size = 3ULL * 16ULL}, payloadB)));
-            records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 0ULL, .size = 1ULL * 16ULL}, payloadB))); // regresses: a second file opens
+            records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 0ULL, .size = 1ULL * 16ULL}, payloadB))); // the index regresses and a second file opens
             const Capture capture = run(block, std::span<const Record>(records));
             expect(eq(block._engine->counters().files_opened, 2ULL)) << "true: a second file opens on regression";
             expect(eq(block.nEvictedSuperseded, 1ULL)) << "the file the transmitter moved on from is a counted, named departure";
@@ -745,7 +740,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             auto                block = make(settings(false));
             std::vector<Record> records;
             records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 1ULL, .size = 2ULL * 16ULL}, payloadB)));
-            records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 0ULL, .size = 2ULL * 16ULL}, payloadA))); // false: placed by index in the current file
+            records.push_back(makeRecord(buildBytes(noIdLayout, Fields{.index = 0ULL, .size = 2ULL * 16ULL}, payloadA))); // with false, placed by index in the current file
             const Capture capture = run(block, std::span<const Record>(records));
             expect(eq(block._engine->counters().files_opened, 1ULL)) << "false: the regressing chunk is placed in the current file";
             expect(eq(block.nEvictedSuperseded, 0ULL));
@@ -757,7 +752,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         }
     };
 
-    // Every emitted packet is admissible by the Tier-1 predicates
+    // Every emitted packet has one metadata map and 1 to 2^31 - 1 items
     "every emitted packet is admissible by the Tier-1 predicates"_test = [] {
         const std::vector<std::uint8_t> file   = referenceFile(kFileBytes);
         const auto                      chunks = splitIntoChunks(file, kChunkSize);
@@ -778,8 +773,8 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             expect(le(packet.signal_values.size(), 2'147'483'647UZ)) << "Q3";
         }
 
-        // fed through the landed PacketToDataSet in one scheduler graph: a real port is what that block's own tag
-        // handling needs, which a bare span mock does not supply.
+        // The packets pass through PacketToDataSet in one scheduler graph. That block's tag handling needs a real
+        // port, and a bare span mock has none.
         gr::test::RuntimeTest runtimeTest;
         auto&                 source = runtimeTest.emplace<ItemSource<PacketU>>();
         source._items                = capture.out;
@@ -795,17 +790,17 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         expect(eq(refused._items.size(), 0UZ)) << "none on reject";
     };
 
-    // The degenerate descriptor's continuity rule (kernel-direct: unreachable through the block, §6.3,
-    // because both shipped formats always populate their own defining field, index or offset)
+    // The degenerate descriptor's continuity rule, on the engine directly. Both block formats set their defining
+    // field, so the block cannot produce this descriptor.
     "the degenerate descriptor's continuity rule"_test = [] {
         using gr::packet::ChunkDescriptor;
         constexpr std::size_t                   kStep = 32UZ;
         constexpr gr::packet::OffsetChunkFormat kHookFormat{.offset = gr::packet::FieldSpec{0UZ, 4UZ}, .total_size = gr::packet::FieldSpec{4UZ, 4UZ}, .payload_offset = 8UZ};
 
-        // (a) no index, no offset: contiguous chunks assemble exactly.
+        // (a) Without an index or an offset, contiguous chunks assemble exactly.
         {
-            // The format is never read here — pushDescriptor is the route a protocol's own parser takes — but the
-            // engine still validates the one it was configured with, so it names a field layout that could be read.
+            // This test does not read the format. pushDescriptor is the route a protocol's own parser takes. The
+            // engine still validates its configured format, so the format names a readable field layout.
             gr::packet::ChunkReassembler::Config config{.format = kHookFormat, .max_open_files = 4UZ, .max_file_bytes = 1UZ << 16UZ};
             gr::packet::ChunkReassembler         engine(config);
             const std::vector<std::uint8_t>      file = referenceFile(160UZ);
@@ -831,10 +826,9 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             }
         }
 
-        // (b) a hole in coverage (opened here through an explicit offset, since a purely degenerate sequence can
-        // never itself create one — every accepted degenerate write extends the write pointer by construction) and
-        // the next degenerate push against it is 'no_position', counted, and the file is evicted in that same call
-        // with its coverage reported.
+        // (b) A hole in coverage, opened through an explicit offset. A degenerate sequence cannot create a hole,
+        // because every accepted degenerate write extends the write pointer. The next degenerate push against the
+        // hole is refused as 'no_position' and counted. The same call evicts the file and reports its coverage.
         {
             gr::packet::ChunkReassembler::Config config{.format = kHookFormat, .max_open_files = 4UZ, .max_file_bytes = 1UZ << 16UZ};
             gr::packet::ChunkReassembler         engine(config);
@@ -850,7 +844,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
 
             ChunkDescriptor holeAhead;
             holeAhead.total_size    = file.size();
-            holeAhead.offset        = 2ULL * kStep; // skips [kStep, 2*kStep): a hole
+            holeAhead.offset        = 2ULL * kStep; // skips [kStep, 2*kStep) and leaves a hole
             holeAhead.payload_begin = 0UZ;
             holeAhead.payload_end   = kStep;
             const std::vector<std::uint8_t> aheadChunk(file.begin() + 2 * static_cast<std::ptrdiff_t>(kStep), file.begin() + 3 * static_cast<std::ptrdiff_t>(kStep));
@@ -887,8 +881,8 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         const Capture referenceCapture = run(reference, std::span<const Record>(records));
         expect(eq(referenceCapture.out.size(), 1UZ));
 
-        // the same records handed to processBulk in spans of 1, 7 and 4096: the file is byte-identical, which is
-        // what chunk independence means for a block whose input span is its whole unit of work
+        // The same records go to processBulk in spans of 1, 7 and 4096. The file is byte-identical each time. The
+        // input span is the block's whole unit of work, so this shows the chunks are independent.
         for (const std::size_t inputChunk : {1UZ, 7UZ, 4096UZ}) {
             auto          block   = make(basicSettings());
             const Capture capture = run(block, std::span<const Record>(records), true, true, true, 0UZ, inputChunk);
@@ -899,9 +893,8 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             }
         }
 
-        // and once through a scheduler graph, where the ports and their buffers are real and the source hands the
-        // graph seven records at a time; 'incomplete' and 'reject' are left unconnected, which is a graph a
-        // recipe would build
+        // The records also pass once through a scheduler graph with real ports and buffers. The source emits seven
+        // records at a time. 'incomplete' and 'reject' are left unconnected, as in a typical recipe.
         {
             gr::test::RuntimeTest runtimeTest;
             auto&                 source = runtimeTest.emplace<ItemSource<Record>>();
@@ -919,7 +912,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             }
         }
 
-        // three contributing records carry crc_ok = false: admitted, and the file says so
+        // three contributing records carry crc_ok = false, are admitted, and the file reports it
         {
             auto                block = make(basicSettings());
             std::vector<Record> crcRecords;
@@ -934,7 +927,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
                 expect(eq(metaValue<bool>(metaOf(capture.out.front()), "file_all_chunks_crc_ok").value_or(true), false));
             }
         }
-        // the same scene at require_crc_ok = true: no completed file, three records on reject
+        // the same records with require_crc_ok = true give no completed file and three records on reject
         {
             auto                block = make(basicSettings(8U, 1UZ << 20UZ, 0ULL, true));
             std::vector<Record> crcRecords;
@@ -949,7 +942,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         }
     };
 
-    // §7.2's refusals, each one offered to the block and refused where it is offered
+    // Each refused configuration, offered to the block and refused when it is offered
     "every configuration the block refuses, refused where it is offered"_test = [] {
         const auto staged = [](gr::property_map settings) { std::ignore = make(std::move(settings)); };
         const auto with   = [](std::string_view key, gr::pmt::Value value) {
@@ -987,7 +980,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         expect(throws([&staged, &with] { staged(with("last_flag_bit", gr::pmt::Value(gr::Size_t{9U}))); })) << "a bit above 8 would silently disable the flag";
         expect(nothrow([&staged, &with] { staged(with("last_flag_bit", gr::pmt::Value(gr::Size_t{8U}))); })) << "8 is the documented spelling of 'no flag'";
 
-        // a refused configuration leaves the block inert rather than half-configured
+        // a refused configuration leaves the block inert, with no engine
         ChunkReassembler          inert{};
         const std::vector<Record> records{encodeChunk(1ULL, 0ULL, kFileBytes, std::vector<std::uint8_t>(kChunkSize, 0x01U))};
         std::vector<PacketU>      outScratch(1UZ);
@@ -1002,14 +995,14 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         expect(eq(outSpan.count, 0UZ));
     };
 
-    // §7.4's table, on the four reasons no numbered criterion reaches
+    // The four refusal reasons the other tests do not reach
     "unparsable, zero size, beyond the declared size and a bad payload span each name themselves"_test = [] {
         auto                            block = make(basicSettings());
         const std::vector<std::uint8_t> full(kChunkSize, 0x77U);
         const std::vector<std::uint8_t> half(kChunkSize / 2UZ, 0x77U);
 
         std::vector<Record> records;
-        records.push_back(makeRecord(std::vector<std::uint8_t>(5UZ, 0U))); // shorter than the header: unparsable
+        records.push_back(makeRecord(std::vector<std::uint8_t>(5UZ, 0U))); // shorter than the header, unparsable
         records.push_back(encodeChunk(1ULL, 0ULL, 0ULL, full));            // a declared size of zero
         records.push_back(encodeChunk(1ULL, 40ULL, kFileBytes, full));     // 40 * 224 is past the declared 8192
         records.push_back(encodeChunk(1ULL, 0ULL, kFileBytes, half));      // half a cell at an index that is not the last
@@ -1133,7 +1126,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             records.push_back(encodeChunk(1ULL, index, kFileBytes, payload));
         }
 
-        { // 'out' unconnected: the file still completes and the records are still consumed
+        { // with 'out' unconnected the file still completes and the records are consumed
             auto          block   = make(basicSettings());
             const Capture capture = run(block, std::span<const Record>(records), false, true, true);
             expect(!capture.stalled);
@@ -1141,7 +1134,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             expect(eq(capture.out.size(), 0UZ));
             expect(eq(block._engine->counters().files_completed, 1ULL));
         }
-        { // 'incomplete' unconnected under publish_incomplete: the eviction is counted and named, and nothing is held
+        { // with 'incomplete' unconnected under publish_incomplete the eviction is counted and named, and nothing is held
             auto                            block = make(basicSettings(2U, 1UZ << 16UZ, 0ULL, false, true));
             const std::vector<std::uint8_t> small(64UZ, 0xAAU);
             const std::vector<Record>       three{encodeChunk(1ULL, 0ULL, 128ULL, small), encodeChunk(2ULL, 0ULL, 128ULL, small), encodeChunk(3ULL, 0ULL, 128ULL, small)};
@@ -1152,7 +1145,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             expect(eq(block._engine->counters().evicted_for_cap, 1ULL));
             expect(eq(block.nIncompleteDroppedNoRoom, 0ULL)) << "an unconnected port is not a port that ran out of room";
         }
-        { // 'reject' unconnected: the refusal is the kernel's own count and the block does not stall on it
+        { // with 'reject' unconnected the engine counts the refusal and the block does not stall
             auto                      block = make(basicSettings());
             const std::vector<Record> refused{encodeChunk(1ULL, 0ULL, 0ULL, std::vector<std::uint8_t>(kChunkSize, 0x01U))};
             const Capture             capture = run(block, std::span<const Record>(refused), true, true, false);

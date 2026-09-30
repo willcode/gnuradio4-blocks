@@ -22,10 +22,10 @@
 #include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/basic/GraphBridge.hpp>
 
-// The two halves of one flow graph, in two files and two schedulers, joined by nothing but the bridge name they both
-// carry. Neither half is reachable from here as a typed block: they arrive through the YAML importer as `gr::Graph`,
-// which is the whole point of the registry -- an application that exported the graph gets its ring back without a cast
-// and without including this header in its loader.
+// The two halves of one flow graph, in two files and two schedulers. The bridge name both files carry is their only
+// link. The halves arrive through the YAML importer as `gr::Graph`, and neither is reachable here as a typed block.
+// The registry lets an application that exported the graph get its ring back without a cast. Its loader does not
+// include this header.
 
 namespace {
 

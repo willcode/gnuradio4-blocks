@@ -77,18 +77,18 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
             const std::uint64_t publishedTime    = tagMap.at(std::pmr::string(gr::tag::TRIGGER_TIME.shortKey())).value_or(std::uint64_t{0});
             const float         publishedOffsetS = tagMap.at(std::pmr::string(gr::tag::TRIGGER_OFFSET.shortKey())).value_or(0.0f);
 
-            // the block's own clock at the edge: 41 samples (0-based index 40, plus one) at 416 ns each,
+            // the block's own clock at the edge, 41 samples (0-based index 40, plus one) at 416 ns each,
             // from the zero seed staged above
             constexpr std::int64_t kNowAtEdge = 41LL * 416LL;
 
             const auto reconstructed = gr::timing::ScheduleAnchor::anchorNsFor(publishedTime, publishedOffsetS);
             expect(reconstructed.has_value());
             if (reconstructed.has_value()) {
-                // The pair carries the sub-sample position in two halves of different exactness: the
-                // published instant truncates it to a whole nanosecond and the offset carries it back as
-                // seconds, which the anchor rounds. The two disagree by at most one nanosecond, which is
-                // the resolution of the reserved keys themselves; any scale error is three or six orders
-                // of magnitude wide and this bound excludes it.
+                // The pair carries the sub-sample position in two parts of different exactness. The
+                // published instant truncates it to a whole nanosecond. The offset carries the rest in
+                // seconds, which the anchor rounds. The two disagree by at most one nanosecond, the
+                // resolution of the reserved keys. A scale error is three or six orders of magnitude
+                // wide, and this bound excludes it.
                 expect(le(std::abs(*reconstructed - kNowAtEdge), 1LL)) << "trigger_time plus trigger_offset scaled to nanoseconds recovers the edge's instant to the "
                                                                           "nanosecond the two keys can hold; a microsecond-scaled offset would be six orders off";
             }
