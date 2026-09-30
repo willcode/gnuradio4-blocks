@@ -49,10 +49,10 @@ template<typename T>
 requires(std::same_as<T, float> || std::same_as<T, std::complex<float>>)
 struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
     using Description = Doc<R""(
-@brief Removes impulse noise - ignition, arcing, radar, switching supplies - by replacing the offending samples.
+@brief Removes impulse noise from ignition, arcing, radar or switching supplies by replacing the offending samples.
 
-A sample whose power exceeds the tracked mean power by `threshold_db` opens a window of `blank_samples`, and the
-`lookback_samples` before it are replaced too; `replacement` chooses how. The output is the input delayed by
+A sample whose power exceeds the tracked mean power by `threshold_db` opens a window of `blank_samples`. The
+`lookback_samples` before it are replaced too. `replacement` chooses how. The output is the input delayed by
 `delay_samples` in every case, including while disabled. The default `threshold_db = 9.32` blanks 0.17 % of a clean
 circular-complex-Gaussian stream.
 )"">;
@@ -60,25 +60,25 @@ circular-complex-Gaussian stream.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<bool, "enabled", Doc<"false is a pass-through through the same delay; true restarts the warm-up">, Visible>       enabled            = false;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate; a change retunes the tracker and restarts warm-up">>          sample_rate        = 96000.f;
-    Annotated<double, "threshold_db", Unit<"dB">, Doc<"how far above the tracked mean power a sample must be">, Visible>        threshold_db       = 9.32;
-    Annotated<double, "averaging_time", Unit<"s">, Doc<"tracker time constant; 0 uses alpha directly">>                         averaging_time     = 0.01;
-    Annotated<double, "alpha", Doc<"the pole, used when averaging_time is 0; reads back as the resolved value">>                alpha              = 1e-3;
-    Annotated<gr::Size_t, "blank_samples", Doc<"length of the replaced run once a detection fires; changes the delay">>         blank_samples      = 7U;
-    Annotated<gr::Size_t, "lookback_samples", Doc<"samples before the detected one also replaced; changes the delay">>          lookback_samples   = 2U;
-    Annotated<std::string, "replacement", Doc<"'interpolate' (default), 'hold' or 'zero'">, Visible>                            replacement        = std::string("interpolate");
-    Annotated<bool, "retrigger", Doc<"restart the window on a detection inside one, up to max_window_samples">>                 retrigger          = false;
-    Annotated<gr::Size_t, "max_window_samples", Doc<"cap on a retriggering window; 0 selects 4 * blank_samples">>               max_window_samples = 0U;
-    Annotated<bool, "emit_tags", Doc<"publish a private noise_blanked tag at each replaced run, with its length">>              emit_tags          = false;
-    Annotated<gr::Size_t, "delay_samples", Doc<"observable: lookback_samples + blank_samples, present when disabled">>          delay_samples      = 9U;
-    Annotated<double, "tracked_power", Doc<"observable: the censored mean power the threshold is taken against">>               tracked_power      = 0.0;
-    Annotated<double, "blanked_fraction", Doc<"observable: a slow average of the replaced duty, so a threshold can be judged">> blanked_fraction   = 0.0;
+    Annotated<bool, "enabled", Doc<"false passes through with the same delay, true restarts the warm-up">, Visible>        enabled            = false;
+    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate, retuning the tracker and restarting warm-up on change">> sample_rate        = 96000.f;
+    Annotated<double, "threshold_db", Unit<"dB">, Doc<"how far above the tracked mean power a sample must be">, Visible>   threshold_db       = 9.32;
+    Annotated<double, "averaging_time", Unit<"s">, Doc<"tracker time constant, 0 to use alpha directly">>                  averaging_time     = 0.01;
+    Annotated<double, "alpha", Doc<"the pole when averaging_time is 0, read back as the resolved value">>                  alpha              = 1e-3;
+    Annotated<gr::Size_t, "blank_samples", Doc<"length of the replaced run after a detection, part of the delay">>         blank_samples      = 7U;
+    Annotated<gr::Size_t, "lookback_samples", Doc<"samples before the detected one also replaced, part of the delay">>     lookback_samples   = 2U;
+    Annotated<std::string, "replacement", Doc<"'interpolate' (default), 'hold' or 'zero'">, Visible>                       replacement        = std::string("interpolate");
+    Annotated<bool, "retrigger", Doc<"restart the window on a detection inside one, up to max_window_samples">>            retrigger          = false;
+    Annotated<gr::Size_t, "max_window_samples", Doc<"cap on a retriggering window, 0 for 4 * blank_samples">>              max_window_samples = 0U;
+    Annotated<bool, "emit_tags", Doc<"publish a private noise_blanked tag at each replaced run, with its length">>         emit_tags          = false;
+    Annotated<gr::Size_t, "delay_samples", Doc<"observable lookback_samples + blank_samples, present when disabled">>      delay_samples      = 9U;
+    Annotated<double, "tracked_power", Doc<"observable censored mean power the threshold is taken against">>               tracked_power      = 0.0;
+    Annotated<double, "blanked_fraction", Doc<"observable slow average of the replaced duty">>                             blanked_fraction   = 0.0;
 
     GR_MAKE_REFLECTABLE(NoiseBlanker, in, out, enabled, sample_rate, threshold_db, averaging_time, alpha, blank_samples, lookback_samples, replacement, retrigger, max_window_samples, emit_tags, delay_samples, tracked_power, blanked_fraction);
 
     std::vector<T>            _line{};
-    std::vector<std::uint8_t> _marked{}; // a byte per slot rather than a bitset: read and written once per sample
+    std::vector<std::uint8_t> _marked{}; // a byte per slot and not a bitset, read and written once per sample
     std::size_t               _cursor       = 0UZ;
     std::size_t               _oldest       = 1UZ;
     std::size_t               _ring         = 10UZ;
@@ -98,8 +98,9 @@ circular-complex-Gaussian stream.
     std::uint32_t             _runPosition  = 0U;
     T                         _anchor{};
 
-    /// The coefficients and the delay line are derived from the members, and a batch that moves no value never
-    /// calls back, so a block constructed at its declared defaults is born with the line its settings describe.
+    /// The coefficients and the delay line are derived from the members. A settings batch that changes no value
+    /// makes no call. A block constructed at its declared defaults therefore starts with the line its settings
+    /// describe.
     explicit NoiseBlanker(property_map init = {}) : Block<NoiseBlanker<T>, NoTagPropagation>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
@@ -171,7 +172,7 @@ circular-complex-Gaussian stream.
             while (tag < nTags && inSpan.rawTags[tag].index <= inSpan.streamIndex + i) {
                 if (inSpan.rawTags[tag].index >= inSpan.streamIndex) {
                     const property_map forwarded = this->filterAndSubstituteTag(inSpan.rawTags[tag].map, cachedSettings);
-                    if (!forwarded.empty()) { // 1:1 and no offset arithmetic: a tag stays where it arrived
+                    if (!forwarded.empty()) { // 1:1 with no offset arithmetic, and a tag stays where it arrived
                         outSpan.publishTag(forwarded, i);
                     }
                 }
@@ -197,19 +198,19 @@ private:
         }
     }
 
-    /// The oldest entry plus @p ahead, wrapped by a compare, which is cheaper than a runtime integer modulo.
+    /// The oldest entry plus @p ahead, wrapped by a compare. A compare costs less than a runtime integer modulo.
     [[nodiscard]] std::size_t slot(std::size_t ahead) const noexcept {
         const std::size_t at = _oldest + ahead;
         return at >= _ring ? at - _ring : at;
     }
 
-    /// @brief Take one input: decide, then track the power from the samples the decision left in place.
+    /// @brief Take one input. Decide first, then track the power from the samples the decision left in place.
     void accept(T sample) {
         const double power      = squaredMagnitude(sample);
         const bool   windowOpen = _remaining > 0U;
 
-        // Compare first and update after: updating from every sample, impulse
-        // included, and then testing against the value the impulse just raised is what desensitizes a blanker.
+        // Compare first and update after. A blanker that updates from every sample, impulse included, and
+        // then tests against the value the impulse just raised desensitizes itself.
         bool detected = false;
         if (_warmup > 0UZ) {
             --_warmup;
@@ -219,7 +220,7 @@ private:
         if (!windowOpen && !detected && enabled) {
             _power += _alpha * (power - _power);
             if (_power < std::numeric_limits<double>::min()) {
-                _power = 0.0; // a pole below one decays a silent input into subnormals and stays there; each one costs a microcode assist
+                _power = 0.0; // a pole below one decays a silent input into subnormals, where it stays, and each one costs a microcode assist
             }
         }
 
@@ -239,7 +240,7 @@ private:
 
         _marked[_cursor] = marked ? std::uint8_t{1} : std::uint8_t{0};
         _windowLength    = marked ? _windowLength + 1U : 0U;
-        _duty += 0.1 * _alpha * ((marked ? 1.0 : 0.0) - _duty); // ten tracker time constants: a 0.17 % duty needs a longer average than the power does
+        _duty += 0.1 * _alpha * ((marked ? 1.0 : 0.0) - _duty); // ten tracker time constants, since a 0.17 % duty needs a longer average than the power
         if (_duty < std::numeric_limits<double>::min()) {
             _duty = 0.0; // the same decay into the subnormals as the power, ten times slower
         }
