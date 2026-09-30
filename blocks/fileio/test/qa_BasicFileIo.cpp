@@ -7,6 +7,7 @@
 
 #include "ScopedWorkingDirectory.hpp"
 
+#include <cstdint>
 #include <format>
 #include <optional>
 
@@ -189,7 +190,7 @@ struct SourceRun {
     std::expected<void, gr::Error> result;
     std::string                    sourceName;
     gr::lifecycle::State           sourceState;
-    gr::Size_t                     nSamples;
+    std::uint64_t                  nSamples;
 };
 
 SourceRun runFloatSource(const std::string& fileName, const std::string& modeName) {
@@ -216,7 +217,7 @@ SourceRun runFloatSource(const std::string& fileName, const std::string& modeNam
 }
 
 // returns the number of samples the source delivered
-std::expected<gr::Size_t, gr::Error> readFloatFile(const std::string& fileName, const std::string& modeName) {
+std::expected<std::uint64_t, gr::Error> readFloatFile(const std::string& fileName, const std::string& modeName) {
     auto run = runFloatSource(fileName, modeName);
     if (!run.result.has_value()) {
         return std::unexpected(run.result.error());
