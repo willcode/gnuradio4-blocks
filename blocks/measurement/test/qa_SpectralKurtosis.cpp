@@ -52,8 +52,8 @@ struct Rng {
         return radius * std::cos(angle);
     }
 
-    /// @brief `|A + n|^2` with `n` circular complex Gaussian of total power `noisePower`: the periodogram bin a CW
-    /// tone of amplitude `A` produces in noise, at real part `A`.
+    /// @brief `|A + n|^2` with `n` circular complex Gaussian of total power `noisePower`. This is the periodogram bin a
+    /// CW tone of amplitude `A` produces in noise, at real part `A`.
     [[nodiscard]] double cwBin(double amplitude, double noisePower) {
         const double sigma = std::sqrt(noisePower / 2.);
         const double re    = amplitude + sigma * normal();
@@ -143,7 +143,7 @@ struct RecordSink : gr::Block<RecordSink> {
 /// @brief @p count copies of one record.
 [[nodiscard]] std::vector<gr::DataSet<float>> repeated(const gr::DataSet<float>& record, std::size_t count) { return std::vector<gr::DataSet<float>>(count, record); }
 
-/// @brief Everything a criterion reads out of one run, captured while the block is still alive.
+/// @brief Everything a test reads out of one run, captured while the block is still alive.
 struct Run {
     std::vector<gr::DataSet<float>> records;
 
@@ -219,8 +219,8 @@ struct Run {
     return {};
 }
 
-/// @brief `M` rows of `nBins` independent noise-only Gamma(d) draws, which is what an already-averaged (`n=d`)
-/// periodogram bin is distributed as under circular complex Gaussian noise.
+/// @brief `M` rows of `nBins` independent noise-only Gamma(d) draws. An averaged (`n=d`) periodogram bin has this
+/// distribution under circular complex Gaussian noise.
 [[nodiscard]] std::vector<gr::DataSet<float>> noiseRows(Rng& rng, std::size_t m, std::size_t nBins, std::size_t d) {
     std::vector<gr::DataSet<float>> rows;
     rows.reserve(m);
@@ -260,18 +260,18 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
     using namespace boost::ut;
     using namespace qa_sk;
 
-    // criterion 6: SK reads 1 on noise, its mean inside (5.3)'s band and its spread within 10% of sqrt(Var), at
-    // d = 1, 4 and 16 — using many independent bins in one accumulation cycle in place of many separate cycles, since
-    // each bin is its own independent SK reading.
+    // SK reads 1 on noise at d = 1, 4 and 16. Its mean lies inside the closed-form band, and its spread is within 10%
+    // of sqrt(Var). Many independent bins in one accumulation cycle replace many separate cycles. Each bin is its
+    // own independent SK reading.
     "criterion 6: spectral kurtosis reads 1 on noise, mean and spread inside the derived envelope"_test = [] {
         constexpr std::size_t kM    = 64UZ;
         constexpr std::size_t kBins = 2048UZ;
         Rng                   rng(0x2545f4914f6cdd1dULL);
 
-        // The spread each shape is measured against is the spec's own literal from (5.3) at M = 64 — 0.24251,
-        // 0.19728 and 0.18321 at d = 1, 4 and 16 — not a value recomputed from the function under test. The band on
-        // the mean is 4 standard errors over the bins in one cycle, each bin being its own independent reading; the
-        // spec quotes 0.0217 for the same figure over 2000 readings at d = 1.
+        // Each shape's spread is measured against the closed-form value at M = 64, written as a literal. The values
+        // are 0.24251, 0.19728 and 0.18321 at d = 1, 4 and 16. They are not recomputed from the function under test.
+        // The band on the mean is 4 standard errors over the bins in one cycle. Each bin is its own independent
+        // reading.
         struct Shape {
             std::size_t d;
             double      spread;
@@ -294,15 +294,15 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             expect(std::abs(measured - 1.) < sem) << std::format("d={}: mean SK too far from 1", shape.d);
             expect(std::abs(measuredSd - shape.spread) < 0.15 * shape.spread) << std::format("d={}: spread too far from (5.3)'s literal", shape.d);
 
-            // and the block's own record states the same figure a downstream threshold would use.
+            // The block's own record states the same figure a threshold would use.
             std::println("criterion 6: d={} record sk_std {:.5f}, sk_expectation {:.5f}", shape.d, metaNumber(records.front(), "sk_std"), metaNumber(records.front(), "sk_expectation"));
             expect(std::abs(metaNumber(records.front(), "sk_std") - shape.spread) < 5e-5) << std::format("d={}: the record's sk_std must be (5.3)'s literal", shape.d);
             expect(eq(metaNumber(records.front(), "sk_expectation"), 1.)) << "sk_expectation is exactly 1, at every M and every d";
         }
     };
 
-    // criterion 7: a noiseless tone gives identical bin powers, so SK = 0 exactly, at every M — an algebraic
-    // identity, asserted as an exact float comparison.
+    // A noiseless tone gives identical bin powers, and SK = 0 exactly at every M. The identity is algebraic and is
+    // asserted as an exact float comparison.
     "criterion 7: a noiseless tone reads SK = 0 exactly, at every M"_test = [] {
         for (const std::size_t m : {8UZ, 64UZ, 1024UZ}) {
             std::vector<gr::DataSet<float>> rows;
@@ -319,9 +319,9 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         }
     };
 
-    // criterion 8: the two closed shapes in between. CW-in-noise at bin ratios rho = 1, 2, 10, 100, and the pulsed
-    // arm — whose 0.01-absolute-at-M=1024 tolerance F14 records as failing at p=0.1, replaced by a convergence
-    // check: the gap to the closed form falls as M grows, and is inside 0.05 at M = 8192.
+    // The two closed shapes in between. CW-in-noise runs at bin ratios rho = 1, 2, 10 and 100. The pulsed arm fails
+    // an absolute tolerance of 0.01 at M = 1024 and p = 0.1. It is checked for convergence instead. The gap to the
+    // closed form falls as M grows and is inside 0.05 at M = 8192.
     "criterion 8: CW-in-noise reads the closed shape, and the pulsed arm converges with M"_test = [] {
         constexpr std::size_t kM    = 1024UZ;
         constexpr std::size_t kBins = 400UZ;
@@ -349,7 +349,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             expect(std::abs(measured - expected) < 0.01) << std::format("rho={}: CW arm outside 0.01 absolute", rho);
         }
 
-        // the pulsed arm: S/N0 = 100, p = 0.1, measured at M = 1024 and M = 8192, gap must fall and land under 0.05.
+        // The pulsed arm at S/N0 = 100 and p = 0.1, measured at M = 1024 and M = 8192. The gap must fall to under 0.05.
         const double kSN0       = 100.;
         const double kAmp       = std::sqrt(kSN0);
         const auto   pulsedMean = [&](double p, std::size_t m) {
@@ -375,8 +375,8 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         const double measured8k = pulsedMean(0.1, 8192UZ);
         const double gap1k      = std::abs(measured1k - expected01);
         const double gap8k      = std::abs(measured8k - expected01);
-        // The two gaps are single draws, so their ordering is not assertable — it is printed. What is asserted is the
-        // absolute bound F14 measured at M = 8192, the criterion's own replacement for the 0.01-at-M=1024 tolerance.
+        // The two gaps are single draws, and their order cannot be asserted. The test prints it. It asserts the
+        // absolute bound at M = 8192 in place of the 0.01 tolerance at M = 1024.
         std::println("criterion 8: pulsed p=0.1 closed form {:.4f}, M=1024 measured {:.4f} (gap {:.4f}), M=8192 measured {:.4f} (gap {:.4f})", expected01, measured1k, gap1k, measured8k, gap8k);
         expect(gap8k < 0.05) << "the gap at M=8192 must be inside 0.05";
 
@@ -388,8 +388,8 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         }
     };
 
-    // F5 and §5.2: independence is a precondition the block checks in the one place a producer states it, so a
-    // record is folded only when it carries `overlap` and that value is exactly zero.
+    // Independence is a precondition, and the block checks the producer's `overlap` metadata. A record is folded only
+    // when it carries `overlap` and that value is exactly zero.
     "F5: a record is folded only when its overlap metadata is present and zero"_test = [] {
         const gr::DataSet<float> clean = spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0);
 
@@ -413,22 +413,22 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         }
     };
 
-    // §5.2's remaining refusals, each counted and each leaving the block able to measure again afterwards.
+    // The remaining refusals. Each is counted, and each leaves the block able to measure again afterwards.
     "the further refusals: shape, absent n_averaged, a negative bin, a changed bin count"_test = [] {
         const gr::DataSet<float> shape1 = spectrum({1.f, 2.f, 3.f, 4.f}, 1ULL, 0.0);
         const gr::DataSet<float> shape4 = spectrum({1.f, 2.f, 3.f, 4.f}, 4ULL, 0.0);
 
-        { // a `shape` setting that disagrees with the record it is handed
+        { // a `shape` setting that disagrees with the record it receives
             const Run r = runWith({{"n_spectra", gr::Size_t{8U}}, {"shape", gr::Size_t{4U}}}, repeated(shape1, 8UZ));
             expect(eq(r.nRefusedRecords, std::uint64_t{8ULL})) << "every record disagreeing with the shape setting is refused";
             expect(eq(r.records.size(), 0UZ));
         }
-        { // shape = 0 takes it from the record, so a record without `n_averaged` cannot be folded
+        { // shape = 0 reads the shape from the record, and a record without `n_averaged` cannot be folded
             const Run r = runWith({{"n_spectra", gr::Size_t{8U}}}, repeated(withoutMeta(shape1, "n_averaged"), 8UZ));
             expect(eq(r.nRefusedRecords, std::uint64_t{8ULL}));
             expect(eq(r.records.size(), 0UZ));
         }
-        { // the producer's own shape moves mid-accumulation: what was folded is discarded and only that record refused
+        { // the producer's shape changes mid-accumulation, the folded spectra are discarded and only that record refused
             std::vector<gr::DataSet<float>> rows = repeated(shape1, 2UZ);
             rows.push_back(shape4);
             for (const auto& row : repeated(shape4, 8UZ)) {
@@ -477,11 +477,11 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         expect(nothrow([&] { staged({{"n_spectra", gr::Size_t{1U << 20U}}}); })) << "the ceiling itself is admitted";
     };
 
-    // §5.3's record: the axis copied verbatim, the conditions stated, and `valid` false only when every bin died.
+    // The record copies the axis verbatim and states the conditions. `valid` is false only when every bin is dead.
     "the record states its conditions, and a dead bin is a property of the signal rather than of the record"_test = [] {
         constexpr std::size_t kM = 8UZ;
 
-        { // one dead bin among three: counted, written 0, and the record still valid
+        { // one dead bin among three is counted and written 0, and the record stays valid
             const Run r = runWith({{"n_spectra", gr::Size_t{kM}}}, repeated(spectrum({1.f, 2.f, 0.f}, 1ULL, 0.0, 4242ULL), kM));
             expect(eq(r.records.size(), 1UZ));
             expect(eq(r.nDegenerateBins, std::uint64_t{1ULL})) << "the all-zero bin is counted degenerate";
@@ -499,7 +499,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
                 expect(eq(record.axis_values.at(0UZ).size(), 3UZ)) << "the input's frequency axis, copied verbatim";
             }
         }
-        { // every bin dead: now the record itself says so
+        { // with every bin dead the record is marked invalid
             const Run r = runWith({{"n_spectra", gr::Size_t{kM}}}, repeated(spectrum({0.f, 0.f, 0.f}, 1ULL, 0.0), kM));
             expect(eq(r.records.size(), 1UZ));
             expect(eq(r.nDegenerateBins, std::uint64_t{3ULL}));
@@ -508,8 +508,8 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             }
         }
         { // the worst bin is the one furthest from the unit value, whichever side it falls
-            // bin 0 alternates 0 and 1 over M = 8: S1 = 4, S2 = 4, so M*S2/S1^2 = 2 and SK = (9/7)*(2-1) = 1.2857;
-            // bin 1 is constant, so SK = 0 exactly. |0 - 1| is the larger departure, and bin 1 is the worst.
+            // Bin 0 alternates 0 and 1 over M = 8. S1 = 4 and S2 = 4, so M*S2/S1^2 = 2 and SK = (9/7)*(2-1) = 1.2857.
+            // Bin 1 is constant, so SK = 0 exactly. |0 - 1| is the larger departure, and bin 1 is the worst.
             std::vector<gr::DataSet<float>> rows;
             for (std::size_t k = 0UZ; k < kM; ++k) {
                 rows.push_back(spectrum({k % 2UZ == 0UZ ? 0.f : 1.f, 2.5f}, 1ULL, 0.0));
@@ -533,8 +533,8 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         expect(eq(r.nRefusedRecords, std::uint64_t{0ULL}));
     };
 
-    // criterion 19 (records-per-call independence): the same input records, delivered a different number at a time,
-    // must produce bit-identical output records and identical counters.
+    // Records-per-call independence. The same input records, delivered a different number at a time, must produce
+    // bit-identical output records and identical counters.
     "criterion 19: independent of how many input records arrive per call"_test = [] {
         Rng                             rng(0x1122334455667788ULL);
         std::vector<gr::DataSet<float>> rows = noiseRows(rng, 96UZ, 64UZ, 1UZ);

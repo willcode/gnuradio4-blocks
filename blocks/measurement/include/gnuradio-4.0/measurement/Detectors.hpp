@@ -19,7 +19,7 @@ namespace gr::blocks::measurement {
 
 namespace detail {
 
-/// @brief One detection, in the units a consumer reads rather than in bins.
+/// @brief One detection, in physical units and not in bins.
 struct Detection {
     float frequencyHz{};
     float levelDb{};
@@ -44,8 +44,8 @@ struct Detection {
 
     ds.signal_names      = {"frequency", "level", "width"};
     ds.signal_quantities = {"Frequency", "PowerSpectralDensity", "Bandwidth"};
-    // A detection is read by eye and by threshold, so its level is in decibels — the logarithm of the source
-    // record's linear density, against the same full-scale-sine reference the source names.
+    // A detection is read by eye and by threshold, so its level is in decibels. The level is the logarithm of the
+    // source record's linear density, against the full-scale-sine reference the source names.
     ds.signal_units = {"Hz", "dBFS/Hz", "Hz"};
     ds.signal_values.resize(3UZ * n);
     ds.signal_ranges.resize(3UZ);
@@ -55,7 +55,7 @@ struct Detection {
         ds.signal_values[2UZ * n + k] = detections[k].widthHz;
     }
 
-    // the source record's facts carry through, so a detection stays timestamped by provenance rather than invention
+    // the source record's facts carry through, and a detection keeps the source's timestamp
     ds.meta_information.resize(3UZ);
     property_map carried;
     if (!source.meta_information.empty()) {
@@ -83,9 +83,9 @@ struct Detection {
  * @brief Sub-bin peak position by three-point parabolic interpolation, in bins relative to `k`.
  *
  * Fits a parabola through the decibel values at `k-1`, `k`, `k+1` and returns its vertex. The refinement is exact
- * for a parabola and biased for a windowed sinc, by an amount that depends on the window and that the qa records
- * rather than assumes. The decibel domain is used because a windowed main lobe is far closer to a parabola in
- * decibels than in linear power, which is what makes the correction worth applying at all.
+ * for a parabola and biased for a windowed sinc. The bias depends on the window. The fit uses decibels because a
+ * windowed main lobe is much closer to a parabola in decibels than in linear power. In linear power the correction
+ * would not be worth applying.
  */
 [[nodiscard]] inline float parabolicOffset(float leftDb, float centerDb, float rightDb) noexcept {
     const float denominator = leftDb - 2.f * centerDb + rightDb;
@@ -100,10 +100,10 @@ struct Detection {
  * @brief Half-power width around `k`, in bins, by linear interpolation on the record's own linear power.
  *
  * Both detectors state a width the same way. The walk runs outward from `k` to the first bin at or below half the
- * peak's power on each side and interpolates between it and its inward neighbor. Half power is a linear notion, so
- * the arithmetic stays in the record's stored form and no detector has to build a decibel curve to state a width.
- * A side that never falls to half power before the record ends contributes zero, which is what makes a width of
- * zero mean "the record does not contain this signal's skirt" rather than "the signal is one bin wide".
+ * peak's power on each side. It interpolates between that bin and its inward neighbor. Half power is a linear
+ * quantity. The arithmetic stays in the record's stored form, and no detector builds a decibel curve for a width.
+ * A side that does not fall to half power before the record ends contributes zero. A width of zero therefore means
+ * the record does not contain the signal's skirt. It does not mean the signal is one bin wide.
  */
 [[nodiscard]] inline float halfPowerWidthBins(std::span<const float> power, std::size_t k) noexcept {
     const float target = 0.5f * power[k];
@@ -137,18 +137,17 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::PeakDetect)
 /**
  * @brief Local maxima of a density record, above a stated threshold, with sub-bin frequency.
  *
- * `reference` says what `threshold_db` is measured against: `absolute` reads it as a level in dBFS per hertz, and
- * `above_median` reads it as a margin over the record's own median, which is the reading that survives a changing
- * noise floor without being re-tuned. Peaks closer together than `min_distance_hz` collapse to the strongest, taken
- * in order of level, so a single emitter's shoulder does not arrive as a second signal.
+ * `reference` sets what `threshold_db` is measured against. `absolute` reads it as a level in dBFS per hertz.
+ * `above_median` reads it as a margin over the record's own median. That margin holds on a changing noise floor
+ * without re-tuning. Peaks closer together than `min_distance_hz` collapse to the strongest, taken in order of
+ * level. A single emitter's shoulder then does not appear as a second signal.
  *
- * A record that yields no detection emits no record: an empty `DataSet` fails the tier's admission predicates, whose
- * first question of a record is whether its extent is positive. The absence of a record for a PSD input is therefore
- * what says nothing was found, and `nEmptyResults()` counts how often that has happened beside `nRecords()`, so a
- * graph can still tell "nothing found" from "nothing ran".
+ * A record that yields no detection emits no record. An empty `DataSet` fails the record admission predicates,
+ * whose first check is a positive extent. A missing output record for a PSD input means nothing was found.
+ * `nEmptyResults()` counts those cases beside `nRecords()`. A graph can then tell "nothing found" from "nothing ran".
  */
 struct PeakDetect : Block<PeakDetect, NoTagPropagation> {
-    using Description = Doc<"Peak detection on a spectral density record: local maxima above a threshold, with three-point parabolic sub-bin frequency and half-power width. A record that finds nothing emits no record and is counted by nEmptyResults()">;
+    using Description = Doc<"Detects peaks in a spectral density record. It reports local maxima above a threshold, with a three-point parabolic sub-bin frequency and a half-power width. A record that finds nothing emits no record and is counted by nEmptyResults().">;
 
     PortIn<DataSet<float>, Async>  in;
     PortOut<DataSet<float>, Async> out;
@@ -156,7 +155,7 @@ struct PeakDetect : Block<PeakDetect, NoTagPropagation> {
     Annotated<double, "threshold_db", Visible, Unit<"dB">, Doc<"the level a maximum must reach, read against `reference`">> threshold_db    = 10.0;
     Annotated<std::string, "reference", Visible, Doc<"absolute (dBFS/Hz) or above_median (dB over the record's median)">>   reference       = std::string("above_median");
     Annotated<double, "min_distance_hz", Visible, Unit<"Hz">, Doc<"peaks nearer than this collapse to the strongest">>      min_distance_hz = 0.0;
-    Annotated<gr::Size_t, "max_peaks", Visible, Doc<"0 keeps every peak that passes; otherwise the strongest this many">>   max_peaks       = 0U;
+    Annotated<gr::Size_t, "max_peaks", Visible, Doc<"most peaks kept, strongest first, 0 for all">>                         max_peaks       = 0U;
 
     GR_MAKE_REFLECTABLE(PeakDetect, in, out, threshold_db, reference, min_distance_hz, max_peaks);
 
@@ -227,8 +226,8 @@ private:
         }
         const float cutoff = floorDb + static_cast<float>(threshold_db.value);
 
-        // A maximum is `>=` on the left and `>` on the right, so a plateau — two bins of exactly equal level,
-        // which is what a lobe centered half a bin away produces — reports once rather than twice.
+        // A maximum is `>=` on the left and `>` on the right. A plateau of two bins at exactly equal level reports
+        // once. A lobe centered half a bin away produces such a plateau.
         for (std::size_t k = 1UZ; k + 1UZ < _db.size(); ++k) {
             if (_db[k] <= cutoff || _db[k] < _db[k - 1UZ] || _db[k] <= _db[k + 1UZ]) {
                 continue;
@@ -270,22 +269,21 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::CfarDetect)
  *
  *     alpha = N * (pfa^(-1/N) - 1),    N = 2 * n_train
  *
- * the closed cell-averaging form: for exponentially distributed power, that threshold holds the false-alarm rate at
- * `pfa` whatever the noise level is, which is the whole point of the method and is what the qa measures rather than
- * assumes.
+ * This is the closed cell-averaging form. For exponentially distributed power the threshold holds the false-alarm
+ * rate at `pfa` at any noise level.
  *
- * The first and last `n_train + n_guard` cells have no full training window and are never tested. That is stated
- * because it is also the denominator of any false-alarm rate computed from these records.
+ * The first and last `n_train + n_guard` cells have no full training window and are not tested. A false-alarm rate
+ * computed from these records must leave them out of its denominator.
  *
- * A detection's `width` is the half-power width of the peak it sits on, measured the way `PeakDetect` measures one;
- * a cell whose skirt does not fall to half power inside the record reports zero. Its `frequency` is the cell's own,
- * unrefined: a CFAR cell is a decision about one bin, and this detector states no sub-bin position.
+ * A detection's `width` is the half-power width of the peak it sits on, measured as `PeakDetect` measures it. A cell
+ * whose skirt does not fall to half power inside the record reports zero. Its `frequency` is the cell's own and is
+ * not refined. A CFAR cell is a decision about one bin, and this detector states no sub-bin position.
  *
- * A record that yields no detection emits no record — an empty `DataSet` fails the tier's admission predicates —
- * and `nEmptyResults()` counts how often that happened beside `nRecords()`.
+ * A record that yields no detection emits no record, because an empty `DataSet` fails the record admission
+ * predicates. `nEmptyResults()` counts those cases beside `nRecords()`.
  */
 struct CfarDetect : Block<CfarDetect, NoTagPropagation> {
-    using Description = Doc<"Cell-averaging CFAR detection on a spectral density record, at a stated design false-alarm rate. A record that finds nothing emits no record and is counted by nEmptyResults()">;
+    using Description = Doc<"Runs cell-averaging CFAR detection on a spectral density record at a stated design false-alarm rate. A record that finds nothing emits no record and is counted by nEmptyResults().">;
 
     PortIn<DataSet<float>, Async>  in;
     PortOut<DataSet<float>, Async> out;
@@ -332,14 +330,14 @@ struct CfarDetect : Block<CfarDetect, NoTagPropagation> {
         return consumed == 0UZ && inSpan.size() > 0UZ ? work::Status::INSUFFICIENT_OUTPUT_ITEMS : work::Status::OK;
     }
 
-    /// @brief The multiplier the design false-alarm rate implies, exposed so a graph can state what it is running at.
-    /// Derived from the members on every read, so it is what `n_train` and `pfa` say whether or not either moved.
+    /// @brief The multiplier the design false-alarm rate implies, public so a graph can report it. It is derived from
+    /// `n_train` and `pfa` on every read.
     [[nodiscard]] double alpha() const noexcept {
         const double n = 2. * static_cast<double>(n_train.value);
         return n * (std::pow(pfa.value, -1. / n) - 1.);
     }
 
-    /// @brief The cells a record of `bins` bins actually tests — the denominator of a measured false-alarm rate.
+    /// @brief The cells a record of `bins` bins tests, the denominator of a measured false-alarm rate.
     [[nodiscard]] std::size_t testableCells(std::size_t bins) const noexcept {
         const std::size_t margin = static_cast<std::size_t>(n_train.value) + static_cast<std::size_t>(n_guard.value);
         return bins > 2UZ * margin ? bins - 2UZ * margin : 0UZ;

@@ -25,9 +25,9 @@ namespace detail {
 inline constexpr gr::Size_t kMinSpectralKurtosisSpectra = 8U;
 inline constexpr gr::Size_t kMaxSpectralKurtosisSpectra = 1U << 20U;
 
-/// @brief A `double` meta value read whichever numeric alternative the map holds; `std::nullopt` when absent or the
-/// wrong kind entirely. `WelchPsd` writes `n_averaged` as `std::uint64_t` and `overlap` as `double`, and this reads
-/// either without the caller having to know which.
+/// @brief A `double` meta value read from whichever numeric alternative the map holds, or `std::nullopt` when the key
+/// is absent or not numeric. `WelchPsd` writes `n_averaged` as `std::uint64_t` and `overlap` as `double`. This reads
+/// either, and the caller need not know which.
 [[nodiscard]] inline std::optional<double> metaNumber(const property_map& map, std::string_view key) {
     const auto it = map.find(std::pmr::string(key));
     if (it == map.end()) {
@@ -63,17 +63,17 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::SpectralKurtosis)
 /**
  * @brief Spectral kurtosis per bin over `n_spectra` independent density records, homogeneous in the record's own scale.
  *
- * `SpectralKurtosisAccumulator` folds one `S1`/`S2` pair per bin; at `n_spectra` inputs the per-bin statistic is
- * evaluated and one record emitted. Independence is the estimator's precondition and this cannot see it in the
- * numbers, so it is checked in the one place it is stated: a producer's `overlap` metadata. A record is folded only
- * when it carries `overlap` and that value is exactly zero — overlapping Welch segments share samples and bias
- * `E[SK]` away from the one exact value (1) the statistic is defined to hold on noise, and a producer that states no
- * overlap at all has not said its spectra are independent.
+ * `SpectralKurtosisAccumulator` folds one `S1`/`S2` pair per bin. At `n_spectra` inputs the block evaluates the
+ * per-bin statistic and emits one record. The estimator requires independent spectra. The numbers cannot show
+ * independence, so the block checks the producer's `overlap` metadata. A record is folded only when it carries
+ * `overlap` and that value is exactly zero. Overlapping Welch segments share samples. They bias `E[SK]` away from 1,
+ * the exact value the statistic holds on noise. A producer that states no overlap has not said its spectra are
+ * independent.
  *
- * The shape parameter `d` is taken from the producer's own `n_averaged` metadata by default (`shape == 0`); a
- * nonzero `shape` is instead checked for agreement with the record and refused on a disagreement, which is what
- * catches a caller's setting drifting out of step with the producer's own configuration. A bin whose accumulated
- * `S1` is exactly zero has no defined ratio and is written `0.f`, counted in `nDegenerateBins()`.
+ * By default (`shape == 0`) the shape parameter `d` comes from the producer's own `n_averaged` metadata. A nonzero
+ * `shape` is checked against the record, and a record that disagrees is refused. The check catches a setting that has
+ * drifted out of step with the producer's configuration. A bin whose accumulated `S1` is exactly zero has no defined
+ * ratio. It is written as `0.f` and counted in `nDegenerateBins()`.
  */
 struct SpectralKurtosis : Block<SpectralKurtosis, NoTagPropagation> {
     using Description = Doc<R""(
@@ -82,15 +82,16 @@ struct SpectralKurtosis : Block<SpectralKurtosis, NoTagPropagation> {
 Consumes `DataSet<float>` density records (as `WelchPsd` or `Spectrogram` emit) and emits one `spectral_kurtosis`
 record per `n_spectra` inputs, one value per bin. `SK` reads exactly 1 on noise, 0 on a noiseless tone, above 1 on an
 intermittent interferer and below 1 on steady structure. A record is refused unless its `overlap` metadata is present
-and exactly zero: the statistic's derivation assumes independent spectra, which overlapping Welch segments are not.
+and exactly zero. The statistic's derivation assumes independent spectra, and overlapping Welch segments are not
+independent.
 )"">;
 
     PortIn<DataSet<float>, Async>  spectra;
     PortOut<DataSet<float>, Async> measurements;
 
-    Annotated<gr::Size_t, "n_spectra", Visible, Doc<"independent spectra per reading; below 8 or above 2^20 is refused">>              n_spectra    = 32U;
-    Annotated<gr::Size_t, "shape", Visible, Doc<"Gamma shape d; 0 takes it from the record's n_averaged, nonzero must agree with it">> shape        = 0U;
-    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per completed accumulation">>                      emit_records = true;
+    Annotated<gr::Size_t, "n_spectra", Visible, Doc<"independent spectra per reading, from 8 to 2^20">>           n_spectra    = 32U;
+    Annotated<gr::Size_t, "shape", Visible, Doc<"Gamma shape d, 0 to take the record's n_averaged">>              shape        = 0U;
+    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per completed accumulation">> emit_records = true;
 
     GR_MAKE_REFLECTABLE(SpectralKurtosis, spectra, measurements, n_spectra, shape, emit_records);
 
@@ -159,7 +160,7 @@ and exactly zero: the statistic's derivation assumes independent spectra, which 
     }
 
 private:
-    /// @brief Fold one input record in, refusing it and naming why when it cannot be used. Returns the emitted
+    /// @brief Folds one input record in, or refuses it with the reason when it cannot be used. Returns the emitted
     /// record when this input completed the accumulation.
     [[nodiscard]] std::optional<DataSet<float>> fold(const DataSet<float>& record) {
         if (record.signal_values.empty() || record.axis_values.empty()) {
@@ -192,10 +193,10 @@ private:
 
         const std::size_t bins = record.signal_values.size();
         if (_acc.bins() == 0UZ) {
-            _acc.resize(bins); // the accumulation has not been configured yet: this record sets its shape
+            _acc.resize(bins); // the accumulation is not configured yet, and this record sets its shape
         } else if (_acc.bins() != bins) {
-            // A bin count that does not match the accumulation in progress cannot be folded into it: the
-            // accumulation is discarded and resized so the next matching record starts a fresh one.
+            // A bin count that does not match the accumulation in progress cannot be folded into it. The
+            // accumulation is discarded and resized, and the next matching record starts a fresh one.
             _acc.resize(bins);
             _haveCycle = false;
             _filled.store(0ULL, std::memory_order_relaxed);
@@ -204,9 +205,9 @@ private:
         }
 
         if (_haveCycle && effectiveShape != _cycleShape) {
-            // The producer's shape moved while an accumulation was in progress. Gamma draws of two different shapes
-            // cannot share one `S1`/`S2` pair, so what has been folded is discarded and only this record is refused;
-            // the next one starts a fresh cycle under whichever shape it carries.
+            // The producer's shape changed while an accumulation was in progress. Gamma draws of two different shapes
+            // cannot share one `S1`/`S2` pair. The folded spectra are discarded, and only this record is refused. The
+            // next record starts a fresh cycle under the shape it carries.
             _acc.resize(bins);
             _haveCycle = false;
             _filled.store(0ULL, std::memory_order_relaxed);

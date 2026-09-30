@@ -31,8 +31,8 @@ using CF = std::complex<float>;
 constexpr double kPi    = std::numbers::pi;
 constexpr double kTwoPi = 2. * std::numbers::pi;
 
-/// Emits a fixed sequence in bursts of a stated size, then ends the stream. The burst size is what makes chunk
-/// independence testable: the same samples presented differently must produce the same records.
+/// Emits a fixed sequence in bursts of a stated size, then ends the stream. The burst size makes chunk independence
+/// testable. The same samples presented differently must produce the same records.
 template<typename T>
 struct BurstSource : gr::Block<BurstSource<T>> {
     gr::PortOut<T> out;
@@ -67,7 +67,7 @@ struct BurstSource : gr::Block<BurstSource<T>> {
     }
 };
 
-/// Keeps every record a run produced, which is what the criteria read.
+/// Keeps every record a run produced, for the assertions to read.
 struct RecordSink : gr::Block<RecordSink> {
     gr::PortIn<gr::DataSet<float>, gr::Async> in;
 
@@ -223,8 +223,8 @@ struct Rng {
 
 // ---- scenes -------------------------------------------------------------------------------------------------
 
-/// @brief An OFDM stream: random quadrature symbols on every bin, transformed to time, each symbol preceded by a
-/// copy of its own last `nCp` samples. The prefix is what puts an exact repeat at the useful symbol's length.
+/// @brief An OFDM stream of random quadrature symbols on every bin, transformed to time. Each symbol is preceded by a
+/// copy of its own last `nCp` samples. The prefix puts an exact repeat at the useful symbol's length.
 [[nodiscard]] std::vector<CF> ofdmScene(std::size_t nFft, std::size_t nCp, std::size_t symbols, std::uint64_t seed, double offsetPerSample = 0.) {
     Rng                                                                                              rng{seed};
     gr::algorithm::FFT<std::complex<float>, std::complex<float>, gr::algorithm::Direction::Backward> inverse{};
@@ -275,8 +275,8 @@ struct Rng {
     return h;
 }
 
-/// @brief Antipodal symbols at `sps` samples a symbol, shaped by @p pulse; an empty pulse holds each symbol flat,
-/// which is the rectangular case.
+/// @brief Antipodal symbols at `sps` samples a symbol, shaped by @p pulse. An empty pulse holds each symbol flat, the
+/// rectangular case.
 [[nodiscard]] std::vector<CF> linearModulation(std::size_t symbols, std::size_t sps, std::span<const float> pulse, std::uint64_t seed) {
     Rng                rng{seed};
     std::vector<float> antipodal(symbols);
@@ -305,13 +305,13 @@ struct Rng {
     return out;
 }
 
-/// @brief The C4FM scene: four-level frequency modulation at 4800 symbols a second and 20 samples a symbol, the
-/// dibits shaped by the Nyquist raised cosine the standard specifies and scaled so the outer level deviates 1800 Hz
-/// and the inner 600 Hz, then integrated into a phase.
+/// @brief The C4FM scene, four-level frequency modulation at 4800 symbols a second and 20 samples a symbol.
 ///
-/// The shaping is the transmit filter itself and not a continuous-phase modulator's frequency pulse: the two are
-/// different functions that share a name, and only the Nyquist one — `sinc(t/T) cos(pi a t/T) / (1 - (2 a t/T)^2)` —
-/// leaves a symbol-rate structure in the envelope once a receive filter converts frequency to amplitude.
+/// The dibits are shaped by the Nyquist raised cosine the standard specifies. They are scaled so the outer level
+/// deviates 1800 Hz and the inner 600 Hz, then integrated into a phase. The shaping is the transmit filter itself and
+/// not a continuous-phase modulator's frequency pulse. The two are different functions that share a name. Only the
+/// Nyquist one, `sinc(t/T) cos(pi a t/T) / (1 - (2 a t/T)^2)`, leaves a symbol-rate structure in the envelope once a
+/// receive filter converts frequency to amplitude.
 [[nodiscard]] std::vector<CF> c4fmScene(std::size_t symbols, std::uint64_t seed) {
     constexpr std::size_t sps  = 20UZ;
     constexpr double      rate = 96000.;
@@ -321,7 +321,7 @@ struct Rng {
     std::vector<double>      frequency(symbols * sps, 0.);
     for (std::size_t k = 0UZ; k < symbols; ++k) {
         const auto        rank      = static_cast<double>(rng.next() % 4ULL);
-        const double      deviation = (2. * rank - 3.) * 600.; // the odd grid times 600 Hz: +/-1800 and +/-600
+        const double      deviation = (2. * rank - 3.) * 600.; // the odd grid times 600 Hz, giving +/-1800 and +/-600
         const std::size_t base      = k * sps;
         for (std::size_t t = 0UZ; t < pulse.size(); ++t) {
             const std::size_t at = base + t;
@@ -339,7 +339,7 @@ struct Rng {
     return out;
 }
 
-/// @brief The valid part of a convolution, which is what a channel filter hands on.
+/// @brief The valid part of a convolution, the part a channel filter passes on.
 [[nodiscard]] std::vector<CF> applyFir(std::span<const CF> in, std::span<const float> taps) {
     if (in.size() < taps.size()) {
         return {};
@@ -355,11 +355,11 @@ struct Rng {
     return out;
 }
 
-/// The Mode S preamble in half-microsecond slots: pulses at 0.0, 1.0, 3.5 and 4.5 microseconds.
+/// The Mode S preamble in half-microsecond slots, with pulses at 0.0, 1.0, 3.5 and 4.5 microseconds.
 constexpr std::array<int, 16> kPreamble{1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0};
 
-/// @brief One long Mode S frame at two slots a microsecond: sixteen preamble slots then two slots a bit, a pulse in
-/// the first half for a one and in the second for a zero.
+/// @brief One long Mode S frame at two slots a microsecond. Sixteen preamble slots come first, then two slots a bit.
+/// A one has its pulse in the first half and a zero in the second.
 [[nodiscard]] std::vector<CF> modeSFrame(Rng& rng, bool withPreamble, bool withData) {
     std::vector<CF> wave;
     if (withPreamble) {
@@ -456,7 +456,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         expect(throws([&] { refused({{"false_alarm_rate", 0.0}}); }));
         expect(throws([&] { refused({{"sample_rate", 0.f}}); }));
 
-        // the refusal names both offending values, which is what makes it actionable
+        // the refusal names both offending values, and a user can act on it
         try {
             refused({{"max_lag", gr::Size_t(4096)}, {"window_length", gr::Size_t(1024)}});
             expect(false) << "a lag beyond the window is refused";
@@ -528,17 +528,16 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         constexpr std::size_t tagAt  = 4600UZ;
         const std::vector<CF> input  = complexNoise(16384UZ, 0x2222ULL);
 
-        // Both rates arrive as tags, the first on the stream's own first sample: the framework stops auto-updating a
-        // parameter a graph author has set by name, so a block that follows a tagged rate only ever sees one when the
-        // rate was not also written into its settings. The geometry settings are in samples, so neither tag re-plans
-        // the transform.
+        // Both rates arrive as tags, the first on the stream's own first sample. The framework stops auto-updating a
+        // parameter a graph author has set by name. A block follows a tagged rate only when the rate was not also
+        // written into its settings. The geometry settings are in samples, so neither tag re-plans the transform.
         const gr::property_map first{{gr::tag::SAMPLE_RATE.shortKey(), 48000.f}};
         const gr::property_map second{{gr::tag::SAMPLE_RATE.shortKey(), 96000.f}};
         const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(8)}, {"overlap", 0.0}};
         const Run<CF>          run = collect<CF>(geometry, input, 512UZ, false, {{0UZ, first}, {tagAt, second}});
 
         expect(eq(run.nWindowResets, std::uint64_t{1ULL})) << "the window straddling the change is discarded and counted";
-        // the change flushes one short record; the stream's own end flushes whatever the last group holds
+        // the change flushes one short record, and the stream's end flushes what the last group holds
         expect(ge(run.nPartialFlushes, std::uint64_t{1ULL})) << "the accumulation so far is flushed rather than dropped";
         expect(le(run.nPartialFlushes, std::uint64_t{2ULL})) << "and nothing else flushes short";
         expect(fatal(ge(run.records.size(), 2UZ)));
@@ -697,9 +696,9 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             const auto [at, height]          = peakOver(record, 4UZ, 12UZ);
             const double       atPeriod      = static_cast<double>(record.signal_values[sps]);
             const HandComputed hand          = recomputed(record);
-            // The envelope's feature at one symbol period is a negative lobe, so the published magnitude runs
-            // through a null a few lags short of it and its own maximum sits one lag below the period; the height
-            // the closed forms state is the value at the period itself.
+            // The envelope's feature at one symbol period is a negative lobe. The published magnitude runs through a
+            // null a few lags short of it, and its maximum sits one lag below the period. The closed forms state the
+            // height at the period itself.
             std::println("criterion 9: beta {:.2f} puts the maximum at lag {} reading {:.4f}; lag {} itself reads {:.4f} (bracket 0.31 to 0.38), threshold {:.4f}, scatter {:.5f}", beta, at, height, sps, atPeriod, hand.threshold, hand.scatter);
             expect(le(at > sps ? at - sps : sps - at, 1UZ)) << std::format("beta {}: within one lag step of {}", beta, sps);
             expect(atPeriod > 0.31 && atPeriod < 0.38) << std::format("beta {}: height {:.4f} outside the bracket", beta, atPeriod);
@@ -707,7 +706,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             expect(approx(metaNumber(record, "scatter"), hand.scatter, 1e-12));
             expect(atPeriod > hand.threshold);
         }
-        // beta = 0 keeps the feature: only the periodic mean vanishes there, and two other terms do not
+        // beta = 0 keeps the feature, because only the periodic mean vanishes there and two other terms remain
         const std::vector<float> flatPulse = raisedCosine(sps, 0., 8UZ);
         const std::vector<CF>    flatScene = linearModulation(symbols, sps, std::span<const float>(flatPulse), 0x7777ULL);
         const Run<CF>            flatRun   = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(256)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(32)}, {"sample_rate", static_cast<float>(sps * 1000UZ)}}, flatScene);
@@ -730,9 +729,9 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         expect(eq(unfiltered.nDegenerate, unfiltered.nWindows));
         std::println("criterion 10: unfiltered C4FM, {} windows, all degenerate", unfiltered.nWindows);
 
-        // The receive filter has to be one whose impulse response does not ring: a windowed-sinc channel filter
-        // rings at fs/(2 fc), and that period, not the symbol period, is what its own envelope autocorrelation
-        // reports. A Gaussian filter has no ringing, so what is left in the envelope is the signal's.
+        // The receive filter must have an impulse response that does not ring. A windowed-sinc channel filter rings
+        // at fs/(2 fc). Its envelope autocorrelation then reports that period and not the symbol period. A Gaussian
+        // filter has no ringing, and the envelope holds only the signal's structure.
         constexpr std::array<std::pair<double, std::size_t>, 4> kBandwidths{{{6250., 21UZ}, {5000., 25UZ}, {4000., 31UZ}, {3000., 41UZ}}};
         for (const auto& [bandwidth, taps] : kBandwidths) {
             const std::vector<float> channel  = gr::filter::fir::design::gaussianPulse(taps, static_cast<double>(sps), bandwidth / 4800.);
@@ -752,7 +751,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
     };
 
     "criterion 11: Mode S, exactly"_test = [] {
-        // the preamble alone: a deterministic sequence, so there is no tolerance to argue about
+        // the preamble alone, a deterministic sequence with an exact expected value
         Rng                   rng{0x9999ULL};
         const std::vector<CF> preamble = modeSFrame(rng, true, false);
         expect(eq(preamble.size(), 16UZ));
@@ -788,10 +787,9 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         std::println("criterion 11: the data field alone reads |R(0.5 us)|/R(0) = {:.5f} against 0.5 and |R(1.0 us)|/R(0) = {:.5f} against 0, scatter {:.5f}", atHalf, atOne, scatter);
         const HandComputed hand = recomputed(dataRecord);
         expect(std::abs(atHalf - 0.5) < 3. * scatter) << std::format("{:.5f} against 0.5 within three scatter units of {:.5f}", atHalf, scatter);
-        // The null is read against the record's own detection threshold rather than against a fixed multiple of the
-        // scatter: a magnitude drawn from a zero-mean real estimate is folded, so three scatter units is a bound one
-        // realization in three hundred crosses on nothing but luck, while the threshold is the level the record
-        // itself says a peak must reach.
+        // The null is read against the record's own detection threshold and not a fixed multiple of the scatter. A
+        // magnitude drawn from a zero-mean real estimate is folded. One realization in three hundred crosses three
+        // scatter units by chance. The threshold is the level the record itself says a peak must reach.
         expect(atOne < hand.threshold) << std::format("the derived null reads {:.5f} ({:.2f} scatter units) against the record's threshold {:.5f}", atOne, atOne / scatter, hand.threshold);
         expect(approx(metaNumber(dataRecord, "detection_threshold"), hand.threshold, 1e-12)) << "criterion 21";
         expect(atHalf > hand.threshold) << "the instrument is positive on the same run that carries the null";
@@ -817,7 +815,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
 
         const gr::property_map shapedSettings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(32)}, {"false_alarm_rate", pFa}, {"sample_rate", rate}};
 
-        /// @brief The chain of the reader: the estimate, then a peak detector reading the margin the record states.
+        /// @brief The reader's chain, the estimate followed by a peak detector that reads the margin the record states.
         const auto detect = [](gr::property_map settings, std::vector<CF> samples, double thresholdDb) {
             gr::test::RuntimeTest runtimeTest;
             auto&                 source   = runtimeTest.emplace<BurstSource<CF>>();
@@ -845,8 +843,8 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             return result;
         };
 
-        /// @brief The decibel margin a record's own largest value stands at over its own median, which is the
-        /// quantity a detector reading `above_median` compares against its threshold.
+        /// @brief The decibel margin of a record's largest value over its own median. A detector reading
+        /// `above_median` compares this quantity against its threshold.
         const auto marginDb = [](const gr::DataSet<float>& record) {
             std::vector<float> sorted(record.signal_values);
             if (sorted.size() < 3UZ) {
@@ -862,15 +860,15 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             return median > 0. ? 10. * std::log10(top / median) : 0.;
         };
 
-        // A period the sample grid does not land on is what the sub-bin refinement is for: a sinusoidal envelope
-        // modulation at 8.4 samples has its correlation maximum at 8.4, between two published lags.
+        // The sub-bin refinement serves a period the sample grid does not land on. A sinusoidal envelope modulation
+        // at 8.4 samples has its correlation maximum at 8.4, between two published lags.
         //
-        // Its threshold is a stated margin and not the record's own derived figure, and the reason is a property of
-        // the reference rather than of the estimate: a sinusoidal modulation correlates at every lag, so the record
-        // carries the same cosine from lag 1 to lag L and its median is the median of that cosine, which stands
-        // 10 log10(1/cos(pi/4)) = 1.51 dB under the peak. A margin derived for a record whose median is noise cannot
-        // be met by a record that has no noise-only lag in it, and the arm's subject is the interpolation, not the
-        // threshold - the realized rate the threshold does claim is the third arm's.
+        // This arm's threshold is a stated margin and not the record's derived figure. The reason lies in the
+        // reference. A sinusoidal modulation correlates at every lag. The record carries the same cosine from lag 1 to
+        // lag L, and its median is the median of that cosine. That median stands 10 log10(1/cos(pi/4)) = 1.51 dB
+        // under the peak. A margin derived for a record whose median is noise cannot be met by a record with no
+        // noise-only lag. This arm tests the interpolation and not the threshold. The third arm tests the realized
+        // rate the threshold claims.
         {
             constexpr double period    = 8.4;
             constexpr double statedDb  = 1.0;
@@ -888,8 +886,8 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             expect(closest <= 0.5 / static_cast<double>(rate)) << "within half a lag step, which is what makes a period between two lags resolvable";
         }
 
-        // the symbol period of a shaped stream, whose envelope feature is a negative lobe and so sits a fifth of a
-        // lag below the period itself
+        // The symbol period of a shaped stream. Its envelope feature is a negative lobe and sits a fifth of a lag
+        // below the period itself.
         {
             const Run<CF> plain = collect<CF>(shapedSettings, scene);
             expect(fatal(ge(plain.records.size(), 1UZ)));
@@ -901,7 +899,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             expect(closest <= 1.5 / static_cast<double>(rate)) << "the symbol period is reported within the lobe the envelope actually puts there";
         }
 
-        // the realized rate on noise alone, which is the whole of what a threshold in decibels over the median claims
+        // the realized rate on noise alone, the one claim a threshold in decibels over the median makes
         {
             constexpr std::size_t noiseRecords = 2000UZ;
             for (const std::string& kind : {std::string("complex"), std::string("envelope")}) {

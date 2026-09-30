@@ -32,33 +32,33 @@ inline constexpr gr::Size_t kMaxPolarizationWindow = 1U << 24U;
 GR_REGISTER_BLOCK(gr::blocks::measurement::PolarizationCombiner)
 
 /**
- * @brief Two orthogonal antenna branches combined at the maximal-ratio optimum, from the 2x2 covariance in closed form.
+ * @brief Combines two orthogonal antenna branches at the maximal-ratio optimum, from the 2x2 covariance in closed form.
  *
- * Over window `w` the block accumulates the branch covariance in `double` while emitting output computed with the
- * weights `BranchCovariance::solve` derived from window `w-1` — causal, with no lookahead. That makes the weights one
- * window old, which is the block's stated adaptation latency. Before the first window closes, `out` carries branch 0
- * unchanged and `ortho` carries branch 1 unchanged (`polarizationPassthrough(0)`): a valid signal, with no phase
- * discontinuity relative to what follows once branch 0 is the gauge reference, and no invented relative phase.
+ * Over window `w` the block accumulates the branch covariance in `double`. It computes its output with the weights
+ * `BranchCovariance::solve` derived from window `w-1`. The block is causal and has no lookahead. The weights are one
+ * window old, and that is the block's stated adaptation latency. Before the first window closes, `out` carries
+ * branch 0 unchanged and `ortho` carries branch 1 unchanged (`polarizationPassthrough(0)`). That output is a valid
+ * signal. Once branch 0 is the gauge reference, the later output has no phase discontinuity against it. The block
+ * reports no relative phase it has not measured.
  *
- * `emit_orthogonal` is the switch `polarizationCombine`'s own optional span is for: when clear, or when nothing is
- * connected to `ortho`, the orthogonal arithmetic is skipped rather than computed and discarded, and the port
- * publishes nothing.
+ * `emit_orthogonal` drives the optional span of `polarizationCombine`. When it is clear, or when `ortho` is not
+ * connected, the block skips the orthogonal arithmetic and the port publishes nothing.
  *
- * A degenerate window — no noise in either branch, or nothing correlated between them — makes an SNR figure or the
- * amplitude ratio unbounded; both are reported saturated at `1e6` linear (`60 dB`) rather than as an infinity, and
- * every saturation is counted in `nSaturatedFigures()` so the record's finite number is never mistaken for a
- * measurement. At the other end, a branch whose estimated signal power is exactly zero has a signal-to-noise ratio
- * of zero and so a decibel figure of `-inf`; those channels read `0` dB and the record's `valid` is written false,
- * the same convention a degenerate window uses, so nothing non-finite reaches a record or a reader.
+ * A degenerate window has no noise in either branch or no correlation between them. It makes an SNR figure or the
+ * amplitude ratio unbounded. Both are reported saturated at `1e6` linear (`60 dB`) and not as an infinity.
+ * `nSaturatedFigures()` counts every saturation, which marks the record's finite number as a bound and not a
+ * measurement. A branch whose estimated signal power is exactly zero has a signal-to-noise ratio of zero and a
+ * decibel figure of `-inf`. Those channels read `0` dB, and the record's `valid` is false, as for a degenerate
+ * window. No non-finite value reaches a record or a reader.
  */
 struct PolarizationCombiner : Block<PolarizationCombiner> {
     using Description = Doc<R""(
-@brief Two orthogonal antenna branches into one at the maximal-ratio optimum, with the estimator's own figures readable.
+@brief Combines two orthogonal antenna branches at the maximal-ratio optimum and publishes the estimator's figures.
 
-Accumulates the branch covariance over a stream-absolute window and combines with the weights the *previous* window's
-covariance implies (causal, one window of adaptation latency). `mode = mrc` maximizes the combined signal-to-noise
-ratio; `selection` picks the stronger branch from the same covariance. Before the first window, `out` passes branch 0
-through unchanged and `ortho` carries branch 1 unchanged.
+The block accumulates the branch covariance over a stream-absolute window. It combines with the weights the
+*previous* window's covariance implies. It is causal, with one window of adaptation latency. `mode = mrc` maximizes
+the combined signal-to-noise ratio. `selection` picks the stronger branch from the same covariance. Before the first
+window, `out` passes branch 0 through unchanged and `ortho` carries branch 1 unchanged.
 )"">;
 
     PortIn<std::complex<float>>              in0;
@@ -68,11 +68,11 @@ through unchanged and `ortho` carries branch 1 unchanged.
     PortOut<DataSet<float>, Async, Optional> measurements;
 
     Annotated<std::string, "mode", Visible, Doc<"'mrc' or 'selection'">>                                                          mode             = std::string("mrc");
-    Annotated<gr::Size_t, "window", Visible, Doc<"samples per estimate; below 64 or above 2^24 is refused">>                      window           = 4096U;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate stated in every record; must be positive and finite">>           sample_rate      = 96000.f;
+    Annotated<gr::Size_t, "window", Visible, Doc<"samples per estimate, from 64 to 2^24">>                                        window           = 4096U;
+    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate stated in every record, positive and finite">>                   sample_rate      = 96000.f;
     Annotated<std::vector<double>, "noise_powers", Visible, Doc<"empty for equal branch noise, or exactly two positive entries">> noise_powers     = std::vector<double>{};
     Annotated<std::string, "normalize", Visible, Doc<"'unit_noise' (||v||=1) or 'unit_signal' (signal gain 1)">>                  normalize        = std::string("unit_noise");
-    Annotated<double, "weight_smoothing", Visible, Doc<"one-pole blend of the weight vector across windows; must lie in [0, 1)">> weight_smoothing = 0.0;
+    Annotated<double, "weight_smoothing", Visible, Doc<"one-pole blend of the weight vector across windows, in [0, 1)">>          weight_smoothing = 0.0;
     Annotated<bool, "emit_orthogonal", Visible, Doc<"compute and publish the orthogonal (interference-only) output">>             emit_orthogonal  = true;
     Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per completed window">>                       emit_records     = true;
 
@@ -164,10 +164,10 @@ through unchanged and `ortho` carries branch 1 unchanged.
         _nDroppedSampleTags.store(0ULL, std::memory_order_relaxed);
         _pending.clear();
         _slot.publish({0., 0., 0., 0., 0., 0., 0.}, 0ULL);
-        // A block built entirely from defaults stages nothing, so `settingsChanged` has not necessarily run by now.
-        // From here on every settings change is a change to a running block, and the window reset rule applies to it.
+        // A block built entirely from defaults stages nothing, and `settingsChanged` may not have run yet. From here
+        // on every settings change is a change to a running block, and the window reset rule applies to it.
         _configured = true;
-        // The last sample of a call is held back so the end-of-stream epilogue always has a span to run on.
+        // The last sample of a call is held back. The end-of-stream epilogue then has a span to run on.
         in0.min_samples = 2UZ;
         in1.min_samples = 2UZ;
     }
@@ -176,7 +176,7 @@ through unchanged and `ortho` carries branch 1 unchanged.
     [[nodiscard]] double amplitudeRatio() const noexcept { return _slot.read().first[1]; }
     [[nodiscard]] double branchSnrDb(std::size_t branch) const noexcept { return _slot.read().first[branch == 0UZ ? 2UZ : 3UZ]; }
     [[nodiscard]] double combinedSnrDb() const noexcept { return _slot.read().first[4]; }
-    /// @brief What the combination bought over the better branch, the same finite figure the record's channel carries.
+    /// @brief The combining gain over the better branch, the same finite figure the record's channel carries.
     [[nodiscard]] double combiningGainDb() const noexcept { return _slot.read().first[6]; }
     [[nodiscard]] int    selectedBranch() const noexcept { return static_cast<int>(_slot.read().first[5]); }
     [[nodiscard]] double coverage() const noexcept { return std::min(1., static_cast<double>(_slot.read().second) / static_cast<double>(std::max(window.value, 1U))); }
@@ -209,7 +209,7 @@ through unchanged and `ortho` carries branch 1 unchanged.
         return take == 0UZ && made == 0UZ && rawOffer > 0UZ ? work::Status::INSUFFICIENT_OUTPUT_ITEMS : work::Status::OK;
     }
 
-    /// @brief End of stream: fold the trailing samples, then flush the partial window with the count it actually covers.
+    /// @brief At end of stream, folds in the trailing samples and flushes the partial window with the count it covers.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& in0Span, InputSpanLike auto& in1Span, OutputSpanLike auto& outSpan, OutputSpanLike auto& orthoSpan, OutputSpanLike auto& measurementsSpan) {
         const bool        wantOrtho = emit_orthogonal.value && orthoSpan.isConnected;
         const std::size_t take      = std::min({in0Span.size(), in1Span.size(), outSpan.size(), wantOrtho ? orthoSpan.size() : std::numeric_limits<std::size_t>::max()});
@@ -229,8 +229,8 @@ through unchanged and `ortho` carries branch 1 unchanged.
     }
 
 private:
-    /// @brief Count the `n_dropped_samples` tags sitting on the @p count samples this call takes, on either branch,
-    /// bounded so a tag that belongs to a later call is not counted twice.
+    /// @brief Counts the `n_dropped_samples` tags on the @p count samples this call takes, on either branch. The bound
+    /// keeps a tag of a later call from being counted twice.
     void countDroppedTags(InputSpanLike auto& in0Span, InputSpanLike auto& in1Span, std::size_t count) {
         const std::uint64_t base   = _streamAt;
         const auto          onSpan = [this, base, count](const auto& span) {
@@ -310,18 +310,18 @@ private:
     }
 
     /**
-     * @brief `v_new = (1-g) v_est + g v_prev` on the *whitened* weight vectors, renormalized, gauge re-fixed, then
-     * unwhitened again with the fresh estimate's own normalization scalar and the orthogonal complement rebuilt.
+     * @brief Blends `v_new = (1-g) v_est + g v_prev` on the *whitened* weight vectors.
      *
-     * Blending the unwhitened weights instead would mix two vectors living in different noise bases and would leave
-     * an orthogonal channel that no longer nulls the signal once the branch noises differ, which is exactly the case
-     * `noise_powers` exists for.
+     * The blend is renormalized and its gauge re-fixed. It is then unwhitened with the fresh estimate's own
+     * normalization scalar, and the orthogonal complement is rebuilt. A blend of the unwhitened weights would mix two
+     * vectors in different noise bases. With unequal branch noises the orthogonal channel would then fail to null the
+     * signal. `noise_powers` sets unequal branch noises.
      */
     [[nodiscard]] static gr::measurement::PolarizationEstimate smoothed(const gr::measurement::PolarizationEstimate& fresh, const gr::measurement::PolarizationEstimate& prior, double g, std::span<const double> noisePowers) {
         const double sqrtN0 = noisePowers.empty() ? 1. : std::sqrt(noisePowers[0]);
         const double sqrtN1 = noisePowers.empty() ? 1. : std::sqrt(noisePowers[1]);
 
-        // The whitened vector is the weight times sqrt(N_i), normalized: the estimate's own scale divides out.
+        // The whitened vector is the weight times sqrt(N_i), normalized, and the estimate's own scale divides out.
         const auto whitened = [sqrtN0, sqrtN1](const gr::measurement::PolarizationEstimate& estimate) {
             std::complex<double> v0    = estimate.weight0 * sqrtN0;
             std::complex<double> v1    = estimate.weight1 * sqrtN1;
@@ -358,12 +358,11 @@ private:
     }
 
     /**
-     * @brief The five decibel figures a window reports, with the infinity an unbounded ratio produces replaced by
-     * zero and the substitution flagged.
+     * @brief The five decibel figures a window reports, with an infinite value replaced by zero and flagged.
      *
-     * A branch whose estimated signal power is exactly zero has a signal-to-noise ratio of zero, whose logarithm is
-     * `-inf`, and the difference of two such is a NaN. Zero is the same placeholder a degenerate window uses, and
-     * `finite` is what marks the record invalid, so no reader and no record channel ever carries a non-finite number.
+     * A branch whose estimated signal power is exactly zero has a signal-to-noise ratio of zero. Its logarithm is
+     * `-inf`, and the difference of two such values is a NaN. Zero is the placeholder a degenerate window also uses.
+     * `finite` marks the record invalid. No reader and no record channel carries a non-finite number.
      */
     struct DbFigures {
         double branch0{0.};

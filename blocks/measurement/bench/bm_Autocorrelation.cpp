@@ -59,8 +59,8 @@ template<typename TBlock, typename T>
     return outSpan.count == 0UZ ? 0.0 : static_cast<double>(records[0UZ].signal_values[1UZ]);
 }
 
-/// @brief The estimate with no record built: the floor a record is measured against, so the question of whether the
-/// record emission dominates the transform is answered by a difference rather than by assumption.
+/// @brief The estimate without building a record. It is the floor a record is measured against. The difference shows
+/// whether the record emission dominates the transform.
 template<typename T>
 [[nodiscard]] double kernelOnly(gr::analysis::Autocorrelation<T>& kernel, std::span<const T> input) {
     double     last = 0.;

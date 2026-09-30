@@ -44,7 +44,7 @@ void init(TBlock& block) {
     return data;
 }
 
-/// @brief The producer's records: a Welch estimate at zero overlap, which is what the consumer requires.
+/// @brief The producer's records, a Welch estimate at zero overlap as the consumer requires.
 [[nodiscard]] std::vector<gr::DataSet<float>> spectra() {
     namespace shim = gr::blocks::testing::span;
     WelchPsd<CF> welch({{"fft_size", gr::Size_t{kFftSize}}, {"n_averages", gr::Size_t{kAverages}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});

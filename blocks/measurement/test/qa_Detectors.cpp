@@ -129,8 +129,8 @@ template<typename TBlock>
  * @brief The five facts `DataSetToStream` admits a record on, in its own order. Returns the reason it would reject
  * the record, or nullptr.
  *
- * That predicate is a private static member of the block, so it cannot be called from here; these are the same five
- * conditions, restated. A record this rejects cannot be read by the Tier-1 consumer, whatever else it carries.
+ * That predicate is a private static member of the block and cannot be called from here. These are the same five
+ * conditions, restated. `DataSetToStream` cannot read a record this rejects, whatever else it carries.
  */
 [[nodiscard]] const char* admissionFailure(const gr::DataSet<float>& ds, std::size_t signalIndex = 0UZ) {
     if (ds.signal_names.empty()) {
@@ -151,7 +151,7 @@ template<typename TBlock>
     return nullptr;
 }
 
-/// @brief Exponentially distributed power of unit mean, which is what a squared-magnitude noise bin is.
+/// @brief Exponentially distributed power of unit mean, the distribution of a squared-magnitude noise bin.
 struct ExponentialNoise {
     std::uint64_t state = 0x9e3779b97f4a7c15ULL;
 
@@ -171,8 +171,8 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
     using namespace qa_detect;
 
     "the parabolic refinement is exact on a lobe that is a parabola in decibels"_test = [] {
-        // A Gaussian lobe is an exact parabola in decibels, so this fixture bounds the arithmetic rather than the
-        // window: criterion 3's bias against a real windowed tone is measured in qa_SpectralEstimate.
+        // A Gaussian lobe is an exact parabola in decibels. The fixture bounds the arithmetic and not the window.
+        // qa_SpectralEstimate measures the bias against a real windowed tone.
         const auto lobeAt = [](double centerBin) {
             std::vector<float> values(kBins, 1e-9f);
             for (std::size_t k = 0UZ; k < kBins; ++k) {
@@ -224,8 +224,8 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
     };
 
     "an empty result emits no record and is counted, so nothing-found still differs from nothing-ran"_test = [] {
-        // An empty DataSet fails the tier's admission predicates, whose first question is whether the extent is
-        // positive, so the empty result cannot travel as a record; the counter carries it instead.
+        // An empty DataSet fails the record admission predicates, whose first check is a positive extent. The empty
+        // result cannot travel as a record, and the counter carries it instead.
         std::vector<gr::DataSet<float>> quiet;
         for (std::size_t r = 0UZ; r < 3UZ; ++r) {
             quiet.push_back(densityRecord(std::vector<float>(kBins, 1.f)));
@@ -341,9 +341,9 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
     };
 
     "criterion 5: a shaped noise band of stated transition reads its design bandwidth"_test = [] {
-        // A rectangle with no transition and no noise is not the fixture criterion 5 asks for. This band is seeded
-        // noise shaped by a raised-cosine edge of a stated width, which is what a designed lowpass gives a spectrum;
-        // the claim is then that the 99 % bandwidth lands within that transition width of the design bandwidth.
+        // A rectangle with no transition and no noise is too easy a fixture. This band is seeded noise shaped by a
+        // raised-cosine edge of a stated width, as a designed lowpass shapes a spectrum. The test asserts that the
+        // 99 % bandwidth lands within the transition width of the design bandwidth.
         constexpr double      kBandBins       = 400.;
         constexpr double      kTransitionBins = 40.;
         constexpr std::size_t kTrials         = 32UZ;
@@ -356,7 +356,7 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
                 return 1.;
             }
             if (d >= outer) {
-                return 1e-6; // a real receiver's floor rather than a mathematical zero
+                return 1e-6; // a floor like a real receiver's, not a mathematical zero
             }
             return 0.5 * (1. + std::cos(std::numbers::pi * (d - inner) / kTransitionBins));
         };

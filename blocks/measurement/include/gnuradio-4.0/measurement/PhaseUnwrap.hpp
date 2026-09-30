@@ -25,29 +25,30 @@ namespace gr::blocks::measurement {
 GR_REGISTER_BLOCK(gr::blocks::measurement::PhaseUnwrap)
 
 /**
- * @brief Unwrapped instantaneous phase as an exact `int64` cycle count beside a `float` residual, never summed.
+ * @brief Unwrapped instantaneous phase as an exact `int64` cycle count beside a separate `float` residual.
  *
- * A 1:1 block wrapping `gr::measurement::CycleUnwrapper`. `cycles` counts whole turns since the origin exactly;
- * `phase` is the residual on `[-pi, pi)` at a `float`'s own spacing, which never grows because the count carries the
- * turns instead. The two are never added here: forming `2*pi*cycles + phase` needs a floating type, and doing that at
- * the block's own output would reintroduce the resolution loss a `float` or `double` accumulator suffers, at the one
- * point nothing downstream can recover it from.
+ * A 1:1 block that wraps `gr::measurement::CycleUnwrapper`. `cycles` counts whole turns since the origin exactly.
+ * `phase` is the residual on `[-pi, pi)` at a `float`'s own spacing. The residual does not grow, because the count
+ * carries the turns. The block does not add the two. Forming `2*pi*cycles + phase` needs a floating type. At the
+ * block's output that sum would bring back the resolution loss of a `float` or `double` accumulator, and the lost
+ * resolution could not be recovered after the output.
  *
- * `max_step_fraction` is an observability hook, not a detector: the unwrap is only correct when the true phase
- * advances by less than `pi` per sample (`|f| < fs/2`), and a step whose magnitude exceeds `max_step_fraction * pi`
- * is the closest this can come to noticing that bound was approached. It is a live setting, evaluated against the
- * cycle and phase the kernel already produced, so changing it never disturbs the count.
+ * `max_step_fraction` is an observability hook and not a detector. The unwrap is correct only when the true phase
+ * advances by less than `pi` per sample (`|f| < fs/2`). A step whose magnitude exceeds `max_step_fraction * pi` is
+ * counted as a sign that the bound was approached. The setting is live. It is evaluated against the cycle and phase
+ * the kernel has produced, and changing it does not disturb the count.
  *
- * A `n_dropped_samples` tag resets the cycle count and re-takes the origin when `reset_on_discontinuity` is set: the
- * turns during a gap were not seen, so continuing the count would be a number that looks exact and is wrong.
+ * With `reset_on_discontinuity` set, a `n_dropped_samples` tag resets the cycle count and re-takes the origin. The
+ * turns during a gap were not seen. A continued count would look exact and be wrong.
  */
 struct PhaseUnwrap : Block<PhaseUnwrap> {
     using Description = Doc<R""(
 @brief Unwrapped phase as an exact int64 cycle count beside a float residual on [-pi, pi).
 
-A 1:1 block. `cycles` and `phase` are never summed on the ports: a consumer that wants one number forms it in
-whatever type it can afford. `max_step_fraction` counts steps that came close to Nyquist in `nSuspectSteps()`, an
-observability hook rather than a detector. `reset_on_discontinuity` resets the count at a `n_dropped_samples` tag.
+A 1:1 block. The ports carry `cycles` and `phase` separately and never their sum. A consumer that wants one number
+forms the sum in a type of its choice. `nSuspectSteps()` counts the steps that exceed `max_step_fraction * pi`, near
+Nyquist. The count is an observability hook and not a detector. `reset_on_discontinuity` resets the count at a
+`n_dropped_samples` tag.
 )"">;
 
     PortIn<std::complex<float>> in;
@@ -55,7 +56,7 @@ observability hook rather than a detector. `reset_on_discontinuity` resets the c
     PortOut<float>              phase;
 
     Annotated<std::string, "origin", Visible, Doc<"'first_sample' (cycles=0 at the first sample) or 'zero' (also subtracts its phase)">> origin                 = std::string("first_sample");
-    Annotated<double, "max_step_fraction", Visible, Doc<"fraction of pi a step must exceed to count as suspect; must lie in (0, 1]">>    max_step_fraction      = 0.9;
+    Annotated<double, "max_step_fraction", Visible, Doc<"fraction of pi a suspect step exceeds, in (0, 1]">>                             max_step_fraction      = 0.9;
     Annotated<bool, "reset_on_discontinuity", Visible, Doc<"reset the cycle count at a n_dropped_samples tag">>                          reset_on_discontinuity = true;
 
     GR_MAKE_REFLECTABLE(PhaseUnwrap, in, cycles, phase, origin, max_step_fraction, reset_on_discontinuity);
@@ -88,8 +89,8 @@ observability hook rather than a detector. `reset_on_discontinuity` resets the c
         }
 
         if (_configured && newSettings.contains("origin") && *parsedOrigin != _origin) {
-            // Where the count is measured from has moved, so the count itself is no longer a number about this
-            // stream: it returns to zero and the origin is re-taken at the next sample.
+            // The origin of the count has changed, and the old count does not describe this stream. The count returns
+            // to zero, and the origin is re-taken at the next sample.
             _origin    = *parsedOrigin;
             _unwrapper = gr::measurement::CycleUnwrapper(_origin, 1.0);
             _havePrev  = false;
@@ -101,9 +102,9 @@ observability hook rather than a detector. `reset_on_discontinuity` resets the c
     }
 
     void start() {
-        // The kernel's own maxStepFraction is fixed at 1.0 (its internal suspect threshold effectively never fires,
-        // since a step is bounded by pi by construction): the block reads its own live `max_step_fraction` against
-        // the cycle/phase the kernel produces instead, which is what lets the setting move without disturbing cycles.
+        // The kernel's own maxStepFraction is fixed at 1.0. A step is bounded by pi, so the kernel's suspect threshold
+        // in effect does not fire. The block tests its own live `max_step_fraction` against the cycle and phase the
+        // kernel produces. The setting can then change without disturbing the cycle count.
         _unwrapper = gr::measurement::CycleUnwrapper(_origin, 1.0);
         _havePrev  = false;
         _streamAt  = 0ULL;
@@ -111,16 +112,16 @@ observability hook rather than a detector. `reset_on_discontinuity` resets the c
         _nResets.store(0ULL, std::memory_order_relaxed);
         _lastSuspect.store(-1LL, std::memory_order_relaxed);
         _taggedUnits = false;
-        // A block built entirely from defaults stages nothing, so `settingsChanged` has not necessarily run by now.
-        // From here on every settings change is a change to a running block, and the reset rule applies to it.
+        // A block built entirely from defaults stages nothing, and `settingsChanged` may not have run yet. From here
+        // on every settings change is a change to a running block, and the reset rule applies to it.
         _configured = true;
     }
 
-    // `cycles` and `phase` name the two output ports, so the per-sample readings are not duplicated as
-    // identically-named methods; `_unwrapper.cycles()` / `.phase()` are the owning-thread accessors for a caller that
-    // already holds the block, and the two streams are what everyone else reads.
+    // `cycles` and `phase` name the two output ports. The block has no methods of the same names for the per-sample
+    // readings. `_unwrapper.cycles()` and `.phase()` serve a caller on the owning thread that holds the block. Every
+    // other reader reads the two streams.
 
-    /// @brief `2*pi*cycles + phase` for the current sample only; spacing `9.54e-7 rad` at `10^9` cycles. Owning thread.
+    /// @brief `2*pi*cycles + phase` for the current sample only, with spacing `9.54e-7 rad` at `10^9` cycles. Owning thread.
     [[nodiscard]] double unwrappedRadians() const noexcept { return _unwrapper.unwrappedRadians(); }
 
     [[nodiscard]] std::uint64_t                nSuspectSteps() const noexcept { return _nSuspect.load(std::memory_order_relaxed); }

@@ -90,62 +90,62 @@ inline void requireFalseAlarmRate(double rate) {
 GR_REGISTER_BLOCK(gr::blocks::measurement::Autocorrelation, [T], [ float, std::complex<float> ])
 
 /**
- * @brief What a signal repeats at: one autocorrelation record per averaged group of windows, with the scatter and
- * the detection threshold that decide whether a peak in it is a peak.
+ * @brief Publishes one autocorrelation record per averaged group of windows, with the scatter and detection threshold.
  *
- * `kind` selects the instrument. `complex` estimates `R(tau) = E[x(t) x*(t - tau)]` on the samples as they arrive
- * and is coherent, so its phase at a known lag is a frequency estimate and a carrier offset leaves its magnitude
- * alone; `envelope` estimates the autocorrelation of the mean-removed `|x|^2` and is immune to oscillator phase
- * noise. They see different things: an OFDM cyclic prefix shows in both, a shaped linear modulation's symbol rate
- * only in the envelope, and a constant-modulus waveform has no envelope autocorrelation at all — such an input
- * publishes no record and is counted in `nDegenerate()` rather than emitting a curve of `0/0`.
+ * The record shows the lags at which a signal repeats. `kind` selects the estimator. `complex` estimates
+ * `R(tau) = E[x(t) x*(t - tau)]` on the input samples. It is coherent. Its phase at a known lag is a frequency
+ * estimate, and a carrier offset leaves its magnitude unchanged. `envelope` estimates the autocorrelation of the
+ * mean-removed `|x|^2`. It is immune to oscillator phase noise. The two kinds show different features. An OFDM
+ * cyclic prefix shows in both. A shaped linear modulation's symbol rate shows only in the envelope. A
+ * constant-modulus waveform has no envelope autocorrelation. Such an input publishes no record, and
+ * `nDegenerate()` counts it. The block does not emit a curve of `0/0`.
  *
  * `normalization` selects the divisor. `unbiased` divides lag `tau` by the taper's own autocorrelation `r_w(tau)`
- * and estimates `R(tau)` itself; `biased` divides every lag by `r_w(0)` and estimates `R(tau) r_w(tau)/r_w(0)`, a
- * triangularly-windowed correlation whose variance falls with the lag and which is positive-semidefinite. A height
- * compared against a closed form is a statement about `R(tau)` and therefore about `unbiased`, which is the default.
+ * and estimates `R(tau)`. `biased` divides every lag by `r_w(0)` and estimates `R(tau) r_w(tau)/r_w(0)`. That is a
+ * triangularly windowed correlation. Its variance falls with the lag, and it is positive-semidefinite. A height
+ * compared against a closed form refers to `R(tau)` and so to `unbiased`, the default.
  *
- * The record carries `signal_power`, `scatter`, `detection_threshold`, `false_alarm_rate` and `peak_threshold_db`,
- * which is the whole of what a consumer needs to decide whether a peak is a peak without reconstructing the
- * estimator's statistics. `peak_threshold_db` is that height expressed over the record's own median, which is
- * the form a median-referenced peak detector takes as its threshold; on a lag axis a detection's frequency
- * field is a lag in seconds, and a parabolic interpolation of it refines a period below the sample grid.
+ * The record carries `signal_power`, `scatter`, `detection_threshold`, `false_alarm_rate` and `peak_threshold_db`.
+ * With these a consumer can judge a peak without rebuilding the estimator's statistics. `peak_threshold_db` states
+ * the threshold height over the record's own median. A median-referenced peak detector takes its threshold in this
+ * form. On a lag axis the frequency field of a detection is a lag in seconds. A parabolic interpolation of it
+ * refines a period below the sample grid.
  *
- * Both geometry settings are in samples and the record's axis is in seconds, so a `sample_rate` tag moves the axis
- * without re-planning the transform. `window_length`, `max_lag`, `kind`, `normalization`, `overlap`, `window` and
- * `remove_mean` are staged-restart and refused while the graph runs; `n_averages`, `false_alarm_rate`,
- * `emit_phase`, `signal_name` and `sample_rate` are live. A `sample_rate` change discards the window in progress —
- * it straddles two rates and no single lag axis describes it — and flushes the accumulation so far as a short
- * record carrying its own averaged count, distinct-sample count, scatter and threshold, with the old rate on its
- * axis, so a short average is honest rather than misleading.
+ * Both geometry settings are in samples, and the record's axis is in seconds. A `sample_rate` tag moves the axis
+ * without re-planning the transform. `overlap` does not reduce the scatter. `window_length`, `max_lag`, `kind`,
+ * `normalization`, `overlap`, `window` and `remove_mean` are staged-restart settings, refused while the graph runs.
+ * `n_averages`, `false_alarm_rate`, `emit_phase`, `signal_name` and `sample_rate` are live. A `sample_rate` change
+ * discards the window in progress. That window spans two rates, and no single lag axis describes it. The change
+ * also flushes the accumulation as a short record with the old rate on its axis. The short record carries its own
+ * averaged count, distinct-sample count, scatter and threshold. A short average is then reported as short.
  */
 template<typename T>
 requires(std::is_same_v<T, float> || std::is_same_v<T, std::complex<float>>)
 struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
-    using Description = Doc<"Windowed averaged autocorrelation: one DataSet record of |R(tau)|/R(0) over lags 0..max_lag per n_averages windows, with the scatter and the detection threshold the record is read against. kind selects the complex or the mean-removed envelope instrument; a constant-modulus input publishes no record and is counted degenerate. window_length, max_lag, kind, normalization, overlap, window and remove_mean are staged-restart; n_averages, false_alarm_rate, emit_phase, signal_name and sample_rate are live">;
+    using Description = Doc<"Computes a windowed, averaged autocorrelation. Each DataSet record holds |R(tau)|/R(0) over lags 0..max_lag from n_averages windows, with its scatter and detection threshold. kind selects the complex or the mean-removed envelope estimator. A constant-modulus input publishes no record and is counted as degenerate. window_length, max_lag, kind, normalization, overlap, window and remove_mean are staged-restart settings. n_averages, false_alarm_rate, emit_phase, signal_name and sample_rate are live.">;
     using Real        = float;
 
     PortIn<T>                               in;
     PortOut<DataSet<Real>, Async>           out;   ///< `|R(tau)|/R(0)` over lags 0..max_lag
     PortOut<DataSet<Real>, Async, Optional> phase; ///< `arg R(tau)`, fed only when `emit_phase` and `kind` is complex
 
-    Annotated<gr::Size_t, "window_length", Visible, Doc<"samples per window, in [16, 1048576]; staged-restart">>                          window_length    = 4096U;
-    Annotated<gr::Size_t, "max_lag", Visible, Doc<"longest published lag in samples, below window_length; staged-restart">>               max_lag          = 1024U;
+    Annotated<gr::Size_t, "window_length", Visible, Doc<"samples per window in [16, 1048576], staged-restart">>                           window_length    = 4096U;
+    Annotated<gr::Size_t, "max_lag", Visible, Doc<"longest published lag in samples, below window_length, staged-restart">>               max_lag          = 1024U;
     Annotated<std::string, "kind", Visible, Doc<"complex (the samples themselves) or envelope (the mean-removed |x|^2)">>                 kind             = std::string("envelope");
     Annotated<std::string, "normalization", Visible, Doc<"unbiased (divide lag tau by r_w(tau)) or biased (divide every lag by r_w(0))">> normalization    = std::string("unbiased");
     Annotated<gr::Size_t, "n_averages", Visible, Doc<"windows per emitted record">>                                                       n_averages       = 16U;
-    Annotated<double, "overlap", Visible, Doc<"fraction of a window shared with the next, in [0, 1); it does not reduce the scatter">>    overlap          = 0.5;
-    Annotated<bool, "remove_mean", Visible, Doc<"remove each window's own mean before correlating; staged-restart">>                      remove_mean      = true;
+    Annotated<double, "overlap", Visible, Doc<"fraction of a window shared with the next, in [0, 1)">>                                    overlap          = 0.5;
+    Annotated<bool, "remove_mean", Visible, Doc<"remove each window's own mean before correlating, staged-restart">>                      remove_mean      = true;
     Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                      window           = std::string("Rectangular");
     Annotated<double, "false_alarm_rate", Visible, Doc<"probability per record that noise alone puts a lag over the threshold">>          false_alarm_rate = 1e-3;
-    Annotated<bool, "emit_phase", Visible, Doc<"publish arg R(tau) on the phase port; complex kind only">>                                emit_phase       = false;
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate, which sets the record's lag axis">>                      sample_rate      = 1.f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name; the phase record appends _phase">>                       signal_name      = std::string("acf");
+    Annotated<bool, "emit_phase", Visible, Doc<"publish arg R(tau) on the phase port, complex kind only">>                                emit_phase       = false;
+    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate setting the lag axis scale">>                             sample_rate      = 1.f;
+    Annotated<std::string, "signal_name", Doc<"signal name of the emitted record, with _phase for the phase record">>                     signal_name      = std::string("acf");
 
     GR_MAKE_REFLECTABLE(Autocorrelation, in, out, phase, window_length, max_lag, kind, normalization, n_averages, overlap, remove_mean, window, false_alarm_rate, emit_phase, sample_rate, signal_name);
 
     gr::analysis::Autocorrelation<T> _kernel{};
-    std::vector<T>                   _pending{}; ///< the undecided tail: samples taken but not yet covered by a whole window
+    std::vector<T>                   _pending{}; ///< samples taken and not yet covered by a whole window
     gr::analysis::AcfConfig          _built{};   ///< the configuration the kernel currently holds
     bool                             _configured = false;
     bool                             _running    = false;
@@ -162,8 +162,8 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { applySettings(); }
 
-    /// @brief Derives the kernel from the members. Idempotent, so `start()` runs it for a construction that moved
-    /// no value and therefore called back nowhere.
+    /// @brief Derives the kernel from the members. It is idempotent. `start()` also runs it, because a construction
+    /// that changes no value calls no settingsChanged().
     void applySettings() {
         detail::requireAcfWindowLength(window_length);
         detail::requireAcfLag(max_lag, window_length);
@@ -182,9 +182,9 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
         }
         const auto windowType = detail::requireWindow(window.value);
 
-        // A tagged rate the estimator cannot put on an axis leaves the previous rate standing and is counted, because
-        // a stream tag is a statement about the stream and not a request a graph can be stopped over; the same value
-        // arriving as a settings change on a stopped block is refused by name.
+        // A tagged rate that cannot scale an axis leaves the previous rate in force and is counted. A stream tag
+        // describes the stream, and the block does not stop a graph over it. The same value in a settings change on a
+        // stopped block is refused by name.
         if (!(sample_rate.value > 0.f) || !std::isfinite(sample_rate.value)) {
             if (_running) {
                 _nRateRefused.fetch_add(1ULL, std::memory_order_relaxed);
@@ -194,8 +194,8 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
             }
         }
 
-        // A staged-restart key is refused on the value it would move to and not on its mere presence: the framework
-        // re-applies a block's whole settings map, so refusing the key would refuse every apply after the first.
+        // A staged-restart key is refused on the value it would change to, not on its presence. The framework
+        // re-applies a block's whole settings map. Refusing the key itself would refuse every apply after the first.
         if (_running && _configured) {
             const auto refuse = [](bool moved, std::string_view key) {
                 if (moved) {
@@ -241,7 +241,7 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
     }
 
     void start() {
-        if (!_configured) { // a construction whose values all matched the defaults called back nowhere
+        if (!_configured) { // a construction that matched every default called no settingsChanged()
             applySettings();
         }
         _kernel.reset();
@@ -256,9 +256,9 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
         _nWindowResets.store(0ULL, std::memory_order_relaxed);
         _nRateRefused.store(0ULL, std::memory_order_relaxed);
         _nTailDropped.store(0ULL, std::memory_order_relaxed);
-        // The framework runs `processEpilogue` only over a non-empty trailing span, and that epilogue is what flushes
-        // a partial accumulation at end of stream. `processBulk` therefore always leaves one sample unconsumed, and
-        // asking for two keeps that from stalling the steady state.
+        // The framework runs `processEpilogue` only over a non-empty trailing span. That epilogue flushes a partial
+        // accumulation at end of stream. `processBulk` leaves one sample unconsumed on every call. Asking for two
+        // samples keeps that from stalling the steady state.
         in.min_samples = 2UZ;
     }
 
@@ -308,8 +308,8 @@ struct Autocorrelation : Block<Autocorrelation<T>, NoTagPropagation> {
         return work::Status::OK;
     }
 
-    /// @brief End of stream: fold the trailing samples, then emit the accumulation in progress marked with the window
-    /// count that actually reached it. The framework consumes the trailing span itself.
+    /// @brief At end of stream, folds in the trailing samples and emits the accumulation in progress. The record
+    /// states the window count that reached it. The framework consumes the trailing span itself.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& phaseSpan) {
         detail::AcfProgress progress = fold(inSpan, inSpan.size(), outSpan, phaseSpan);
         if (!_flushed && _kernel.windowsPending() > 0UZ && progress.made < outSpan.size()) {
@@ -331,9 +331,9 @@ private:
         }
         const std::size_t length = _built.windowLength;
 
-        // The rate under the stream has moved: the window in progress straddles two rates and no single lag axis
-        // describes it, so it goes; the accumulation is published as the short record it honestly is, on the old
-        // axis, and the next window starts at the sample the tag arrived on.
+        // The stream's rate has changed. The window in progress spans two rates, and no single lag axis describes
+        // it. The block discards it. The accumulation is published as a short record on the old axis. The next window
+        // starts at the sample the tag arrived on.
         if (_rateMoved) {
             if (_kernel.windowsPending() > 0UZ && progress.made >= outSpan.size()) {
                 progress.outputFull = true; // the short record has nowhere to go yet, so the change waits for room
@@ -342,8 +342,8 @@ private:
             _rateMoved                    = false;
             const std::uint64_t restartAt = _kernel.streamAt() + static_cast<std::uint64_t>(_pending.size());
             if (!_pending.empty()) {
-                // only a window that had samples in it is discarded; a rate arriving on a window boundary, the
-                // stream's own first sample included, disturbs nothing and is counted as nothing
+                // Only a window with samples in it is discarded and counted. A rate arriving on a window boundary,
+                // the stream's first sample included, changes nothing and counts nothing.
                 _nWindowResets.fetch_add(1ULL, std::memory_order_relaxed);
             }
             _pending.clear();
@@ -405,15 +405,15 @@ private:
             {std::pmr::string("window"), pmt::Value(window.value)},
             {std::pmr::string("n_averaged"), pmt::Value(static_cast<std::uint64_t>(result.nAveraged))},
             {std::pmr::string("n_samples"), pmt::Value(static_cast<std::uint64_t>(result.nDistinctSamples))},
-            // the independent sample products behind the worst published lag, which is what the scatter and the
-            // threshold are computed from and what a consumer recomputes them from
+            // the independent sample products behind the worst published lag, from which the block computes the
+            // scatter and the threshold and a consumer can recompute them
             {std::pmr::string("n_pairs"), pmt::Value(static_cast<std::uint64_t>(result.nPairs))},
             {std::pmr::string("mean_removed"), pmt::Value(_built.removeMean)},
-            // the envelope kind squares magnitudes and the complex kind of a real input correlates real samples, so
-            // in both the estimate is real and its tail is folded normal rather than Rayleigh; the two thresholds
-            // below are computed for whichever tail this record's estimate actually has
+            // The envelope kind squares magnitudes, and the complex kind of a real input correlates real samples. In
+            // both cases the estimate is real, and its tail is folded normal, not Rayleigh. The two thresholds below
+            // are computed for the tail this record's estimate has.
             {std::pmr::string("real_valued"), pmt::Value(result.realValued)},
-            // R(0) before normalization: the published ratio throws the scale away and this is where it is kept
+            // R(0) before normalization, which keeps the scale the published ratio drops
             {std::pmr::string("signal_power"), pmt::Value(static_cast<float>(result.power))},
             {std::pmr::string("scatter"), pmt::Value(result.scatter)},
             {std::pmr::string("detection_threshold"), pmt::Value(result.threshold)},
