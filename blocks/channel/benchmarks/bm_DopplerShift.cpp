@@ -21,13 +21,13 @@ constexpr float       kSampleRate     = 1.0e6f;
 constexpr double      kOffsetHz       = 1.0e3;
 constexpr double      kDriftHzPerS    = 50.0;
 
-/// Built in place: a block carrying a measurement slot is not movable, so it lives behind a pointer.
+/// Built in place. A block with a measurement slot is not movable and lives behind a pointer.
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> make(gr::property_map settings) {
     auto block = std::make_unique<TBlock>(std::move(settings));
     block->settings().init();
     std::ignore = block->settings().applyStagedParameters();
-    if constexpr (requires { block->start(); }) { // FrequencyOffset has no start(); DopplerShift takes its origin there
+    if constexpr (requires { block->start(); }) { // DopplerShift takes its origin in start(), and FrequencyOffset has none
         block->start();
     }
     return block;
@@ -45,8 +45,8 @@ template<typename TBlock>
     return data;
 }
 
-/// A ten-minute pass shape at @p knots knots: the same curve however finely it is tabulated, which is what makes the
-/// per-sample cost against the table size a fair comparison.
+/// A ten-minute pass shape at @p knots knots. The curve is the same at every table size. The per-sample cost can
+/// then be compared across table sizes.
 [[nodiscard]] gr::property_map schedule(std::size_t knots) {
     std::vector<std::int64_t> times(knots);
     std::vector<double>       offsets(knots);

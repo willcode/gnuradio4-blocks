@@ -45,9 +45,9 @@ template<typename TBlock>
 
 /// @brief Instantaneous frequency in Hz over a window of @p width steps centered on sample @p center.
 ///
-/// The window is symmetric, and a linear frequency ramp puts its phase steps symmetrically about the step at the
-/// center, so the argument of the vector sum is that center step exactly rather than approximately. What the estimate
-/// measures is therefore the phasor's own error, which is the resolution the criterion is stated to.
+/// The window is symmetric. A linear frequency ramp puts its phase steps symmetrically about the center step. The
+/// argument of the vector sum is then that center step exactly. The estimate therefore measures the phasor's own
+/// error, the resolution of the criterion.
 [[nodiscard]] double instantaneousFrequency(std::span<const C> x, std::size_t centre, std::size_t width, double fs) {
     const std::size_t    first = centre - width / 2UZ;
     std::complex<double> accumulated{0., 0.};
@@ -70,12 +70,12 @@ template<typename TBlock>
 [[nodiscard]] std::vector<C> ones(std::size_t n) { return std::vector<C>(n, C(1.f, 0.f)); }
 
 /**
- * @brief The rehearsal profile: a ten-minute LEO pass at 437 MHz, three knots per minute.
+ * @brief The rehearsal profile, a ten-minute LEO pass at 437 MHz with three knots per minute.
  *
- * The shape is the S-curve a pass has — high and nearly flat while the satellite closes, steep through the point of
- * closest approach, low and flat again as it recedes — written as `-A*tanh((t - T/2)/tau)` with `A` = 10 kHz and
- * `tau` = 60 s, so the ends sit within a hertz of `+/-A` and the slope through the center is `A/tau` = 167 Hz/s.
- * The sign is the convention `gr::timing::offsetFor` pins: closing reads high.
+ * A pass has an S-curve shape. The offset is high and nearly flat while the satellite closes, steep through closest
+ * approach, and low and flat as it recedes. The curve is `-A*tanh((t - T/2)/tau)` with `A` = 10 kHz and `tau` =
+ * 60 s. The ends sit within a hertz of `+/-A`. The slope through the center is `A/tau` = 167 Hz/s. The sign follows
+ * the convention `gr::timing::offsetFor` pins, where closing reads high.
  */
 struct Pass {
     std::vector<std::int64_t> times{};
@@ -145,7 +145,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         }
         std::println("[doppler] criterion 1: worst discriminator disagreement {:.3e} Hz over a {} sample window at {} Hz", worst, kWindow, fs);
 
-        // the knots themselves, read through the block's own observable rather than through the discriminator
+        // the knots themselves, read through the block's own observable and not the discriminator
         auto atStart = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}});
         expect(that % (atStart->currentOffsetHz() == kStart)) << "at the first knot the first value, exactly";
         expect(atStart->schedulePosition() == SchedulePosition::Inside);
@@ -183,7 +183,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
             worst = std::max(worst, static_cast<double>(std::abs(restored[k] - input[k])));
         }
         std::println("[doppler] criterion 3: worst round-trip error {:.3e} on unit-magnitude samples over {} samples", worst, nSamples);
-        // two float phasor multiplies plus a float cos/sin each: the bound is a few ULP of one, not of the run
+        // two float phasor multiplies plus one float cos/sin each. The bound is a few ULP of one, not of the run.
         expect(lt(worst, 4e-6)) << std::format("worst {:.3e}", worst);
     };
 
@@ -247,9 +247,9 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         const gr::property_map table{{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}};
         const auto             input = ones(nSamples);
 
-        // What the owning thread reports at the sample the reader is held on, and at the end of the stream, taken from
-        // a block of the same table driven straight through: the cross-thread reads are then compared against the same
-        // arithmetic arrived at on one thread rather than against themselves.
+        // A block of the same table, driven straight through on one thread, gives the reference values. They are the
+        // values at the sample the reader is held on and at the end of the stream. The cross-thread reads are
+        // compared against that reference, not against themselves.
         auto alone          = configured<DopplerShift<C>>(table);
         std::ignore         = runChunked(*alone, std::span<const C>(input).first(kHalf * kChunk), kChunk);
         const double atHalf = alone->currentOffsetHz();
@@ -272,8 +272,8 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
                 std::ignore = block->processBulk(std::span<const C>(input.data() + k * kChunk, kChunk), std::span<C>(output.data() + k * kChunk, kChunk));
                 produced.store(k + 1UZ, std::memory_order_release);
                 while (k + 1UZ == kHalf && !looked.load(std::memory_order_acquire)) {
-                    // one look is held open on a stream in motion, so the pinned comparison below is against a block
-                    // that is running rather than against whatever the last call left behind
+                    // One look is held open on a moving stream. The comparison below is then against a running
+                    // block, not against the state the last call left.
                 }
             }
             finished.store(true, std::memory_order_release);
@@ -356,12 +356,12 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         }
     };
 
-    // The satellite gate, in miniature: a ten-minute pass applied and corrected around a modem
+    // A ten-minute pass applied and corrected around a modem
     "a corrected pass decodes at the same error rate as no pass at all"_test = [] {
         constexpr double      fs       = 21'000.; // above 2*10 kHz, so the pass's peak is a shift and not an alias
         constexpr std::size_t kSeconds = 600UZ;
         constexpr std::size_t kChunk   = 65'536UZ;
-        constexpr double      kNoise   = 0.35; // total complex noise power; BPSK at unit energy reads about 1e-2
+        constexpr double      kNoise   = 0.35; // total complex noise power, at which BPSK of unit energy reads about 1e-2
         const std::size_t     kSymbols = static_cast<std::size_t>(fs) * kSeconds;
 
         const Pass                              pass          = leoPass(static_cast<double>(kSeconds));
@@ -406,9 +406,9 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         const double clean    = measure(false);
         const double elapsed  = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 
-        // The correction rotates the noise as well as the signal, so the two runs see the same noise distribution but
-        // not the same realization; the agreement is statistical and its own bound is the counting error. At this rate
-        // over this many symbols one standard deviation is sqrt(N*p)/N, about 2.8e-5 in the rate.
+        // The correction rotates the noise as well as the signal. The two runs see the same noise distribution but
+        // not the same realization. The agreement is statistical, and its bound is the counting error. At this rate
+        // over this many symbols, one standard deviation is sqrt(N*p)/N, about 2.8e-5 in the rate.
         const double sigma = std::sqrt(clean * static_cast<double>(kSymbols)) / static_cast<double>(kSymbols);
         std::println("[doppler] criterion 6: {} symbols over a {} s pass at {} Hz — BER {:.6f} corrected against {:.6f} with no pass, difference {:.2e}, one sigma {:.2e}, {:.2f} s", kSymbols, kSeconds, fs, withPass, clean, withPass - clean, sigma, elapsed);
         expect(gt(clean, 1e-3)) << "the reference run must actually be making errors for the comparison to mean anything";

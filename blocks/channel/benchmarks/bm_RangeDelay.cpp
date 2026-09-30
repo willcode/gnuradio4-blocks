@@ -20,8 +20,8 @@ constexpr std::size_t kSamplesPerCall = 65536UZ;
 constexpr std::size_t kRepeats        = 9UZ;
 constexpr float       kSampleRate     = 1.0e6f;
 
-/// A hundred samples of delay moving to a hundred and fifty over a second, which is a range rate no orbit
-/// reaches and therefore an upper bound on how hard the schedule walk is ever driven.
+/// A hundred samples of delay moving to a hundred and fifty over one second. No orbit reaches that range rate.
+/// It bounds how hard the schedule walk is driven.
 const std::vector<std::int64_t> kTimes{0LL, 1'000'000'000LL};
 const std::vector<double>       kDelays{1.0e-4, 1.5e-4};
 
@@ -57,8 +57,8 @@ int main() {
     auto cubic   = make(32UZ, 3);
     auto wide    = make(128UZ, 1);
 
-    // The schedule walk and the one conversion that makes its seconds into fixed-point samples, with no
-    // interpolation behind them: the share of the per-sample cost that is not the bank.
+    // The schedule walk and the conversion of its seconds to fixed-point samples, without interpolation. This is
+    // the share of the per-sample cost outside the bank.
     const gr::timing::DelaySchedule schedule{std::span<const std::int64_t>(kTimes), std::span<const double>(kDelays)};
     const gr::timing::SampleClock   clock = gr::timing::clockForRateHz(static_cast<double>(kSampleRate), 0ULL, 0LL);
     std::vector<double>             seconds(kSamplesPerCall);
