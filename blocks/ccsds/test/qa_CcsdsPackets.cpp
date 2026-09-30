@@ -116,10 +116,10 @@ struct Tally {
         block.pointer_mismatch, block.bad_pointer, block.orphan_octets, block.oversize_dropped, block.nWrongChannel, block.nMissingKey, block.nSyncFlagSet};
 }
 
-/// One hand-built zone as extractor input: the pointer, frame count and channel it would have arrived with.
+/// One hand-built zone as extractor input, with the pointer, frame count and channel it would have arrived with.
 [[nodiscard]] Record zoneRecord(std::vector<std::uint8_t> octets, gr::Size_t fhp, gr::Size_t count = 0U, gr::Size_t vcid = 0U) { return recordOf(std::move(octets), {{"ccsds_first_header_pointer", fhp}, {"ccsds_vc_frame_count", count}, {"ccsds_vcid", vcid}}); }
 
-/// Turn segmented zones into extractor input: the pointer the segmenter computed, a continuous frame count, one channel.
+/// Turns segmented zones into extractor input with the segmenter's pointer, a continuous frame count and one channel.
 [[nodiscard]] std::vector<Record> zonesForExtraction(std::span<const Record> zones, gr::Size_t vcid = 0U) {
     std::vector<Record> out;
     out.reserve(zones.size());
@@ -130,8 +130,8 @@ struct Tally {
     return out;
 }
 
-/// Segment @p lengths' worth of packets at @p zoneLength and extract them again, with one trailing packet sized so the
-/// last zone comes out full: nothing is left in the segmenter, so the round trip is asserted over every packet sent.
+/// Segments @p lengths' worth of packets at @p zoneLength and extracts them again. One trailing packet is sized to fill
+/// the last zone. Nothing is left in the segmenter, and the round trip covers every packet sent.
 struct RoundTrip {
     std::vector<std::vector<std::uint8_t>> sent{};
     std::vector<Record>                    zones{};
@@ -201,7 +201,7 @@ struct RecordSink : gr::Block<RecordSink> {
     }
 };
 
-/// Source, segmenter, sink under the scheduler; the zones the sink collected come back.
+/// Runs source, segmenter and sink under the scheduler and returns the zones the sink collected.
 [[nodiscard]] std::vector<Record> segmentUnderScheduler(std::span<const std::vector<std::uint8_t>> packets, gr::Size_t zoneLength, bool flush) {
     gr::Graph flow;
     auto&     source  = flow.emplaceBlock<RecordSource>();
@@ -232,7 +232,7 @@ struct RecordSink : gr::Block<RecordSink> {
     return sink._records;
 }
 
-/// Every zone's octets laid end to end, which is what the receiver's virtual channel carries.
+/// Every zone's octets laid end to end, as the receiver's virtual channel carries them.
 [[nodiscard]] std::vector<std::uint8_t> concatenated(std::span<const Record> zones) {
     std::vector<std::uint8_t> all;
     for (const Record& zone : zones) {
@@ -299,8 +299,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         const std::vector<std::uint8_t> zone2(stream.begin() + 100, stream.begin() + 150);
         const std::vector<std::uint8_t> zone3(stream.begin() + 150, stream.begin() + 200);
         const std::vector<std::uint8_t> zone4(stream.begin() + 200, stream.end());
-        // zone1 [50,100) is lost with its frame count. firstPacket ends at 136, so zone2's first packet start is at
-        // 136 - 100 = 36; secondPacket ends at 162, so zone3's is at 162 - 150 = 12; thirdPacket ends the stream, so
+        // zone1 [50,100) is lost with its frame count. firstPacket ends at 136, and zone2's first packet start is at
+        // 136 - 100 = 36. secondPacket ends at 162, and zone3's is at 162 - 150 = 12. thirdPacket ends the stream.
         // zone4 starts inside it and carries the reserved "no packet starts here".
         constexpr std::uint16_t kZone2Fhp = 36U;
         constexpr std::uint16_t kZone3Fhp = 12U;
@@ -322,8 +322,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             }
         }
 
-        // The surveyed behavior: lay the surviving zones end to end and split them by the declared lengths alone. The
-        // pointer is what the arms differ by, so this arm gets the same octets and none of the pointers.
+        // The surveyed behavior lays the surviving zones end to end and splits them by the declared lengths alone.
+        // The arms differ by the pointer, and this arm gets the same octets and none of the pointers.
         std::vector<std::vector<std::uint8_t>> naive;
         {
             std::vector<std::uint8_t> buffer;
@@ -352,8 +352,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
     };
 
     "criterion 3: the minus-one's second half, through the blocks"_test = [] {
-        // Three packets built with the surveyed convention, data_length = payload_octets: 106 octets on the wire, each
-        // claiming 107. Header octets for APID 100, unsegmented, count 0: 00 64 C0 00 00 64.
+        // Three packets built with the surveyed convention data_length = payload_octets. Each is 106 octets on the
+        // wire and claims 107. The header octets for APID 100, unsegmented, count 0 are 00 64 C0 00 00 64.
         const auto wrongPacket = [] {
             const std::array<std::uint8_t, 6UZ> header{0x00U, 0x64U, 0xC0U, 0x00U, 0x00U, 0x64U};
             std::vector<std::uint8_t>           packet(106UZ, 0xAAU);
@@ -362,7 +362,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         };
         const auto rightPacket = [](std::uint16_t sequence) { return packetOf(106UZ, 100U, sequence); };
 
-        { // §4.5: the record is one octet short of what its own header claims, so it is refused and not trimmed
+        { // the record is one octet short of what its own header claims, and §4.5 refuses it without trimming
             auto                      decode = make<SpacePacketDecode>({});
             const std::vector<Record> in{recordOf(wrongPacket()), recordOf(wrongPacket()), recordOf(wrongPacket())};
             const std::vector<Record> out = drive1(decode, in);
@@ -370,8 +370,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             expect(eq(decode.nLengthMismatch, std::uint64_t{3}));
             expect(eq(decode.nPackets, std::uint64_t{0}));
         }
-        { // the same three laid end to end in one zone: the first "packet" eats the second's first octet and the walk
-            // never finds a boundary again, so one wrong record comes out where three right ones should have
+        { // the same three laid end to end in one zone. The first "packet" takes in the second's first octet, and
+            // the walk does not find a boundary again. One wrong record comes out where three right ones should.
             std::vector<std::uint8_t> zone;
             for (int i = 0; i < 3; ++i) {
                 const std::vector<std::uint8_t> packet = wrongPacket();
@@ -388,7 +388,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             expect(eq(extract.packets, std::uint64_t{1}));
             expect(!extract._extractor.fragment().empty()) << "the rest of the zone is a fragment against a length read out of a payload";
         }
-        { // the same scene with the convention right: three packets in, three packets out, byte for byte
+        { // the same scene with the convention right, three packets in and three packets out, byte for byte
             std::vector<std::uint8_t> zone;
             for (std::uint16_t i = 0U; i < 3U; ++i) {
                 const std::vector<std::uint8_t> packet = rightPacket(i);
@@ -423,7 +423,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         // the pad is the 4.1.4.6.2 sequence from its start, whose first ten octets 132.0-B-3 publishes
         expect(that % (std::vector<std::uint8_t>(zones[1].signal_values.begin() + 10, zones[1].signal_values.end()) == std::vector<std::uint8_t>{0xFFU, 0xFFU, 0xFFU, 0xFFU, 0x6DU, 0xB6U, 0xD8U, 0x61U, 0x45U, 0x1FU}));
 
-        // and the label is the one that gets the packet back: 2046 would have the receiver discard the zone as fill
+        // and the label is the one that gets the packet back. 2046 would make the receiver discard the zone as fill.
         auto                      extract = make<SpacePacketExtract>({{"virtual_channel", gr::Size_t{0}}});
         const std::vector<Record> out     = drive1(extract, zonesForExtraction(zones));
         expect(eq(out.size(), 1UZ));
@@ -484,8 +484,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
     };
 
     "SpacePacketSegment: configuration refusals"_test = [] {
-        // one unrelated setting is staged in each case, because a block staged with nothing at all reaches its
-        // configuration check at start() rather than here
+        // one unrelated setting is staged in each case. A block staged with nothing at all reaches its
+        // configuration check at start(), not here.
         expect(throws([] { std::ignore = make<SpacePacketSegment>({{"fill", std::string("idle_packet")}}); })) << "zone_length is required";
         expect(throws([] { std::ignore = make<SpacePacketSegment>({{"zone_length", gr::Size_t{2047}}}); })) << "a zone the pointer cannot address is refused";
         expect(nothrow([] { std::ignore = make<SpacePacketSegment>({{"zone_length", gr::Size_t{2046}}}); })) << "2046 is the longest addressable zone";
@@ -530,8 +530,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             expect(eq(segment._buffer.size(), 55UZ)) << "shortening the zone does not throw the packets away";
 
             const std::vector<Record> zones = drive1(segment, std::span<const Record>{}, 8UZ);
-            // the second packet begins at octet 25, which is octet 5 of the third zone of ten; the zones before
-            // and after it carry no start and say so with the reserved value
+            // the second packet begins at octet 25, octet 5 of the third zone of ten. The zones before and after
+            // it carry no start and mark that with the reserved value.
             expect(eq(zones.size(), 5UZ)) << "fifty-five octets are five whole zones of ten and a five-octet remainder";
             const std::array<gr::Size_t, 5> expectedPointers{gr::Size_t{0}, gr::Size_t{kFhpNoPacketStart}, gr::Size_t{5}, gr::Size_t{kFhpNoPacketStart}, gr::Size_t{kFhpNoPacketStart}};
             for (std::size_t i = 0UZ; i < zones.size() && i < expectedPointers.size(); ++i) {
@@ -596,8 +596,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
     };
 
     "SpacePacketSegment: the end of the stream sends the last zone"_test = [] {
-        // five packets of thirty octets are 150, which is three whole zones of forty and a thirty-octet
-        // remainder: the run that flushes emits four zones, the run that does not emits three
+        // five packets of thirty octets are 150, three whole zones of forty and a thirty-octet remainder. The
+        // run that flushes emits four zones, and the run that does not emits three.
         std::vector<std::vector<std::uint8_t>> packets;
         std::vector<std::uint8_t>              sent;
         for (std::uint16_t i = 0U; i < 5U; ++i) {
@@ -615,8 +615,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             for (const Record& zone : flushed) {
                 expect(eq(zone.signal_values.size(), 40UZ));
             }
-            // the starts sit at 0, 30, 60, 90 and 120, so the zone boundaries at 40, 80 and 120 put the first
-            // start of each zone at 0, 20, 10 and 0
+            // the starts sit at 0, 30, 60, 90 and 120. The zone boundaries at 40, 80 and 120 put the first start
+            // of each zone at 0, 20, 10 and 0.
             const std::array<gr::Size_t, 4> expectedPointers{gr::Size_t{0}, gr::Size_t{20}, gr::Size_t{10}, gr::Size_t{0}};
             for (std::size_t i = 0UZ; i < 4UZ; ++i) {
                 expect(eq(metaSize(flushed[i], "ccsds_first_header_pointer"), expectedPointers[i])) << "zone " << i;
@@ -789,7 +789,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             zone.insert(zone.end(), packet.begin(), packet.end());
         }
         const std::vector<std::uint8_t> spilling = packetOf(40UZ, 50U, 5U);
-        zone.insert(zone.end(), spilling.begin(), spilling.begin() + 10); // a sixth packet's head, whose rest never arrives
+        zone.insert(zone.end(), spilling.begin(), spilling.begin() + 10); // a sixth packet's head, whose rest does not arrive
 
         const std::vector<Record> in{zoneRecord(zone, 0U)};
         const std::vector<Record> out = drive1(extract, in, 2UZ); // room for two of the five packets
@@ -862,8 +862,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
     "criterion 20: a gap the zone does not resolve rides the next packet"_test = [] {
         auto extract = make<SpacePacketExtract>({{"virtual_channel", gr::Size_t{0}}});
 
-        // A packet spanning three zones, with the frame between the first two lost: the zone that detects the gap is a
-        // pure continuation and completes nothing, so there is no record in it to carry the cause.
+        // A packet spans three zones, and the frame between the first two is lost. The zone that detects the gap is a
+        // pure continuation and completes nothing. No record in it can carry the cause.
         const std::vector<std::uint8_t> spanning = packetOf(60UZ, 80U, 0U);
         const std::vector<std::uint8_t> behind   = packetOf(20UZ, 80U, 1U);
 
@@ -926,8 +926,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             expect(!metaHas(decoded[0], "sequence"));
         }
 
-        // SpacePacketSegment builds its zones from the octets of many records and carries none of their keys: a zone is
-        // not any one packet's record, and a spanning packet would otherwise leave its keys on an arbitrary zone.
+        // SpacePacketSegment builds its zones from the octets of many records and carries none of their keys. A zone is
+        // not any one packet's record. A spanning packet would otherwise leave its keys on an arbitrary zone.
         auto                      segment = make<SpacePacketSegment>({{"zone_length", gr::Size_t{20}}});
         const std::vector<Record> segmentIn{recordOf(std::vector<std::uint8_t>(20UZ, 1U), meta), recordOf(std::vector<std::uint8_t>(20UZ, 2U), meta)};
         const std::vector<Record> zones = drive1(segment, segmentIn);

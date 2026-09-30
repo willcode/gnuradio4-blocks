@@ -23,21 +23,23 @@
 #include <gnuradio-4.0/ccsds/RecordHelpers.hpp>
 
 /**
- * @brief `TimeCodeDecode` and `TimeCodeEncode`, thin adapters over `gr::ccsds`'s time-code kernel, CCSDS 301.0-B-4.
+ * @brief `TimeCodeDecode` and `TimeCodeEncode`, thin blocks over the time-code kernel of `gr::ccsds`, CCSDS 301.0-B-4.
  *
- * Each is a 1:1 record adapter that calls one kernel function and writes one carrier field. The decoded instant
- * goes to `DataSet<T>::timestamp`, the carrier's own `std::int64_t` field, and nowhere else: a `timestamp`
- * metadata key would be a second spelling for a fact the carrier already holds, typed and reflected, with no
- * rule for which wins. Four producer-private keys carry provenance — which code, which time scale, and the
- * resolution and leap-second facts that did not fit in the field — and no vocabulary key is written by either
- * block.
+ * Each is a 1:1 record block that calls one kernel function and writes one carrier field. The decoded instant goes
+ * to `DataSet<T>::timestamp`, the carrier's own `std::int64_t` field, and nowhere else. The field is typed and
+ * reflected. A `timestamp` metadata key would state the same fact a second time, with no rule for which one wins.
+ * Four producer-private keys carry provenance. They name the code and the time scale, and they hold the resolution
+ * and leap-second facts that the field cannot hold. Neither block writes a vocabulary key.
+ *
+ * `epoch` applies to CUC and CDS alone and is refused for CCS and ASCII. `epoch_ns` is required when `epoch` is
+ * 'custom' and refused otherwise. `tai_utc_offset_s` applies to CUC alone and is refused for CDS, CCS and ASCII.
  */
 namespace gr::blocks::ccsds {
 
 namespace time_detail {
 
-/// @brief "No epoch was given", chosen outside the axis so that `0` stays a legal custom epoch: it is
-/// the Unix epoch itself, and a setting that reads it as absence is a setting one instant cannot say.
+/// @brief The value for "no epoch was given". It lies outside the axis, and `0` stays a legal custom epoch.
+/// `0` is the Unix epoch itself. A setting that read it as absence could not name that instant.
 inline constexpr std::int64_t kNoEpoch = std::numeric_limits<std::int64_t>::min();
 
 /// @brief The name a synthesized signal takes where the input names none.
@@ -115,40 +117,40 @@ struct LayoutSettings {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::TimeCodeDecode)
 
 /*!
-@brief Reads a CCSDS time code out of the record's payload at a stated offset and writes it to `timestamp`.
+@brief Reads a CCSDS time code from the record's payload at a stated offset and writes it to `timestamp`.
 
-Payload, not metadata: 133.0-B-2 4.1.4.2.1.5 puts the Time Code Field first in a packet secondary header, so it
-sits at a fixed offset in the record `SpacePacketDecode` publishes, and a metadata map is not a carrier for a
-variable-length octet string. `require_time = false` (the default) publishes every record regardless of whether
-its code decoded, leaving `timestamp` untouched on a failure and counting which named fault it was — one counter
-for each refusal the kernel can state, plus a record too short to hold the code and a wire P-field that
-contradicts the settings.
+The block reads the code from the payload, not from metadata. 133.0-B-2 4.1.4.2.1.5 puts the Time Code Field first
+in a packet secondary header. The code therefore sits at a fixed offset in the record `SpacePacketDecode` publishes.
+A metadata map does not carry a variable-length octet string. With `require_time = false`, the default, the block
+publishes every record whether or not its code decoded. On a failure it leaves `timestamp` untouched and counts the
+named fault. There is one counter for each refusal the kernel can state. Two more count a record too short to hold
+the code and a wire P-field that contradicts the settings. With `require_time` set, the block drops such a record.
 
-Every length is known before the kernel is called, so a record short of `offset + p_field + t_field` is
-`nShortRecord` and never reaches a conversion; `nShortField` remains for the kernel's own `short_field`, which
-that check leaves unreachable from here.
+Every length is known before the kernel is called. A record shorter than `offset + p_field + t_field` counts in
+`nShortRecord` and never reaches a conversion. `nShortField` remains for the kernel's own `short_field`, which that
+check leaves unreachable from here.
 */
 struct TimeCodeDecode : Block<TimeCodeDecode> {
-    using Description = Doc<"Reads a CCSDS time code from the payload at a stated offset into DataSet::timestamp, never into metadata (CCSDS 301.0-B-4)">;
+    using Description = Doc<"Reads a CCSDS time code from the payload at a stated offset and writes the instant to DataSet::timestamp alone (CCSDS 301.0-B-4)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "code", Doc<"'cuc', 'cds', 'ccs', 'ascii_a' or 'ascii_b'; required">, Visible>                                                                             code{};
-    Annotated<std::string, "p_field", Doc<"'explicit' (read from the wire, the default) or 'implicit' (from the layout settings); naming either one is refused for the ASCII codes">> p_field{std::string()};
-    Annotated<gr::Size_t, "offset", Doc<"octets into the payload at which the code begins">>                                                                                          offset = 0U;
-    Annotated<std::string, "epoch", Doc<"'tai1958' or 'custom'; CUC and CDS only, refused for CCS and ASCII">>                                                                        epoch{std::string("tai1958")};
-    Annotated<std::int64_t, "epoch_ns", Doc<"the custom epoch's position on the Unix nanosecond axis, 0 included; required when epoch == 'custom', refused otherwise">>               epoch_ns{time_detail::kNoEpoch};
-    Annotated<std::int32_t, "tai_utc_offset_s", Doc<"TAI minus UTC at the instant in question; CUC only, refused for CDS, CCS and ASCII">>                                            tai_utc_offset_s = 0;
-    Annotated<bool, "strip", Doc<"remove the code's octets from the published payload">>                                                                                              strip            = false;
-    Annotated<bool, "require_time", Doc<"a record whose code fails to decode is a counted drop rather than a counted pass-through">>                                                  require_time     = false;
+    Annotated<std::string, "code", Doc<"required code, 'cuc', 'cds', 'ccs', 'ascii_a' or 'ascii_b'">, Visible>                      code{};
+    Annotated<std::string, "p_field", Doc<"P-field source, 'explicit' from the wire (default) or 'implicit' from layout settings">> p_field{std::string()};
+    Annotated<gr::Size_t, "offset", Doc<"octets into the payload at which the code begins">>                                        offset = 0U;
+    Annotated<std::string, "epoch", Doc<"epoch, 'tai1958' or 'custom', CUC and CDS only">>                                          epoch{std::string("tai1958")};
+    Annotated<std::int64_t, "epoch_ns", Doc<"custom epoch in Unix nanoseconds, 0 included">>                                        epoch_ns{time_detail::kNoEpoch};
+    Annotated<std::int32_t, "tai_utc_offset_s", Doc<"TAI minus UTC at the coded instant, CUC only">>                                tai_utc_offset_s = 0;
+    Annotated<bool, "strip", Doc<"remove the code's octets from the published payload">>                                            strip            = false;
+    Annotated<bool, "require_time", Doc<"drop records whose code fails to decode">>                                                 require_time     = false;
 
-    Annotated<gr::Size_t, "coarse_octets", Doc<"CUC, implicit p_field only: 1 to 7">>            coarse_octets{detail::kUnset};
-    Annotated<gr::Size_t, "fine_octets", Doc<"CUC, implicit p_field only: 0 to 10">>             fine_octets{detail::kUnset};
-    Annotated<gr::Size_t, "day_octets", Doc<"CDS, implicit p_field only: 2 or 3">>               day_octets{detail::kUnset};
-    Annotated<gr::Size_t, "submillisecond_octets", Doc<"CDS, implicit p_field only: 0, 2 or 4">> submillisecond_octets{detail::kUnset};
-    Annotated<bool, "day_of_year", Doc<"CCS, implicit p_field only">>                            day_of_year = false;
-    Annotated<gr::Size_t, "subsecond_octets", Doc<"CCS, implicit p_field only: 0 to 6">>         subsecond_octets{detail::kUnset};
+    Annotated<gr::Size_t, "coarse_octets", Doc<"CUC coarse octets, 1 to 7, implicit p_field only">>                    coarse_octets{detail::kUnset};
+    Annotated<gr::Size_t, "fine_octets", Doc<"CUC fine octets, 0 to 10, implicit p_field only">>                       fine_octets{detail::kUnset};
+    Annotated<gr::Size_t, "day_octets", Doc<"CDS day octets, 2 or 3, implicit p_field only">>                          day_octets{detail::kUnset};
+    Annotated<gr::Size_t, "submillisecond_octets", Doc<"CDS submillisecond octets, 0, 2 or 4, implicit p_field only">> submillisecond_octets{detail::kUnset};
+    Annotated<bool, "day_of_year", Doc<"CCS day-of-year form, implicit p_field only">>                                 day_of_year = false;
+    Annotated<gr::Size_t, "subsecond_octets", Doc<"CCS subsecond octets, 0 to 6, implicit p_field only">>              subsecond_octets{detail::kUnset};
 
     GR_MAKE_REFLECTABLE(TimeCodeDecode, in, out, code, p_field, offset, epoch, epoch_ns, tai_utc_offset_s, strip, require_time, coarse_octets, fine_octets, day_octets, submillisecond_octets, day_of_year, subsecond_octets);
 
@@ -195,13 +197,13 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
         _implicit = p_field.value == "implicit";
 
         // The empty string is the setting's own sentinel for "never staged", distinct from both legal
-        // names, the same device `epoch_ns` uses against the nanosecond axis: 3.5.2 gives the ASCII
-        // codes no P-field at all, so naming one -- even the harmless default's name -- is refused,
-        // while a decode that never touched the setting reads unset and proceeds.
+        // names. `epoch_ns` uses the same approach against the nanosecond axis. 3.5.2 gives the ASCII
+        // codes no P-field. Naming either value is refused for them, even the name of the default. A
+        // decode that never touched the setting reads it as unset and proceeds.
         if (_isAscii && !p_field.value.empty()) {
             throw gr::exception("p_field is refused for the ASCII codes: 3.5.2 gives them no P-field to name, implicit or explicit");
         }
-        // CUC and CDS count from an epoch; CCS and ASCII carry a calendar date and have none to name.
+        // CUC and CDS count from an epoch. CCS and ASCII carry a calendar date and have no epoch.
         const bool hasEpoch = _kind == gr::ccsds::TimeCodeKind::cuc || _kind == gr::ccsds::TimeCodeKind::cds;
         if (!hasEpoch && epoch.value != "tai1958") {
             throw gr::exception(std::format("epoch is refused for code = '{}': a calendar code carries its own date and counts from no epoch", code.value));
@@ -324,15 +326,15 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                     text = text.substr(0UZ, nul);
                 }
                 status = gr::ccsds::decodeAscii(text, _kind, instant);
-                // The code ends at the NUL that closes it, or at the end of the payload where there is
-                // none; a NUL belongs to the code it terminates, so `strip` removes it with the code.
+                // The code ends at the NUL that closes it, or at the end of the payload when there is
+                // no NUL. A NUL belongs to the code it terminates, and `strip` removes it with the code.
                 consumedOctets = nul != std::string_view::npos ? nul + 1UZ : text.size();
             } else {
                 if (!_implicit) {
                     status = gr::ccsds::parsePField(fromOffset, layout);
                     if (status == gr::ccsds::TimeStatus::short_field) {
-                        // The payload does not reach the end of the P-field, so the record is short of
-                        // the code and nothing has been parsed out of it yet.
+                        // The payload does not reach the end of the P-field. The record is short of the
+                        // code, and nothing has been parsed from it yet.
                         ++nShortRecord;
                         if (require_time.value) {
                             continue;
@@ -350,11 +352,10 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                         ++made;
                         continue;
                     }
-                    // The wire declares which code it is and which epoch it counts from, and the
-                    // settings declare the same two facts. Where they disagree the record is refused
-                    // rather than decoded under one of them: decoding under the wire's would make
-                    // `ccsds_time_code` name a code the instant did not come out of, and decoding under
-                    // the setting's would read a field of one width as a field of another.
+                    // The wire declares the code and its epoch, and the settings declare the same two
+                    // facts. When they disagree, the block refuses the record. Decoding under the wire's
+                    // facts would make `ccsds_time_code` name a code the instant did not come from.
+                    // Decoding under the settings would read a field of one width as a field of another.
                     if (layout.kind != _kind || layout.custom_epoch != (epoch.value == "custom")) {
                         ++nPFieldMismatch;
                         if (require_time.value) {
@@ -413,8 +414,8 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                 ++nLeapSecondValues;
             }
             if (instant.precision_discarded_digits != 0U) {
-                // A producer emitting more digits than the axis and its picosecond residue together
-                // hold is telling a consumer something neither can carry, and the count says so.
+                // A producer emitting more digits than the axis and its picosecond residue can hold
+                // together sends a precision neither can carry. The count records it.
                 ++nPrecisionDiscarded;
             }
 
@@ -437,9 +438,10 @@ GR_REGISTER_BLOCK(gr::blocks::ccsds::TimeCodeEncode)
 /*!
 @brief Reads `in.timestamp` and writes a CCSDS time code into the payload at a stated offset.
 
-A record whose `timestamp` is `0` is not special-cased: zero is the Unix epoch, a legal instant, and treating it
-as "unset" would silently drop legitimate records at exactly that value. A graph that wants to encode only where
-a time is known filters on something that says so, not on a sentinel that a legitimate instant can equal.
+The block treats a `timestamp` of `0` like any other. Zero is the Unix epoch, a legal instant. Treating it as
+"unset" would silently drop legitimate records at exactly that value. A graph that encodes only known times must
+filter on a field that states it, not on a sentinel that a legal instant can equal. Both P-field modes need the
+layout settings.
 */
 struct TimeCodeEncode : Block<TimeCodeEncode> {
     using Description = Doc<"Writes DataSet::timestamp into the payload as a CCSDS time code at a stated offset (CCSDS 301.0-B-4)">;
@@ -447,22 +449,22 @@ struct TimeCodeEncode : Block<TimeCodeEncode> {
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "code", Doc<"'cuc', 'cds', 'ccs', 'ascii_a' or 'ascii_b'; required">, Visible>                                                               code{};
-    Annotated<std::string, "p_field", Doc<"'explicit' emits the preamble, 'implicit' does not; both need the layout settings below">>                                   p_field{std::string("explicit")};
-    Annotated<gr::Size_t, "offset", Doc<"octets into the payload at which the code is written">>                                                                        offset = 0U;
-    Annotated<bool, "insert", Doc<"insert the code's octets at offset, growing the record; false overwrites in place">>                                                 insert = true;
-    Annotated<std::string, "epoch", Doc<"'tai1958' or 'custom'; CUC and CDS only, refused for CCS and ASCII">>                                                          epoch{std::string("tai1958")};
-    Annotated<std::int64_t, "epoch_ns", Doc<"the custom epoch's position on the Unix nanosecond axis, 0 included; required when epoch == 'custom', refused otherwise">> epoch_ns{time_detail::kNoEpoch};
-    Annotated<std::int32_t, "tai_utc_offset_s", Doc<"TAI minus UTC at the instant in question; CUC only, refused for CDS, CCS and ASCII">>                              tai_utc_offset_s = 0;
-    Annotated<gr::Size_t, "fraction_digits", Doc<"ASCII only: 0 to 9 digits of fractional seconds; refused for the binary codes">>                                      fraction_digits  = 6U;
-    Annotated<bool, "terminator", Doc<"ASCII only: emit the optional trailing 'Z'; refused for the binary codes">>                                                      terminator       = true;
+    Annotated<std::string, "code", Doc<"required code, 'cuc', 'cds', 'ccs', 'ascii_a' or 'ascii_b'">, Visible> code{};
+    Annotated<std::string, "p_field", Doc<"P-field preamble, 'explicit' written or 'implicit' omitted">>       p_field{std::string("explicit")};
+    Annotated<gr::Size_t, "offset", Doc<"octets into the payload at which the code is written">>               offset = 0U;
+    Annotated<bool, "insert", Doc<"insert the code at offset, else overwrite in place">>                       insert = true;
+    Annotated<std::string, "epoch", Doc<"epoch, 'tai1958' or 'custom', CUC and CDS only">>                     epoch{std::string("tai1958")};
+    Annotated<std::int64_t, "epoch_ns", Doc<"custom epoch in Unix nanoseconds, 0 included">>                   epoch_ns{time_detail::kNoEpoch};
+    Annotated<std::int32_t, "tai_utc_offset_s", Doc<"TAI minus UTC at the coded instant, CUC only">>           tai_utc_offset_s = 0;
+    Annotated<gr::Size_t, "fraction_digits", Doc<"fractional-second digits, 0 to 9, ASCII codes only">>        fraction_digits  = 6U;
+    Annotated<bool, "terminator", Doc<"emit the optional trailing 'Z', ASCII codes only">>                     terminator       = true;
 
-    Annotated<gr::Size_t, "coarse_octets", Doc<"CUC: 1 to 7">>            coarse_octets{detail::kUnset};
-    Annotated<gr::Size_t, "fine_octets", Doc<"CUC: 0 to 10">>             fine_octets{detail::kUnset};
-    Annotated<gr::Size_t, "day_octets", Doc<"CDS: 2 or 3">>               day_octets{detail::kUnset};
-    Annotated<gr::Size_t, "submillisecond_octets", Doc<"CDS: 0, 2 or 4">> submillisecond_octets{detail::kUnset};
-    Annotated<bool, "day_of_year", Doc<"CCS">>                            day_of_year = false;
-    Annotated<gr::Size_t, "subsecond_octets", Doc<"CCS: 0 to 6">>         subsecond_octets{detail::kUnset};
+    Annotated<gr::Size_t, "coarse_octets", Doc<"CUC coarse octets, 1 to 7">>                    coarse_octets{detail::kUnset};
+    Annotated<gr::Size_t, "fine_octets", Doc<"CUC fine octets, 0 to 10">>                       fine_octets{detail::kUnset};
+    Annotated<gr::Size_t, "day_octets", Doc<"CDS day octets, 2 or 3">>                          day_octets{detail::kUnset};
+    Annotated<gr::Size_t, "submillisecond_octets", Doc<"CDS submillisecond octets, 0, 2 or 4">> submillisecond_octets{detail::kUnset};
+    Annotated<bool, "day_of_year", Doc<"CCS day-of-year form">>                                 day_of_year = false;
+    Annotated<gr::Size_t, "subsecond_octets", Doc<"CCS subsecond octets, 0 to 6">>              subsecond_octets{detail::kUnset};
 
     GR_MAKE_REFLECTABLE(TimeCodeEncode, in, out, code, p_field, offset, insert, epoch, epoch_ns, tai_utc_offset_s, fraction_digits, terminator, coarse_octets, fine_octets, day_octets, submillisecond_octets, day_of_year, subsecond_octets);
 
@@ -497,7 +499,7 @@ struct TimeCodeEncode : Block<TimeCodeEncode> {
         if (_isAscii && _explicit == false) {
             throw gr::exception("p_field must be 'explicit' for the ASCII codes: 3.5.2 gives them no P-field");
         }
-        // CUC and CDS count from an epoch; CCS and ASCII carry a calendar date and have none to name.
+        // CUC and CDS count from an epoch. CCS and ASCII carry a calendar date and have no epoch.
         const bool hasEpoch = _kind == gr::ccsds::TimeCodeKind::cuc || _kind == gr::ccsds::TimeCodeKind::cds;
         if (!hasEpoch && epoch.value != "tai1958") {
             throw gr::exception(std::format("epoch is refused for code = '{}': a calendar code carries its own date and counts from no epoch", code.value));
@@ -580,9 +582,9 @@ struct TimeCodeEncode : Block<TimeCodeEncode> {
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
             const DataSet<std::uint8_t>& record = inSpan[consumed];
-            // The record's own field carries the nanoseconds; the picoseconds under one nanosecond, if
-            // a decoder recorded any, are in the metadata beside it, and the layouts that can hold them
-            // -- CDS with four submillisecond octets, CCS with five or six -- write them back out.
+            // The record's own field carries the nanoseconds. A decoder may have recorded the picoseconds
+            // below one nanosecond in the metadata beside it. The layouts that can hold them write them
+            // back out. Those are CDS with four submillisecond octets and CCS with five or six.
             const gr::ccsds::Instant instant{.ns = record.timestamp, .sub_ns_ps = time_detail::readSubNs(detail::metaOf(record)), .leap = false, .tai = tai_utc_offset_s.value == 0, .precision_discarded_digits = 0U};
             const std::int64_t       epochNs = epoch.value == "custom" ? epoch_ns.value : 0;
 

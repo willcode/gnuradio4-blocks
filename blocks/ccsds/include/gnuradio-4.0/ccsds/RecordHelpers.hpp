@@ -19,14 +19,14 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 
 /**
- * @brief The record-shaping helpers the CCSDS blocks share: metadata reads, the `discontinuity` cause list, the
- * fields every published `DataSet<std::uint8_t>` needs before a block writes its own keys, and the counter report.
+ * @brief Record-shaping helpers shared by the CCSDS blocks.
  *
- * One definition each, because two blocks that shape a record differently produce records a downstream block has to
- * tell apart, and a metadata read that answers "absent" in one block and throws in another turns a wire value into
- * a block-dependent outcome. Every read here treats a value of the wrong type as absent: a record that has crossed
- * a network can carry anything under a key, and a guess at what a mistyped value meant is a guess a decoder would
- * then act on.
+ * They cover metadata reads, the `discontinuity` cause list, the fields every published `DataSet<std::uint8_t>`
+ * needs before a block writes its own keys, and the counter report. Each has one definition. Two blocks that shape a
+ * record differently would produce records that a downstream block has to tell apart. A metadata read that returns
+ * "absent" in one block and throws in another would make a wire value's outcome depend on the block. Every read here
+ * treats a value of the wrong type as absent. A record that has crossed a network can carry anything under a key. A
+ * decoder would act on a guess at a mistyped value.
  */
 namespace gr::blocks::ccsds::detail {
 
@@ -36,7 +36,7 @@ inline constexpr gr::Size_t kUnset = 0xFFFFFFFFU;
 /// @brief The record's metadata map, or `nullptr` where it carries none.
 [[nodiscard]] inline const property_map* metaOf(const DataSet<std::uint8_t>& record) noexcept { return record.meta_information.empty() ? nullptr : &record.meta_information[0UZ]; }
 
-/// @brief @p key read as a `bool`, or `std::nullopt` where it is absent, absent from an absent map, or another type.
+/// @brief @p key read as a `bool`, `std::nullopt` when the key or the map is absent or the value has another type.
 [[nodiscard]] inline std::optional<bool> readBool(const property_map* map, const char* key) {
     if (map == nullptr) {
         return std::nullopt;
@@ -51,7 +51,7 @@ inline constexpr gr::Size_t kUnset = 0xFFFFFFFFU;
     return std::nullopt;
 }
 
-/// @brief @p key read as a `gr::Size_t`, or `std::nullopt` where it is absent, absent from an absent map, or another type.
+/// @brief @p key read as a `gr::Size_t`, `std::nullopt` when the key or map is absent or the value has another type.
 [[nodiscard]] inline std::optional<gr::Size_t> readSize(const property_map* map, const char* key) {
     if (map == nullptr) {
         return std::nullopt;
@@ -79,12 +79,11 @@ inline constexpr gr::Size_t kUnset = 0xFFFFFFFFU;
 }
 
 /**
- * @brief `discontinuity`'s transform rule: append the cause, never replace what is already there, and never twice.
+ * @brief Appends a cause to `discontinuity`, keeping the causes already there and adding none twice.
  *
- * The key is a set of causes rather than a single label because two blocks in one chain can each break continuity
- * for their own reason, and a second cause that overwrote the first would hide the earlier break entirely. A cause
- * the list already names is left as it stands, so a record that crosses a block which re-detects the same break
- * carries one mention of it and not a run of them.
+ * The key holds a set of causes, not a single label. Two blocks in one chain can each break continuity for their own
+ * reason. A second cause that overwrote the first would hide the earlier break. A cause the list already names stays
+ * as it is. A record that crosses a block which detects the same break again carries one mention of it.
  */
 inline void appendDiscontinuity(property_map& map, std::string_view cause) {
     const auto  it       = map.find(property_map::key_type("discontinuity"));
@@ -99,7 +98,7 @@ inline void appendDiscontinuity(property_map& map, std::string_view cause) {
     map.insert_or_assign(property_map::key_type("discontinuity"), pmt::Value(combined));
 }
 
-/// @brief Take one cause out of the `discontinuity` key, dropping the key when it names nothing else.
+/// @brief Removes one cause from the `discontinuity` key and drops the key when no cause remains.
 inline void removeDiscontinuity(property_map& map, std::string_view cause) {
     const auto it = map.find(property_map::key_type("discontinuity"));
     if (it == map.end()) {
@@ -126,7 +125,7 @@ inline void removeDiscontinuity(property_map& map, std::string_view cause) {
 }
 
 /// @brief The extent, signal name and metadata map every output record derived from @p in needs before its own keys
-/// are written: the input's metadata crosses verbatim, and @p fallbackName names the signal where the input does not.
+/// are written. The input's metadata passes through unchanged. @p fallbackName names a signal the input lacks.
 inline void startRecord(const DataSet<std::uint8_t>& in, DataSet<std::uint8_t>& out, std::string_view fallbackName) {
     out.extents.push_back(static_cast<std::int32_t>(out.signal_values.size()));
     out.signal_names.emplace_back(in.signal_names.empty() ? std::string(fallbackName) : in.signal_names[0UZ]);
@@ -145,8 +144,8 @@ inline void freshRecord(DataSet<std::uint8_t>& out, std::string_view name) {
     out.meta_information.resize(1UZ);
 }
 
-/// @brief One line on stderr naming @p block and every counter of @p counters that is not zero, or nothing at all
-/// where none of them moved: a run in which nothing was refused says so by staying silent.
+/// @brief Writes one line on stderr naming @p block and every non-zero counter of @p counters.
+/// It writes nothing when every counter is zero. A run with no refusals stays silent.
 template<typename TBlock>
 inline void reportCounters(const TBlock& block, std::string_view label, std::initializer_list<std::pair<std::string_view, std::uint64_t>> counters) {
     std::string report;

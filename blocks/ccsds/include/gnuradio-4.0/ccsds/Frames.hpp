@@ -24,17 +24,21 @@
 /**
  * @brief The TM, AOS and TC transfer-frame decoders and encoders, CCSDS 132.0-B-3 / 732.0-B-4 / 232.0-B-4.
  *
- * Each decoder is a record adapter: one frame per `DataSet<std::uint8_t>` in, its data field out, the primary
- * header (and the TM secondary header and either standard's operational control field) written to metadata or
- * published on their own optional ports. Every setting is immutable configuration, validated in `rebuild()` and
- * called from both `settingsChanged` and `start()`; a refused configuration leaves the block inert, publishing
- * and consuming nothing and returning `work::Status::ERROR`. Every refusal at the per-record level is a counted
- * drop with a named counter, reported once at `stop()`.
+ * Each decoder takes one frame per `DataSet<std::uint8_t>` record and publishes its data field. It writes the
+ * primary header to metadata. The TM secondary header and the operational control field of either standard go to
+ * metadata or to their own optional ports. Every setting is immutable configuration. `rebuild()` validates it and
+ * runs from both `settingsChanged` and `start()`. A refused configuration leaves the block inert. The block then
+ * publishes and consumes nothing and returns `work::Status::ERROR`. Each refused record is dropped and counted in a
+ * named counter. The counters are reported once at `stop()`.
  *
- * The carrier is `DataSet<std::uint8_t>` throughout and input metadata crosses verbatim before a block's own
- * keys are written over it. The frame error control field is never computed here: `digital::CrcCheck` runs in
- * front of a decoder and `digital::CrcAppend` behind an encoder, with the parameter set of 132.0-B-3 4.1.6.2.2 /
- * 232.0-B-4 4.1.4.2 (CRC-16/IBM-3740).
+ * Each decoder drops a frame whose spacecraft identifier differs from `spacecraft_id` and counts it in
+ * `nFilteredScid`. An unset `spacecraft_id` accepts any. With `require_crc_ok` set, a decoder drops a record whose
+ * `crc_ok` key is false and counts it in `nCrcFailed`. A record without the key passes, because no check was
+ * claimed for it.
+ *
+ * The carrier is `DataSet<std::uint8_t>` throughout. Input metadata passes through, and a block writes its own keys
+ * over it. These blocks never compute the frame error control field. `digital::CrcCheck` and `digital::CrcAppend`
+ * compute it with the parameter set of 132.0-B-3 4.1.6.2.2 / 232.0-B-4 4.1.4.2 (CRC-16/IBM-3740).
  */
 namespace gr::blocks::ccsds {
 
@@ -45,17 +49,17 @@ inline constexpr gr::Size_t kUnsetScid = 0xFFFFU; // wider than TM's ten bits an
 inline constexpr gr::Size_t kTmMaxScid  = 1023U; // 132.0-B-3 4.1.2.2.3, ten bits
 inline constexpr gr::Size_t kAosMaxScid = 255U;  // 732.0-B-4 4.1.2.2.3, eight bits
 
-/// A frame count register per virtual channel: 4.1.2.6's count is the channel's own and says nothing about another's.
+/// A frame count register per virtual channel. The count of 4.1.2.6 belongs to its own channel alone.
 inline constexpr std::size_t kTmVirtualChannels  = 8UZ;  // 132.0-B-3 4.1.2.3, three bits
 inline constexpr std::size_t kAosVirtualChannels = 64UZ; // 732.0-B-4 4.1.2.3, six bits
 
 /**
  * @brief The operational control field's metadata, 132.0-B-3 4.1.5.
  *
- * Bit 0 selects the report: a Type-1 report is the CLCW of 232.0-B-4 4.2.1.1.2 and its eleven fields are parsed
- * out, and a Type-2 report is four opaque octets belonging to the SDLS protocol, of which bit 1 (4.1.5.5) is the
- * only thing read here. The two carry different `protocol` labels because they are different objects: only the
- * Type-1 record holds a control link word.
+ * Bit 0 selects the report type. A Type-1 report is the CLCW of 232.0-B-4 4.2.1.1.2, and its eleven fields are
+ * parsed. A Type-2 report is four opaque octets of the SDLS protocol. Only its bit 1 (4.1.5.5) is read. The two
+ * reports carry different `protocol` labels because they are different objects. Only the Type-1 record holds a
+ * control link word.
  */
 inline void writeOcfMetadata(property_map& map, std::span<const std::uint8_t> ocfBytes) {
     const gr::ccsds::OcfReportType type   = gr::ccsds::ocfReportType(ocfBytes);
@@ -86,27 +90,28 @@ inline void writeOcfMetadata(property_map& map, std::span<const std::uint8_t> oc
 GR_REGISTER_BLOCK(gr::blocks::ccsds::TmFrameDecode)
 
 /*!
-@brief One TM transfer frame per record becomes its data field, 132.0-B-3 4.1.
+@brief Decodes one TM transfer frame per record into its data field, 132.0-B-3 4.1.
 
-`frame_length` is required because 4.1.1.2 makes the frame constant-length for a mission phase and there is no
-bit that states it. The operational control field's presence is read from the primary header (4.1.2.4); the
-frame error control field's is not (4.1.6.1.2) and is `has_fecf`. `secondary_header` and `ocf` are optional
-ports: a graph that wants neither wires neither and pays nothing beyond the counters, which count what was not
-published regardless.
+`frame_length` is required. 4.1.1.2 makes the frame length constant for a mission phase, and no bit states it. The
+block reads the presence of the operational control field from the primary header (4.1.2.4). No bit states the
+presence of the frame error control field (4.1.6.1.2), and `has_fecf` sets it. `secondary_header` and `ocf` are
+optional ports. With neither connected, the block does no work for them beyond the counters. The counters count
+what was not published in either case. A gap larger than a non-zero `max_frames_lost_report` is reported as a
+discontinuity and left out of the frames-lost total.
 */
 struct TmFrameDecode : Block<TmFrameDecode> {
-    using Description = Doc<"TM transfer frame decode: one frame per record becomes its data field, with the primary header, secondary header and OCF written to metadata and published on their own ports (132.0-B-3 4.1)">;
+    using Description = Doc<"Decodes one TM transfer frame per record into its data field. It writes the primary header, secondary header and OCF to metadata and publishes the last two on their own ports (132.0-B-3 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>            in;
     PortOut<DataSet<std::uint8_t>, Async>           out;
     PortOut<DataSet<std::uint8_t>, Async, Optional> secondary_header;
     PortOut<DataSet<std::uint8_t>, Async, Optional> ocf;
 
-    Annotated<gr::Size_t, "frame_length", Doc<"total octets of the frame as it arrives here; required, 4.1.1.2 makes it a mission property">, Visible>                                       frame_length = 0U;
-    Annotated<bool, "has_fecf", Doc<"two trailing octets are the frame error control field and are excluded from the data field, 4.1.6.1.2">>                                                has_fecf     = false;
-    Annotated<gr::Size_t, "spacecraft_id", Doc<"a frame whose spacecraft identifier differs is a counted drop; unset accepts any">>                                                          spacecraft_id{frames_detail::kUnsetScid};
-    Annotated<bool, "require_crc_ok", Doc<"a record whose crc_ok metadata is present and false is a counted drop; a record with no crc_ok key passes, no check having been claimed for it">> require_crc_ok         = false;
-    Annotated<gr::Size_t, "max_frames_lost_report", Doc<"a gap larger than this is reported as a discontinuity but excluded from the frames-lost total; 0 means no cap">>                    max_frames_lost_report = 0U;
+    Annotated<gr::Size_t, "frame_length", Doc<"required total octets of each arriving frame, 4.1.1.2">, Visible>        frame_length = 0U;
+    Annotated<bool, "has_fecf", Doc<"two trailing FECF octets, excluded from the data field, 4.1.6.1.2">>               has_fecf     = false;
+    Annotated<gr::Size_t, "spacecraft_id", Doc<"spacecraft identifier to accept, unset for any">>                       spacecraft_id{frames_detail::kUnsetScid};
+    Annotated<bool, "require_crc_ok", Doc<"drop records whose crc_ok key is false">>                                    require_crc_ok         = false;
+    Annotated<gr::Size_t, "max_frames_lost_report", Doc<"largest gap added to the frames-lost total, 0 for unlimited">> max_frames_lost_report = 0U;
 
     GR_MAKE_REFLECTABLE(TmFrameDecode, in, out, secondary_header, ocf, frame_length, has_fecf, spacecraft_id, require_crc_ok, max_frames_lost_report);
 
@@ -228,13 +233,13 @@ struct TmFrameDecode : Block<TmFrameDecode> {
             const std::size_t dataFieldLength = frame_length.value - overhead;
             const std::size_t ocfStart        = dataFieldStart + dataFieldLength;
 
-            // Every port this record needs must have room before anything of it is counted, published or folded into
-            // the gap state, so that a full optional port leaves the record whole for the next call.
+            // Every port this record needs must have room before any of it is counted, published or folded into the
+            // gap state. A full optional port then leaves the record whole for the next call.
             if ((header.secondary_header && shConnected && madeSh >= shSpan.size()) || (header.ocf_present && ocfConnected && madeOcf >= ocfSpan.size())) {
                 break;
             }
             if (status == gr::ccsds::ParseStatus::reserved_violation) {
-                ++nReservedViolations; // the frame is still a frame: reported, refusing nothing
+                ++nReservedViolations; // the frame is still valid, reported and not refused
             }
 
             bool       gapDetected  = false;
@@ -345,30 +350,31 @@ struct TmFrameDecode : Block<TmFrameDecode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::AosFrameDecode)
 
 /*!
-@brief One AOS transfer frame per record becomes its data field or, for `data_unit = "m_pdu"`, its packet zone, 732.0-B-4 4.1.
+@brief Decodes one AOS transfer frame per record into its data field or its M_PDU packet zone, 732.0-B-4 4.1.
 
-The operational control field has no presence bit anywhere in the AOS header (732.0-B-4 4.1.1.1), so `has_ocf` is a
-setting here where it is a read on `TmFrameDecode`. `data_unit` is required because 4.1.4.1.4 makes it a static
-property of the virtual channel with no bit that states it; for `"m_pdu"` the two-octet M_PDU header is removed and
-`ccsds_first_header_pointer` comes from it rather than from the primary header, which is the one structural
-difference `SpacePacketExtract` downstream never has to know about. There is no `secondary_header` port: AOS has no
-transfer frame secondary header.
+The AOS header has no presence bit for the operational control field (732.0-B-4 4.1.1.1). `has_ocf` is therefore a
+setting here. `TmFrameDecode` reads the same presence from its header. `data_unit` is required. 4.1.4.1.4 makes it a
+static property of the virtual channel, and no bit states it. For `"m_pdu"` the output is the packet zone. The block
+removes the two-octet M_PDU header and takes `ccsds_first_header_pointer` from it. The key has the same meaning as
+the one `TmFrameDecode` takes from its primary header. The block skips the fixed insert zone of `insert_zone_length`
+octets, counts them in `nInsertOctets` and never publishes them. There is no `secondary_header` port, because AOS has
+no transfer frame secondary header.
 */
 struct AosFrameDecode : Block<AosFrameDecode> {
-    using Description = Doc<"AOS transfer frame decode: one frame per record becomes its data field or M_PDU packet zone, with the primary header and OCF written to metadata (732.0-B-4 4.1)">;
+    using Description = Doc<"Decodes one AOS transfer frame per record into its data field or M_PDU packet zone and writes the primary header and OCF to metadata (732.0-B-4 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>            in;
     PortOut<DataSet<std::uint8_t>, Async>           out;
     PortOut<DataSet<std::uint8_t>, Async, Optional> ocf;
 
-    Annotated<gr::Size_t, "frame_length", Doc<"total octets of the frame as it arrives here; required">, Visible>                                                                            frame_length{0U};
-    Annotated<bool, "has_fhec", Doc<"the optional 2-octet frame header error control is present, making the primary header 8 octets, 4.1.2.6.2">>                                            has_fhec           = false;
-    Annotated<gr::Size_t, "insert_zone_length", Doc<"octets of the fixed insert zone, 4.1.3.4.1; skipped and counted, never published">>                                                     insert_zone_length = 0U;
-    Annotated<bool, "has_ocf", Doc<"a setting, not a read: AOS's header carries no OCF flag anywhere">>                                                                                      has_ocf            = false;
-    Annotated<bool, "has_fecf", Doc<"two trailing octets are the frame error control field and are excluded from the data field">>                                                           has_fecf           = false;
-    Annotated<std::string, "data_unit", Doc<"'m_pdu', 'b_pdu', 'vca_sdu' or 'idle'; required, 4.1.4.1.4 makes it a property of the channel">, Visible>                                       data_unit{};
-    Annotated<gr::Size_t, "spacecraft_id", Doc<"a frame whose spacecraft identifier differs is a counted drop; unset accepts any">>                                                          spacecraft_id{frames_detail::kUnsetScid};
-    Annotated<bool, "require_crc_ok", Doc<"a record whose crc_ok metadata is present and false is a counted drop; a record with no crc_ok key passes, no check having been claimed for it">> require_crc_ok = false;
+    Annotated<gr::Size_t, "frame_length", Doc<"required total octets of each arriving frame">, Visible>                       frame_length{0U};
+    Annotated<bool, "has_fhec", Doc<"2-octet frame header error control present, 8-octet primary header, 4.1.2.6.2">>         has_fhec           = false;
+    Annotated<gr::Size_t, "insert_zone_length", Doc<"octets of the fixed insert zone, 4.1.3.4.1">>                            insert_zone_length = 0U;
+    Annotated<bool, "has_ocf", Doc<"four-octet operational control field present">>                                           has_ocf            = false;
+    Annotated<bool, "has_fecf", Doc<"two trailing FECF octets, excluded from the data field">>                                has_fecf           = false;
+    Annotated<std::string, "data_unit", Doc<"required data unit, 'm_pdu', 'b_pdu', 'vca_sdu' or 'idle', 4.1.4.1.4">, Visible> data_unit{};
+    Annotated<gr::Size_t, "spacecraft_id", Doc<"spacecraft identifier to accept, unset for any">>                             spacecraft_id{frames_detail::kUnsetScid};
+    Annotated<bool, "require_crc_ok", Doc<"drop records whose crc_ok key is false">>                                          require_crc_ok = false;
 
     GR_MAKE_REFLECTABLE(AosFrameDecode, in, out, ocf, frame_length, has_fhec, insert_zone_length, has_ocf, has_fecf, data_unit, spacecraft_id, require_crc_ok);
 
@@ -462,13 +468,13 @@ struct AosFrameDecode : Block<AosFrameDecode> {
                 }
             }
 
-            // The OCF port must have room before anything of this record is counted, published or folded into the
-            // gap state, so that a full optional port leaves the record whole for the next call.
+            // The OCF port must have room before any of this record is counted, published or folded into the gap
+            // state. A full optional port then leaves the record whole for the next call.
             if (has_ocf.value && ocfConnected && madeOcf >= ocfSpan.size()) {
                 break;
             }
             if (status == gr::ccsds::ParseStatus::reserved_violation) {
-                ++nReservedViolations; // the frame is still a frame: reported, refusing nothing
+                ++nReservedViolations; // the frame is still valid, reported and not refused
             }
 
             const std::uint32_t widened     = gr::ccsds::aosWidenedFrameCount(header);
@@ -561,22 +567,22 @@ struct AosFrameDecode : Block<AosFrameDecode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::TcFrameDecode)
 
 /*!
-@brief One TC transfer frame per record becomes its data field, 232.0-B-4 4.1.
+@brief Decodes one TC transfer frame per record into its data field, 232.0-B-4 4.1.
 
-The one self-describing frame: the frame length field (4.1.2.7.2) carries the total, so there is no `frame_length`
-setting. A record longer than the declared total is not refused — the surplus is not part of the frame and is
-counted in `nTrailingOctets` rather than dropped as an error, which is the honest reading of a fixed-size channel
-carrying a variable-length frame.
+Of the three frame types, only TC describes its own length. The frame length field (4.1.2.7.2) carries the total,
+and there is no `frame_length` setting. The block accepts a record longer than the declared total. The surplus is
+not part of the frame. The block counts it in `nTrailingOctets` and does not treat it as an error. A fixed-size
+channel can carry a variable-length frame.
 */
 struct TcFrameDecode : Block<TcFrameDecode> {
-    using Description = Doc<"TC transfer frame decode: one self-describing frame per record becomes its data field, with the primary header written to metadata (232.0-B-4 4.1)">;
+    using Description = Doc<"Decodes one self-describing TC transfer frame per record into its data field and writes the primary header to metadata (232.0-B-4 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<bool, "has_fecf", Doc<"two trailing octets are the frame error control field and are excluded from the data field">>                                                           has_fecf = false;
-    Annotated<gr::Size_t, "spacecraft_id", Doc<"a frame whose spacecraft identifier differs is a counted drop; unset accepts any">>                                                          spacecraft_id{frames_detail::kUnsetScid};
-    Annotated<bool, "require_crc_ok", Doc<"a record whose crc_ok metadata is present and false is a counted drop; a record with no crc_ok key passes, no check having been claimed for it">> require_crc_ok = false;
+    Annotated<bool, "has_fecf", Doc<"two trailing FECF octets, excluded from the data field">>    has_fecf = false;
+    Annotated<gr::Size_t, "spacecraft_id", Doc<"spacecraft identifier to accept, unset for any">> spacecraft_id{frames_detail::kUnsetScid};
+    Annotated<bool, "require_crc_ok", Doc<"drop records whose crc_ok key is false">>              require_crc_ok = false;
 
     GR_MAKE_REFLECTABLE(TcFrameDecode, in, out, has_fecf, spacecraft_id, require_crc_ok);
 
@@ -670,29 +676,29 @@ struct TcFrameDecode : Block<TcFrameDecode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::TmFrameEncode)
 
 /*!
-@brief One data field per record in, one whole TM transfer frame out, ready for `digital::CrcAppend`.
+@brief Encodes one data field per record as one whole TM transfer frame.
 
-`master_frame_count` and `vc_frame_count` are counters this block owns and increments modulo 256 per frame
-(132.0-B-3 4.1.2.5.2, 4.1.2.6.2) — a frame count's increment rule is one sentence of the standard and depends on
-nothing external, unlike a COP-1 sequence number. The first header pointer is read from the input record's
-`ccsds_first_header_pointer` metadata, which `SpacePacketSegment` writes for every zone it emits; a record with no
-such key, or one whose key does not fit the field's eleven bits, is treated as a pure continuation
-(`kFhpNoPacketStart`), the reading that claims nothing about the zone, and the out-of-range case is counted.
-A data field shorter than the frame's own is padded with the pseudo-noise fill of 4.1.4.6.2, whose generator runs
-across frames rather than restarting per frame (4.1.4.6.2.1); the pointer is written as the metadata gave it.
+The block owns `master_frame_count` and `vc_frame_count` and increments each modulo 256 per frame (132.0-B-3
+4.1.2.5.2, 4.1.2.6.2). Unlike a COP-1 sequence number, a frame count follows one rule of the standard and depends on
+nothing outside the block. The block reads the first header pointer from the input record's
+`ccsds_first_header_pointer` key. `SpacePacketSegment` writes that key for every zone it emits. A record without the
+key is treated as a pure continuation (`kFhpNoPacketStart`), which claims nothing about the zone. A key that does not
+fit the field's eleven bits is treated the same way and counted in `nBadPointerKey`. The block pads a data field
+shorter than the frame's with the pseudo-noise fill of 4.1.4.6.2. The fill generator runs across frames and does
+not restart per frame (4.1.4.6.2.1). The pointer is written as the metadata gave it.
 */
 struct TmFrameEncode : Block<TmFrameEncode> {
-    using Description = Doc<"TM transfer frame encode: one data field per record becomes a whole frame, with its own master and virtual channel frame counts (132.0-B-3 4.1)">;
+    using Description = Doc<"Encodes one data field per record as a whole TM transfer frame with its own master and virtual channel frame counts (132.0-B-3 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "frame_length", Doc<"total octets of the frame this block produces; required">, Visible>                          frame_length{0U};
-    Annotated<gr::Size_t, "spacecraft_id", Doc<"the ten-bit spacecraft identifier; required">, Visible>                                     spacecraft_id{detail::kUnset};
-    Annotated<gr::Size_t, "virtual_channel", Doc<"the three-bit virtual channel identifier; required">, Visible>                            virtual_channel{detail::kUnset};
-    Annotated<bool, "has_fecf", Doc<"reserve two trailing octets for digital::CrcAppend to fill; not written here">>                        has_fecf = false;
-    Annotated<bool, "has_ocf", Doc<"reserve four octets for the operational control field; written as a zeroed CLCW">>                      has_ocf  = false;
-    Annotated<std::vector<std::uint8_t>, "secondary_header", Doc<"1 to 63 octets of secondary header data; empty means the flag is clear">> secondary_header{};
+    Annotated<gr::Size_t, "frame_length", Doc<"required total octets of each produced frame">, Visible>                       frame_length{0U};
+    Annotated<gr::Size_t, "spacecraft_id", Doc<"required ten-bit spacecraft identifier">, Visible>                            spacecraft_id{detail::kUnset};
+    Annotated<gr::Size_t, "virtual_channel", Doc<"required three-bit virtual channel identifier">, Visible>                   virtual_channel{detail::kUnset};
+    Annotated<bool, "has_fecf", Doc<"reserve two unwritten trailing octets for the FECF">>                                    has_fecf = false;
+    Annotated<bool, "has_ocf", Doc<"reserve four OCF octets, written as a zeroed CLCW">>                                      has_ocf  = false;
+    Annotated<std::vector<std::uint8_t>, "secondary_header", Doc<"1 to 63 secondary header octets, empty clearing the flag">> secondary_header{};
 
     GR_MAKE_REFLECTABLE(TmFrameEncode, in, out, frame_length, spacecraft_id, virtual_channel, has_fecf, has_ocf, secondary_header);
 
@@ -765,7 +771,7 @@ struct TmFrameEncode : Block<TmFrameEncode> {
             header.segment_length_id                = 3U;
             const std::optional<gr::Size_t> pointer = detail::readSize(detail::metaOf(record), "ccsds_first_header_pointer");
             if (pointer.has_value() && *pointer > gr::Size_t{gr::ccsds::kFhpNoPacketStart}) {
-                ++nBadPointerKey; // a value the eleven-bit field cannot hold says nothing about the zone, so it reads as absent
+                ++nBadPointerKey; // a value the eleven-bit field cannot hold says nothing about the zone and reads as absent
             }
             const bool havePointer      = pointer.has_value() && *pointer <= gr::Size_t{gr::ccsds::kFhpNoPacketStart};
             header.first_header_pointer = havePointer ? static_cast<std::uint16_t>(*pointer) : gr::ccsds::kFhpNoPacketStart;
@@ -773,7 +779,7 @@ struct TmFrameEncode : Block<TmFrameEncode> {
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(frame_length.value, std::uint8_t{0U});
             if (gr::ccsds::writeTmPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
-                ++nRefusedHeader; // a header that cannot be written is a counted drop, never a frame carrying a zeroed header
+                ++nRefusedHeader; // an unwritable header drops and counts the record, and no frame goes out with a zeroed header
                 continue;
             }
             std::size_t at = gr::ccsds::kTmPrimaryHeaderSize;
@@ -792,7 +798,7 @@ struct TmFrameEncode : Block<TmFrameEncode> {
             }
             at += dataFieldLength;
             if (has_ocf.value) {
-                at += gr::ccsds::kOcfSize; // left zeroed: this block synthesizes no CLCW content
+                at += gr::ccsds::kOcfSize; // left zeroed, since the block synthesizes no CLCW content
             }
             static_cast<void>(at);
 
@@ -818,28 +824,28 @@ struct TmFrameEncode : Block<TmFrameEncode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::AosFrameEncode)
 
 /*!
-@brief One data field per record in, one whole AOS transfer frame out, ready for `digital::CrcAppend`.
+@brief Encodes one data field per record as one whole AOS transfer frame.
 
-`vc_frame_count` is a 24-bit counter this block owns, with the four-bit cycle field incremented on wrap when
-`vcfc_cycle_use` is set (732.0-B-4 4.1.2.5.5.2) — the same argument as `TmFrameEncode`'s counts. A packet zone
-shorter than the frame's own is padded with the pseudo-noise fill of 4.1.4.1.5.2, whose generator runs across
-frames rather than restarting per frame; the M_PDU pointer is written as the input record's metadata gave it, and
-a pointer key too wide for the field's eleven bits reads as absent and is counted.
+The block owns `vc_frame_count`, a 24-bit counter. With `vcfc_cycle_use` set, the four-bit cycle field increments
+when the counter wraps (732.0-B-4 4.1.2.5.5.2). The count follows the same reasoning as those of `TmFrameEncode`.
+The block pads a packet zone shorter than the frame's with the pseudo-noise fill of 4.1.4.1.5.2. The fill generator
+runs across frames and does not restart per frame. The M_PDU pointer is written as the input record's metadata gave
+it. A pointer key too wide for the field's eleven bits reads as absent and is counted in `nBadPointerKey`.
 */
 struct AosFrameEncode : Block<AosFrameEncode> {
-    using Description = Doc<"AOS transfer frame encode: one data field per record becomes a whole frame, with its own virtual channel frame count (732.0-B-4 4.1)">;
+    using Description = Doc<"Encodes one data field per record as a whole AOS transfer frame with its own virtual channel frame count (732.0-B-4 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "frame_length", Doc<"total octets of the frame this block produces; required">, Visible>                frame_length{0U};
-    Annotated<gr::Size_t, "spacecraft_id", Doc<"the eight-bit spacecraft identifier; required">, Visible>                         spacecraft_id{detail::kUnset};
-    Annotated<gr::Size_t, "virtual_channel", Doc<"the six-bit virtual channel identifier; required">, Visible>                    virtual_channel{detail::kUnset};
+    Annotated<gr::Size_t, "frame_length", Doc<"required total octets of each produced frame">, Visible>                           frame_length{0U};
+    Annotated<gr::Size_t, "spacecraft_id", Doc<"required eight-bit spacecraft identifier">, Visible>                              spacecraft_id{detail::kUnset};
+    Annotated<gr::Size_t, "virtual_channel", Doc<"required six-bit virtual channel identifier">, Visible>                         virtual_channel{detail::kUnset};
     Annotated<bool, "has_fhec", Doc<"write the optional 2-octet frame header error control, making the primary header 8 octets">> has_fhec           = false;
     Annotated<gr::Size_t, "insert_zone_length", Doc<"octets of the fixed insert zone, written as zero">>                          insert_zone_length = 0U;
-    Annotated<bool, "has_ocf", Doc<"reserve four octets for the operational control field; written as a zeroed CLCW">>            has_ocf            = false;
-    Annotated<bool, "has_fecf", Doc<"reserve two trailing octets for digital::CrcAppend to fill; not written here">>              has_fecf           = false;
-    Annotated<std::string, "data_unit", Doc<"'m_pdu', 'b_pdu', 'vca_sdu' or 'idle'; required">, Visible>                          data_unit{};
+    Annotated<bool, "has_ocf", Doc<"reserve four OCF octets, written as a zeroed CLCW">>                                          has_ocf            = false;
+    Annotated<bool, "has_fecf", Doc<"reserve two unwritten trailing octets for the FECF">>                                        has_fecf           = false;
+    Annotated<std::string, "data_unit", Doc<"required data unit, 'm_pdu', 'b_pdu', 'vca_sdu' or 'idle'">, Visible>                data_unit{};
     Annotated<bool, "replay", Doc<"the replay flag, 4.1.2.5.2">>                                                                  replay         = false;
     Annotated<bool, "vcfc_cycle_use", Doc<"whether the four-bit cycle field extends the count to 28 bits">>                       vcfc_cycle_use = false;
 
@@ -919,14 +925,14 @@ struct AosFrameEncode : Block<AosFrameEncode> {
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(frame_length.value, std::uint8_t{0U});
             if (gr::ccsds::writeAosPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
-                ++nRefusedHeader; // a header that cannot be written is a counted drop, never a frame carrying a zeroed header
+                ++nRefusedHeader; // an unwritable header drops and counts the record, and no frame goes out with a zeroed header
                 continue;
             }
             std::size_t at = _primaryHeaderOctets + std::size_t{insert_zone_length.value};
             if (_isMpdu) {
                 const std::optional<gr::Size_t> pointer = detail::readSize(detail::metaOf(record), "ccsds_first_header_pointer");
                 if (pointer.has_value() && *pointer > gr::Size_t{gr::ccsds::kFhpNoPacketStart}) {
-                    ++nBadPointerKey; // a value the eleven-bit field cannot hold says nothing about the zone, so it reads as absent
+                    ++nBadPointerKey; // a value the eleven-bit field cannot hold says nothing about the zone and reads as absent
                 }
                 const bool            havePointer = pointer.has_value() && *pointer <= gr::Size_t{gr::ccsds::kFhpNoPacketStart};
                 gr::ccsds::MpduHeader mpdu{.reserved = 0U, .first_header_pointer = havePointer ? static_cast<std::uint16_t>(*pointer) : gr::ccsds::kFhpNoPacketStart};
@@ -966,25 +972,25 @@ struct AosFrameEncode : Block<AosFrameEncode> {
 GR_REGISTER_BLOCK(gr::blocks::ccsds::TcFrameEncode)
 
 /*!
-@brief One data field per record in, one whole TC transfer frame out, ready for `digital::CrcAppend`.
+@brief Encodes one data field per record as one whole TC transfer frame.
 
-`frame_sequence_number` is a setting and is not incremented (232.0-B-4 4.1.2.8 NOTE 1 places its assignment in the
-COP-1 procedures, a link-layer engine this module does not build); every other frame's count is a counter this
-block owns, and this is the one place that line is drawn the other way. 4.1.1.1 b) makes the data field mandatory,
-so an empty payload has no encoding and is a counted refusal rather than a five-octet frame a decoder would drop.
+`frame_sequence_number` is a setting. The block does not increment it. 232.0-B-4 4.1.2.8 NOTE 1 places its
+assignment in the COP-1 procedures, a link-layer engine this module does not build. The TM and AOS encoders own
+their frame counts. 4.1.1.1 b) makes the data field mandatory. An empty payload therefore has no encoding. The block
+refuses it and counts it in `nRefusedEmpty`. It emits no five-octet frame for a decoder to drop.
 */
 struct TcFrameEncode : Block<TcFrameEncode> {
-    using Description = Doc<"TC transfer frame encode: one data field per record becomes a whole, self-describing frame (232.0-B-4 4.1)">;
+    using Description = Doc<"Encodes one data field per record as a whole, self-describing TC transfer frame (232.0-B-4 4.1)">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "spacecraft_id", Doc<"the ten-bit spacecraft identifier; required">, Visible>                                    spacecraft_id{detail::kUnset};
-    Annotated<gr::Size_t, "virtual_channel", Doc<"the six-bit virtual channel identifier; required">, Visible>                             virtual_channel{detail::kUnset};
-    Annotated<bool, "has_fecf", Doc<"reserve two trailing octets for digital::CrcAppend to fill; not written here">>                       has_fecf              = false;
-    Annotated<bool, "bypass_flag", Doc<"'0' Type-A, '1' Type-B, 4.1.2.3.1.2">>                                                             bypass_flag           = false;
-    Annotated<bool, "control_command_flag", Doc<"'0' data, '1' control commands, 4.1.2.3.2.2">>                                            control_command_flag  = false;
-    Annotated<gr::Size_t, "frame_sequence_number", Doc<"N(S); a setting, not incremented, 4.1.2.8 NOTE 1 places its assignment in COP-1">> frame_sequence_number = 0U;
+    Annotated<gr::Size_t, "spacecraft_id", Doc<"required ten-bit spacecraft identifier">, Visible>        spacecraft_id{detail::kUnset};
+    Annotated<gr::Size_t, "virtual_channel", Doc<"required six-bit virtual channel identifier">, Visible> virtual_channel{detail::kUnset};
+    Annotated<bool, "has_fecf", Doc<"reserve two unwritten trailing octets for the FECF">>                has_fecf              = false;
+    Annotated<bool, "bypass_flag", Doc<"'0' Type-A, '1' Type-B, 4.1.2.3.1.2">>                            bypass_flag           = false;
+    Annotated<bool, "control_command_flag", Doc<"'0' data, '1' control commands, 4.1.2.3.2.2">>           control_command_flag  = false;
+    Annotated<gr::Size_t, "frame_sequence_number", Doc<"fixed frame sequence number N(S), 4.1.2.8">>      frame_sequence_number = 0U;
 
     GR_MAKE_REFLECTABLE(TcFrameEncode, in, out, spacecraft_id, virtual_channel, has_fecf, bypass_flag, control_command_flag, frame_sequence_number);
 
@@ -1046,7 +1052,7 @@ struct TcFrameEncode : Block<TcFrameEncode> {
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(totalOctets, std::uint8_t{0U});
             if (gr::ccsds::writeTcPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
-                ++nRefusedHeader; // a header that cannot be written is a counted drop, never a frame carrying a zeroed header
+                ++nRefusedHeader; // an unwritable header drops and counts the record, and no frame goes out with a zeroed header
                 continue;
             }
             std::ranges::copy(record.signal_values, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(gr::ccsds::kTcPrimaryHeaderSize));

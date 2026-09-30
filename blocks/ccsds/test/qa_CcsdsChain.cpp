@@ -109,8 +109,8 @@ struct RecordSink : gr::Block<RecordSink> {
     }
 };
 
-/// Drops the frame at zero-based index `_dropAt` from the wire, so a lost-frame scenario can be built without a
-/// captured recording: every other frame passes unchanged.
+/// Drops the frame at zero-based index `_dropAt` from the wire. A lost-frame scenario then needs no captured
+/// recording. Every other frame passes unchanged.
 struct DropNth : gr::Block<DropNth> {
     gr::PortIn<Record, gr::Async>  in;
     gr::PortOut<Record, gr::Async> out;
@@ -134,8 +134,8 @@ struct DropNth : gr::Block<DropNth> {
     }
 };
 
-/// Run @p flow to completion on @p scheduler, then call @p collect. The scheduler owns the graph and destroys its
-/// blocks with it, so a caller that reads a block after the run gives a scheduler that outlives those reads.
+/// Runs @p flow to completion on @p scheduler, then calls @p collect. The scheduler owns the graph and destroys its
+/// blocks with it. A caller that reads a block after the run keeps the scheduler alive through those reads.
 template<typename TCollect>
 void runGraph(gr::scheduler::Simple<>& scheduler, gr::Graph flow, TCollect&& collect) {
     boost::ut::expect(scheduler.exchange(std::move(flow)).has_value());
@@ -186,12 +186,12 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
     using gr::blocks::digital::CrcCheck;
 
     static constexpr gr::Size_t                kZoneLength  = 242U; // 248 (frame_length) - 6 (TM primary header)
-    static constexpr gr::Size_t                kFrameLength = 248U; // pre-CRC size; CrcAppend grows the wire frame to 250
+    static constexpr gr::Size_t                kFrameLength = 248U; // pre-CRC size, and CrcAppend grows the wire frame to 250
     static constexpr std::array<gr::Size_t, 3> kApids{gr::Size_t{10}, gr::Size_t{20}, gr::Size_t{30}};
 
     "the receive chain, end to end, under the scheduler"_test = [] {
-        // The segmenter holds octets back until a zone fills, so the run closes with one packet sized to fill the last
-        // zone exactly. Every packet sent is then a packet received, and the comparison is over the whole stream.
+        // The segmenter holds octets back until a zone fills. The run therefore closes with one packet sized to fill
+        // the last zone exactly. Every packet sent is then a packet received, and the comparison covers the stream.
         const std::vector<Record> payloads = [] {
             std::vector<Record> records = seededPayloads(30, std::span<const gr::Size_t>(kApids));
             std::size_t         octets  = 0UZ;
@@ -224,9 +224,9 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
             checking["discard_crc"]      = true;
             auto& crcCheck               = flow.emplaceBlock<CrcCheck>(checking);
             auto& frameDecode            = flow.emplaceBlock<TmFrameDecode>(gr::property_map{{"frame_length", kFrameLength}});
-            // FieldRouter sits where 132.0-B-3's own service model puts it: after the frame decode, routing by the
-            // field the frame decode wrote (ccsds_vcid), before per-channel packet extraction. The three APIDs are
-            // multiplexed within this one virtual channel and survive to SpacePacketDecode's own ccsds_apid key.
+            // FieldRouter sits where the service model of 132.0-B-3 puts it. It follows the frame decode, routes by
+            // the field the frame decode wrote (ccsds_vcid), and precedes per-channel packet extraction. The three
+            // APIDs are multiplexed within this one virtual channel and survive to SpacePacketDecode's ccsds_apid key.
             auto& router    = flow.emplaceBlock<FieldRouter>(gr::property_map{{"field", std::string("virtual_channel")}, {"values", std::vector<gr::Size_t>{gr::Size_t{0}}}});
             auto& extract   = flow.emplaceBlock<SpacePacketExtract>(gr::property_map{{"virtual_channel", gr::Size_t{0}}});
             auto& pktDecode = flow.emplaceBlock<SpacePacketDecode>();
@@ -386,7 +386,7 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         std::ignore                       = gr::ccsds::writeTmPrimaryHeader(h1, frame1);
         std::vector<std::uint8_t>  frame2 = frame1;
         gr::ccsds::TmPrimaryHeader h2     = h1;
-        h2.vc_frame_count                 = 5; // a gap of five - four missing
+        h2.vc_frame_count                 = 5; // a gap of five, four frames missing
         h2.master_frame_count             = 5;
         std::ignore                       = gr::ccsds::writeTmPrimaryHeader(h2, frame2);
 
