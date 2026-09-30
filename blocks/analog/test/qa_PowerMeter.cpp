@@ -32,11 +32,11 @@
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
-/// @brief Drives the meter over `input` to exhaustion and returns the records it published, which most cases ignore.
+/// @brief Drives the meter over `input` to exhaustion and returns the records it published. Most cases ignore them.
 ///
-/// The meter leaves the last sample of a call unconsumed so the framework's end-of-stream epilogue has a span to run
-/// on, and takes at most as many samples as the output span has room for the records they close. Calling until the
-/// span is spent is therefore what a scheduler does, and what makes one call here mean one stretch of stream.
+/// The meter leaves the last sample of a call unconsumed. The framework's end-of-stream epilogue then has a span to
+/// run on. The meter takes at most as many samples as the output span has room for the records they close. A
+/// scheduler also calls until the span is used up. One call here then means one stretch of stream.
 template<typename TBlock, typename T>
 std::vector<gr::DataSet<float>> drive(TBlock& block, std::span<const T> input) {
     namespace test = gr::blocks::testing::span;
@@ -56,8 +56,9 @@ std::vector<gr::DataSet<float>> drive(TBlock& block, std::span<const T> input) {
     return records;
 }
 
-/// @brief What the meter emits when the stream ends here: the trailing samples folded in, then the record covering
-/// what has accumulated since the last one.
+/// @brief What the meter emits when the stream ends here.
+///
+/// It folds in the trailing samples, then emits the record covering what has accumulated since the last one.
 template<typename TBlock, typename T>
 std::vector<gr::DataSet<float>> finish(TBlock& block, std::span<const T> trailing) {
     namespace test = gr::blocks::testing::span;
@@ -102,7 +103,7 @@ void feed(PowerMeter<T>& block, std::span<const T> input, std::size_t chunkSize 
     }
 }
 
-/// 0.01 normalized: a whole number of periods in a 600-sample segment and in a 9600-sample window alike.
+/// 0.01 normalized, a whole number of periods in a 600-sample segment and in a 9600-sample window alike.
 [[nodiscard]] std::vector<CF> complexTone(std::size_t count, double amplitude, double normalized = 0.01) {
     std::vector<CF> samples(count);
     for (std::size_t i = 0UZ; i < count; ++i) {
@@ -134,7 +135,7 @@ struct Random {
 
     [[nodiscard]] double gaussian() noexcept { return std::sqrt(-2.0 * std::log(uniform() + 1e-300)) * std::cos(2.0 * kPi * uniform()); }
 
-    /// Circular complex Gaussian of unit mean power: each component has variance one half.
+    /// Circular complex Gaussian of unit mean power. Each component has variance one half.
     [[nodiscard]] CF sample() noexcept { return CF(static_cast<float>(gaussian() * 0.7071067811865476), static_cast<float>(gaussian() * 0.7071067811865476)); }
 };
 
@@ -172,7 +173,7 @@ struct Random {
 
 [[nodiscard]] bool longTestsEnabled() { return std::getenv("ENABLE_LONG_TESTS") != nullptr; }
 
-/// @brief Sends file descriptor 2 to a temporary file until `release()`; `text()` reads what arrived.
+/// @brief Sends file descriptor 2 to a temporary file until `release()`. `text()` reads what arrived.
 class StderrCapture {
     std::FILE* _file  = std::tmpfile();
     int        _saved = -1;
@@ -227,8 +228,9 @@ struct Hold {
     std::atomic<bool>        released{false};
 };
 
-/// @brief Publishes nothing and answers `OK` until released, then `count` samples of unit power and `DONE`. While
-/// held it draws the runtime's report of a block that answers `OK` for a second without moving a sample.
+/// @brief Publishes nothing and answers `OK` until released, then `count` samples of unit power and `DONE`.
+///
+/// While held it draws the runtime's report of a block that answers `OK` for a second without moving a sample.
 struct HeldSource : gr::Block<HeldSource> {
     gr::PortOut<CF> out;
     GR_MAKE_REFLECTABLE(HeldSource, out);
@@ -437,8 +439,8 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         std::println("after {} samples: linear_power {:.15g} against a fresh mean of {:.15g}", kBuffer * kPasses, block.linear_power(), fresh);
         expect(lt(std::abs(block.linear_power() - fresh) / fresh, 1e-12)) << "nothing is ever subtracted, so there is no residue to accumulate";
 
-        // A single 9600-sample window of noise has a 0.0443 dB spread of its own, so the 0 dB check needs a signal
-        // whose power is not a random variable; the drift is checked above.
+        // A single 9600-sample window of noise has a 0.0443 dB spread of its own. The 0 dB check therefore needs a
+        // signal whose power is not a random variable. The drift is checked above.
         PowerMeter<CF> tone({{"sample_rate", kRate}});
         init(tone);
         const std::vector<CF> steady = complexTone(kBuffer, 1.0);
@@ -648,11 +650,11 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         }
         std::println("[checksum {:g}]", sink);
 
-        // With DISABLE_SENSITIVE_TESTS set the test prints the figures and asserts nothing, with ENABLE_BENCHMARK_TESTS
-        // set it asserts the tight 1.5x bound, and otherwise it asserts the loose 3.0x bound. The tight bound needs a
-        // harness that controls the run; an ordinary ctest run measures the scheduler as much as this code. Either
-        // bound still catches a per-sample log10, which costs tens of times the accumulation rather than tens of
-        // percent.
+        // With DISABLE_SENSITIVE_TESTS set, the test prints the figures and asserts nothing. With
+        // ENABLE_BENCHMARK_TESTS set, it asserts the tight 1.5x bound. Otherwise it asserts the loose 3.0x bound. The
+        // tight bound needs a harness that controls the run. An ordinary ctest run measures the scheduler as much as
+        // this code. Either bound still catches a per-sample log10, which costs tens of times the accumulation and not
+        // tens of percent.
         if (std::getenv("DISABLE_SENSITIVE_TESTS") != nullptr) {
             std::println("DISABLE_SENSITIVE_TESTS is set: the figures are printed and not asserted on");
             return;

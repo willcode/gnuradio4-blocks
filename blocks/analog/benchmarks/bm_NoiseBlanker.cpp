@@ -45,7 +45,7 @@ struct Reference {
             const double re    = static_cast<double>(input[i].real());
             const double im    = static_cast<double>(input[i].imag());
             const double value = root ? std::sqrt(re * re + im * im) : re * re + im * im;
-            power += alpha * (value - power); // uncensored, and before the comparison: the desensitizing order
+            power += alpha * (value - power); // uncensored and before the comparison, the order that desensitizes
             output[i] = value > threshold * power ? CF{} : input[i];
         }
     }

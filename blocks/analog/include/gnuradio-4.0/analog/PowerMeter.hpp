@@ -31,28 +31,28 @@ template<typename T>
 requires(std::same_as<T, float> || std::same_as<T, std::complex<float>>)
 struct PowerMeter : Block<PowerMeter<T>> {
     using Description = Doc<R""(
-@brief An S-meter: the mean power of the last `window_time` seconds, in dBFS, readable from another thread.
+@brief An S-meter giving the mean power of the last `window_time` seconds in dBFS, readable from another thread.
 
-A sink. 0 dBFS is a mean power of exactly 1.0, and the window is a boxcar rather than a pole. `level()` is that
-reading in dBFS, `linear_power()` the same reading without the logarithm, and `coverage()` the fraction of the nominal
-window accumulated so far - a partial window is reported rather than suppressed.
+A sink. 0 dBFS is a mean power of exactly 1.0. The window is a boxcar, not a pole. `level()` is that reading in dBFS.
+`linear_power()` is the same reading without the logarithm. `coverage()` is the fraction of the nominal window
+accumulated so far. A partial window is reported and not suppressed.
 
-The optional `records` port carries the same reading as one `DataSet<float>` per completed window, stamped with the
-window's first input sample, for a consumer outside C++; a stream that ends mid-window emits a final record covering
-what it had.
+The optional `records` port carries the same reading as one `DataSet<float>` per completed window, for a consumer
+outside C++. Each record is stamped with the window's first input sample. A stream that ends mid-window emits a final
+record covering what it had.
 )"">;
 
     PortIn<T> in;
-    /// One record per completed window, for a consumer outside C++. The port is optional: leaving it unconnected
-    /// costs nothing and the readers below remain the whole interface for a graph that polls.
+    /// One record per completed window, for a consumer outside C++. The port is optional. An unconnected port has
+    /// no cost. A polling graph calls the readers below.
     PortOut<DataSet<float>, Async, Optional> records;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate; a change rebuilds the window">>                   sample_rate     = 96000.f;
-    Annotated<double, "window_time", Unit<"s">, Doc<"length of the rolling average; a change rebuilds the window">> window_time     = 0.100;
-    Annotated<gr::Size_t, "segments", Doc<"pieces the window is cut into; the reading refreshes once per piece">>   segments        = 16U;
-    Annotated<double, "floor_db", Unit<"dBFS">, Doc<"what level() returns at or below 10^(floor_db/10)">>           floor_db        = -200.0;
-    Annotated<gr::Size_t, "segment_samples", Doc<"observable: the realized segment length, at least one sample">>   segment_samples = 600U;
-    Annotated<gr::Size_t, "window_samples", Doc<"observable: segments * segment_samples, the realized window">>     window_samples  = 9600U;
+    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate, rebuilding the window on change">>                   sample_rate     = 96000.f;
+    Annotated<double, "window_time", Unit<"s">, Doc<"length of the rolling average, rebuilding the window on change">> window_time     = 0.100;
+    Annotated<gr::Size_t, "segments", Doc<"pieces of the window, each refreshing the reading once">>                   segments        = 16U;
+    Annotated<double, "floor_db", Unit<"dBFS">, Doc<"what level() returns at or below 10^(floor_db/10)">>              floor_db        = -200.0;
+    Annotated<gr::Size_t, "segment_samples", Doc<"observable realized segment length, at least one sample">>           segment_samples = 600U;
+    Annotated<gr::Size_t, "window_samples", Doc<"observable realized window, segments * segment_samples">>             window_samples  = 9600U;
 
     GR_MAKE_REFLECTABLE(PowerMeter, in, records, sample_rate, window_time, segments, floor_db, segment_samples, window_samples);
 
@@ -74,8 +74,8 @@ what it had.
     std::atomic<double>         _floorLinear{1e-20};
     std::atomic<double>         _floorDb{-200.0};
 
-    /// The window is sized from the members, and a batch that moves no value never calls back, so a block
-    /// constructed at its declared defaults is born with the window its settings describe.
+    /// The window is sized from the members. A settings batch that changes no value makes no call. A block
+    /// constructed at its declared defaults therefore starts with the window its settings describe.
     explicit PowerMeter(property_map init = {}) : Block<PowerMeter<T>>(std::move(init)) { configure(); }
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
@@ -84,7 +84,7 @@ what it had.
 
         static constexpr std::array kRebuildKeys{"sample_rate", "window_time", "segments"};
         if (!std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            return; // floor_db alone changes the clamp and nothing else
+            return; // floor_db alone changes only the clamp
         }
         configure();
     }
@@ -116,7 +116,7 @@ what it had.
         in.min_samples = 2UZ;
     }
 
-    /// @brief Zero the window. Not thread-safe against a running scheduler: for the owning thread between stop() and start().
+    /// @brief Zero the window. It is not thread-safe against a running scheduler. The owning thread calls it between stop() and start().
     void reset() {
         _lanes.fill(0.0);
         std::ranges::fill(_segments, 0.0);
@@ -139,19 +139,20 @@ what it had.
     /// @brief Fraction of the nominal window the reading covers, 0 to 1. Callable from any thread.
     [[nodiscard]] float coverage() const noexcept { return coverageOf(read().second); }
 
-    /// @brief The same reading without the logarithm, for a caller that wants a ratio rather than decibels.
+    /// @brief The same reading without the logarithm, as a ratio and not in decibels.
     [[nodiscard]] double linear_power() const noexcept { return read().first; }
 
-    /// @brief Fold the input into the window and publish the records it closes. The framework also calls this on an
-    /// empty input, because the async `records` port counts as ready whenever it has room or is unconnected. A call
-    /// that moves nothing answers `INSUFFICIENT_INPUT_ITEMS` on an empty input and `INSUFFICIENT_OUTPUT_ITEMS` when a
-    /// record has no room.
+    /// @brief Fold the input into the window and publish the records it closes.
+    ///
+    /// The framework also calls this on an empty input, because the async `records` port counts as ready whenever it
+    /// has room or is unconnected. A call that moves nothing answers `INSUFFICIENT_INPUT_ITEMS` on an empty input and
+    /// `INSUFFICIENT_OUTPUT_ITEMS` when a record has no room.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::span<const T> input(inSpan);
         std::size_t              made = drain(outSpan, 0UZ);
 
-        // The last sample of a call is held back so the end-of-stream epilogue always has a span to run on. A call
-        // carrying a single sample is one a caller drove by hand rather than one the framework composed, and takes it.
+        // The block holds back the last sample of a call. The end-of-stream epilogue then has a span to run on. A
+        // single-sample call comes from a caller driving the block by hand, not from the framework, and takes it.
         const std::size_t offer = input.size() >= 2UZ ? input.size() - 1UZ : input.size();
         const std::size_t take  = std::min(offer, roomFor(outSpan, made));
 
@@ -166,8 +167,9 @@ what it had.
         return input.empty() ? work::Status::INSUFFICIENT_INPUT_ITEMS : work::Status::INSUFFICIENT_OUTPUT_ITEMS;
     }
 
-    /// @brief End of stream: fold the trailing samples, then emit what has accumulated since the last record. That
-    /// span is shorter than a window, and `sample_start` with the stream's end is what delimits it.
+    /// @brief At end of stream, fold the trailing samples, then emit what has accumulated since the last record.
+    ///
+    /// That span is shorter than a window. `sample_start` and the stream's end delimit it.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         accumulate(std::span<const T>(inSpan), outSpan.isConnected);
         std::size_t made = drain(outSpan, 0UZ);
@@ -182,8 +184,10 @@ what it had.
         return work::Status::OK;
     }
 
-    /// @brief The reading as a record, on the tier's measurement conventions: the power the window closed at, in the
-    /// clamped form `level()` returns, beside the raw ratio and the coverage.
+    /// @brief The reading as a record, on the tier's measurement conventions.
+    ///
+    /// It holds the power the window closed at, in the clamped form `level()` returns, beside the raw ratio and the
+    /// coverage.
     [[nodiscard]] DataSet<float> makeRecord(double power, std::uint32_t filled) const {
         const std::array<gr::measurement::ScalarChannel, 3UZ> channels{{
             {"power", "Power", "dBFS", clampedLevel(power, filled)},
@@ -212,8 +216,10 @@ private:
 
     [[nodiscard]] float coverageOf(std::uint32_t filled) const noexcept { return std::min(1.f, static_cast<float>(filled) / static_cast<float>(_windowSegments.load(std::memory_order_relaxed))); }
 
-    /// @brief How many input samples may be taken before a record would have nowhere to go. A record closes every
-    /// `window_samples` samples, so it is that many per free output slot, less what the current window already holds.
+    /// @brief How many input samples may be taken before a record would have nowhere to go.
+    ///
+    /// A record closes every `window_samples` samples, so it is that many per free output slot, less what the current
+    /// window already holds.
     [[nodiscard]] std::size_t roomFor(OutputSpanLike auto& outSpan, std::size_t made) const {
         if (!outSpan.isConnected) {
             return std::numeric_limits<std::size_t>::max();
@@ -290,8 +296,8 @@ private:
         mean /= static_cast<double>(filled);
         publish(mean, static_cast<std::uint32_t>(filled));
 
-        // A record is one completed window, so the rate is one per `window_samples` rather than one per segment, and
-        // the record states the reading of the window that closed rather than whatever the next chunk goes on to make.
+        // A record is one completed window. The rate is one per `window_samples`, not one per segment. The record
+        // states the reading of the window that closed, not a later chunk's reading.
         if (++_sinceRecord >= _segments.size()) {
             _sinceRecord = 0UZ;
             if (wantRecords) {

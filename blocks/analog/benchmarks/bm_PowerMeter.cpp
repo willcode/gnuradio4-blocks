@@ -46,9 +46,9 @@ int main() {
     init(polled);
     init(wired);
 
-    // `connected` is what separates the sample path a polling graph runs from the one that also builds a record per
-    // window; the meter holds the last sample of a call back for the end-of-stream epilogue, so the sweep advances by
-    // what was consumed rather than by the chunk, as a scheduler does.
+    // `connected` separates the sample path of a polling graph from the path that also builds a record per window.
+    // The meter holds back the last sample of a call for the end-of-stream epilogue. The sweep therefore advances by
+    // what was consumed and not by the chunk, as a scheduler does.
     std::vector<gr::DataSet<float>> records(4UZ);
     const auto                      sweep = [&x, &records](PowerMeter<CF>& meter, bool poll, bool connected) {
         namespace test    = gr::blocks::testing::span;

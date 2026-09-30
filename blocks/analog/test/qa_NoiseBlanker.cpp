@@ -64,7 +64,7 @@ struct Random {
 
     [[nodiscard]] double gaussian() noexcept { return std::sqrt(-2.0 * std::log(uniform() + 1e-300)) * std::cos(2.0 * kPi * uniform()); }
 
-    /// Circular complex Gaussian of unit mean power: each component has variance one half.
+    /// Circular complex Gaussian of unit mean power. Each component has variance one half.
     [[nodiscard]] CF sample() noexcept { return CF(static_cast<float>(gaussian() * 0.7071067811865476), static_cast<float>(gaussian() * 0.7071067811865476)); }
 };
 
@@ -77,7 +77,7 @@ struct Random {
     return samples;
 }
 
-/// A constant-magnitude tone: |x|^2 never departs from its own mean, so a correct detector never fires on it.
+/// A constant-magnitude tone. |x|^2 always equals its own mean, and a correct detector does not fire on it.
 [[nodiscard]] std::vector<CF> tone(std::size_t count, double amplitude, double normalized = 0.013) {
     std::vector<CF> samples(count);
     for (std::size_t i = 0UZ; i < count; ++i) {
@@ -147,10 +147,10 @@ struct Random {
 /**
  * @brief Where a censored tracker settles on unit-power noise, and the run rate that follows.
  *
- * An exact reference gives exp(-T) for the trigger rate. A censored tracker is not exact: it never learns from the
- * samples it rejected, so it settles on E[p | p <= T*m] rather than on E[p], and the fixed point of that is below
- * one. At the default 9.32 dB the shift is 0.17 % and exp(-T) is the answer; at 6 dB it is 10 % and it is not,
- * which is a property of censoring rather than of this implementation.
+ * An exact reference gives exp(-T) for the trigger rate. A censored tracker is not exact. It does not learn from the
+ * samples it rejected. It settles on E[p | p <= T*m] and not on E[p], and the fixed point of that is below one. At
+ * the default 9.32 dB the shift is 0.17 %, and exp(-T) is the answer. At 6 dB the shift is 10 %, and exp(-T) is not
+ * the answer. This is a property of censoring and not of this implementation.
  */
 [[nodiscard]] std::pair<double, double> censoredRunRate(double thresholdDb, std::size_t blankSamples) {
     const double threshold = std::pow(10.0, thresholdDb / 10.0);
@@ -204,7 +204,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         }
         expect(that % exact) << "disabled is the input delayed by delay_samples, bit for bit";
 
-        // A mid-stream `enabled` change keeps the alignment: every sample comes out once, in order.
+        // A mid-stream `enabled` change keeps the alignment. Every sample comes out once, in order.
         NoiseBlanker<CF>  toggled = make<CF>({{"sample_rate", kRate}, {"threshold_db", 60.0}});
         std::size_t       calls   = 0UZ;
         std::vector<CF>   out;
@@ -233,8 +233,8 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", db}});
             expect(approx(block._threshold, std::pow(10.0, db / 10.0), std::pow(10.0, db / 10.0) * 1e-9)) << std::format("threshold_db {}", db);
 
-            // The marked sample only reaches the output delay_samples later, so the probe is followed by enough
-            // silence to flush the line; silence is below any threshold and opens nothing of its own.
+            // The marked sample reaches the output delay_samples later. The probe is therefore followed by enough
+            // silence to flush the line. Silence is below any threshold and opens no window of its own.
             const auto fires = [db](double scale) {
                 NoiseBlanker<CF> probe = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", db}, {"emit_tags", true}});
                 probe._warmup          = 0UZ;
@@ -247,7 +247,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             expect(fires(1.0 + 1e-5)) << std::format("threshold_db {}: just above it does", db);
         }
 
-        // Exactly at the threshold, in a case binary arithmetic represents exactly: T = 4, p_bar = 1, |x| = 2.
+        // Exactly at the threshold, in a case binary arithmetic represents exactly, with T = 4, p_bar = 1 and |x| = 2.
         NoiseBlanker<CF> exactly = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", 10.0 * std::log10(4.0)}, {"emit_tags", true}});
         exactly._warmup          = 0UZ;
         exactly._power           = 1.0;
@@ -256,7 +256,8 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         atThreshold[0UZ] = CF(2.f, 0.f);
         expect(eq(test::run(exactly, std::span<const CF>(atThreshold), 32UZ).tags.size(), 0UZ)) << "a sample at exactly T * p_bar does not trigger: the comparison is strict";
 
-        // The conversion is exact; the two defaults are it, rounded to two decimals. 3.3 gives 9.32108, not 9.32000.
+        // The conversion is exact. The two defaults are its values rounded to two decimals.
+        // 3.3 gives 9.32108, not 9.32000.
         expect(approx(thresholdFromMagnitudeRatio(3.3), 9.32, 2e-3)) << std::format("k=3.3 maps to {:.5f} dB", thresholdFromMagnitudeRatio(3.3));
         expect(approx(thresholdFromMagnitudeRatio(2.5), 6.91, 2e-3)) << std::format("k=2.5 maps to {:.5f} dB", thresholdFromMagnitudeRatio(2.5));
     };
@@ -277,12 +278,12 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             const std::vector<CF>  x   = noise(samples, 0xa4093822299f31d0ULL + static_cast<std::uint64_t>(db));
             const test::Result<CF> got = test::run(block, std::span<const CF>(x), 4096UZ);
 
-            // The tail is tested against the reference the block actually holds, which is the exact statement of
-            // P(false) = exp(-T * p_bar). Where that reference sits is the second assertion, and it is below one:
-            // a censored tracker never learns from the samples it rejected. Taking exp(-T) alone is right at the
-            // default 9.32 dB (0.17 % apart) and 30 % out at 6 dB.
-            // Two triggers less than four samples apart leave one contiguous replaced run and so one marker, which
-            // is the first-order merge term below.
+            // The tail is tested against the reference the block holds. That is the exact statement of
+            // P(false) = exp(-T * p_bar). The second assertion places that reference below one. A censored tracker
+            // does not learn from the samples it rejected. Taking exp(-T) alone is right at the default 9.32 dB
+            // (0.17 % apart) and 30 % out at 6 dB.
+            // Two triggers less than four samples apart leave one contiguous replaced run and one marker. The
+            // first-order merge term below accounts for that.
             const auto [modeled, modeledRate] = censoredRunRate(db, 7UZ);
             const double perSample            = std::exp(-std::pow(10.0, db / 10.0) * block._power);
             const double wantRate             = perSample / (1.0 + perSample * 6.0) * (1.0 - 3.0 * perSample);
@@ -309,7 +310,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 1000.0 / static_cast<double>(kRate)}});
         std::ignore            = test::run(block, std::span<const CF>(x), 4096UZ);
 
-        double       uncensored = 0.0; // the desensitizing order: update from every sample, then compare
+        double       uncensored = 0.0; // the desensitizing order, which updates from every sample and then compares
         const double alpha      = block._alpha;
         for (const CF& sample : x) {
             const double power = static_cast<double>(sample.real()) * static_cast<double>(sample.real()) + static_cast<double>(sample.imag()) * static_cast<double>(sample.imag());
@@ -331,9 +332,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         }
         expect(eq(test::run(block, std::span<const CF>(loud), 128UZ).tags.size(), 0UZ)) << "not one blanked sample in the first time constant, whatever the level";
 
-        // The tracker is still climbing for a few time constants after the warm-up ends, so the settled duty is read
-        // after that rather than across it: the cost of the warm-up is stated as one time constant of no protection,
-        // plus the further few during which the reference is still climbing.
+        // The tracker still climbs for a few time constants after the warm-up ends. The settled duty is read after
+        // that climb. The cost of the warm-up is one time constant of no protection, plus the few more during which
+        // the reference still climbs.
         std::vector<CF> settling = noise(10UZ * kTau, 0x452821e638d01377ULL);
         std::vector<CF> after    = noise(10UZ * kTau, 0xbe5466cf34e90c6cULL);
         for (CF& sample : settling) {
@@ -360,7 +361,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         constexpr std::size_t kSpacing  = 20UZ;
 
         for (const auto& [inrDb, want] : kCases) {
-            // The stream runs nine samples past the last impulse: each impulse is looked for in the output, which is
+            // The stream runs nine samples past the last impulse. Each impulse is looked for in the output, which is
             // the input delayed by nine.
             const double      amplitude = std::sqrt(std::pow(10.0, inrDb / 10.0));
             const std::size_t count     = kImpulses * kSpacing;
@@ -370,8 +371,8 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
                 x[at] += CF(static_cast<float>(amplitude), 0.f);
             }
 
-            // The reference is held exact: a 5 % duty of impulses would otherwise raise it and cost detection, which
-            // is a property of the scene rather than of the statistic under test here.
+            // The reference is held exact. A 5 % duty of impulses would otherwise raise it and cost detection. That
+            // effect belongs to the scene and not to the statistic under test here.
             NoiseBlanker<CF> block     = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 1e8 / static_cast<double>(kRate)}, {"replacement", std::string("zero")}});
             block._warmup              = 0UZ;
             block._power               = 1.0;
@@ -497,7 +498,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         block._warmup          = 0UZ;
         block._power           = 1.0;
 
-        // Sample by sample, so the bound can be read at every point rather than inferred from the output.
+        // Sample by sample, so the bound can be read at every point and need not be inferred from the output.
         std::uint32_t highest = 0U;
         std::size_t   made    = 0UZ;
         for (std::size_t i = 0UZ; i < kLength; ++i) {
@@ -606,10 +607,10 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
     };
 
     "a run of exact zeros leaves both trackers at zero, not at a subnormal"_test = [] {
-        // Both trackers keep a double, so the silence that walks one into the subnormals is long: at the default pole
-        // (0.01 s at 96 kHz, alpha = 1.0411e-3) the power needs 680 061 samples and the duty, whose pole is ten times
-        // slower, 6.7 million. Only the pole sets the count, so the case runs at alpha = 0.1, where the power needs
-        // 6 724 samples and the duty, from a half, 70 416.
+        // Both trackers keep a double, and the silence that walks one into the subnormals is long. At the default pole
+        // (0.01 s at 96 kHz, alpha = 1.0411e-3) the power needs 680 061 samples. The duty, whose pole is ten times
+        // slower, needs 6.7 million. Only the pole sets the count. The case therefore runs at alpha = 0.1, where the
+        // power needs 6 724 samples and the duty, from a half, needs 70 416.
         constexpr std::size_t kZeros = 80000UZ;
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 0.0}, {"alpha", 0.1}});
@@ -627,11 +628,11 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
     };
 
     "the flush changes nothing above the subnormal range"_test = [] {
-        // The two recursions as they stood, sample by sample against the block, over a step of unit magnitude and the
-        // decay that follows it. The seeded reference power is exactly the step's power, so nothing is ever detected
-        // and no window ever opens: both updates run unconditionally and the mirror is exact. At alpha = 0.5 the power
-        // passes 1e-300 after 997 zeros and cannot be flushed before 1022; the duty, at a tenth of that pole, passes
-        // 1e-300 at sample 13 454 and cannot be flushed before 13 798.
+        // The two recursions without the flush, run sample by sample beside the block over a step of unit magnitude
+        // and its decay. The seeded reference power is exactly the step's power. Nothing is detected and no window
+        // opens. Both updates run unconditionally, and the mirror is exact. At alpha = 0.5 the power passes 1e-300
+        // after 997 zeros and cannot be flushed before 1022. The duty, at a tenth of that pole, passes 1e-300 at
+        // sample 13 454 and cannot be flushed before 13 798.
         constexpr double      kAlpha = 0.5;
         constexpr std::size_t kStep  = 8UZ;
         constexpr std::size_t kTotal = 13454UZ;
@@ -672,7 +673,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
     "the per-sample cost stays inside the recorded budget"_test = [] {
         if (std::getenv("ENABLE_BENCHMARK_TESTS") == nullptr) {
-            return; // opt-in: a throughput figure belongs to a controlled run, not to every ctest invocation
+            return; // opt-in, since a throughput figure belongs to a controlled run and not to every ctest invocation
         }
         using Clock                   = std::chrono::steady_clock;
         constexpr std::size_t kLength = 1UZ << 22;
@@ -706,9 +707,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             }
         }
         std::println("NoiseBlanker<complex<float>> {:.3f} ns/sample (spread {:.3f}), span copy {:.3f}", best, worst - best, floorBest);
-        // The test builds at the build type's optimization level, the level bm_NoiseBlanker builds at. The bound
-        // carries the margin set for an -O1 build of this test. It catches a change of shape, and bm_NoiseBlanker gives
-        // the cost a receiver pays.
+        // The test builds at the build type's optimization level, as bm_NoiseBlanker does. The bound carries the
+        // margin set for an -O1 build of this test. It catches a change of shape. bm_NoiseBlanker measures the cost
+        // in a receiver.
         expect(lt(best, 22.0)) << std::format("the block reads {:.3f} ns/sample", best);
     };
 };
