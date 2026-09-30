@@ -25,43 +25,43 @@ namespace gr::blocks::ofdm {
 GR_REGISTER_BLOCK(gr::blocks::ofdm::CarrierAllocator)
 
 /**
- * @brief Maps a stream of data-carrier symbols onto OFDM symbols: data, pilots and sync words in bin order.
+ * @brief Maps a stream of data-carrier symbols onto OFDM symbols of data, pilots and sync words in bin order.
  *
- * One output record is one symbol, `fft_len` values in FFT bin order, and its axis carries the signed logical index
- * of each value. `data_carriers` and `pilot_carriers` name carriers by signed index; the conversion to bins happens
- * once, in `gr::ofdm::CarrierMap`, and everything here reads the bins it produced.
+ * One output record is one symbol of `fft_len` values in FFT bin order. Its axis carries the signed logical index of
+ * each value. `data_carriers` and `pilot_carriers` name carriers by signed index. `gr::ofdm::CarrierMap` converts
+ * them to bins once, and the block reads the bins it produced.
  *
- * Pilots are read from `pilot_symbols` by the two-level cycle the family states: symbol `s`, pilot slot `p` takes
- * `pilot_symbols[(s * n_pilots + p) % len]`. A cycle whose length is a multiple of `n_pilots` therefore gives every
- * symbol the same pilots, and one that is not rotates them from symbol to symbol. `s` is the symbol's data index
- * within its frame, so a receiver that has found the frame can reproduce the sequence from the frame alone; unframed,
- * `s` is stream-absolute, there being no frame to count from.
+ * Pilots come from `pilot_symbols` by the family's two-level cycle. Symbol `s`, pilot slot `p` takes
+ * `pilot_symbols[(s * n_pilots + p) % len]`. A cycle whose length is a multiple of `n_pilots` gives every symbol the
+ * same pilots. Any other length rotates them from symbol to symbol. `s` is the symbol's data index within its frame.
+ * A receiver that has found the frame can reproduce the sequence from the frame alone. Without framing, `s` is
+ * stream-absolute.
  *
- * `sync_words` are whole symbols emitted verbatim as a frame's first symbols. They are a concatenation, since a
- * setting carries no vector of vectors, and a length that is not a whole number of symbols is refused. A Schmidl-Cox
- * preamble is one of these — a sync word whose time-domain form repeats its lower half in its upper — which
- * `gr::ofdm::schmidlCoxPreamble` builds for a caller who has no standard to follow.
+ * `sync_words` are whole symbols, emitted verbatim as a frame's first symbols. A setting carries no vector of vectors,
+ * and the words are one concatenation. A length that is not a whole number of symbols is refused. A Schmidl-Cox
+ * preamble is one such sync word. Its time-domain form repeats its lower half in its upper half.
+ * `gr::ofdm::schmidlCoxPreamble` builds one for a caller who has no standard to follow.
  *
- * `frame_len` is the data symbols in a frame; 0 is unframed and carries no sync words. A frame's sync words are
- * emitted only once a whole data symbol is ready for it, so a stream that ends on a frame boundary leaves no preamble
- * standing in front of nothing.
+ * `frame_len` is the number of data symbols in a frame. A value of 0 means unframed, with no sync words. The block
+ * emits a frame's sync words only once a whole data symbol is ready for that frame. A stream that ends on a frame
+ * boundary therefore leaves no preamble without data behind it.
  *
- * End of stream fills what is missing with zeros: the trailing partial symbol always, and, when framed, the rest of
- * the open frame, so a receiver's `n_sync + frame_len` cut is always satisfied. Every record states the carriers that
- * were invented for it under `pad_carriers`, and the total is `nPadded()`.
+ * At end of stream, the block fills what is missing with zeros. It always pads the trailing partial symbol. When
+ * framed, it also pads the rest of the open frame. A receiver that cuts `n_sync + frame_len` symbols then always gets
+ * a whole frame. Every record states its zero-filled carriers under `pad_carriers`, and `nPadded()` gives the total.
  */
 struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
-    using Description = Doc<"OFDM carrier allocator: a stream of data-carrier symbols in, one DataSet<complex<float>> symbol record of fft_len values in bin order out. Pilots follow the two-level pilot_symbols cycle, sync_words open each frame verbatim, and the trailing partial symbol and frame are zero-padded with the invented carriers counted in each record's pad_carriers">;
+    using Description = Doc<"Maps a stream of data-carrier symbols onto DataSet<complex<float>> symbol records of fft_len values in bin order. Pilots follow the two-level pilot_symbols cycle, and sync_words open each frame verbatim. The trailing partial symbol and frame are zero-padded, and each record's pad_carriers counts its padded carriers">;
 
     PortIn<Complex>                  in;
     PortOut<DataSet<Complex>, Async> out;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length, a power of two; the record's length in bins">>                       fft_len = 64U;
+    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length and record length in bins, a power of two">>                          fft_len = 64U;
     Annotated<std::vector<std::int32_t>, "data_carriers", Visible, Doc<"signed logical carrier indices the data stream fills, in order">> data_carriers{};
     Annotated<std::vector<std::int32_t>, "pilot_carriers", Visible, Doc<"signed logical carrier indices the pilot cycle fills">>          pilot_carriers{};
-    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im; read by (s * n_pilots + p) % len">>                            pilot_symbols{};
+    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im pilots, read by (s * n_pilots + p) % len">>                     pilot_symbols{};
     Annotated<std::vector<float>, "sync_words", Doc<"interleaved re,im, a whole number of fft_len-carrier symbols, emitted verbatim">>    sync_words{};
-    Annotated<gr::Size_t, "frame_len", Visible, Doc<"data symbols per frame; 0 is unframed and carries no sync words">>                   frame_len   = 0U;
+    Annotated<gr::Size_t, "frame_len", Visible, Doc<"data symbols per frame, 0 for unframed">>                                            frame_len   = 0U;
     Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                        signal_name = std::string("ofdm_symbol");
 
     GR_MAKE_REFLECTABLE(CarrierAllocator, in, out, fft_len, data_carriers, pilot_carriers, pilot_symbols, sync_words, frame_len, signal_name);
@@ -80,9 +80,9 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
     std::uint64_t _frameIndex      = 0ULL;
     std::size_t   _symbolInFrame   = 0UZ;  ///< sync words included, so it indexes the frame's symbol cadence
     std::size_t   _dataInFrame     = 0UZ;  ///< data symbols emitted into the open frame
-    std::uint64_t _pilotPhase      = 0ULL; ///< the `s` of the pilot cycle: within the frame when framed, absolute when not
+    std::uint64_t _pilotPhase      = 0ULL; ///< the `s` of the pilot cycle, within the frame when framed and absolute when not
     std::uint64_t _streamAt        = 0ULL; ///< absolute input index of `_pending`'s first sample
-    std::uint64_t _padded          = 0ULL; ///< carriers invented at end of stream, cumulative
+    std::uint64_t _padded          = 0ULL; ///< carriers zero-filled at end of stream, cumulative
     std::size_t   _padThisSymbol   = 0UZ;
     bool          _flushed         = false;
     bool          _warnedTruncated = false;
@@ -153,7 +153,7 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
         in.min_samples = 2UZ;
     }
 
-    /// @brief Fold whole data symbols out of the stream, taking no sample the output has no room for the record of.
+    /// @brief Folds whole data symbols out of the stream. It takes no sample whose record the output has no room for.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const Progress tally = fold(inSpan, inSpan.size() > 0UZ ? inSpan.size() - 1UZ : 0UZ, outSpan);
         if (tally.outputFull && tally.made == 0UZ && tally.taken == 0UZ) {
@@ -166,7 +166,7 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
         return work::Status::OK;
     }
 
-    /// @brief End of stream: fold the trailing samples, then zero-fill the open symbol and, when framed, the open frame.
+    /// @brief Folds the trailing samples at end of stream, then zero-fills the open symbol and any open frame.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         Progress tally = fold(inSpan, inSpan.size(), outSpan);
         if (!_flushed) {
@@ -217,7 +217,7 @@ private:
         }
     }
 
-    /// @brief Zero-fill what the stream did not deliver, counting every invented carrier.
+    /// @brief Zero-fills what the stream did not deliver and counts every padded carrier.
     void flush(Progress& tally, OutputSpanLike auto& outSpan) {
         const bool frameOpen = frame_len.value > 0U && (_dataInFrame > 0UZ || !_pending.empty());
         if (_pending.empty() && !frameOpen) {
@@ -240,7 +240,7 @@ private:
             if (_syncLeft > 0UZ) {
                 emitSyncWord(outSpan[tally.made]);
             } else {
-                if (_pending.empty()) { // a whole symbol the frame owes and the stream never carried
+                if (_pending.empty()) { // a whole symbol the frame needs and the stream did not carry
                     _pending.assign(_nData, Complex{});
                     _padThisSymbol = _nData;
                     _padded += static_cast<std::uint64_t>(_nData);

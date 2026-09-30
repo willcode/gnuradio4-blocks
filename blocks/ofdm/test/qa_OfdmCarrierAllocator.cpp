@@ -20,8 +20,8 @@ namespace shim = gr::blocks::testing::span;
 
 constexpr gr::Size_t kFft = 64U;
 
-/// The QA numerology: 64 carriers, 52 occupied, 4 of them pilots. A test shape, explicitly not an
-/// interoperability claim, and the one the whole module's QA is measured on.
+/// The QA numerology is 64 carriers, 52 occupied, 4 of them pilots. It is a test shape and makes no
+/// interoperability claim. The whole module's QA is measured on it.
 [[nodiscard]] std::vector<std::int32_t> pilotCarriers() { return {-21, -7, 7, 21}; }
 
 [[nodiscard]] std::vector<std::int32_t> dataCarriers() {
@@ -55,10 +55,10 @@ constexpr gr::Size_t kFft = 64U;
 }
 
 /**
- * @brief Drive the block over @p input in chunks, then run the end-of-stream epilogue over what it held back.
+ * @brief Drives the block over @p input in chunks, then runs the end-of-stream epilogue over what it held back.
  *
- * The block leaves the last sample of every call unconsumed so the framework's epilogue has a span to run on, so the
- * driver re-presents what a call did not take rather than advancing by the chunk size.
+ * The block leaves the last sample of every call unconsumed, and the framework's epilogue runs on that span. The
+ * driver therefore re-presents what a call did not take and does not advance by the chunk size.
  */
 [[nodiscard]] std::vector<gr::DataSet<CF>> drive(CarrierAllocator& block, std::span<const CF> input, std::size_t chunk, std::size_t outRoom = 128UZ) {
     std::vector<gr::DataSet<CF>> records;
@@ -143,7 +143,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         expect(values[27UZ] == CF{}) << "carrier +27 is outside the occupied band";
         expect(values[37UZ] == CF{}) << "carrier -27 is outside the occupied band";
 
-        // the record's own axis states the mapping, so a consumer never re-derives it
+        // the record's own axis states the mapping, and a consumer does not re-derive it
         expect(records[0UZ].axis_values[0UZ][0UZ] == CF(0.f, 0.f));
         expect(records[0UZ].axis_values[0UZ][1UZ] == CF(1.f, 0.f));
         expect(records[0UZ].axis_values[0UZ][32UZ] == CF(-32.f, 0.f));
@@ -246,7 +246,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         expect(eq(meta(records[3UZ], "pad_carriers"), data.size()));
         expect(eq(block.nPadded(), 2UZ * data.size() - partial));
 
-        // what was invented is zero, and what arrived is untouched
+        // the padded carriers are zero, and the carriers that arrived are untouched
         const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, data[partial]);
         expect(records[2UZ].signal_values[bin] == CF{});
         const std::size_t kept = gr::ofdm::CarrierMap::binOf(kFft, data[partial - 1UZ]);

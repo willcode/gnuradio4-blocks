@@ -24,15 +24,15 @@
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 /**
- * The tier's OFDM loopback, rehearsed whole: bits through the constellation encoder, the carrier allocator, the
- * prefix and its inverse transform, a channel of static multipath, a carrier offset and additive noise, then the
- * Schmidl-Cox sync, prefix removal with its forward transform, the equalizer and the decoder, and the bit error rate
- * out the far end at two pinned operating points.
+ * The OFDM loopback, run whole. Bits go through the constellation encoder, the carrier allocator, and the prefix with
+ * its inverse transform. A channel of static multipath, a carrier offset and additive noise follow. The receiver runs
+ * the Schmidl-Cox sync, prefix removal with its forward transform, the equalizer and the decoder. The test measures
+ * the bit error rate at two pinned operating points.
  *
- * The chain the spec names has a separate IFFT and FFT between the allocator and the prefix blocks. The fourier
- * module's FFT block carries no complex symbol record on either side and the module has no inverse block at all, so
- * the transforms are inside CpInsert and CpRemove instead -- the same library kernel, called once each, which is
- * what the section-2 heading already calls those two: the blocks where the domains meet.
+ * The specified chain has a separate IFFT and FFT between the allocator and the prefix blocks. The FFT block of the
+ * fourier module carries no complex symbol record on either side, and that module has no inverse block. The
+ * transforms are therefore inside CpInsert and CpRemove. They use the same library kernel, called once each. These
+ * two are the blocks where the domains meet.
  */
 namespace qa_ofdm_loopback {
 
@@ -57,9 +57,9 @@ constexpr std::size_t kFrames = 8UZ;
 constexpr std::size_t kLead   = 200UZ;
 constexpr std::size_t kTrail  = 400UZ;
 
-/// The cut is biased into the prefix by enough to clear both the channel's delay spread and the plateau-midpoint
-/// bias the sync leaves: the window then starts inside the prefix, where the symbol's own tail already sits, and the
-/// per-carrier rotation it costs is one the least-squares estimate absorbs along with the channel.
+/// The cut is biased into the prefix far enough to clear both the channel's delay spread and the plateau-midpoint
+/// bias of the sync. The window then starts inside the prefix, where the symbol's own tail already sits. The
+/// least-squares estimate absorbs the per-carrier rotation along with the channel.
 constexpr std::int32_t kTimingOffset = -6;
 
 template<typename TBlock>
@@ -123,7 +123,7 @@ template<typename TBlock>
     return gr::channel::tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), rate, true);
 }
 
-/// @brief Everything from bits to the transmitted stream, with no trigger tag: a receiver finds its own frames.
+/// @brief Everything from bits to the transmitted stream, with no trigger tag. A receiver finds its own frames.
 [[nodiscard]] std::vector<CF> transmit(std::span<const std::uint8_t> labels) {
     ConstellationEncoder<float> encoder = make<ConstellationEncoder<float>>({{"constellation", std::string("qpsk")}});
     const auto                  symbols = shim::run<CF>(encoder, labels, 4096UZ);
@@ -151,8 +151,8 @@ template<typename TBlock>
         records.push_back(std::move(scratch[k]));
     }
 
-    // emit_trigger off: a transmit-side marker would reach the receiver's prefix removal alongside the sync's own
-    // and restart the frame at whichever came second
+    // emit_trigger off. A transmit-side marker would reach the receiver's prefix removal beside the sync's own and
+    // restart the frame at whichever came second.
     CpInsert                         cp = make<CpInsert>({{"cp_len", std::vector<gr::Size_t>{kCp}}, {"emit_trigger", false}});
     std::vector<CF>                  body(1UZ << 17);
     shim::InputSpan<gr::DataSet<CF>> recordSpan(std::span<const gr::DataSet<CF>>(records), 0UZ);
@@ -229,7 +229,7 @@ struct Result {
     return result;
 }
 
-/// @brief What zero forcing costs on this profile: the response over the data carriers and the noise it multiplies.
+/// @brief What zero forcing costs on this profile, as the response over the data carriers and the noise it multiplies.
 struct Selectivity {
     double minDb  = 0.;
     double maxDb  = 0.;
@@ -276,13 +276,12 @@ const boost::ut::suite<"OFDM tier gate"> _loopback = [] {
     const float floor = static_cast<float>(0.25 * meanPower * static_cast<double>(kFft / 2U));
 
     /**
-     * The two operating points are recorded with their envelopes rather than against a bound argued in advance,
-     * because what sets the rate here is not the additive noise alone. Zero forcing divides by the channel, so a
-     * carrier the profile puts in a null carries its own noise multiplied by the same amount; the mean of 1/|H|^2
-     * over the data carriers is what that costs, and it is printed beside the rates. The same chain over a flat
-     * channel is run at each point too, so the share belonging to the profile can be read off the difference rather
-     * than inferred. The bounds are set a factor above what the seeded scenes measure: a regression shows and
-     * ordinary movement does not.
+     * The two operating points are recorded with their envelopes, not against a bound argued in advance. Additive
+     * noise alone does not set the rate here. Zero forcing divides by the channel. A carrier the profile puts in a
+     * null carries its own noise multiplied by the same amount. The mean of 1/|H|^2 over the data carriers is that
+     * cost, and it is printed beside the rates. The same chain also runs over a flat channel at each point. The
+     * profile's share is then read off the difference and not inferred. The bounds sit a factor above what the
+     * seeded scenes measure. A regression shows, and ordinary movement does not.
      */
     "criterion 5: the whole chain, at two pinned operating points"_test = [&clean, &labels, floor, meanPower] {
         const Selectivity profile = selectivity();

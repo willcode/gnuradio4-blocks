@@ -31,57 +31,57 @@ namespace gr::blocks::ofdm {
 GR_REGISTER_BLOCK(gr::blocks::ofdm::SchmidlCoxSync)
 
 /**
- * @brief Coarse frame timing and fractional carrier frequency offset from a repeated-half preamble.
+ * @brief Estimates coarse frame timing and fractional carrier frequency offset from a repeated-half preamble.
  *
- * With `L = fft_len/2`, the block runs two sums over the stream:
+ * With `L = fft_len/2`, the block runs two sums over the stream.
  *
  *     P(d) = sum_{m=0..L-1} conj(r[d+m]) * r[d+m+L]      R(d) = sum_{m=0..L-1} |r[d+m+L]|^2
  *
- * both as sliding updates — `P(d+1) = P(d) + conj(r[d+L])*r[d+2L] - conj(r[d])*r[d+L]` and the matching one for `R` —
- * so the cost is two complex multiplies and two magnitudes a sample and does not grow with `fft_len`. The stream
- * before its first sample counts as silence, which makes the recurrence exact from the first sample rather than
- * needing a warm-up the chunking could disturb.
+ * Both are sliding updates. `P(d+1) = P(d) + conj(r[d+L])*r[d+2L] - conj(r[d])*r[d+L]`, and `R` has the matching
+ * update. Each sample costs two complex multiplies and two magnitudes, independent of `fft_len`. The stream before its
+ * first sample counts as silence. The recurrence is then exact from the first sample and needs no warm-up that the
+ * chunking could disturb.
  *
- * `M(d) = |P(d)|^2 / R(d)^2` is tested as `|P(d)|^2 > threshold * R(d)^2`, which is the same comparison without the
- * division. `M` does not peak at a preamble, it plateaus: the correlation is exact for every `d` from the preamble's
- * first prefix sample to `cp_len` samples later, so the plateau is `cp_len + 1` samples wide and its midpoint, not
- * its maximum, is the timing instant. The block takes the midpoint of the threshold crossings, which is the same
- * point and is what a noisy maximum is not.
+ * The block tests `M(d) = |P(d)|^2 / R(d)^2` as `|P(d)|^2 > threshold * R(d)^2`, the same comparison without the
+ * division. `M` does not peak at a preamble. It plateaus. The correlation is exact for every `d` from the preamble's
+ * first prefix sample to `cp_len` samples later. The plateau is therefore `cp_len + 1` samples wide. Its midpoint,
+ * not its maximum, is the timing instant. The block takes the midpoint of the threshold crossings. That is the same
+ * point, and noise moves it less than it moves a maximum.
  *
- * The trigger is written at the frame's first sample — the first sample of the preamble's own cyclic prefix, the
- * convention `CpRemove` cuts on — which is `cp_len/2` before the plateau midpoint. `out` therefore lags `in` by
- * `fft_len + 2*cp_len` samples, which is what leaves room to place a tag at a sample the falling crossing only
- * confirmed later; a detection whose sample has nonetheless already been published is dropped and counted in
- * `nLate()` rather than placed where it would misalign a frame.
+ * The block writes the trigger at the frame's first sample. That is the first sample of the preamble's own cyclic
+ * prefix, where `CpRemove` cuts. It lies `cp_len/2` before the plateau midpoint. `out` lags `in` by
+ * `fft_len + 2*cp_len` samples. The lag leaves room to tag a sample that the falling crossing confirms only later. A
+ * detection whose sample has already been published is dropped and counted in `nLate()`. Placing it would misalign a
+ * frame.
  *
- * The tag's `trigger_meta_info` carries `cfo_fractional`, in subcarrier spacings:
+ * The tag's `trigger_meta_info` carries `cfo_fractional`, in subcarrier spacings.
  *
  *     eps_frac = angle(P(d_opt)) / pi
  *
- * since `P` correlates samples `L = fft_len/2` apart and a carrier offset of `eps` spacings turns them by
- * `2*pi*eps*L/fft_len = pi*eps`. The estimate is unambiguous for `|eps| <= 1`. Integer offsets — whole bins — are not
- * estimated here; the classical answer is a differentially encoded second preamble symbol, and it waits for a
- * consumer whose oscillators need more than the equalizer's own sync-word estimate can absorb.
+ * `P` correlates samples `L = fft_len/2` apart. A carrier offset of `eps` spacings turns them by
+ * `2*pi*eps*L/fft_len = pi*eps`. The estimate is unambiguous for `|eps| <= 1`. The block does not estimate integer
+ * offsets of whole bins. The classical method is a differentially encoded second preamble symbol. It is not
+ * implemented. It matters only for oscillators whose offset exceeds what the equalizer's sync-word estimate absorbs.
  *
- * `correct_cfo` derotates the output from the trigger onward. The phasor's increment changes at each trigger and its
- * phase runs on, so the correction is phase-continuous across a re-estimate; the constant phase this leaves is one
- * the equalizer's channel estimate absorbs.
+ * `correct_cfo` derotates the output from the trigger onward. The phasor's increment changes at each trigger, and its
+ * phase continues. The correction is therefore phase-continuous across a re-estimate. The equalizer's channel
+ * estimate absorbs the constant phase that remains.
  *
- * `r_floor` is the received-energy floor below which no trigger is emitted: `M` is a ratio, and silence divided by
+ * `r_floor` is the received-energy floor below which no trigger is emitted. `M` is a ratio, and silence divided by
  * silence is not a detection. `min_gap` symbols of dead time after a trigger keep a frame from being detected twice.
  */
 struct SchmidlCoxSync : Block<SchmidlCoxSync> {
-    using Description = Doc<"Schmidl-Cox coarse timing and fractional CFO: a complex passthrough, 1:1, lagging its input by fft_len + 2*cp_len samples, emitting a trigger_name tag at each frame's first sample with cfo_fractional in subcarrier spacings and optionally derotating the stream by it. Both sliding sums are O(1) per sample and the timing instant is the plateau midpoint, not its maximum">;
+    using Description = Doc<"Estimates Schmidl-Cox coarse timing and fractional CFO as a 1:1 complex passthrough that lags its input by fft_len + 2*cp_len samples. It tags each frame's first sample with trigger_name and cfo_fractional in subcarrier spacings, and it can derotate the stream by that estimate. Both sliding sums cost O(1) per sample. The timing instant is the plateau midpoint, not its maximum">;
 
     PortIn<Complex>  in;
     PortOut<Complex> out;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length; the repeated halves are fft_len/2 samples each">>                      fft_len       = 64U;
+    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length, each repeated half being fft_len/2 samples">>                          fft_len       = 64U;
     Annotated<gr::Size_t, "cp_len", Visible, Doc<"the preamble symbol's own prefix, which sets the plateau width and the midpoint offset">> cp_len        = 16U;
     Annotated<float, "threshold", Visible, Doc<"M above which the plateau is held to have started, in (0, 1)">>                             threshold     = 0.6f;
     Annotated<gr::Size_t, "min_gap", Visible, Unit<"symbols">, Doc<"dead time after a trigger, in cp_len + fft_len sample symbols">>        min_gap       = 1U;
     Annotated<bool, "correct_cfo", Visible, Doc<"derotate the output by the estimate from the trigger onward">>                             correct_cfo   = true;
-    Annotated<float, "r_floor", Doc<"received energy below which no trigger is emitted; silence over silence is not a detection">>          r_floor       = 1e-9f;
+    Annotated<float, "r_floor", Doc<"received-energy floor for emitting a trigger">>                                                        r_floor       = 1e-9f;
     Annotated<std::string, "trigger_label", Doc<"the label written under the trigger_name key of the emitted tags">>                        trigger_label = std::string("ofdm_frame");
 
     GR_MAKE_REFLECTABLE(SchmidlCoxSync, in, out, fft_len, cp_len, threshold, min_gap, correct_cfo, r_floor, trigger_label);
@@ -102,10 +102,9 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
     std::vector<Complex>    _pRing{};   ///< P(d) for the recent d, so the falling edge can read the midpoint's
     std::vector<PendingTag> _pending{};
 
-    /// The last `L` per-sample terms of each sum, so neither is computed twice. `conj(r[n-L]) * r[n]` is the term
-    /// P(d) gains at sample `n` and the one it loses `L` samples later, and `|r[n]|^2` stands in the same relation to
-    /// R(d): keeping them halves the multiplies the sliding update would otherwise do. `L` is a power of two, so the
-    /// index is a mask.
+    /// The last `L` per-sample terms of each sum. Neither term is computed twice. `conj(r[n-L]) * r[n]` is the term
+    /// P(d) gains at sample `n` and loses `L` samples later. `|r[n]|^2` has the same relation to R(d). Keeping the
+    /// terms halves the multiplies of the sliding update. `L` is a power of two, and the index is a mask.
     std::vector<double> _termRe{};
     std::vector<double> _termIm{};
     std::vector<double> _termNorm{};
@@ -166,16 +165,16 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
         _half     = static_cast<std::size_t>(fft_len.value) / 2UZ;
         _delay    = static_cast<std::size_t>(fft_len.value) + 2UZ * static_cast<std::size_t>(cp_len.value);
         _deadTime = std::max(std::size_t{1}, static_cast<std::size_t>(min_gap.value) * (static_cast<std::size_t>(cp_len.value) + static_cast<std::size_t>(fft_len.value)));
-        // Wide enough for any plateau the threshold can hold open, so the midpoint's P is still there when the
-        // falling edge asks for it, and rounded up to a power of two: the ring is indexed once a sample by a
-        // stream-absolute count, and a mask is what keeps that from being an integer division on the hot path.
+        // Wide enough for any plateau the threshold can hold open. The midpoint's P is then still there when the
+        // falling edge reads it. The size is rounded up to a power of two. The ring is indexed once per sample by a
+        // stream-absolute count, and a mask keeps that from being an integer division on the hot path.
         _ring = std::bit_ceil(_delay + 2UZ);
         _mask = _ring - 1UZ;
-        // A repeated-half preamble holds M above any threshold under 1 for the whole width of its prefix, so a
-        // crossing much narrower than that is the metric's own ratio running away where the received energy is
-        // collapsing -- the last samples of a burst, where one signal sample divided by itself reads as a perfect
-        // correlation. Half the prefix is the widest such crossing worth refusing and the narrowest real plateau
-        // worth keeping; what it refuses is counted in nShortPlateaus().
+        // A repeated-half preamble holds M above any threshold under 1 for the whole width of its prefix. A crossing
+        // much narrower than that is the metric's ratio running away where the received energy collapses. At the
+        // last samples of a burst, one signal sample divided by itself reads as a perfect correlation. Half the
+        // prefix is the widest such crossing worth refusing and the narrowest real plateau worth keeping.
+        // nShortPlateaus() counts what it refuses.
         _minWidth = static_cast<std::uint64_t>(cp_len.value) / 2ULL + 1ULL;
 
         _history.assign(_delay, Complex{});
@@ -265,18 +264,18 @@ private:
         double*           termNorm = _termNorm.data();
 
         for (std::size_t j = 0UZ; j < nSamples; ++j) {
-            // The sample arriving completes the window that starts at `d`; everything before the stream is silence,
-            // which is what the zero-initialized history and term rings make true. The complex arithmetic is written
-            // out in scalars rather than in std::complex: a complex multiply in the language calls the library's
-            // infinity-preserving helper, which is a function call in the middle of what has to be a handful of
-            // arithmetic instructions.
+            // The arriving sample completes the window that starts at `d`. Everything before the stream is silence,
+            // as the zero-initialized history and term rings make true. The complex arithmetic is written out in
+            // scalars, not in std::complex. A complex multiply in the language calls the library's
+            // infinity-preserving helper. That helper is a function call where a handful of arithmetic instructions
+            // must run.
             const double newRe = static_cast<double>(window[offset + j].real());
             const double newIm = static_cast<double>(window[offset + j].imag());
             const double midRe = static_cast<double>(window[offset + j - half].real());
             const double midIm = static_cast<double>(window[offset + j - half].imag());
 
-            // conj(r[n-L]) * r[n] and |r[n]|^2: the terms P and R gain now and lose L samples from now, so each is
-            // computed once and read back out of the ring rather than formed a second time from the older samples.
+            // conj(r[n-L]) * r[n] and |r[n]|^2 are the terms P and R gain now and lose L samples from now. Each is
+            // computed once and read back from the ring, not formed a second time from the older samples.
             const double gainRe   = midRe * newRe + midIm * newIm;
             const double gainIm   = midRe * newIm - midIm * newRe;
             const double gainNorm = newRe * newRe + newIm * newIm;
@@ -300,9 +299,9 @@ private:
                     _above  = true;
                     _riseAt = at;
                 }
-                // P is only ever read back from inside a plateau, so it is only kept there. Off the plateau -- which
-                // is almost every sample of a stream -- the loop makes no store at all, and the loads it does make
-                // cannot be aliased by one.
+                // P is only read back from inside a plateau, and it is only kept there. Off the plateau, which is
+                // almost every sample of a stream, the loop makes no store. No store can then alias the loads it
+                // makes.
                 _pRing[at & _mask] = Complex(static_cast<float>(pRe), static_cast<float>(pIm));
                 continue;
             }
@@ -321,7 +320,7 @@ private:
         _r   = r;
     }
 
-    /// @brief The plateau `[riseAt, fallAt)` has ended: place its trigger at the frame's first sample.
+    /// @brief Places the trigger of the ended plateau `[riseAt, fallAt)` at the frame's first sample.
     void close(std::uint64_t fallAt, std::uint64_t riseAt, std::int64_t midShift) {
         if (fallAt - riseAt < _minWidth) {
             ++_short;
@@ -357,11 +356,10 @@ private:
     }
 
     /**
-     * @brief Write the delayed stream out, splitting it at every tag this call reaches.
+     * @brief Writes the delayed stream out, splitting it at every tag this call reaches.
      *
-     * The forwarded input tags and the block's own detections are one ordered sequence on the port, so they are
-     * merged here rather than published as each arises, and the derotation is re-tuned at exactly the sample its
-     * trigger marks.
+     * The forwarded input tags and the block's own detections form one ordered sequence on the port. They are merged
+     * here and not published as each arises. The derotation is re-tuned at exactly the sample its trigger marks.
      */
     void emit(std::uint64_t base, std::size_t nSamples, OutputSpanLike auto& outSpan) {
         std::ranges::stable_sort(_pending, std::ranges::less{}, &PendingTag::at);
@@ -373,7 +371,7 @@ private:
         while (produced < nSamples) {
             while (k < _pending.size() && _pending[k].at < base + static_cast<std::uint64_t>(produced)) {
                 if (_pending[k].ownDetection) {
-                    ++_late; // its sample is already downstream; placing it here would misalign the frame
+                    ++_late; // its sample is already published, and placing it here would misalign the frame
                 } else {
                     outSpan.publishTag(_pending[k].map, produced);
                 }
