@@ -18,14 +18,14 @@
 
 #include <gnuradio-4.0/fileio/SigMfIo.hpp>
 
-// What a SigMF source and sink cost per item end to end, over a real file, at three buffer sizes.
+// The end-to-end cost per item of a SigMF source and sink over a real file, at three buffer sizes.
 //
-// The codec's own cost is measured separately in `algorithm/benchmarks/bm_SigMfCodec.cpp`; the point of this one is
-// the difference between that figure and the block's, which is the file I/O and the tag-schedule scan. Both blocks
-// hold their own handle and read and write inline, so what is measured here is a `read(2)` or a `write(2)` against
-// the page cache plus one indirect call into the selected conversion — and no thread hand-off.
+// `algorithm/benchmarks/bm_SigMfCodec.cpp` measures the codec's own cost. This benchmark gives the difference
+// between that figure and the block's, which is the file I/O and the tag-schedule scan. Both blocks hold their own
+// handle and read and write inline. The measured cost is a `read(2)` or `write(2)` against the page cache plus one
+// indirect call into the selected conversion. There is no thread hand-off.
 //
-// No threshold is asserted. The target is EXCLUDE_FROM_ALL, so it is built by name when a measurement is wanted.
+// No threshold is asserted. The target is EXCLUDE_FROM_ALL and is built by name when a measurement is wanted.
 
 namespace {
 

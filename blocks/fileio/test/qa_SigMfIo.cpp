@@ -30,10 +30,10 @@
 #include <utility>
 #include <vector>
 
-// A recording is what one program hands another, so the assertions below are byte assertions at both ends: the
-// canonical recording is read into samples and tags and compared value by value, then written back out and compared
-// against the same 422 metadata bytes and 64 dataset bytes. Every refusal is driven through a real graph, and the
-// pool-contention case is the measured BasicFileSink deadlock turned into a regression test.
+// A recording passes from one program to another. The assertions below are therefore byte assertions at both ends.
+// The canonical recording is read into samples and tags and compared value by value. It is then written back out and
+// compared against the same 422 metadata bytes and 64 dataset bytes. Every refusal is driven through a real graph.
+// The pool-contention case turns the measured BasicFileSink deadlock into a regression test.
 
 namespace {
 
@@ -49,9 +49,9 @@ namespace keys = gr::blocks::fileio::sigmf_keys;
 template<typename T>
 using TagSinkFor = gr::blocks::testing::TagSink<T, gr::blocks::testing::ProcessFunction::USE_PROCESS_BULK>;
 
-/// The binary's own name, which names the workspace directory. It is a view: the suite runs from the test runner's
-/// destructor at process exit, when a namespace-scope string would already have been destroyed, and the storage
-/// `argv` points at lasts as long as the process.
+/// The binary's own name, which names the workspace directory. It is a view. The suite runs from the test runner's
+/// destructor at process exit, when a namespace-scope string is already destroyed. The storage `argv` points at lasts
+/// as long as the process.
 std::string_view gProgramName = "qa_SigMfIo"sv;
 
 /// A temporary directory named for this binary, removed when the test that owns it ends. A fixed path under /tmp is
@@ -175,8 +175,8 @@ template<typename T>
     }
 }
 
-/// Tags a sink saw, merged by stream index, so an assertion is about what a downstream consumer reads at an index
-/// rather than about how many maps the port machinery chose to deliver there.
+/// Tags a sink saw, merged by stream index. An assertion is then about what a downstream consumer reads at an index.
+/// It does not depend on how many maps the port machinery delivered there.
 [[nodiscard]] std::map<std::size_t, gr::property_map> mergedByIndex(std::span<const gr::Tag> tags) {
     std::map<std::size_t, gr::property_map> merged;
     for (const gr::Tag& tag : tags) {
@@ -263,8 +263,8 @@ struct FilteringPassthrough : gr::Block<FilteringPassthrough<T>> {
     [[nodiscard]] constexpr T processOne(const T& value) const noexcept { return value; }
 };
 
-/// Stands in for a rate changer: it republishes every tag with `sample_rate` rewritten, which is what the standing
-/// rescale ruling requires of anything that changes the rate.
+/// A test block that acts as a rate changer. It republishes every tag with `sample_rate` rewritten. Anything that
+/// changes the rate must do the same.
 template<typename T>
 struct RateRewriter : gr::Block<RateRewriter<T>, gr::NoTagPropagation> {
     gr::PortIn<T>  in;
@@ -294,13 +294,13 @@ struct RateRewriter : gr::Block<RateRewriter<T>, gr::NoTagPropagation> {
     }
 };
 
-/// Holds shared I/O pool threads with non-returning tasks for the run's duration, which is the graph configuration
-/// `BasicFileSink` deadlocks in: it waits on an I/O-pool task that cannot be scheduled because the pool's threads are
-/// all held by tasks that never return.
+/// Holds shared I/O pool threads with non-returning tasks for the run's duration. `BasicFileSink` deadlocks in this
+/// configuration. It waits on an I/O-pool task that cannot be scheduled, because tasks that never return hold all the
+/// pool's threads.
 ///
-/// The count is bounded rather than the pool's own maximum: that maximum is tens of thousands of threads on this
-/// host, so occupying it is neither possible nor what the shipped configuration looks like. A handful of
-/// non-returning tasks — a socket sender loop and the scheduler's own watchdog — is what the tree actually runs.
+/// The count is bounded below the pool's maximum. That maximum is tens of thousands of threads on this host.
+/// Occupying it is neither possible nor like a shipped configuration. A shipped configuration runs a handful of
+/// non-returning tasks, such as a socket sender loop and the scheduler's own watchdog.
 template<typename T>
 struct IoPoolHolder : gr::Block<IoPoolHolder<T>> {
     gr::PortIn<T> in;
@@ -419,8 +419,8 @@ template<typename T, typename TBlock>
 
 // ─── graph helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
-/// Owns the scheduler for as long as the caller inspects the blocks it holds; a reference taken from the graph stays
-/// valid only while the scheduler that took ownership is alive.
+/// Owns the scheduler while the caller inspects the blocks it holds. A reference taken from the graph stays valid only
+/// while the scheduler that took ownership is alive.
 struct GraphRun {
     std::unique_ptr<gr::scheduler::Simple<>> scheduler{};
     std::expected<void, gr::Error>           result{};
@@ -500,9 +500,9 @@ template<typename T>
 
 /// Start a block the way the framework does and report the refusal it names, or "ok".
 ///
-/// A refusal has to be read here rather than from `runAndWait`: the scheduler logs a block whose `start()` threw and
-/// carries on, so the graph's own result does not name the reason. The graph-driven half of the criterion — that a
-/// refused block reaches the ERROR state, emits nothing and leaves no file — is asserted separately below.
+/// The refusal is read here and not from `runAndWait`. The scheduler logs a block whose `start()` threw and carries on.
+/// The graph's own result therefore does not name the reason. A separate case below asserts the graph-driven half. A
+/// refused block reaches the ERROR state, emits nothing and leaves no file.
 template<typename TBlock>
 [[nodiscard]] std::string startRefusal(gr::property_map settings) {
     try {
@@ -666,8 +666,8 @@ const suite<"SigMF source"> _source = [] {
         };
 
         {
-            // driven without a graph: a thousand tags in one stream exceed what a port's tag ring carries between
-            // consumers, and the assertion here is about the repair the reader made, not about that limit
+            // Driven without a graph. A thousand tags in one stream exceed a port's tag ring between consumers. The
+            // assertion is about the reader's repair, not about that limit.
             auto block = makeBlock<SigMfSource<std::complex<float>>>({{"file_name", unsortedAnnotations("repairable", 1024UZ)}});
             block.start();
             const auto capture = drainSource<std::complex<float>>(block, 4096UZ, 256UZ);
@@ -805,7 +805,7 @@ const suite<"SigMF source"> _source = [] {
         auto&     sink   = flow.emplaceBlock<TagSinkFor<std::complex<float>>>({{"log_samples", true}});
         expect(flow.connect<"out", "in">(source, sink).has_value());
         const GraphRun run = runGraph(std::move(flow));
-        std::ignore        = run.ok(); // the scheduler logs a refused start and carries on; the block state is the signal
+        std::ignore        = run.ok(); // the scheduler logs a refused start and carries on, and the block state is the signal
 
         expect(eq(source.nSamplesEmitted, std::uint64_t{0U})) << "a block that cannot do its job refuses to start";
         expect(eq(sink._samples.size(), 0UZ)) << "and nothing downstream has samples to account for";
