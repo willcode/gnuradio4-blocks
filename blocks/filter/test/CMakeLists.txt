@@ -24,7 +24,7 @@ add_ut_test(qa_StagedDecimator)
 gr_pin_test_optimization(qa_StagedDecimator BUILD_TYPE)
 target_link_libraries(qa_StagedDecimator PRIVATE gr-filter gr-testing)
 add_ut_test(qa_Channelizer)
-# The polyphase bank uses SimdFFT, whose always_inline helpers need -O2 as qa_FrequencyEstimator's do.
+# The polyphase bank uses SimdFFT. Its always_inline helpers fail to inline at -O1, a hard error.
 gr_pin_test_optimization(qa_Channelizer -O2)
 target_link_libraries(qa_Channelizer PRIVATE gr-filter gr-testing)
 # The sdr module registers qa_DcBlocker for its own block; this one tests filter/DcBlocker.hpp.
