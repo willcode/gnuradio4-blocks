@@ -263,7 +263,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
     // SK reads 1 on noise at d = 1, 4 and 16. Its mean lies inside the closed-form band, and its spread is within 10%
     // of sqrt(Var). Many independent bins in one accumulation cycle replace many separate cycles. Each bin is its
     // own independent SK reading.
-    "criterion 6: spectral kurtosis reads 1 on noise, mean and spread inside the derived envelope"_test = [] {
+    "spectral kurtosis reads 1 on noise, mean and spread inside the derived envelope"_test = [] {
         constexpr std::size_t kM    = 64UZ;
         constexpr std::size_t kBins = 2048UZ;
         Rng                   rng(0x2545f4914f6cdd1dULL);
@@ -290,20 +290,20 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             const double measuredSd = sampleStdDev(values, measured);
             const double sem        = 4. * shape.spread / std::sqrt(static_cast<double>(kBins));
 
-            std::println("criterion 6: d={} mean {:.5f} (band 1 +- {:.5f}), spread {:.5f} (spec literal {:.5f})", shape.d, measured, sem, measuredSd, shape.spread);
+            std::println("noise: d={} mean {:.5f} (band 1 +- {:.5f}), spread {:.5f} (closed form {:.5f})", shape.d, measured, sem, measuredSd, shape.spread);
             expect(std::abs(measured - 1.) < sem) << std::format("d={}: mean SK too far from 1", shape.d);
-            expect(std::abs(measuredSd - shape.spread) < 0.15 * shape.spread) << std::format("d={}: spread too far from (5.3)'s literal", shape.d);
+            expect(std::abs(measuredSd - shape.spread) < 0.15 * shape.spread) << std::format("d={}: spread too far from the closed-form value", shape.d);
 
             // The block's own record states the same figure a threshold would use.
-            std::println("criterion 6: d={} record sk_std {:.5f}, sk_expectation {:.5f}", shape.d, metaNumber(records.front(), "sk_std"), metaNumber(records.front(), "sk_expectation"));
-            expect(std::abs(metaNumber(records.front(), "sk_std") - shape.spread) < 5e-5) << std::format("d={}: the record's sk_std must be (5.3)'s literal", shape.d);
+            std::println("noise: d={} record sk_std {:.5f}, sk_expectation {:.5f}", shape.d, metaNumber(records.front(), "sk_std"), metaNumber(records.front(), "sk_expectation"));
+            expect(std::abs(metaNumber(records.front(), "sk_std") - shape.spread) < 5e-5) << std::format("d={}: the record's sk_std must be the closed-form spread", shape.d);
             expect(eq(metaNumber(records.front(), "sk_expectation"), 1.)) << "sk_expectation is exactly 1, at every M and every d";
         }
     };
 
     // A noiseless tone gives identical bin powers, and SK = 0 exactly at every M. The identity is algebraic and is
     // asserted as an exact float comparison.
-    "criterion 7: a noiseless tone reads SK = 0 exactly, at every M"_test = [] {
+    "a noiseless tone reads SK = 0 exactly, at every M"_test = [] {
         for (const std::size_t m : {8UZ, 64UZ, 1024UZ}) {
             std::vector<gr::DataSet<float>> rows;
             for (std::size_t row = 0UZ; row < m; ++row) {
@@ -322,7 +322,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
     // The two closed shapes in between. CW-in-noise runs at bin ratios rho = 1, 2, 10 and 100. The pulsed arm fails
     // an absolute tolerance of 0.01 at M = 1024 and p = 0.1. It is checked for convergence instead. The gap to the
     // closed form falls as M grows and is inside 0.05 at M = 8192.
-    "criterion 8: CW-in-noise reads the closed shape, and the pulsed arm converges with M"_test = [] {
+    "CW-in-noise reads the closed shape, and the pulsed arm converges with M"_test = [] {
         constexpr std::size_t kM    = 1024UZ;
         constexpr std::size_t kBins = 400UZ;
         Rng                   rng(0x9e3779b97f4a7c15ULL);
@@ -345,7 +345,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             }
             const double measured = mean(records.front().signal_values);
             const double expected = cwSk(rho);
-            std::println("criterion 8: CW rho={:g} measured {:.5f}, closed form {:.5f}", rho, measured, expected);
+            std::println("CW rho={:g} measured {:.5f}, closed form {:.5f}", rho, measured, expected);
             expect(std::abs(measured - expected) < 0.01) << std::format("rho={}: CW arm outside 0.01 absolute", rho);
         }
 
@@ -377,20 +377,20 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         const double gap8k      = std::abs(measured8k - expected01);
         // The two gaps are single draws, and their order cannot be asserted. The test prints it. It asserts the
         // absolute bound at M = 8192 in place of the 0.01 tolerance at M = 1024.
-        std::println("criterion 8: pulsed p=0.1 closed form {:.4f}, M=1024 measured {:.4f} (gap {:.4f}), M=8192 measured {:.4f} (gap {:.4f})", expected01, measured1k, gap1k, measured8k, gap8k);
+        std::println("pulsed p=0.1 closed form {:.4f}, M=1024 measured {:.4f} (gap {:.4f}), M=8192 measured {:.4f} (gap {:.4f})", expected01, measured1k, gap1k, measured8k, gap8k);
         expect(gap8k < 0.05) << "the gap at M=8192 must be inside 0.05";
 
         for (const double p : {0.25, 0.5}) {
             const double expected = pulsedExpected(p, kSN0);
             const double measured = pulsedMean(p, 8192UZ);
-            std::println("criterion 8: pulsed p={:g} closed form {:.4f}, M=8192 measured {:.4f}", p, expected, measured);
+            std::println("pulsed p={:g} closed form {:.4f}, M=8192 measured {:.4f}", p, expected, measured);
             expect(std::abs(measured - expected) < 0.05) << std::format("p={}: M=8192 outside 0.05", p);
         }
     };
 
     // Independence is a precondition, and the block checks the producer's `overlap` metadata. A record is folded only
     // when it carries `overlap` and that value is exactly zero.
-    "F5: a record is folded only when its overlap metadata is present and zero"_test = [] {
+    "a record is folded only when its overlap metadata is present and zero"_test = [] {
         const gr::DataSet<float> clean = spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0);
 
         {
@@ -494,7 +494,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
                 expect(eq(metaNumber(record, "sample_start"), 4242.)) << "the first input record's start, not the last";
                 expect(std::abs(metaNumber(record, "sample_rate") - 48000.) < 1e-3) << "the rate is copied from the input record";
                 expect(eq(metaString(record, "window"), std::string("Hann"))) << "as is the producer's window name";
-                expect(std::abs(metaNumber(record, "sk_std") - 0.5766) < 1e-4) << "(5.3) at M=8, d=1 is 0.5766";
+                expect(std::abs(metaNumber(record, "sk_std") - 0.5766) < 1e-4) << "the closed-form spread at M=8, d=1 is 0.5766";
                 expect(eq(record.signal_names.at(0UZ), std::string("spectral_kurtosis")));
                 expect(eq(record.axis_values.at(0UZ).size(), 3UZ)) << "the input's frequency axis, copied verbatim";
             }
@@ -535,7 +535,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
 
     // Records-per-call independence. The same input records, delivered a different number at a time, must produce
     // bit-identical output records and identical counters.
-    "criterion 19: independent of how many input records arrive per call"_test = [] {
+    "independent of how many input records arrive per call"_test = [] {
         Rng                             rng(0x1122334455667788ULL);
         std::vector<gr::DataSet<float>> rows = noiseRows(rng, 96UZ, 64UZ, 1UZ);
         rows.push_back(spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0)); // one refusal, so the refusal counter is compared too

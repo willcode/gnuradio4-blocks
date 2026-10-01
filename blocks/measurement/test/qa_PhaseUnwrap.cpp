@@ -166,7 +166,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
     // of 2*10^9 samples, tens of seconds even at the kernel's own cost per sample. The kernel test runs it only under
     // `ENABLE_LONG_TESTS`, outside the default run of about 5 s. This test repeats the demonstration at the scale the
     // kernel test pins.
-    "criterion 9: exact where a float accumulator has already stopped working"_test = [] {
+    "exact where a float accumulator has already stopped working"_test = [] {
         constexpr double      kCyclesPerSample = 0.4;
         constexpr std::size_t kTotal           = 5'242'881UZ;
 
@@ -178,12 +178,12 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
 
         const std::int64_t measuredCycles = run_.cycles.back();
         const float        measuredPhase  = run_.phase.back();
-        std::println("criterion 9: measured cycles()={} phase()={:.8f}", measuredCycles, measuredPhase);
+        std::println("past float precision: measured cycles()={} phase()={:.8f}", measuredCycles, measuredPhase);
         expect(eq(measuredCycles, std::int64_t{2'097'152LL})) << "the kernel qa's own pinned cycle count at this scene";
 
         const double trueRadians  = 2. * std::numbers::pi * kCyclesPerSample * static_cast<double>(kTotal - 1UZ);
         const double trueResidual = wrap(trueRadians);
-        std::println("criterion 9: analytic residual {:.8f}, block residual {:.8f}", trueResidual, static_cast<double>(measuredPhase));
+        std::println("past float precision: analytic residual {:.8f}, block residual {:.8f}", trueResidual, static_cast<double>(measuredPhase));
         expect(std::abs(static_cast<double>(measuredPhase) - trueResidual) < 4. * 2.38e-7) << "phase() must sit within 4 * a float's own pi-spacing of the analytic residual";
 
         const double unwrappedRadians = 2. * std::numbers::pi * static_cast<double>(measuredCycles) + static_cast<double>(measuredPhase);
@@ -201,20 +201,20 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         const double floatError  = std::abs(static_cast<double>(floatAccumulator) - trueRadians);
         const double doubleError = std::abs(doubleAccumulator - trueRadians);
         const float  spacing     = std::nextafter(floatAccumulator, floatAccumulator * 2.f) - floatAccumulator;
-        std::println("criterion 9: float accumulator off by {:.3f} rad ({:.1f} cycles), final ULP spacing {:.3f} rad; double accumulator off by {:.3e} rad (not asserted)", floatError, floatError / (2. * std::numbers::pi), spacing, doubleError);
+        std::println("past float precision: float accumulator off by {:.3f} rad ({:.1f} cycles), final ULP spacing {:.3f} rad; double accumulator off by {:.3e} rad (not asserted)", floatError, floatError / (2. * std::numbers::pi), spacing, doubleError);
         expect(floatError > 2. * std::numbers::pi) << "a float accumulator over this ramp must be wrong by more than one whole cycle";
     };
 
     // Correct below Nyquist and aliased at or above it. The suspect-step hook crosses its threshold at 0.47
     // cycles/sample, as the derivation places it, and not at 0.6.
-    "criterion 10: unwraps exactly below Nyquist, aliases at or above it, and the suspect hook fires below both"_test = [] {
+    "unwraps exactly below Nyquist, aliases at or above it, and the suspect hook fires below both"_test = [] {
         constexpr std::size_t kTotal = 1'000'000UZ;
 
         {
             const Run    run_        = run(gr::property_map{}, 0.4, kTotal, 8192UZ);
             const double trueRadians = 2. * std::numbers::pi * 0.4 * static_cast<double>(kTotal - 1UZ);
             const double unwrapped   = 2. * std::numbers::pi * static_cast<double>(run_.cycles.back()) + static_cast<double>(run_.phase.back());
-            std::println("criterion 10: 0.4 fs unwrapped {:.3f}, analytic {:.3f}", unwrapped, trueRadians);
+            std::println("0.4 fs unwrapped {:.3f}, analytic {:.3f}", unwrapped, trueRadians);
             expect(std::abs(unwrapped - trueRadians) < 1e-2) << "0.4 cycles/sample must unwrap exactly over 10^6 samples";
         }
 
@@ -224,7 +224,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
             const Run    run_         = run(gr::property_map{}, 0.6, kTotal, 8192UZ);
             const double aliasRadians = 2. * std::numbers::pi * (-0.4) * static_cast<double>(kTotal - 1UZ);
             const double unwrapped    = 2. * std::numbers::pi * static_cast<double>(run_.cycles.back()) + static_cast<double>(run_.phase.back());
-            std::println("criterion 10: 0.6 fs unwrapped {:.3f}, aliased prediction (-0.4 fs) {:.3f}", unwrapped, aliasRadians);
+            std::println("0.6 fs unwrapped {:.3f}, aliased prediction (-0.4 fs) {:.3f}", unwrapped, aliasRadians);
             expect(std::abs(unwrapped - aliasRadians) < 1e-2) << "0.6 cycles/sample must alias to the -0.4 cycles/sample result, not the true 0.6";
         }
 
@@ -244,8 +244,8 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
             std::ignore                     = runtimeTest.connect(block, "cycles", sink, "in");
             std::ignore                     = runtimeTest.connect(block, "phase", phaseSink, "in");
             std::ignore                     = runtimeTest.run();
-            std::println("criterion 10 (F14): nSuspectSteps() at 0.6 fs = {} (the step there is 0.8*pi, under the default 0.9*pi threshold)", block.nSuspectSteps());
-            expect(eq(block.nSuspectSteps(), std::uint64_t{0ULL})) << "F14: the hook does not fire at 0.6 fs, which is why the criterion moved to 0.47 fs";
+            std::println("nSuspectSteps() at 0.6 fs = {} (the step there is 0.8*pi, under the default 0.9*pi threshold)", block.nSuspectSteps());
+            expect(eq(block.nSuspectSteps(), std::uint64_t{0ULL})) << "the hook does not fire at 0.6 fs, where the step is 0.8*pi";
         }
         {
             // At 0.47 cycles/sample the step is 0.94*pi, over the default 0.9*pi threshold. The observability hook
@@ -262,13 +262,13 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
             std::ignore                     = runtimeTest.connect(block, "cycles", sink, "in");
             std::ignore                     = runtimeTest.connect(block, "phase", phaseSink, "in");
             std::ignore                     = runtimeTest.run();
-            std::println("criterion 10 (F14): nSuspectSteps() at 0.47 fs = {}", block.nSuspectSteps());
-            expect(block.nSuspectSteps() > 0ULL) << "0.47 cycles/sample must cross the default suspect threshold, per F14's amendment to criterion 10";
+            std::println("nSuspectSteps() at 0.47 fs = {}", block.nSuspectSteps());
+            expect(block.nSuspectSteps() > 0ULL) << "0.47 cycles/sample must cross the default suspect threshold";
         }
     };
 
     // The reset rule, on the same stream with only the flag differing.
-    "criterion 11: a n_dropped_samples tag resets the count exactly when reset_on_discontinuity is set"_test = [] {
+    "a n_dropped_samples tag resets the count exactly when reset_on_discontinuity is set"_test = [] {
         constexpr std::size_t kTotal  = 10000UZ;
         constexpr std::size_t kDropAt = 4000UZ;
 
@@ -284,7 +284,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         for (std::size_t k = 0UZ; k < kDropAt; ++k) {
             expect(eq(withReset.cycles[k], withoutReset.cycles[k])) << std::format("sample {}: the two runs must agree before the drop", k);
         }
-        std::println("criterion 11: cycles just before the drop {}, at the drop with reset {}, without reset {}", withReset.cycles[kDropAt - 1UZ], withReset.cycles[kDropAt], withoutReset.cycles[kDropAt]);
+        std::println("discontinuity reset: cycles just before the drop {}, at the drop with reset {}, without reset {}", withReset.cycles[kDropAt - 1UZ], withReset.cycles[kDropAt], withoutReset.cycles[kDropAt]);
         expect(eq(withReset.cycles[kDropAt], std::int64_t{0LL})) << "with reset_on_discontinuity, the count returns to zero at the tagged sample";
         expect(withoutReset.cycles[kDropAt] > std::int64_t{100LL}) << "without reset_on_discontinuity, the count is nowhere near zero at the same sample: ~400 cycles have already accumulated at 0.1 cycles/sample";
         expect(std::abs(withoutReset.cycles[kDropAt] - withReset.cycles[kDropAt - 1UZ]) <= std::int64_t{1LL}) << "without the flag, this sample's cycle count is the stream's own continuous value, unaffected by the tag";
@@ -326,7 +326,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
     };
 
     // Before any sample, cycles() reads 0.
-    "criterion 18: cycles() reads 0 before any sample is processed"_test = [] {
+    "cycles() reads 0 before any sample is processed"_test = [] {
         PhaseUnwrap block;
         block.settings().init();
         std::ignore = block.settings().applyStagedParameters();
@@ -437,7 +437,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
     };
 
     // Chunk independence, with bit-identical cycles and phase streams and counters at every chunk size.
-    "criterion 19: chunk independence, bit-identical for every chunk size"_test = [] {
+    "chunk independence, bit-identical for every chunk size"_test = [] {
         constexpr std::size_t kTotal  = 3UZ * 4096UZ + 777UZ;
         constexpr std::size_t kDropAt = 4096UZ; // a tagged sample landing exactly on a chunk boundary at burst 4096
 

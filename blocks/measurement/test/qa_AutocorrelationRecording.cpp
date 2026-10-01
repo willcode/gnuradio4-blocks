@@ -264,7 +264,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         }
     };
 
-    "criterion 17: the FM leg, the 19 kHz pilot at 52.632 us"_test = [] {
+    "the FM recording: the 19 kHz pilot at 52.632 us"_test = [] {
         constexpr double      rate   = 2.048e6;
         constexpr std::size_t length = 16384UZ;
         constexpr std::size_t lags   = 300UZ;
@@ -323,7 +323,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             config.kind                     = AcfKind::Complex;
             const Estimate discriminatorArm = estimate<float>(config, std::span<const float>(discriminated));
 
-            std::println("criterion 17: {} tuned {:+.0f} kHz (mean power {:.5f} after the channel filter), N={} K={} L={}, expected lag {:.2f}, scatter {:.6f}", name, bestOffset / 1000., bestPower, length, complexArm.windows, lags, expected, complexArm.scatter);
+            std::println("FM pilot: {} tuned {:+.0f} kHz (mean power {:.5f} after the channel filter), N={} K={} L={}, expected lag {:.2f}, scatter {:.6f}", name, bestOffset / 1000., bestPower, length, complexArm.windows, lags, expected, complexArm.scatter);
             for (const auto& [label, arm] : {std::pair{"complex ACF, +/-100 kHz    ", &complexArm}, std::pair{"envelope ACF, +/-100 kHz   ", &envelopeArm}, std::pair{"envelope ACF, +/-200 kHz   ", &wideArm}, std::pair{"envelope ACF, untuned span ", &untunedArm}, std::pair{"ACF of the discriminator   ", &discriminatorArm}}) {
                 const auto [isMax, at] = maximumNear(std::span<const float>(arm->magnitude), near);
                 std::println("    {} lag 107 {:.4f}  lag 108 {:.4f}  local maximum near {}: {}  threshold {:.4f}", label, arm->magnitude[near], arm->magnitude[near + 1UZ], near, isMax ? std::format("yes at {}", at) : std::string("no"), arm->threshold);
@@ -341,7 +341,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         }
     };
 
-    "criterion 18: the LTE leg, the useful symbol at 66.667 us"_test = [] {
+    "the LTE recording: the useful symbol at 66.667 us"_test = [] {
         constexpr double      rate   = 25.0e6;
         constexpr std::size_t length = 32768UZ;
         constexpr std::size_t lags   = 2000UZ;
@@ -361,14 +361,14 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         config.overlap          = 0.;
         config.nAverages        = full;
         const Estimate fullSpan = estimate<CF>(config, std::span<const CF>(samples));
-        std::println("criterion 18: the whole 25 MHz span, N={} K={}, scatter {:.6f}: |R(1666)|/R(0) = {:.4f}, |R(1667)|/R(0) = {:.4f}", length, fullSpan.windows, fullSpan.scatter, fullSpan.magnitude[1666UZ], fullSpan.magnitude[1667UZ]);
+        std::println("LTE: the whole 25 MHz span, N={} K={}, scatter {:.6f}: |R(1666)|/R(0) = {:.4f}, |R(1667)|/R(0) = {:.4f}", length, fullSpan.windows, fullSpan.scatter, fullSpan.magnitude[1666UZ], fullSpan.magnitude[1667UZ]);
 
         const std::vector<float>  channel = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 4.5e6, .transitionWidth = 1.0e6, .attenuationDb = 60.});
         const std::size_t         need    = tunedK * length + channel.size();
         const std::span<const CF> head(samples.data(), std::min(samples.size(), need));
 
         config.nAverages = tunedK;
-        std::println("criterion 18: the offset sweep, N={} K={}, +/-4.5 MHz channel filter ({} taps)", length, tunedK, channel.size());
+        std::println("LTE: the offset sweep, N={} K={}, +/-4.5 MHz channel filter ({} taps)", length, tunedK, channel.size());
         double bestHeight = -1.;
         double bestOffset = 0.;
         // The asserted arm is at +4 MHz, where both grids land. The finer grid resolves how flat the sweep is between
@@ -391,10 +391,10 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
                 bestOffset = offset;
             }
         }
-        std::println("criterion 18: the strongest arm of the sweep sits at {:+.1f} MHz reading {:.4f} against the closed form 1024/15360 = {:.4f}", bestOffset / 1e6, bestHeight, closed);
+        std::println("LTE: the strongest arm of the sweep sits at {:+.1f} MHz reading {:.4f} against the closed form 1024/15360 = {:.4f}", bestOffset / 1e6, bestHeight, closed);
     };
 
-    "criterion 19: the ADS-B leg, 0.5 us and 1 us, gated and ungated"_test = [] {
+    "the ADS-B recording: 0.5 us and 1 us, gated and ungated"_test = [] {
         constexpr std::size_t ungatedLength = 8192UZ;
         constexpr std::size_t frameLength   = 240UZ;
         constexpr std::size_t frameLags     = 16UZ;
@@ -418,7 +418,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         ungated.overlap           = 0.;
         ungated.nAverages         = ungatedWindows;
         const Estimate ungatedArm = estimate<float>(ungated, std::span<const float>(head));
-        std::println("criterion 19: ungated, N={} K={}, scatter {:.6f}", ungatedLength, ungatedArm.windows, ungatedArm.scatter);
+        std::println("ADS-B: ungated, N={} K={}, scatter {:.6f}", ungatedLength, ungatedArm.windows, ungatedArm.scatter);
         std::print("    ");
         for (std::size_t lag = 1UZ; lag <= 6UZ; ++lag) {
             std::print("{:.1f} us: {:.4f}   ", 0.5 * static_cast<double>(lag), ungatedArm.magnitude[lag]);
@@ -473,7 +473,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         gated.overlap           = 0.;
         gated.nAverages         = crudeWindows;
         const Estimate crudeArm = estimate<float>(gated, std::span<const float>(crude));
-        std::println("criterion 19: the crude magnitude gate at eight times the median ({:.1f}) opened {} times over {} samples, K={}, scatter {:.5f}", 8. * median, openings, seen, crudeArm.windows, crudeArm.scatter);
+        std::println("ADS-B: the crude magnitude gate at eight times the median ({:.1f}) opened {} times over {} samples, K={}, scatter {:.5f}", 8. * median, openings, seen, crudeArm.windows, crudeArm.scatter);
         std::print("    ");
         for (std::size_t lag = 1UZ; lag <= 5UZ; ++lag) {
             std::print("{:.1f} us: {:.4f}   ", 0.5 * static_cast<double>(lag), crudeArm.magnitude[lag]);
@@ -525,7 +525,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
 
         gated.nAverages          = framedWindows;
         const Estimate framedArm = estimate<float>(gated, std::span<const float>(framed));
-        std::println("criterion 19: the framer's gate nominated {} long frames ({} admitted by the parity), K={}, scatter {:.5f}, threshold {:.5f}", longFrames, admitted, framedArm.windows, framedArm.scatter, framedArm.threshold);
+        std::println("ADS-B: the framer's gate nominated {} long frames ({} admitted by the parity), K={}, scatter {:.5f}, threshold {:.5f}", longFrames, admitted, framedArm.windows, framedArm.scatter, framedArm.threshold);
         std::print("    ");
         for (std::size_t lag = 1UZ; lag <= 5UZ; ++lag) {
             std::print("{:.1f} us: {:.4f}   ", 0.5 * static_cast<double>(lag), framedArm.magnitude[lag]);
@@ -562,7 +562,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         ideal.overlap           = 0.;
         ideal.nAverages         = rendered.size() / 224UZ;
         const Estimate idealArm = estimate<float>(ideal, std::span<const float>(rendered));
-        std::println("criterion 19: the same frames' decoded bits rendered as the ideal envelope, K={}, scatter {:.5f}, threshold {:.5f}: 0.5 us {:.5f} against the closed form {:.5f}, 1.0 us {:.5f} against {:.5f}, over {} adjacent bit pairs {:.1f}% of which differ", idealArm.windows, idealArm.scatter, idealArm.threshold, idealArm.magnitude[1UZ], derivedHalf, idealArm.magnitude[2UZ], derivedOne, adjacent, 100. * static_cast<double>(transitions) / static_cast<double>(adjacent));
+        std::println("ADS-B: the same frames' decoded bits rendered as the ideal envelope, K={}, scatter {:.5f}, threshold {:.5f}: 0.5 us {:.5f} against the closed form {:.5f}, 1.0 us {:.5f} against {:.5f}, over {} adjacent bit pairs {:.1f}% of which differ", idealArm.windows, idealArm.scatter, idealArm.threshold, idealArm.magnitude[1UZ], derivedHalf, idealArm.magnitude[2UZ], derivedOne, adjacent, 100. * static_cast<double>(transitions) / static_cast<double>(adjacent));
         expect(static_cast<double>(idealArm.magnitude[1UZ]) > idealArm.threshold) << "the rendered frames put a maximum at half a microsecond";
         expect(std::abs(static_cast<double>(idealArm.magnitude[1UZ]) - derivedHalf) < 1e-3) << std::format("the half-microsecond maximum is the closed form {:.5f}", derivedHalf);
         expect(std::abs(static_cast<double>(idealArm.magnitude[2UZ]) - derivedOne) < 1e-3) << std::format("the one-microsecond reading is the frames' own bit imbalance {:.5f} and nothing else", derivedOne);
@@ -574,11 +574,11 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         for (std::size_t lag = 1UZ; lag <= 6UZ; ++lag) {
             ungatedFloor = std::min(ungatedFloor, static_cast<double>(ungatedArm.magnitude[lag]));
         }
-        std::println("criterion 19: gating drops the curve from a floor of {:.4f} over 0.5 to 3.0 us to {:.4f} at 3.0 us; the capture's own pair at 0.5 and 1.0 us reads {:.5f} and {:.5f} against the ideal {:.5f} and {:.5f}", ungatedFloor, framedArm.magnitude[6UZ], framedArm.magnitude[1UZ], framedArm.magnitude[2UZ], idealArm.magnitude[1UZ], idealArm.magnitude[2UZ]);
+        std::println("ADS-B: gating drops the curve from a floor of {:.4f} over 0.5 to 3.0 us to {:.4f} at 3.0 us; the capture's own pair at 0.5 and 1.0 us reads {:.5f} and {:.5f} against the ideal {:.5f} and {:.5f}", ungatedFloor, framedArm.magnitude[6UZ], framedArm.magnitude[1UZ], framedArm.magnitude[2UZ], idealArm.magnitude[1UZ], idealArm.magnitude[2UZ]);
         expect(static_cast<double>(framedArm.magnitude[6UZ]) < ungatedFloor) << "the gated estimate falls where the ungated one never does";
     };
 
-    "criterion 20: the P25 leg, recorded and not asserted"_test = [] {
+    "the P25 recording, printed and not asserted"_test = [] {
         constexpr double      rate    = 125000.;
         constexpr std::size_t length  = 4096UZ;
         constexpr std::size_t lags    = 60UZ;
@@ -605,7 +605,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         const std::vector<float> channel = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 6250., .transitionWidth = 3000., .attenuationDb = 60.});
         const std::vector<CF>    block   = readCf32(capturePath(kP25), blockSize + channel.size(), bestBlock * blockSize);
         expect(fatal(ge(block.size(), blockSize))) << "the loudest block is readable";
-        std::println("criterion 20: the loudest 0.8 s block starts at sample {} with mean power {:.4g}; the symbol period is {:.3f} samples at {} S/s", bestBlock * blockSize, bestPower, symbol, static_cast<std::size_t>(rate));
+        std::println("P25: the loudest 0.8 s block starts at sample {} with mean power {:.4g}; the symbol period is {:.3f} samples at {} S/s", bestBlock * blockSize, bestPower, symbol, static_cast<std::size_t>(rate));
 
         AcfConfig config{};
         config.windowLength = length;
@@ -629,7 +629,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             const auto [isMax, at]                  = maximumNear(std::span<const float>(envelopeArm.magnitude), 26UZ);
             std::println("    offset {:+6.1f} kHz: envelope lag 26 {:.4f} lag 27 {:.4f}, local maximum near 26: {}; envelope argmax over [10, {}] at {} reading {:.4f}; complex argmax at {} reading {:.4f} (scatter {:.5f})", offset / 1000., envelopeArm.magnitude[26UZ], envelopeArm.magnitude[27UZ], isMax ? std::format("yes at {}", at) : std::string("no"), lags, envelopeAt, envelopeHeight, complexAt, complexHeight, envelopeArm.scatter);
         }
-        std::println("criterion 20: recorded and not asserted — a negative here is a recorded negative, because no arm of this capture put a local maximum at the symbol period when the row was specified either");
+        std::println("P25: printed and not asserted; no arm of this capture puts a local maximum at the symbol period");
     };
 };
 

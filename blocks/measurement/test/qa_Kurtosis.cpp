@@ -222,7 +222,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
 
     // Seeded circular complex and real Gaussian input. Each window's excess_kurtosis lies inside the closed-form bias
     // band. The readings spread as the closed-form variance of a window's estimate predicts.
-    "criterion 1: Gaussian excess kurtosis sits inside its derived bias-and-spread envelope"_test = [] {
+    "Gaussian excess kurtosis sits inside its derived bias-and-spread envelope"_test = [] {
         constexpr std::size_t kWindow = 4096UZ;
         constexpr std::size_t kTrials = 400UZ;
 
@@ -259,8 +259,8 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         const double sdComplex   = sampleStdDev(complexExcess, meanComplex);
         const double sdReal      = sampleStdDev(realExcess, meanReal);
 
-        std::println("criterion 1: complex mean excess {:.6f} (band {:.6f} +- {:.6f}), spread {:.5f} (nominal {:.5f})", meanComplex, biasComplex, semComplex, sdComplex, spreadComplex);
-        std::println("criterion 1: real    mean excess {:.6f} (band {:.6f} +- {:.6f}), spread {:.5f} (nominal {:.5f})", meanReal, biasReal, semReal, sdReal, spreadReal);
+        std::println("Gaussian: complex mean excess {:.6f} (band {:.6f} +- {:.6f}), spread {:.5f} (nominal {:.5f})", meanComplex, biasComplex, semComplex, sdComplex, spreadComplex);
+        std::println("Gaussian: real    mean excess {:.6f} (band {:.6f} +- {:.6f}), spread {:.5f} (nominal {:.5f})", meanReal, biasReal, semReal, sdReal, spreadReal);
 
         expect(std::abs(meanComplex - biasComplex) < semComplex) << "complex mean excess kurtosis outside its 4*sigma_mean band";
         expect(std::abs(meanReal - biasReal) < semReal) << "real mean excess kurtosis outside its 4*sigma_mean band";
@@ -273,13 +273,13 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             complexNormalized.push_back(static_cast<double>(r.signal_values.at(1UZ)));
         }
         const double meanK = mean(complexNormalized);
-        std::println("criterion 2: complex Gaussian normalized fourth moment mean {:.6f} (nominal 2)", meanK);
-        expect(std::abs(meanK - (2. + biasComplex)) < semComplex) << "circular complex Gaussian must read K=2 within criterion 1's band";
+        std::println("complex Gaussian normalized fourth moment mean {:.6f} (nominal 2)", meanK);
+        expect(std::abs(meanK - (2. + biasComplex)) < semComplex) << "circular complex Gaussian must read K=2 within the Gaussian excess-kurtosis band";
     };
 
     // The three other closed values. Each is measured over a single large window, which approximates the ensemble
     // average the derivation assumes.
-    "criterion 2: constant modulus, two equal tones, and a real sinusoid read their exact excess values"_test = [] {
+    "constant modulus, two equal tones, and a real sinusoid read their exact excess values"_test = [] {
         constexpr std::size_t kWindow = 1UZ << 18U; // 262144
 
         // Constant modulus, |z| = A with a random phase. K=1 and excess=-1 exactly, for any window. The result does
@@ -296,7 +296,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             expect(eq(records.size(), 1UZ));
             if (!records.empty()) {
                 const double excess = static_cast<double>(records.front().signal_values.at(0UZ));
-                std::println("criterion 2: constant modulus excess {:.6f} (exact -1, asserted against the literal 1 SignalQuality.hpp's ka names)", excess);
+                std::println("constant modulus excess {:.6f} (exact -1, asserted against the literal 1 SignalQuality.hpp's ka names)", excess);
                 expect(std::abs(excess - (-1.)) < 1e-4) << "constant modulus must read excess -1 to float rounding";
             }
         }
@@ -317,7 +317,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             expect(eq(records.size(), 1UZ));
             if (!records.empty()) {
                 const double excess = static_cast<double>(records.front().signal_values.at(0UZ));
-                std::println("criterion 2: two equal complex tones excess {:.6f} (nominal -0.5)", excess);
+                std::println("two equal complex tones excess {:.6f} (nominal -0.5)", excess);
                 expect(std::abs(excess - (-0.5)) < 0.01) << "two equal-amplitude complex tones must read excess close to -0.5";
             }
         }
@@ -334,7 +334,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             expect(eq(records.size(), 1UZ));
             if (!records.empty()) {
                 const double excess = static_cast<double>(records.front().signal_values.at(0UZ));
-                std::println("criterion 2: real sinusoid excess {:.6f} (nominal -1.5)", excess);
+                std::println("real sinusoid excess {:.6f} (nominal -1.5)", excess);
                 expect(std::abs(excess - (-1.5)) < 1e-3) << "a real sinusoid over a whole number of cycles must read excess -1.5";
             }
         }
@@ -343,7 +343,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     // The closed-form impulsive excess of `x = g + b*A`, with g standard Gaussian and b Bernoulli(p). It is measured
     // over a reduced number of windows. The kernel's own test pins the Monte Carlo reference at full scale. This test
     // reproduces the shape within a run time of about 5 s.
-    "criterion 3: the impulsive closed form, positive where the structured signals are negative"_test = [] {
+    "the impulsive closed form, positive where the structured signals are negative"_test = [] {
         constexpr std::size_t kWindow = 1UZ << 16U; // 65536
         constexpr std::size_t kTrials = 60UZ;
 
@@ -371,7 +371,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             }
             const double measured = mean(readings);
             const double expected = impulsiveExcess(c.p, c.a);
-            std::println("criterion 3: p={:.3f} A={:.1f} measured excess {:.4f}, closed form {:.4f}", c.p, c.a, measured, expected);
+            std::println("impulsive: p={:.3f} A={:.1f} measured excess {:.4f}, closed form {:.4f}", c.p, c.a, measured, expected);
 
             expect(measured > 0.) << "the impulsive case must read a positive excess";
             expect(std::abs(measured - expected) < 0.10 * std::abs(expected) + 0.3) << std::format("p={} A={}: measured {} too far from closed form {}", c.p, c.a, measured, expected);
@@ -379,7 +379,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     };
 
     // An all-zero window is degenerate and reported as degenerate. A stream ending mid-window flushes what it covered.
-    "criterion 4: a degenerate window is reported false and never a NaN, and a partial window states its own coverage"_test = [] {
+    "a degenerate window is reported false and never a NaN, and a partial window states its own coverage"_test = [] {
         const auto everyChannelFinite = [](const gr::DataSet<float>& record, std::string_view what) {
             for (std::size_t k = 0UZ; k < 3UZ; ++k) {
                 expect(std::isfinite(record.signal_values.at(k))) << std::format("{}: channel {} must be finite, read {}", what, k, record.signal_values.at(k));
@@ -407,7 +407,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
 
             expect(eq(partial.records.size(), 2UZ)) << "one full window and one partial flush";
             expect(eq(partial.nWindows, std::uint64_t{1ULL})) << "only the full window counts as a window";
-            std::println("criterion 4: coverage after the partial flush {:.6f} (900/4096 = {:.6f})", partial.coverage, 900. / 4096.);
+            std::println("coverage after the partial flush {:.6f} (900/4096 = {:.6f})", partial.coverage, 900. / 4096.);
             expect(std::abs(partial.coverage - 900. / 4096.) < 1e-9) << "the flush leaves coverage() at the fraction it actually covered";
             expect(partial.coverage < 1.) << "a partial window must report a coverage below one";
             if (partial.records.size() == 2UZ) {
@@ -420,7 +420,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     };
 
     // Window refusals at staging, naming the bound.
-    "criterion 5: window below 8 or above 2^24 refuses at staging"_test = [] {
+    "window below 8 or above 2^24 refuses at staging"_test = [] {
         const auto refused = [](gr::property_map settings) {
             Kurtosis<float> block(std::move(settings));
             block.settings().init();
@@ -433,7 +433,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     };
 
     // Before the first window, coverage() reads 0.
-    "criterion 18: coverage() reads 0 before the first window closes"_test = [] {
+    "coverage() reads 0 before the first window closes"_test = [] {
         Kurtosis<CF> block;
         block.settings().init();
         std::ignore = block.settings().applyStagedParameters();
@@ -444,7 +444,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
 
     // Chunk independence in both domains. The chunk sizes land off and exactly on window boundaries and on the tagged
     // sample. The counters are compared alongside the records.
-    "criterion 19: chunk independence, bit-identical records and counters at every chunk size"_test = [] {
+    "chunk independence, bit-identical records and counters at every chunk size"_test = [] {
         const auto sweep = [](const auto& samples, std::string_view domain) {
             using Sample                   = std::remove_cvref_t<decltype(samples.front())>;
             constexpr std::size_t kDropAt  = 1200UZ; // interior to window 1, not on a window boundary

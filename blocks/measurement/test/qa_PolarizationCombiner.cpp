@@ -278,7 +278,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
     // MRC gain over a branch, at equal branches (3.0103 dB, within 0.05 dB) and at -6 dB relative (0.9691 dB). The
     // envelope is the weight-estimation loss, under 0.011 dB at M>=512, plus the SNR-measurement spread
     // 4.343/sqrt(N) dB, which at N = 65536 is 0.017 dB.
-    "criterion 12: MRC gain over a branch, inside its derived envelope"_test = [] {
+    "MRC gain over a branch, inside its derived envelope"_test = [] {
         constexpr std::size_t kN      = 65536UZ;
         constexpr gr::Size_t  kWindow = 8192U; // shorter than the stream, so `out` is really combined and not passed through
         constexpr std::size_t kFrom   = static_cast<std::size_t>(kWindow);
@@ -301,7 +301,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             const double best       = std::max(snrBranch0, snrBranch1);
             const double gain       = snrOut - best;
 
-            std::println("criterion 12 ({}): measured out {:.4f} dB, branches {:.4f} / {:.4f} dB, gain {:.4f} dB (nominal {:.4f}); block reports {:.4f} dB", what, snrOut, snrBranch0, snrBranch1, gain, nominalGainDb, r.combiningGainDb);
+            std::println("MRC gain ({}): measured out {:.4f} dB, branches {:.4f} / {:.4f} dB, gain {:.4f} dB (nominal {:.4f}); block reports {:.4f} dB", what, snrOut, snrBranch0, snrBranch1, gain, nominalGainDb, r.combiningGainDb);
             expect(std::isfinite(snrOut) && std::isfinite(best)) << std::format("{}: the measured ratios must be finite", what);
             expect(std::abs(gain - nominalGainDb) < 0.05) << std::format("{}: the realized output gain is outside its 0.05 dB envelope", what);
             expect(std::abs(r.combiningGainDb - nominalGainDb) < 0.05) << std::format("{}: the reported gain is outside its 0.05 dB envelope", what);
@@ -313,7 +313,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
 
     // The estimator's internal identity, on arbitrary data with no assumed model. The two branch SNRs sum in linear
     // terms to the combined SNR, to 1e-9 relative. The identity is algebraic.
-    "criterion 13: branchSnrDb(0) and branchSnrDb(1) sum in linear terms to combinedSnrDb()"_test = [] {
+    "branchSnrDb(0) and branchSnrDb(1) sum in linear terms to combinedSnrDb()"_test = [] {
         Rng             rng(0x9e3779b97f4a7c15ULL);
         std::vector<CF> r0(8192UZ);
         std::vector<CF> r1(8192UZ);
@@ -325,7 +325,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         // The identity tests something only when the figures it relates are real numbers. An eigenvalue swap that
         // drives a ratio to zero reads -inf dB. The block reports that as the finite placeholder 0, and a sum of
         // placeholders is not the identity. Each figure is asserted finite and strictly positive before it is used.
-        std::println("criterion 13: branch0 {:.6f} dB, branch1 {:.6f} dB, combined {:.6f} dB", r.branch0Db, r.branch1Db, r.combinedDb);
+        std::println("branch0 {:.6f} dB, branch1 {:.6f} dB, combined {:.6f} dB", r.branch0Db, r.branch1Db, r.combinedDb);
         expect(std::isfinite(r.branch0Db) && std::isfinite(r.branch1Db) && std::isfinite(r.combinedDb)) << "no figure may be an infinity";
         expect(r.combinedDb > r.branch0Db && r.combinedDb > r.branch1Db) << "the combined figure must exceed either branch's";
         if (!r.records.empty()) {
@@ -336,20 +336,20 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         const double linear1  = std::pow(10., r.branch1Db / 10.);
         const double sum      = linear0 + linear1;
         const double combined = std::pow(10., r.combinedDb / 10.);
-        std::println("criterion 13: branch0 {:.6f} + branch1 {:.6f} = {:.6f}, combined {:.6f}", linear0, linear1, sum, combined);
+        std::println("branch0 {:.6f} + branch1 {:.6f} = {:.6f}, combined {:.6f}", linear0, linear1, sum, combined);
         expect(linear0 > 0. && linear1 > 0. && combined > 0.) << "each ratio must be a positive number before the identity means anything";
         expect(std::abs(sum - combined) < 1e-9 * std::max(1., combined)) << "the additive identity must hold to 1e-9 relative on arbitrary data";
     };
 
     // The estimate recovers the channel, within the covariance's own relative standard error.
-    "criterion 14: relativePhase and amplitudeRatio recover the channel, within 4/sqrt(M)"_test = [] {
+    "relativePhase and amplitudeRatio recover the channel, within 4/sqrt(M)"_test = [] {
         constexpr std::size_t kM = 262144UZ;
         Rng                   rng(0x1234567890abcdefULL);
         const Branches        b = twoBranch(rng, kM, CF{1.f, 0.f}, 0.5f * CF(static_cast<float>(std::cos(2.)), static_cast<float>(std::sin(2.))), 1., 0.1);
 
         const Run    r         = run({{"window", gr::Size_t{static_cast<gr::Size_t>(kM)}}}, b.r0, b.r1, 8192UZ);
         const double tolerance = 4. / std::sqrt(static_cast<double>(kM));
-        std::println("criterion 14: relativePhase {:.5f} (nominal -2, tol {:.4f}), amplitudeRatio {:.5f} (nominal 2)", r.relativePhase, tolerance, r.amplitudeRatio);
+        std::println("relativePhase {:.5f} (nominal -2, tol {:.4f}), amplitudeRatio {:.5f} (nominal 2)", r.relativePhase, tolerance, r.amplitudeRatio);
         expect(std::abs(r.relativePhase - (-2.)) < tolerance) << "relativePhase must recover arg(h0)-arg(h1) = -2 within the covariance's own standard error";
         expect(std::abs(r.amplitudeRatio - 2.) < tolerance) << "amplitudeRatio must recover |h0|/|h1| = 2 within the same tolerance";
     };
@@ -357,7 +357,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
     // The orthogonal output nulls the transmitted signal, below -40 dB of what `out` carries of it. The orthogonal
     // weight vector nulls the *true* channel `h` the scene injected. `v^H v_perp == 0` cannot show that. `v_perp` is
     // built from `v`, and their inner product is zero however wrong `v` is.
-    "criterion 15: the orthogonal output nulls, on the correlation and on the injected channel"_test = [] {
+    "the orthogonal output nulls, on the correlation and on the injected channel"_test = [] {
         constexpr std::size_t kWindow  = 8192UZ;
         constexpr std::size_t kWindows = 3UZ;
         Rng                   rng(0xd1b54a32d192ed03ULL);
@@ -380,7 +380,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             corrOrtho += std::conj(static_cast<std::complex<double>>(b.s[k])) * static_cast<std::complex<double>>(r.ortho[k]);
         }
         const double ratioDb = 20. * std::log10(std::abs(corrOrtho) / std::abs(corrOut));
-        std::println("criterion 15: |corr(s,ortho)| / |corr(s,out)| = {:.2f} dB (must be below -40)", ratioDb);
+        std::println("|corr(s,ortho)| / |corr(s,out)| = {:.2f} dB (must be below -40)", ratioDb);
         expect(ratioDb < -40.) << "the orthogonal output must carry the transmitted signal at least 40 dB below what out carries";
 
         // The channel the scene injected, which the block did not see. The orthogonal weights must null it, and the
@@ -391,14 +391,14 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         const double               throughOut   = std::abs(std::conj(r.weight0) * trueH0 + std::conj(r.weight1) * trueH1);
         const double               throughOrtho = std::abs(std::conj(r.ortho0) * trueH0 + std::conj(r.ortho1) * trueH1);
         const double               nullDb       = 20. * std::log10(throughOrtho / throughOut);
-        std::println("criterion 15: |u^H h| / |w^H h| = {:.2f} dB (out gain {:.5f}, ortho gain {:.3e})", nullDb, throughOut, throughOrtho);
+        std::println("|u^H h| / |w^H h| = {:.2f} dB (out gain {:.5f}, ortho gain {:.3e})", nullDb, throughOut, throughOrtho);
         expect(throughOut > 0.5) << "the combining weights must pass the injected channel";
         expect(nullDb < -40.) << "the orthogonal weights must annihilate the channel the scene injected";
     };
 
     // Selection mode follows the stronger branch across exactly one crossover. mrc on the same stream reads a positive
     // gain throughout.
-    "criterion 16: selection mode switches exactly once at a branch crossover; mrc stays positive throughout"_test = [] {
+    "selection mode switches exactly once at a branch crossover; mrc stays positive throughout"_test = [] {
         constexpr std::size_t kWindow  = 2048UZ;
         constexpr std::size_t kWindows = 4UZ;
         Rng                   rng(0x2545f4914f6cdd1dULL);
@@ -419,20 +419,20 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         }
 
         const Run selRun = run({{"window", gr::Size_t{kWindow}}, {"mode", std::string("selection")}}, r0, r1, 4096UZ);
-        std::println("criterion 16: selection nBranchSwitches() = {}", selRun.nBranchSwitches);
+        std::println("selection nBranchSwitches() = {}", selRun.nBranchSwitches);
         expect(eq(selRun.nBranchSwitches, std::uint64_t{1ULL})) << "the branch power crosses over exactly once";
 
         const Run mrcRun = run({{"window", gr::Size_t{kWindow}}, {"mode", std::string("mrc")}, {"emit_records", true}}, r0, r1, 4096UZ);
         expect(ge(mrcRun.records.size(), 3UZ)) << "at least the three post-startup windows must have produced records";
         for (std::size_t i = 1UZ; i < mrcRun.records.size(); ++i) { // record 0 describes window 0's own solve, still a valid combine
             const float gainDb = mrcRun.records[i].signal_values.at(5UZ);
-            std::println("criterion 16: mrc record {} combining_gain_db = {:.3f}", i, gainDb);
+            std::println("mrc record {} combining_gain_db = {:.3f}", i, gainDb);
             expect(gainDb > 0.f) << std::format("record {}: mrc must show a positive gain over the stronger branch throughout", i);
         }
     };
 
     // Saturation is counted at both stated bounds.
-    "criterion 17: saturation is counted at both bounds, and a degenerate ratio leaves branch 0 unchanged"_test = [] {
+    "saturation is counted at both bounds, and a degenerate ratio leaves branch 0 unchanged"_test = [] {
         // (a) A noiseless two-branch input. With no noise in either branch, lambda_- = 0 exactly, from small integer
         // covariance entries computed without rounding. The SNR figures saturate at 60 dB, 1e6 linear.
         {
@@ -440,7 +440,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             std::vector<CF>       r0(kWindow, CF{1.f, 0.f});
             std::vector<CF>       r1(kWindow, CF{2.f, 0.f});
             const Run             r = run({{"window", gr::Size_t{kWindow}}}, r0, r1, 4096UZ);
-            std::println("criterion 17: noiseless branchSnrDb(0)={:.3f} combinedSnrDb={:.3f} nSaturatedFigures={}", r.branch0Db, r.combinedDb, r.nSaturatedFigures);
+            std::println("noiseless branchSnrDb(0)={:.3f} combinedSnrDb={:.3f} nSaturatedFigures={}", r.branch0Db, r.combinedDb, r.nSaturatedFigures);
             expect(r.nSaturatedFigures > 0ULL) << "a noiseless input must saturate at least one figure";
             expect(std::abs(r.combinedDb - 60.) < 1e-6) << "the saturated figure must read exactly 60 dB (1e6 linear)";
         }
@@ -462,7 +462,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             if (r.out.size() != r0.size()) {
                 return;
             }
-            std::println("criterion 17: orthogonal-branch-1 amplitudeRatio={:.3f} nSaturatedFigures={} branch0Db={:.3f} combiningGainDb={:.3f}", r.amplitudeRatio, r.nSaturatedFigures, r.branch0Db, r.combiningGainDb);
+            std::println("orthogonal-branch-1 amplitudeRatio={:.3f} nSaturatedFigures={} branch0Db={:.3f} combiningGainDb={:.3f}", r.amplitudeRatio, r.nSaturatedFigures, r.branch0Db, r.combiningGainDb);
             expect(r.nSaturatedFigures > 0ULL) << "an exactly-uncorrelated branch 1 must saturate the amplitude ratio";
             expect(std::abs(r.amplitudeRatio - 1e6) < 1.) << "the saturated ratio must read the stated 1e6 linear bound";
             for (std::size_t k = kWindow; k < r0.size(); ++k) { // skip the startup window, which is passthrough by construction anyway
@@ -501,7 +501,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         }
     };
 
-    "the settings refusals §7.4 names, each at staging"_test = [] {
+    "every out-of-range setting is refused at staging"_test = [] {
         const auto staged = [](gr::property_map settings) {
             PolarizationCombiner block(std::move(settings));
             block.settings().init();
@@ -628,7 +628,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
     };
 
     // Before the first window, out and ortho pass branches 0 and 1 through unchanged, and every estimate reads 0.
-    "criterion 18: startup passes branch 0 and branch 1 through unchanged, and coverage() reads 0"_test = [] {
+    "startup passes branch 0 and branch 1 through unchanged, and coverage() reads 0"_test = [] {
         // The readers, checked before any sample is processed. A run through a complete RuntimeTest graph reaches end
         // of stream. The block's end-of-stream flush publishes the partial window as a final record. It updates
         // coverage() and the estimates before the graph returns. The "before the first window" reading is therefore
@@ -660,7 +660,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
     };
 
     // Chunk independence, with bit-identical out and ortho streams, records and counters at every chunk size.
-    "criterion 19: chunk independence, bit-identical for every chunk size"_test = [] {
+    "chunk independence, bit-identical for every chunk size"_test = [] {
         Rng            rng(0x5deece66dULL);
         const Branches b         = twoBranch(rng, 3UZ * 1024UZ + 777UZ, CF{1.f, 0.f}, 0.6f * CF(static_cast<float>(std::cos(1.1)), static_cast<float>(std::sin(1.1))), 1., 0.15);
         const auto     settings  = gr::property_map{{"window", gr::Size_t{1024U}}, {"emit_records", true}};

@@ -334,7 +334,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
     using namespace boost::ut;
     using namespace qa_spectral;
 
-    "a record states the segment count that made it, and carries the tier's keys"_test = [] {
+    "a record states the segment count that made it, its overlap, rate, noise bandwidth and units"_test = [] {
         const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{4U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}};
         const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
 
@@ -866,7 +866,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         expect(block._core.pending.empty());
     };
 
-    "criterion 2: halving n_averages doubles the estimator variance, within an envelope"_test = [] {
+    "halving n_averages doubles the estimator variance, within an envelope"_test = [] {
         // By Welch's statistics, n independent periodograms of white noise average to a per-bin estimate whose
         // variance is the square of its mean over n. The ratio between 32 and 64 averages is therefore 2. The test
         // records the measured figure as well as bounding it. Segments do not overlap, so they are independent.
@@ -891,13 +891,13 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         const double at64  = measure(64U);
         const double at32  = measure(32U);
         const double ratio = at32 / at64;
-        std::println("criterion 2: relative estimator variance {:.5f} at 64 averages, {:.5f} at 32, ratio {:.3f} (nominal 1/64, 1/32, 2)", at64, at32, ratio);
+        std::println("relative estimator variance {:.5f} at 64 averages, {:.5f} at 32, ratio {:.3f} (nominal 1/64, 1/32, 2)", at64, at32, ratio);
 
         expect(at64 > 0. && at32 > 0.) << "both settings have to produce whole records";
         expect(ratio > 1.5 && ratio < 2.7) << "the variance envelope is a factor of two, measured " << ratio;
     };
 
-    "criterion 3: a windowed tone's sub-bin frequency, with the bias each window costs"_test = [] {
+    "a windowed tone's sub-bin frequency, with the bias each window costs"_test = [] {
         // The fixture is a complex exponential through the block's own window and transform, read by PeakDetect's
         // three-point parabolic refinement. The refinement is exact for a parabola, and a windowed main lobe is not
         // one. The test measures and records the bias per window.
@@ -919,7 +919,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
                 }
                 const double measured = strongestPeakBin(detections.front(), kSampleRate, kFft);
                 const double bias     = measured - (kCenterBin + offset);
-                std::println("criterion 3: {:<9} tone at bin {:+.1f}: parabolic estimate off by {:+.5f} bins", windowName, offset, bias);
+                std::println("{:<9} tone at bin {:+.1f}: parabolic estimate off by {:+.5f} bins", windowName, offset, bias);
 
                 if (offset == 0.0) {
                     expect(std::abs(bias) < 1e-4) << "at a bin center the lobe is symmetric and the refinement adds nothing, measured " << bias;
@@ -930,7 +930,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         }
     };
 
-    "criterion 6: every emitted record passes the tier's admission predicates and carries the section 0 keys"_test = [] {
+    "every emitted record is well formed and states its rate, start, segment count, overlap and noise bandwidth"_test = [] {
         const gr::property_map psdSettings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{4U}}, {"sample_rate", kSampleRate}};
         const gr::property_map rowSettings{{"fft_size", gr::Size_t{kFft}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}};
 
@@ -970,7 +970,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         }
     };
 
-    "criterion 7: chunk independence holds for the spectrogram and for a real input"_test = [] {
+    "chunk independence holds for the spectrogram and for a real input"_test = [] {
         const gr::property_map rowSettings{{"fft_size", gr::Size_t{kFft}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}};
         const auto             samples = tone(kFft * 8UZ, 32., kFft);
         const auto             wideRow = collect<Spectrogram<CF>, CF>(rowSettings, samples, 4096UZ);

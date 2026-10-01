@@ -255,7 +255,7 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
         expect(eq(counts.second, std::uint64_t{1ULL}));
     };
 
-    "criterion 4: the measured false-alarm rate matches the design, on noise alone"_test = [] {
+    "the measured false-alarm rate matches the design, on noise alone"_test = [] {
         constexpr double      kPfa     = 1e-3;
         constexpr std::size_t kRecords = 1024UZ; // about 10^6 tested cells at the margin below
         ExponentialNoise      noise;
@@ -284,7 +284,7 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
         expect(measured < 2. * kPfa && measured > 0.5 * kPfa) << "measured false-alarm rate " << measured << " against a design " << kPfa;
     };
 
-    "criterion 4: a tone well over the noise is detected, and its guard cells stay clean"_test = [] {
+    "a tone well over the noise is detected, and its guard cells stay clean"_test = [] {
         ExponentialNoise   noise;
         std::vector<float> values(kBins);
         std::ranges::generate(values, [&noise] { return noise(); });
@@ -340,7 +340,7 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
         }
     };
 
-    "criterion 5: a shaped noise band of stated transition reads its design bandwidth"_test = [] {
+    "a shaped noise band of stated transition reads its design bandwidth"_test = [] {
         // A rectangle with no transition and no noise is too easy a fixture. This band is seeded noise shaped by a
         // raised-cosine edge of a stated width, as a designed lowpass shapes a spectrum. The test asserts that the
         // 99 % bandwidth lands within the transition width of the design bandwidth.
@@ -388,13 +388,13 @@ const boost::ut::suite<"Detectors"> detectorTests = [] {
             highest = std::max(highest, bins);
         }
         mean /= static_cast<double>(out.size());
-        std::println("criterion 5: 99 % bandwidth of a {:.0f}-bin band with a {:.0f}-bin transition: mean {:.2f} bins over {} trials, range {:.2f} to {:.2f}", kBandBins, kTransitionBins, mean, out.size(), lowest, highest);
+        std::println("99 % bandwidth of a {:.0f}-bin band with a {:.0f}-bin transition: mean {:.2f} bins over {} trials, range {:.2f} to {:.2f}", kBandBins, kTransitionBins, mean, out.size(), lowest, highest);
 
         expect(std::abs(mean - kBandBins) < kTransitionBins) << "the 99 % bandwidth must land within the transition width of the design, measured " << mean;
         expect(highest - lowest < 2. * kTransitionBins) << "and no single realization may wander further than the transition itself, spread " << (highest - lowest);
     };
 
-    "criterion 6: every detection and bandwidth record passes the tier's admission predicates"_test = [] {
+    "every detection and bandwidth record is well formed and states its conditions"_test = [] {
         std::vector<float> withPeaks(kBins, 1e-6f);
         for (const std::size_t at : {200UZ, 512UZ, 800UZ}) {
             for (std::size_t k = at - 3UZ; k <= at + 3UZ; ++k) {

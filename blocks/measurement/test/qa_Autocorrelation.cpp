@@ -400,7 +400,7 @@ using namespace boost::ut;
 using namespace qa_autocorrelation;
 
 const suite<"autocorrelation record and settings"> _acfRecord = [] {
-    "criterion 12: the lag axis, the rate, and every metadata key"_test = [] {
+    "a record states its lag axis, its rate and every metadata key"_test = [] {
         const std::vector<CF> input = complexNoise(40000UZ, 0x1111ULL);
         for (const float rate : {2.0e6f, 125000.f}) {
             const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(4)}, {"sample_rate", rate}}, input);
@@ -437,7 +437,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }
     };
 
-    "criterion 14: refusals, each by name"_test = [] {
+    "the settings refusals, each by name"_test = [] {
         const auto refused = [](gr::property_map settings) {
             Autocorrelation<CF> block(std::move(settings));
             block.settings().init();
@@ -485,7 +485,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         expect(metaText(aliased.records[0UZ], "window") == std::string("HannExp")) << "the record names the window the settings named";
     };
 
-    "criterion 14: the staged-restart keys refuse while the block runs and move once it is stopped"_test = [] {
+    "the staged-restart keys refuse while the block runs and move once it is stopped"_test = [] {
         const auto running = [](gr::property_map settings) {
             auto block = std::make_unique<Autocorrelation<CF>>(std::move(settings));
             block->settings().init();
@@ -523,7 +523,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }
     };
 
-    "criterion 13: a sample_rate tag mid-stream"_test = [] {
+    "a sample_rate tag mid-stream flushes the open average and each rate stays on its own records"_test = [] {
         constexpr std::size_t length = 1024UZ;
         constexpr std::size_t tagAt  = 4600UZ;
         const std::vector<CF> input  = complexNoise(16384UZ, 0x2222ULL);
@@ -553,7 +553,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         const gr::DataSet<float>& next = run.records[1UZ];
         expect(approx(metaNumber(next, "sample_rate"), 96000., 1e-3)) << "the next record carries the new rate";
         expect(eq(static_cast<std::size_t>(metaNumber(next, "n_averaged")), 8UZ));
-        std::println("criterion 13: flushed n_averaged={} at {} Hz, then n_averaged={} at {} Hz, window resets {}", metaNumber(flushed, "n_averaged"), metaNumber(flushed, "sample_rate"), metaNumber(next, "n_averaged"), metaNumber(next, "sample_rate"), run.nWindowResets);
+        std::println("sample_rate tag: flushed n_averaged={} at {} Hz, then n_averaged={} at {} Hz, window resets {}", metaNumber(flushed, "n_averaged"), metaNumber(flushed, "sample_rate"), metaNumber(next, "n_averaged"), metaNumber(next, "sample_rate"), run.nWindowResets);
 
         // a tag that cannot scale an axis is counted and the old rate stands
         const gr::property_map badTag{{gr::tag::SAMPLE_RATE.shortKey(), 0.f}};
@@ -565,7 +565,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }
     };
 
-    "criterion 15: chunk independence, and the counter identity"_test = [] {
+    "records do not depend on the input chunking, and the window counters add up"_test = [] {
         constexpr std::size_t                sps     = 8UZ;
         constexpr std::size_t                symbols = 8000UZ;
         const std::vector<float>             pulse   = raisedCosine(sps, 0.35, 8UZ);
@@ -591,7 +591,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }
     };
 
-    "criterion 16: the phase port"_test = [] {
+    "the phase port carries the complex kind's phase and nothing for the envelope kind"_test = [] {
         const std::vector<CF> input     = complexNoise(40000UZ, 0x4444ULL);
         const Run<CF>         withPhase = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("complex")}, {"emit_phase", true}, {"n_averages", gr::Size_t(4)}, {"sample_rate", 48000.f}}, input, 65536UZ, true);
         expect(fatal(ge(withPhase.phase.size(), 1UZ))) << "the phase port is fed for the complex kind";
@@ -615,7 +615,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
 };
 
 const suite<"autocorrelation scenes"> _acfScenes = [] {
-    "criterion 7: OFDM, both kinds, against the closed form"_test = [] {
+    "OFDM, both kinds, against the closed form"_test = [] {
         constexpr std::size_t nFft   = 2048UZ;
         constexpr std::size_t nCp    = 144UZ;
         constexpr double      closed = static_cast<double>(nCp) / static_cast<double>(nCp + nFft);
@@ -627,21 +627,21 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             const gr::DataSet<float>& record = run.records[0UZ];
             const auto [at, height]          = peakOver(record, 2000UZ, 2100UZ);
             const double scatter             = metaNumber(record, "scatter");
-            std::println("criterion 7: OFDM {} kind, maximum over [2000, 2100] at lag {} reading {:.5f} against the closed form {:.5f} (scatter {:.5f})", kind, at, height, closed, scatter);
+            std::println("OFDM {} kind, maximum over [2000, 2100] at lag {} reading {:.5f} against the closed form {:.5f} (scatter {:.5f})", kind, at, height, closed, scatter);
             expect(eq(at, nFft)) << std::format("{}: the maximum sits at the useful symbol's length", kind);
             expect(std::abs(height - closed) < 3. * scatter) << std::format("{}: {:.5f} against {:.5f} within three scatter units of {:.5f}", kind, height, closed, scatter);
             const HandComputed hand = recomputed(record);
-            expect(approx(metaNumber(record, "detection_threshold"), hand.threshold, 1e-12)) << "criterion 21: the threshold is what the published keys say it is";
+            expect(approx(metaNumber(record, "detection_threshold"), hand.threshold, 1e-12)) << "the threshold is what the published keys say it is";
             expect(approx(metaNumber(record, "scatter"), hand.scatter, 1e-12));
             expect(height > metaNumber(record, "detection_threshold")) << "and the peak clears it";
             const double power = metaNumber(record, "signal_power");
-            expect(power > 0.) << "criterion 21: the scale the ratio throws away is kept";
+            expect(power > 0.) << "the scale the ratio throws away is kept";
         }
 
         const Run<CF> biased                = collect<CF>({{"window_length", gr::Size_t(16384)}, {"max_lag", gr::Size_t(2200)}, {"kind", std::string("complex")}, {"normalization", std::string("biased")}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, scene);
         const auto [biasedAt, biasedHeight] = peakOver(biased.records[0UZ], 2000UZ, 2100UZ);
         const double biasedClosed           = closed * (1. - static_cast<double>(nFft) / 16384.);
-        std::println("criterion 7: under biased the same peak sits at lag {} reading {:.5f} against {:.5f}", biasedAt, biasedHeight, biasedClosed);
+        std::println("OFDM: under biased the same peak sits at lag {} reading {:.5f} against {:.5f}", biasedAt, biasedHeight, biasedClosed);
         expect(eq(biasedAt, nFft));
         expect(std::abs(biasedHeight - biasedClosed) < 3. * metaNumber(biased.records[0UZ], "scatter"));
 
@@ -655,11 +655,11 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         expect(fatal(ge(withOffset.phase.size(), 1UZ)));
         const double measuredPhase = static_cast<double>(withOffset.phase[0UZ].signal_values[nFft]);
         const double expectedPhase = kTwoPi * offset * static_cast<double>(nFft);
-        std::println("criterion 7: with a {:.4f}/T_u offset the phase at lag {} reads {:.5f} rad against {:.5f}", 0.3, nFft, measuredPhase, expectedPhase);
+        std::println("OFDM: with a {:.4f}/T_u offset the phase at lag {} reads {:.5f} rad against {:.5f}", 0.3, nFft, measuredPhase, expectedPhase);
         expect(std::abs(measuredPhase - expectedPhase) < 0.01 * std::abs(expectedPhase)) << std::format("phase {:.5f} against {:.5f}", measuredPhase, expectedPhase);
     };
 
-    "criterion 8: a rectangular-pulse envelope is nothing, and the instrument is positive on the same run"_test = [] {
+    "a rectangular-pulse envelope publishes nothing, and a raised cosine on the same symbols does"_test = [] {
         constexpr std::size_t  sps     = 8UZ;
         constexpr std::size_t  symbols = 20000UZ;
         const std::vector<CF>  flat    = linearModulation(symbols, sps, std::span<const float>{}, 0x6666ULL);
@@ -669,7 +669,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         expect(rectangular.records.empty()) << "a constant-modulus envelope publishes nothing";
         expect(gt(rectangular.nDegenerate, std::uint64_t{0ULL}));
         expect(eq(rectangular.nDegenerate, rectangular.nWindows)) << "every window of it is degenerate";
-        std::println("criterion 8: rectangular-pulse BPSK, {} windows, {} degenerate, {} records", rectangular.nWindows, rectangular.nDegenerate, rectangular.nRecords);
+        std::println("rectangular-pulse BPSK, {} windows, {} degenerate, {} records", rectangular.nWindows, rectangular.nDegenerate, rectangular.nRecords);
 
         const std::vector<float> pulse     = raisedCosine(sps, 0.35, 8UZ);
         const std::vector<CF>    shaped    = linearModulation(symbols, sps, std::span<const float>(pulse), 0x6666ULL);
@@ -678,12 +678,12 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         const auto [at, height]      = peakOver(shapedRun.records[0UZ], 4UZ, 12UZ);
         const double atPeriod        = static_cast<double>(shapedRun.records[0UZ].signal_values[sps]);
         const double shapedThreshold = metaNumber(shapedRun.records[0UZ], "detection_threshold");
-        std::println("criterion 8: the same symbols through a raised cosine put a maximum at lag {} reading {:.4f}, and lag {} itself reads {:.4f} against the record's threshold {:.4f}", at, height, sps, atPeriod, shapedThreshold);
+        std::println("rectangular pulse: the same symbols through a raised cosine put a maximum at lag {} reading {:.4f}, and lag {} itself reads {:.4f} against the record's threshold {:.4f}", at, height, sps, atPeriod, shapedThreshold);
         expect(le(at > sps ? at - sps : sps - at, 1UZ)) << "within one lag step of one symbol period";
         expect(atPeriod > shapedThreshold) << "and one symbol period clears the threshold";
     };
 
-    "criterion 9: shaped BPSK puts the envelope peak at one symbol period"_test = [] {
+    "shaped BPSK puts the envelope peak at one symbol period"_test = [] {
         constexpr std::size_t           sps     = 8UZ;
         constexpr std::size_t           symbols = 40000UZ;
         constexpr std::array<double, 3> kBetas{0.2, 0.35, 0.5};
@@ -699,10 +699,10 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             // The envelope's feature at one symbol period is a negative lobe. The published magnitude runs through a
             // null a few lags short of it, and its maximum sits one lag below the period. The closed forms state the
             // height at the period itself.
-            std::println("criterion 9: beta {:.2f} puts the maximum at lag {} reading {:.4f}; lag {} itself reads {:.4f} (bracket 0.31 to 0.38), threshold {:.4f}, scatter {:.5f}", beta, at, height, sps, atPeriod, hand.threshold, hand.scatter);
+            std::println("shaped BPSK: beta {:.2f} puts the maximum at lag {} reading {:.4f}; lag {} itself reads {:.4f} (bracket 0.31 to 0.38), threshold {:.4f}, scatter {:.5f}", beta, at, height, sps, atPeriod, hand.threshold, hand.scatter);
             expect(le(at > sps ? at - sps : sps - at, 1UZ)) << std::format("beta {}: within one lag step of {}", beta, sps);
             expect(atPeriod > 0.31 && atPeriod < 0.38) << std::format("beta {}: height {:.4f} outside the bracket", beta, atPeriod);
-            expect(approx(metaNumber(record, "detection_threshold"), hand.threshold, 1e-12)) << "criterion 21";
+            expect(approx(metaNumber(record, "detection_threshold"), hand.threshold, 1e-12)) << "the threshold is what the published keys say it is";
             expect(approx(metaNumber(record, "scatter"), hand.scatter, 1e-12));
             expect(atPeriod > hand.threshold);
         }
@@ -712,12 +712,12 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         const Run<CF>            flatRun   = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(256)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(32)}, {"sample_rate", static_cast<float>(sps * 1000UZ)}}, flatScene);
         const auto [flatAt, flatHeight]    = peakOver(flatRun.records[0UZ], 4UZ, 12UZ);
         const double flatAtPeriod          = static_cast<double>(flatRun.records[0UZ].signal_values[sps]);
-        std::println("criterion 9: beta 0.00 puts the maximum at lag {} reading {:.4f} and lag {} reads {:.4f}, which the criterion does not claim to be zero", flatAt, flatHeight, sps, flatAtPeriod);
+        std::println("shaped BPSK: beta 0.00 puts the maximum at lag {} reading {:.4f} and lag {} reads {:.4f}, which the test does not require to be zero", flatAt, flatHeight, sps, flatAtPeriod);
         expect(le(flatAt > sps ? flatAt - sps : sps - flatAt, 1UZ));
         expect(flatAtPeriod > metaNumber(flatRun.records[0UZ], "detection_threshold"));
     };
 
-    "criterion 10: C4FM, unfiltered and through the channel filter"_test = [] {
+    "C4FM, unfiltered and through the channel filter"_test = [] {
         constexpr std::size_t  sps   = 20UZ;
         constexpr float        rate  = 96000.f;
         constexpr std::size_t  lags  = 128UZ;
@@ -727,7 +727,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         const Run<CF> unfiltered = collect<CF>(settings, scene);
         expect(unfiltered.records.empty()) << "a constant-modulus waveform has no envelope autocorrelation at all";
         expect(eq(unfiltered.nDegenerate, unfiltered.nWindows));
-        std::println("criterion 10: unfiltered C4FM, {} windows, all degenerate", unfiltered.nWindows);
+        std::println("unfiltered C4FM, {} windows, all degenerate", unfiltered.nWindows);
 
         // The receive filter must have an impulse response that does not ring. A windowed-sinc channel filter rings
         // at fs/(2 fc). Its envelope autocorrelation then reports that period and not the symbol period. A Gaussian
@@ -741,7 +741,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             const gr::DataSet<float>& record = run.records[0UZ];
             const auto [at, height]          = peakOver(record, sps - 6UZ, sps + 6UZ);
             const bool isLocal               = at > 0UZ && at + 1UZ < record.signal_values.size() && record.signal_values[at] > record.signal_values[at - 1UZ] && record.signal_values[at] > record.signal_values[at + 1UZ];
-            std::println("criterion 10: Gaussian channel filter at {:.0f} Hz ({} taps): maximum over [{}, {}] at lag {} reading {:.4f}, a local maximum: {}; threshold {:.4f}", bandwidth, channel.size(), sps - 6UZ, sps + 6UZ, at, height, isLocal, metaNumber(record, "detection_threshold"));
+            std::println("C4FM: Gaussian channel filter at {:.0f} Hz ({} taps): maximum over [{}, {}] at lag {} reading {:.4f}, a local maximum: {}; threshold {:.4f}", bandwidth, channel.size(), sps - 6UZ, sps + 6UZ, at, height, isLocal, metaNumber(record, "detection_threshold"));
             if (bandwidth == 6250.) {
                 expect(le(at > sps ? at - sps : sps - at, 1UZ)) << std::format("within one lag step of {} samples, which is 208.333 us at {} S/s", sps, static_cast<std::size_t>(rate));
                 expect(isLocal) << "and it is a local maximum rather than a point on a decay";
@@ -750,7 +750,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         }
     };
 
-    "criterion 11: Mode S, exactly"_test = [] {
+    "Mode S against its exact closed forms"_test = [] {
         // the preamble alone, a deterministic sequence with an exact expected value
         Rng                   rng{0x9999ULL};
         const std::vector<CF> preamble = modeSFrame(rng, true, false);
@@ -767,7 +767,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         std::vector<float> preambleMagnitude;
         std::ignore = kernel.process(std::span<const CF>(preamble), [&preambleMagnitude](const gr::analysis::AcfResult& result) { preambleMagnitude.assign(result.magnitude.begin(), result.magnitude.end()); });
         expect(eq(preambleMagnitude.size(), 9UZ));
-        std::println("criterion 11: the preamble alone reads |R(1.0 us)|/R(0) = {:.6f} against 3/7 = {:.6f}", preambleMagnitude[2UZ], 3. / 7.);
+        std::println("Mode S: the preamble alone reads |R(1.0 us)|/R(0) = {:.6f} against 3/7 = {:.6f}", preambleMagnitude[2UZ], 3. / 7.);
         expect(std::abs(static_cast<double>(preambleMagnitude[2UZ]) - 3. / 7.) < 1e-5) << std::format("{:.7f} against {:.7f}", preambleMagnitude[2UZ], 3. / 7.);
 
         // the data field alone, averaged over 200 seeded frames
@@ -784,14 +784,14 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         const double              scatter    = metaNumber(dataRecord, "scatter");
         const double              atHalf     = static_cast<double>(dataRecord.signal_values[1UZ]);
         const double              atOne      = static_cast<double>(dataRecord.signal_values[2UZ]);
-        std::println("criterion 11: the data field alone reads |R(0.5 us)|/R(0) = {:.5f} against 0.5 and |R(1.0 us)|/R(0) = {:.5f} against 0, scatter {:.5f}", atHalf, atOne, scatter);
+        std::println("Mode S: the data field alone reads |R(0.5 us)|/R(0) = {:.5f} against 0.5 and |R(1.0 us)|/R(0) = {:.5f} against 0, scatter {:.5f}", atHalf, atOne, scatter);
         const HandComputed hand = recomputed(dataRecord);
         expect(std::abs(atHalf - 0.5) < 3. * scatter) << std::format("{:.5f} against 0.5 within three scatter units of {:.5f}", atHalf, scatter);
         // The null is read against the record's own detection threshold and not a fixed multiple of the scatter. A
         // magnitude drawn from a zero-mean real estimate is folded. One realization in three hundred crosses three
         // scatter units by chance. The threshold is the level the record itself says a peak must reach.
         expect(atOne < hand.threshold) << std::format("the derived null reads {:.5f} ({:.2f} scatter units) against the record's threshold {:.5f}", atOne, atOne / scatter, hand.threshold);
-        expect(approx(metaNumber(dataRecord, "detection_threshold"), hand.threshold, 1e-12)) << "criterion 21";
+        expect(approx(metaNumber(dataRecord, "detection_threshold"), hand.threshold, 1e-12)) << "the threshold is what the published keys say it is";
         expect(atHalf > hand.threshold) << "the instrument is positive on the same run that carries the null";
 
         // the whole 240-sample frame blends the two in the ratio 224:16
@@ -802,10 +802,10 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         }
         const Run<CF> wholeRun = collect<CF>({{"window_length", gr::Size_t(240)}, {"max_lag", gr::Size_t(16)}, {"kind", std::string("envelope")}, {"overlap", 0.0}, {"n_averages", gr::Size_t(frames)}, {"sample_rate", 2.0e6f}}, whole);
         expect(fatal(ge(wholeRun.records.size(), 1UZ)));
-        std::println("criterion 11: the whole 240-sample frame reads |R(0.5 us)|/R(0) = {:.5f} and |R(1.0 us)|/R(0) = {:.5f}, scatter {:.5f}", wholeRun.records[0UZ].signal_values[1UZ], wholeRun.records[0UZ].signal_values[2UZ], metaNumber(wholeRun.records[0UZ], "scatter"));
+        std::println("Mode S: the whole 240-sample frame reads |R(0.5 us)|/R(0) = {:.5f} and |R(1.0 us)|/R(0) = {:.5f}, scatter {:.5f}", wholeRun.records[0UZ].signal_values[1UZ], wholeRun.records[0UZ].signal_values[2UZ], metaNumber(wholeRun.records[0UZ], "scatter"));
     };
 
-    "criterion 22: PeakDetect over the record"_test = [] {
+    "PeakDetect over the record, against the derived threshold and false-alarm rate"_test = [] {
         constexpr std::size_t    sps   = 8UZ;
         constexpr float          rate  = static_cast<float>(sps * 1000UZ);
         constexpr std::size_t    lags  = 256UZ;
@@ -881,7 +881,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
 
             const std::vector<gr::DataSet<float>> detections = detect(shapedSettings, modulated, statedDb);
             const auto [closest, count]                      = nearest(detections, period / static_cast<double>(rate));
-            std::println("criterion 22: a {:.1f}-sample sinusoidal envelope modulation stands {:.3f} dB over its record's own median against the derived {:.3f} dB; at a stated {:.1f} dB it gives {} detections and the nearest sits {:.4f} lag steps from the period after parabolic interpolation", period, marginDb(plain.records[0UZ]), metaNumber(plain.records[0UZ], "peak_threshold_db"), statedDb, count, closest * static_cast<double>(rate));
+            std::println("PeakDetect: a {:.1f}-sample sinusoidal envelope modulation stands {:.3f} dB over its record's own median against the derived {:.3f} dB; at a stated {:.1f} dB it gives {} detections and the nearest sits {:.4f} lag steps from the period after parabolic interpolation", period, marginDb(plain.records[0UZ]), metaNumber(plain.records[0UZ], "peak_threshold_db"), statedDb, count, closest * static_cast<double>(rate));
             expect(ge(detections.size(), 1UZ)) << "the injected period is reported as a detection";
             expect(closest <= 0.5 / static_cast<double>(rate)) << "within half a lag step, which is what makes a period between two lags resolvable";
         }
@@ -894,7 +894,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             const double                          thresholdDb = metaNumber(plain.records[0UZ], "peak_threshold_db");
             const std::vector<gr::DataSet<float>> detections  = detect(shapedSettings, scene, thresholdDb);
             const auto [closest, count]                       = nearest(detections, static_cast<double>(sps) / static_cast<double>(rate));
-            std::println("criterion 22: over shaped BPSK the record stands {:.3f} dB over its own median against the derived {:.3f} dB; {} detections, the closest to the symbol period is {:.3f} lag steps away", marginDb(plain.records[0UZ]), thresholdDb, count, closest * static_cast<double>(rate));
+            std::println("PeakDetect: over shaped BPSK the record stands {:.3f} dB over its own median against the derived {:.3f} dB; {} detections, the closest to the symbol period is {:.3f} lag steps away", marginDb(plain.records[0UZ]), thresholdDb, count, closest * static_cast<double>(rate));
             expect(ge(detections.size(), 1UZ)) << "the symbol period is reported as a detection";
             expect(closest <= 1.5 / static_cast<double>(rate)) << "the symbol period is reported within the lobe the envelope actually puts there";
         }
@@ -911,7 +911,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
                 const std::vector<gr::DataSet<float>> detections = detect(settings, complexNoise(noiseRecords * 1024UZ + 16UZ, 0xBBBBULL), thresholdDb);
                 const double                          measured   = static_cast<double>(detections.size()) / static_cast<double>(noiseRecords);
                 const double                          spread     = 3. * std::sqrt(pFa * (1. - pFa) / static_cast<double>(noiseRecords));
-                std::println("criterion 22: {} kind at {:.3f} dB over the median, {} of {} noise records produced a detection: rate {:.5f} against the design {:.5f} (+/- {:.5f})", kind, thresholdDb, detections.size(), noiseRecords, measured, pFa, spread);
+                std::println("PeakDetect: {} kind at {:.3f} dB over the median, {} of {} noise records produced a detection: rate {:.5f} against the design {:.5f} (+/- {:.5f})", kind, thresholdDb, detections.size(), noiseRecords, measured, pFa, spread);
                 expect(measured <= pFa + spread) << std::format("{}: realized rate {:.5f} against design {:.5f}", kind, measured, pFa);
             }
         }
