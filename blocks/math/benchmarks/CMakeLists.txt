@@ -10,5 +10,6 @@ function(add_math_benchmark BM_NAME)
   target_compile_options(${BM_NAME} PRIVATE -O3)
 endfunction()
 
+add_math_benchmark(bm_Binary)
 add_math_benchmark(bm_Rotator)
 add_math_benchmark(bm_Unary)
