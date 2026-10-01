@@ -1068,7 +1068,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         expect(interiorByName(differential, "costas") == nullptr) << "and no carrier loop at all";
 
         // BpskFrontEnd refuses to instantiate without its required parameters.
-        expect(loader.instantiate("gr::recipes::BpskFrontEnd") == nullptr) << "BpskFrontEnd without its required parameters";
+        expect(loader.instantiate("gr::recipes::BpskFrontEnd") == nullptr) << "BpskFrontEnd is refused without its required parameters";
     };
 
     "FskDemodDcBlock is FskDemod's chain plus the blocker, and hands back soft symbols"_test = [] {
