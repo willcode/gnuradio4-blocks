@@ -351,7 +351,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         expect(!naiveFoundSecond) << "and the second packet is never recovered, which is exactly what the pointer buys";
     };
 
-    "a data length written without its minus one is refused by SpacePacketDecode and misframes SpacePacketExtract"_test = [] {
+    "a data length written without its minus one is refused by SpacePacketDecode and misframed by SpacePacketExtract"_test = [] {
         // Three packets built with the common mistake data_length = payload_octets. Each is 106 octets on the wire
         // and claims 107. The header octets for APID 100, unsegmented, count 0 are 00 64 C0 00 00 64.
         const auto wrongPacket = [] {
