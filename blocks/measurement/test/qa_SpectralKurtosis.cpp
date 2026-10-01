@@ -535,7 +535,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
 
     // Records-per-call independence. The same input records, delivered a different number at a time, must produce
     // bit-identical output records and identical counters.
-    "independent of how many input records arrive per call"_test = [] {
+    "the records and counters do not depend on how many input records arrive per call"_test = [] {
         Rng                             rng(0x1122334455667788ULL);
         std::vector<gr::DataSet<float>> rows = noiseRows(rng, 96UZ, 64UZ, 1UZ);
         rows.push_back(spectrum({1.f, 2.f, 3.f}, 1ULL, 0.0)); // one refusal, so the refusal counter is compared too

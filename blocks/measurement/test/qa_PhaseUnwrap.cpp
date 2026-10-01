@@ -166,7 +166,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
     // of 2*10^9 samples, tens of seconds even at the kernel's own cost per sample. The kernel test runs it only under
     // `ENABLE_LONG_TESTS`, outside the default run of about 5 s. This test repeats the demonstration at the scale the
     // kernel test pins.
-    "exact where a float accumulator has already stopped working"_test = [] {
+    "cycles() and phase() stay exact where a float accumulator is off by a whole cycle"_test = [] {
         constexpr double      kCyclesPerSample = 0.4;
         constexpr std::size_t kTotal           = 5'242'881UZ;
 

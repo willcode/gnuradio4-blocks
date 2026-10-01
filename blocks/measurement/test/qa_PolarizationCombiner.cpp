@@ -501,7 +501,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         }
     };
 
-    "every out-of-range setting is refused at staging"_test = [] {
+    "out-of-range and unknown settings are refused at staging, and the floor is admitted"_test = [] {
         const auto staged = [](gr::property_map settings) {
             PolarizationCombiner block(std::move(settings));
             block.settings().init();

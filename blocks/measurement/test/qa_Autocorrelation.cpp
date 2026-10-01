@@ -437,7 +437,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }
     };
 
-    "the settings refusals, each by name"_test = [] {
+    "each invalid setting is refused, and the lag refusal names both values"_test = [] {
         const auto refused = [](gr::property_map settings) {
             Autocorrelation<CF> block(std::move(settings));
             block.settings().init();
@@ -615,7 +615,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
 };
 
 const suite<"autocorrelation scenes"> _acfScenes = [] {
-    "OFDM, both kinds, against the closed form"_test = [] {
+    "OFDM puts both kinds' peak at the useful symbol length, at the closed-form height"_test = [] {
         constexpr std::size_t nFft   = 2048UZ;
         constexpr std::size_t nCp    = 144UZ;
         constexpr double      closed = static_cast<double>(nCp) / static_cast<double>(nCp + nFft);
@@ -717,7 +717,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         expect(flatAtPeriod > metaNumber(flatRun.records[0UZ], "detection_threshold"));
     };
 
-    "C4FM, unfiltered and through the channel filter"_test = [] {
+    "C4FM publishes nothing unfiltered and peaks at the symbol period through a Gaussian filter"_test = [] {
         constexpr std::size_t  sps   = 20UZ;
         constexpr float        rate  = 96000.f;
         constexpr std::size_t  lags  = 128UZ;

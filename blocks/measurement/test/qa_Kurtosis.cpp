@@ -296,7 +296,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             expect(eq(records.size(), 1UZ));
             if (!records.empty()) {
                 const double excess = static_cast<double>(records.front().signal_values.at(0UZ));
-                std::println("constant modulus excess {:.6f} (exact -1, asserted against the literal 1 SignalQuality.hpp's ka names)", excess);
+                std::println("constant modulus excess {:.6f} (exact -1)", excess);
                 expect(std::abs(excess - (-1.)) < 1e-4) << "constant modulus must read excess -1 to float rounding";
             }
         }

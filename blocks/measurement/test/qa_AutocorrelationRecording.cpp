@@ -613,6 +613,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         config.overlap      = 0.5;
         config.nAverages    = windows;
 
+        std::size_t offsets     = 0UZ;
+        std::size_t withMaximum = 0UZ;
         for (int step = -8; step <= 8; ++step) {
             const double          offset   = static_cast<double>(step) * 2500.;
             const std::vector<CF> filtered = applyFir(std::span<const CF>(tune(std::span<const CF>(block), offset, rate)), std::span<const float>(channel));
@@ -627,9 +629,11 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             const auto [envelopeAt, envelopeHeight] = peakOver(std::span<const float>(envelopeArm.magnitude), 10UZ, lags);
             const auto [complexAt, complexHeight]   = peakOver(std::span<const float>(complexArm.magnitude), 10UZ, lags);
             const auto [isMax, at]                  = maximumNear(std::span<const float>(envelopeArm.magnitude), 26UZ);
+            ++offsets;
+            withMaximum += isMax ? 1UZ : 0UZ;
             std::println("    offset {:+6.1f} kHz: envelope lag 26 {:.4f} lag 27 {:.4f}, local maximum near 26: {}; envelope argmax over [10, {}] at {} reading {:.4f}; complex argmax at {} reading {:.4f} (scatter {:.5f})", offset / 1000., envelopeArm.magnitude[26UZ], envelopeArm.magnitude[27UZ], isMax ? std::format("yes at {}", at) : std::string("no"), lags, envelopeAt, envelopeHeight, complexAt, complexHeight, envelopeArm.scatter);
         }
-        std::println("P25: printed and not asserted; no arm of this capture puts a local maximum at the symbol period");
+        std::println("P25: {} of {} offsets put an envelope local maximum within one lag of 26; printed and not asserted", withMaximum, offsets);
     };
 };
 
