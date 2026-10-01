@@ -247,7 +247,7 @@ void connectFromComposite(gr::Graph& flow, const std::shared_ptr<gr::BlockModel>
     boost::ut::expect(flow.connect(composite, gr::PortDefinition{"out"}, *model, gr::PortDefinition{"in"}).has_value()) << boost::ut::fatal;
 }
 
-// ─── G-A: the APRS packet-radio graph ─────────────────────────────────────────────────────────────────────────────
+// ─── The APRS packet-radio graph ──────────────────────────────────────────────────────────────────────────────────
 
 constexpr double      kAudioRate    = 48000.;
 constexpr double      kAprsBaud     = 1200.;
@@ -566,7 +566,7 @@ struct ItemCounter : gr::Block<ItemCounter<T>> {
     }
 };
 
-// ─── G-B: AFSK over AX.25 from real audio ─────────────────────────────────────────────────────────────────────────
+// ─── AFSK over AX.25 from real audio ──────────────────────────────────────────────────────────────────────────────
 
 /// The AFSK/AX.25 captures. They are every recording whose satyaml names an AFSK transmitter with AX.25 framing.
 /// Both captures of Swiatowid are included. Its satellite has an AFSK transmitter. All of them carry the same tone
@@ -627,7 +627,7 @@ constexpr std::array<Capture, 4UZ> kAfskCaptures{{
     return run;
 }
 
-// ─── G-C: 9600-baud G3RUH over AX.25 from real audio ──────────────────────────────────────────────────────────────
+// ─── 9600-baud G3RUH over AX.25 from real audio ───────────────────────────────────────────────────────────────────
 
 /// The FSK 9600 G3RUH captures. They are every recording whose satyaml names an FSK transmitter at 9600 baud with
 /// AX.25 G3RUH framing, and all three Astrocast captures are among them. A capture whose satyaml calls the same
@@ -719,7 +719,7 @@ constexpr std::array<Capture, 12UZ> kG3ruhCaptures{{
     });
     return run;
 }
-// ─── G-D: DBPSK with the AO-40 FEC framing behind it ──────────────────────────────────────────────────────────────
+// ─── DBPSK with the AO-40 FEC framing behind it ───────────────────────────────────────────────────────────────────
 
 /// The AO-40-FEC captures. Of the recordings, AO-73's satyaml alone names DBPSK with AO-40 FEC framing. The two other
 /// AO-40-framed captures are the 400-baud Manchester beacon of the uncoded form, and they need a different chain.
@@ -830,7 +830,7 @@ enum class ChipCombine {
     parity  ///< ManchesterCombine, which selects the parity that carries the differentially detected bit
 };
 
-/// The front end of G-D's chain, from `WavSource` to the soft symbols the coded framing reads. It holds `WavSource`,
+/// The front end of the DBPSK/AO-40 chain, from `WavSource` to the soft symbols the coded framing reads. It holds `WavSource`,
 /// the Hilbert branch and its matching delay, and `DbpskDemod` tuned to the measured carrier.
 [[nodiscard]] std::vector<float> dbpskFrontEnd(const std::filesystem::path& file, double symbolRate, double carrierHz, ChipCombine combine = ChipCombine::none) {
     constexpr gr::Size_t kHilbertTaps = 127U;
@@ -1425,8 +1425,8 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
         const std::string path     = std::filesystem::temp_directory_path() / "qa_ComposedGraphs_aprs.kiss";
         const AprsRun     run      = aprsReceive(audio, 20., path);
         const std::size_t perFrame = bits.size() / kAprsFrames;
-        std::println("[G-A] {} frames, {} wire bits ({} a frame, {:.1f} ms of audio), key-up {} symbols", kAprsFrames, bits.size(), perFrame, 1e3 * static_cast<double>(audio.size()) / kAudioRate, kKeyUpSymbols);
-        std::println("[G-A] Es/N0 20.0 dB (noise power {:.4f}): {} frames decoded, {} read back from the KISS file", toneNoisePower(20.), run.decoded.size(), run.readBack.size());
+        std::println("[APRS] {} frames, {} wire bits ({} a frame, {:.1f} ms of audio), key-up {} symbols", kAprsFrames, bits.size(), perFrame, 1e3 * static_cast<double>(audio.size()) / kAudioRate, kKeyUpSymbols);
+        std::println("[APRS] Es/N0 20.0 dB (noise power {:.4f}): {} frames decoded, {} read back from the KISS file", toneNoisePower(20.), run.decoded.size(), run.readBack.size());
 
         expect(eq(run.decoded.size(), kAprsFrames)) << "every frame survives the link";
         expect(eq(run.readBack.size(), kAprsFrames)) << "and every one of them reaches the KISS file";
@@ -1463,7 +1463,7 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
             const double ebN0      = std::pow(10., esN0_db / 10.);
             const double reference = 0.5 * std::exp(-ebN0 * (1. - 0.190986) / 2.);
             const double frameLoss = std::min(1., perFrame * reference);
-            std::println("[G-A] Es/N0 {:4.1f} dB: {:3} of {} frames, {} read back; bound {:.3e} a bit gives a frame error rate of about {:.3f} over {:.0f} bits", esN0_db, run.decoded.size(), kAprsFrames, run.readBack.size(), reference, frameLoss, perFrame);
+            std::println("[APRS] Es/N0 {:4.1f} dB: {:3} of {} frames, {} read back; bound {:.3e} a bit gives a frame error rate of about {:.3f} over {:.0f} bits", esN0_db, run.decoded.size(), kAprsFrames, run.readBack.size(), reference, frameLoss, perFrame);
 
             expect(ge(run.decoded.size(), previous)) << std::format("Es/N0 {} dB: the count rises as the noise falls", esN0_db);
             expect(eq(run.decoded.size(), run.readBack.size())) << std::format("Es/N0 {} dB: the KISS file holds what the decoder published", esN0_db);
@@ -1496,7 +1496,7 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
                     first  = false;
                 }
             }
-            std::println("[G-B] {:<20} {:<12} {:6.0f} Bd: {:7} symbols, crc_ok by loop bandwidth [{}], best {:3} at {:.3f}, {:3} failed the check; {}", capture.file, capture.satellite, capture.symbolRate, run.symbols, counts, run.crcOk, chosen, run.crcFail, run.addresses());
+            std::println("[AFSK/AX.25] {:<20} {:<12} {:6.0f} Bd: {:7} symbols, crc_ok by loop bandwidth [{}], best {:3} at {:.3f}, {:3} failed the check; {}", capture.file, capture.satellite, capture.symbolRate, run.symbols, counts, run.crcOk, chosen, run.crcFail, run.addresses());
             served += run.crcOk > 0UZ ? 1UZ : 0UZ;
             expect(gt(run.symbols, 0ULL)) << std::format("{}: the demodulator produced no symbols", capture.file);
         }
@@ -1536,8 +1536,8 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
             const FskConfig& config  = kG3ruhConfigs[chosen];
             const AirRun     bare    = fskG3ruhAx25(*file, capture.symbolRate, config, true, false);
             const AirRun     swapped = fskG3ruhAx25(*file, capture.symbolRate, config, false, true);
-            std::println("[G-C] {:<18} {:<14} {:6.0f} Bd: {:7} symbols at {}, crc_ok {:3}, unconditioned {:3}, NRZI first {:3}, {:3} failed the check; {}", capture.file, capture.satellite, capture.symbolRate, run.symbols, config.label(), run.crcOk, bare.crcOk, swapped.crcOk, run.crcFail, run.addresses());
-            std::println("[G-C] {:<18} swept [{}]", capture.file, counts);
+            std::println("[G3RUH/AX.25] {:<18} {:<14} {:6.0f} Bd: {:7} symbols at {}, crc_ok {:3}, unconditioned {:3}, NRZI first {:3}, {:3} failed the check; {}", capture.file, capture.satellite, capture.symbolRate, run.symbols, config.label(), run.crcOk, bare.crcOk, swapped.crcOk, run.crcFail, run.addresses());
+            std::println("[G3RUH/AX.25] {:<18} swept [{}]", capture.file, counts);
             served += run.crcOk > 0UZ ? 1UZ : 0UZ;
             bareServed += bare.crcOk > 0UZ ? 1UZ : 0UZ;
             reversed += swapped.crcOk > 0UZ ? 1UZ : 0UZ;
@@ -1598,7 +1598,7 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
             const double             carrier  = squaringCarrier(std::span<const float>(audio), 500., 3000.);
             const std::vector<float> soft     = dbpskFrontEnd(*file, detected, carrier, manchester ? ChipCombine::parity : ChipCombine::none);
             const double             eye      = eyeOf(std::span<const float>(soft));
-            std::println("[G-D] {:<12} {:<8} {:5.0f} Bd: {:.2f} s of audio, carrier {:.1f} Hz, {} soft symbols against {:.0f} expected, mean over rms {:.3f} against 0.798 for noise", capture.file, capture.satellite, capture.symbolRate, seconds, carrier, soft.size(), seconds * capture.symbolRate, eye);
+            std::println("[DBPSK/AO-40] {:<12} {:<8} {:5.0f} Bd: {:.2f} s of audio, carrier {:.1f} Hz, {} soft symbols against {:.0f} expected, mean over rms {:.3f} against 0.798 for noise", capture.file, capture.satellite, capture.symbolRate, seconds, carrier, soft.size(), seconds * capture.symbolRate, eye);
 
             if (manchester) {
                 // The negative control is the fixed two-tap combine over the same front end. On a differentially
@@ -1610,7 +1610,7 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
                 const double             controlEye    = eyeOf(std::span<const float>(control));
                 const std::size_t        window        = bestSyncWindow(std::span<const float>(soft));
                 const std::size_t        controlWindow = bestSyncWindow(std::span<const float>(control));
-                std::println("[G-D] {:<12} best 65-item sync window: {} errors through the parity selection at mean over rms {:.3f}, {} through the two-tap combine at {:.3f} against 1/sqrt(2) = 0.7071", capture.file, window, eye, controlWindow, controlEye);
+                std::println("[DBPSK/AO-40] {:<12} best 65-item sync window: {} errors through the parity selection at mean over rms {:.3f}, {} through the two-tap combine at {:.3f} against 1/sqrt(2) = 0.7071", capture.file, window, eye, controlWindow, controlEye);
 
                 expect(eq(window, kManchesterSyncErrors)) << std::format("{}: the transcribed vector is matched exactly on the air, at {} errors of {}", capture.file, window, kSyncItems);
                 expect(gt(controlWindow, kManchesterSyncErrors)) << std::format("{}: the two-tap combine does not match it, at {} errors", capture.file, controlWindow);
@@ -1641,7 +1641,7 @@ const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
             // A frame occupies 5200 symbols, and the correlation reads its lag from the 5121 before the code's end. A
             // capture carries a whole frame only when a detection falls that far from its end.
             const double frameSeconds = static_cast<double>(kFrameItems) / capture.symbolRate;
-            std::println("[G-D] {:<12} {} sync, {:.2f} frames of audio: {} detections, {} located, {} through the trellis, {} out of Reed-Solomon of which {} valid, {} symbols corrected; the frame opens {}", capture.file, polarity, seconds / frameSeconds, best.detections, best.located, best.decoded, best.frames, best.valid, best.corrected, opening.empty() ? std::string("no valid frame") : opening);
+            std::println("[DBPSK/AO-40] {:<12} {} sync, {:.2f} frames of audio: {} detections, {} located, {} through the trellis, {} out of Reed-Solomon of which {} valid, {} symbols corrected; the frame opens {}", capture.file, polarity, seconds / frameSeconds, best.detections, best.located, best.decoded, best.frames, best.valid, best.corrected, opening.empty() ? std::string("no valid frame") : opening);
 
             expect(lt(std::abs(static_cast<double>(soft.size()) - seconds * capture.symbolRate), 0.02 * seconds * capture.symbolRate)) << std::format("{}: one soft symbol a bit, within two per cent of the transmitter's rate", capture.file);
             expect(ge(best.detections, 1ULL)) << std::format("{}: the sync vector the published description states is on the air", capture.file);
