@@ -71,7 +71,7 @@
  * spacecraft. Each graph's transmitter facts are the modulation, rate, tones, deviation and framing. They come from
  * the collection's own satellite descriptions and are read as a vendor document is read.
  */
-namespace qa_tier5_gates {
+namespace qa_composed_graphs {
 
 using gr::blocks::ax25::Ax25Decode;
 using gr::blocks::ax25::Ax25Encode;
@@ -259,7 +259,7 @@ constexpr std::size_t kKeyUpSymbols = 64UZ; ///< the transmitter's key-up altern
 /// A deterministic APRS information field, a fixed position report and a sequence number. A failure then comes from
 /// the chain and not from the random draw.
 [[nodiscard]] std::vector<std::uint8_t> aprsInfo(std::size_t index) {
-    const std::string text = std::format("!4903.50N/07201.75W-Tier5 {:03}", index);
+    const std::string text = std::format("!4903.50N/07201.75W-Graph {:03}", index);
     return {text.begin(), text.end()};
 }
 
@@ -1404,11 +1404,11 @@ enum class PassChannel { none, noiseOnly, passOnly, corrected, uncorrected };
         bits.coded);
 }
 
-} // namespace qa_tier5_gates
+} // namespace qa_composed_graphs
 
-using namespace qa_tier5_gates;
+using namespace qa_composed_graphs;
 
-const boost::ut::suite<"Tier5Gates"> tier5Gates = [] {
+const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
     using namespace boost::ut;
 
     // A hundred APRS frames out through the tone pair and back in, closed at the KISS file
@@ -1422,7 +1422,7 @@ const boost::ut::suite<"Tier5Gates"> tier5Gates = [] {
         const std::vector<float>        audio = afskAudio(std::span<const std::uint8_t>(bits), kKeyUpSymbols);
         expect(gt(bits.size(), kAprsFrames * 300UZ)) << std::format("{} wire bits for {} frames", bits.size(), kAprsFrames);
 
-        const std::string path     = std::filesystem::temp_directory_path() / "qa_Tier5Gates_aprs.kiss";
+        const std::string path     = std::filesystem::temp_directory_path() / "qa_ComposedGraphs_aprs.kiss";
         const AprsRun     run      = aprsReceive(audio, 20., path);
         const std::size_t perFrame = bits.size() / kAprsFrames;
         std::println("[G-A] {} frames, {} wire bits ({} a frame, {:.1f} ms of audio), key-up {} symbols", kAprsFrames, bits.size(), perFrame, 1e3 * static_cast<double>(audio.size()) / kAudioRate, kKeyUpSymbols);
@@ -1453,7 +1453,7 @@ const boost::ut::suite<"Tier5Gates"> tier5Gates = [] {
         const std::vector<std::uint8_t> bits     = aprsWireBits(payloads);
         const std::vector<float>        audio    = afskAudio(std::span<const std::uint8_t>(bits), kKeyUpSymbols);
         const double                    perFrame = static_cast<double>(bits.size()) / static_cast<double>(kAprsFrames);
-        const std::string               path     = std::filesystem::temp_directory_path() / "qa_Tier5Gates_aprs_sweep.kiss";
+        const std::string               path     = std::filesystem::temp_directory_path() / "qa_ComposedGraphs_aprs_sweep.kiss";
 
         std::size_t previous = 0UZ;
         for (const double esN0_db : {8., 10., 12., 14., 16., 20.}) {
