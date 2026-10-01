@@ -255,7 +255,7 @@ struct Selectivity {
     return result;
 }
 
-const boost::ut::suite<"OFDM tier gate"> _loopback = [] {
+const boost::ut::suite<"OFDM loopback"> _loopback = [] {
     using namespace boost::ut;
 
     std::vector<std::uint8_t> labels(kFrames * kFrame * dataCarriers().size());
@@ -282,7 +282,7 @@ const boost::ut::suite<"OFDM tier gate"> _loopback = [] {
      * profile's share is then read off the difference and not inferred. The bounds sit a factor above what the
      * seeded scenes measure. A regression shows, and ordinary movement does not.
      */
-    "criterion 5: the whole chain, at two pinned operating points"_test = [&clean, &labels, floor, meanPower] {
+    "the whole chain, at two pinned operating points"_test = [&clean, &labels, floor, meanPower] {
         const Selectivity profile = selectivity();
         std::println("the static profile over the 48 data carriers: |H| from {:.1f} to {:+.1f} dB, and zero forcing multiplies the noise by {:+.1f} dB on average", //
             profile.minDb, profile.maxDb, profile.meanDb);
@@ -308,7 +308,7 @@ const boost::ut::suite<"OFDM tier gate"> _loopback = [] {
                 const auto          noisy   = shim::run<CF>(noise, std::span<const CF>(shifted.samples), 4096UZ);
 
                 const Result got = receive(std::span<const CF>(noisy.samples), std::span<const std::uint8_t>(labels), floor);
-                std::println("criterion 5 at {} over a {} channel: {} of {} frames found, {} symbols decoded, EVM {:.1f} dB, {} bit errors of {} -> BER {:.2e}", //
+                std::println("whole chain at {} over a {} channel: {} of {} frames found, {} symbols decoded, EVM {:.1f} dB, {} bit errors of {} -> BER {:.2e}", //
                     point.name, fading ? "multipath" : "flat", got.frames, kFrames, got.symbols, got.evmDb, got.bitErrors, got.bits, got.ber);
 
                 expect(eq(got.frames, kFrames)) << std::format("{}: every frame is found", point.name);

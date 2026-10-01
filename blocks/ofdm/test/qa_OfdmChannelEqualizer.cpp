@@ -249,7 +249,7 @@ struct Equalized {
 const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
     using namespace boost::ut;
 
-    "criterion 1: on an ideal channel the data comes back as it went in"_test = [] {
+    "on an ideal channel the data comes back as it went in"_test = [] {
         const Modulated      sent  = modulate();
         OfdmChannelEqualizer block = make<OfdmChannelEqualizer>(equalizerSettings("cpe"));
         const Equalized      got   = equalize(block, std::span<const gr::DataSet<CF>>(sent.records), true);
@@ -271,7 +271,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             }
             at += data.size();
         }
-        std::println("criterion 1, ideal channel: worst data-carrier error {:.3e}, EVM {:.1f} dB", worst, errorVectorDb(std::span<const gr::DataSet<CF>>(got.symbols)));
+        std::println("ideal channel: worst data-carrier error {:.3e}, EVM {:.1f} dB", worst, errorVectorDb(std::span<const gr::DataSet<CF>>(got.symbols)));
         expect(lt(worst, 1e-5)) << "the data reproduces to float rounding";
 
         // the estimate of an ideal channel is unit magnitude and zero phase on every occupied carrier
@@ -282,7 +282,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         }
     };
 
-    "criterion 4: static multipath, with and without additive noise"_test = [] {
+    "static multipath, with and without additive noise"_test = [] {
         const Modulated sent  = modulate();
         const Stream    clean = toStream(std::span<const gr::DataSet<CF>>(sent.records));
         const auto      taps  = multipathTaps();
@@ -296,7 +296,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             OfdmChannelEqualizer block = make<OfdmChannelEqualizer>(equalizerSettings("cpe"));
             const Equalized      got   = equalize(block, std::span<const gr::DataSet<CF>>(toRecords(faded)));
             const double         evm   = errorVectorDb(std::span<const gr::DataSet<CF>>(got.symbols));
-            std::println("criterion 4, static multipath alone (0/-3/-6/-9 dB at 0/2/5/9 samples): EVM {:.1f} dB, {} symbol errors", evm, symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(sent.payload)));
+            std::println("static multipath alone (0/-3/-6/-9 dB at 0/2/5/9 samples): EVM {:.1f} dB, {} symbol errors", evm, symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(sent.payload)));
             expect(lt(evm, -60.)) << "the prefix makes the channel circular and zero forcing inverts it outright";
             expect(eq(symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(sent.payload)), 0UZ));
         }
@@ -317,12 +317,12 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             const Equalized      got   = equalize(block, std::span<const gr::DataSet<CF>>(toRecords(noisy)));
             const double         evm   = errorVectorDb(std::span<const gr::DataSet<CF>>(got.symbols));
             const std::size_t    wrong = symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(sent.payload));
-            std::println("criterion 4, the same multipath at {:.0f} dB SNR: EVM {:.1f} dB, {} of {} symbols wrong", snrDb, evm, wrong, kFrame * dataCarriers().size());
+            std::println("the same multipath at {:.0f} dB SNR: EVM {:.1f} dB, {} of {} symbols wrong", snrDb, evm, wrong, kFrame * dataCarriers().size());
             expect(lt(evm, -snrDb + 12.)) << "zero forcing costs noise enhancement at the profile's nulls, bounded here";
         }
     };
 
-    "criterion 4: phase noise is held by cpe tracking and is not held without it"_test = [] {
+    "phase noise is held by cpe tracking and is not held without it"_test = [] {
         const Modulated sent  = modulate();
         const Stream    clean = toStream(std::span<const gr::DataSet<CF>>(sent.records));
 
@@ -349,7 +349,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         for (const gr::DataSet<CF>& symbol : tracked.symbols) {
             lastCpe = metaFloat(symbol, "cpe_rad");
         }
-        std::println("criterion 4, phase noise of {} Hz against a 1 Hz spacing over {} symbols: cpe EVM {:.1f} dB with {} symbol errors, no tracking EVM {:.1f} dB with {} errors; the last symbol was turned by {:+.3f} rad", //
+        std::println("phase noise of {} Hz against a 1 Hz spacing over {} symbols: cpe EVM {:.1f} dB with {} symbol errors, no tracking EVM {:.1f} dB with {} errors; the last symbol was turned by {:+.3f} rad", //
             kLinewidth, kFrame, trackedEvm, trackedWrong, untrackedEvm, untrackedWrong, lastCpe);
 
         // The symbol errors decide the comparison. Once the phase has turned past a decision boundary, the nearest
