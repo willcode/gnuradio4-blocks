@@ -250,7 +250,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
     using namespace gr::ccsds;
     using namespace gr::blocks::ccsds;
 
-    "criterion 5: segment then extract is the identity"_test = [] {
+    "segment then extract is the identity"_test = [] {
         for (const gr::Size_t zoneLength : {gr::Size_t{223}, gr::Size_t{1115}, gr::Size_t{2046}}) {
             const std::vector<std::size_t> lengths{7UZ, 8UZ, 100UZ, 1000UZ, 2047UZ, 4096UZ};
             const RoundTrip                trip = roundTrip(zoneLength, std::span<const std::size_t>(lengths));
@@ -268,7 +268,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         }
     };
 
-    "criterion 5: a packet boundary on a zone boundary and one octet either side"_test = [] {
+    "a packet boundary on a zone boundary, or one octet either side, round trips"_test = [] {
         for (const gr::Size_t zoneLength : {gr::Size_t{223}, gr::Size_t{1115}, gr::Size_t{2046}}) {
             for (const std::ptrdiff_t offset : {std::ptrdiff_t{-1}, std::ptrdiff_t{0}, std::ptrdiff_t{1}}) {
                 const std::size_t              first = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(zoneLength) + offset);
@@ -286,7 +286,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         }
     };
 
-    "criterion 7: the negative control, an extractor that ignores the pointer"_test = [] {
+    "the first header pointer recovers the packets behind a lost frame, and a reader without it does not"_test = [] {
         // one packet spanning three 50-octet zones, then two more behind it
         const std::vector<std::uint8_t> firstPacket  = packetOf(136UZ, 11U, 0U);
         const std::vector<std::uint8_t> secondPacket = packetOf(26UZ, 12U, 0U);
@@ -342,7 +342,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
                 at += total;
             }
         }
-        expect(gt(naive.size(), 0UZ)) << "the surveyed extractor does produce packets - that is what makes it dangerous";
+        expect(gt(naive.size(), 0UZ)) << "a reader without the pointer still produces packets";
         if (!naive.empty()) {
             expect(eq(naive[0].size(), firstPacket.size())) << "and one of the right length";
             expect(that % (naive[0] != firstPacket)) << "built from the wrong octets, since the frame between them was lost";
@@ -351,7 +351,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         expect(!naiveFoundSecond) << "and the second packet is never recovered, which is exactly what the pointer buys";
     };
 
-    "criterion 3: the minus-one's second half, through the blocks"_test = [] {
+    "a data length written without its minus one is refused by SpacePacketDecode and misframes SpacePacketExtract"_test = [] {
         // Three packets built with the common mistake data_length = payload_octets. Each is 106 octets on the wire
         // and claims 107. The header octets for APID 100, unsegmented, count 0 are 00 64 C0 00 00 64.
         const auto wrongPacket = [] {
@@ -825,7 +825,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         expect(eq(extract._extractor.config().max_packet_length, std::size_t{2048})) << "and the new configuration is in force";
     };
 
-    "criterion 20: a gap is one cause on one record"_test = [] {
+    "a frame gap is one cause on one record"_test = [] {
         auto extract = make<SpacePacketExtract>({{"virtual_channel", gr::Size_t{0}}});
 
         const auto zoneOf = [](std::uint16_t first, gr::property_map meta) {
@@ -859,7 +859,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         }
     };
 
-    "criterion 20: a gap the zone does not resolve rides the next packet"_test = [] {
+    "a gap found in a zone that completes no packet is carried by the next packet"_test = [] {
         auto extract = make<SpacePacketExtract>({{"virtual_channel", gr::Size_t{0}}});
 
         // A packet spans three zones, and the frame between the first two is lost. The zone that detects the gap is a
@@ -884,7 +884,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         }
     };
 
-    "criterion 21: the packet blocks pass every other key through"_test = [] {
+    "the packet blocks pass every other key through"_test = [] {
         const gr::property_map meta{{"unrelated_key", std::string("kept")}, {"discontinuity", std::string("rate_change")}, {"crc_ok", true}};
 
         auto                      encode = make<SpacePacketEncode>({{"apid", gr::Size_t{10}}});
@@ -939,7 +939,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         }
     };
 
-    "criterion 22: every packet block's record is admissible at both boundaries"_test = [] {
+    "every packet block's record is accepted by DataSetToStream and DataSetToPacket"_test = [] {
         auto toStream = make<gr::blocks::basic::DataSetToStream<std::uint8_t>>({});
         auto toPacket = make<gr::blocks::basic::DataSetToPacket<std::uint8_t>>({});
 
@@ -952,7 +952,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             OutputSpan<std::uint8_t>  streamOut{std::span<std::uint8_t>(streamBuf)};
             OutputSpan<Record>        streamRejectSpan{std::span<Record>(streamReject)};
             std::ignore = toStream.processBulk(streamIn, streamOut, streamRejectSpan);
-            expect(eq(streamRejectSpan.count, std::size_t{0})) << label << ": A1-A5 pass";
+            expect(eq(streamRejectSpan.count, std::size_t{0})) << label << ": DataSetToStream rejects nothing";
             expect(eq(streamOut.count, record.signal_values.size())) << label << ": the accepted path ran, every octet published";
 
             std::vector<gr::Packet<std::uint8_t>> packetBuf(4UZ);
@@ -961,7 +961,7 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             OutputSpan<gr::Packet<std::uint8_t>>  packetOut{std::span<gr::Packet<std::uint8_t>>(packetBuf)};
             OutputSpan<Record>                    packetRejectSpan{std::span<Record>(packetReject)};
             std::ignore = toPacket.processBulk(packetIn, packetOut, packetRejectSpan);
-            expect(eq(packetRejectSpan.count, std::size_t{0})) << label << ": P1-P6 pass";
+            expect(eq(packetRejectSpan.count, std::size_t{0})) << label << ": DataSetToPacket rejects nothing";
             expect(eq(packetOut.count, std::size_t{1})) << label << ": the accepted path ran, one packet published";
         };
 

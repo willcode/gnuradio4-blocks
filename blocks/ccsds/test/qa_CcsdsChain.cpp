@@ -472,7 +472,7 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         OutputSpan<std::uint8_t>  streamOut{std::span<std::uint8_t>(streamBuf)};
         OutputSpan<Record>        streamRejectSpan{std::span<Record>(streamReject)};
         std::ignore = toStream.processBulk(streamIn, streamOut, streamRejectSpan);
-        expect(eq(streamRejectSpan.count, std::size_t{0})) << "A1-A5 pass: the record is not rejected at the stream boundary";
+        expect(eq(streamRejectSpan.count, std::size_t{0})) << "DataSetToStream does not reject the record";
         expect(eq(streamOut.count, outBuf[0].signal_values.size())) << "and it left by the accepted path, every octet published";
 
         std::vector<gr::Packet<std::uint8_t>> packetBuf(4UZ);
@@ -481,7 +481,7 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         OutputSpan<gr::Packet<std::uint8_t>>  packetOut{std::span<gr::Packet<std::uint8_t>>(packetBuf)};
         OutputSpan<Record>                    packetRejectSpan{std::span<Record>(packetReject)};
         std::ignore = toPacket.processBulk(packetIn, packetOut, packetRejectSpan);
-        expect(eq(packetRejectSpan.count, std::size_t{0})) << "P1-P6 pass: the record is not rejected at the packet boundary";
+        expect(eq(packetRejectSpan.count, std::size_t{0})) << "DataSetToPacket does not reject the record";
         expect(eq(packetOut.count, std::size_t{1})) << "and it left by the accepted path, one packet published";
     };
 };
