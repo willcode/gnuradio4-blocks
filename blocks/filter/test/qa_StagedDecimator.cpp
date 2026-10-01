@@ -241,7 +241,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
         expect(that % (ladder(64U, true) == std::vector<std::size_t>{2UZ, 2UZ, 2UZ, 2UZ, 2UZ, 2UZ}));
     };
 
-    "the acceptance table, read off the block"_test = [] {
+    "each decimation's worst stopband and ripple sum, read off the block"_test = [] {
         struct Row {
             gr::Size_t decimation;
             double     worstStopbandDb;
