@@ -1,0 +1,54 @@
+# One wave of amplitude 1 at 30 degrees on two elements half a wavelength apart. Element 1 leads element 0
+# by 2*pi*0.5*sin(30 degrees) = pi/2, so x1 = j*x0 and the steering vector is (1, j). The conjugated
+# steering weights (1, -j) give x0 + x0 = 2*x0, of magnitude 2, twice one element's amplitude. The
+# orthogonal weights (1, j) give x0 - x0 = 0. The noise has a standard deviation of 0.001 per component,
+# and each sink accepts 1% of twice the amplitude, 0.02.
+blocks:
+  - id: gr::blocks::testing::ArraySource<complex<float32>>
+    parameters:
+      name: array
+      num_elements: !!uint32 2
+      spacing: 0.5
+      angles: [30.0]
+      amplitudes: [1.0]
+      noise: 0.001
+      seed: !!uint64 7
+      n_samples: !!uint32 8
+      frequency: 0.05
+  - id: gr::blocks::array::LinearCombine<complex<float32>>
+    parameters:
+      name: steered
+      weights: !!complex32
+        - (1.0, 0.0)
+        - (0.0, -1.0)
+  - id: gr::blocks::array::LinearCombine<complex<float32>>
+    parameters:
+      name: orthogonal
+      weights: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 1.0)
+  - id: gr::blocks::math::Magnitude<complex<float32>>
+    parameters:
+      name: steered_magnitude
+  - id: gr::blocks::math::Magnitude<complex<float32>>
+    parameters:
+      name: orthogonal_magnitude
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: steered_sink
+      expected: !!float32 [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+      tolerance: 0.02
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: orthogonal_sink
+      expected: !!float32 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      tolerance: 0.02
+connections:
+  - [array, "out#0", steered, "in#0"]
+  - [array, "out#1", steered, "in#1"]
+  - [array, "out#0", orthogonal, "in#0"]
+  - [array, "out#1", orthogonal, "in#1"]
+  - [steered, "out#0", steered_magnitude, in]
+  - [orthogonal, "out#0", orthogonal_magnitude, in]
+  - [steered_magnitude, out, steered_sink, in]
+  - [orthogonal_magnitude, out, orthogonal_sink, in]
