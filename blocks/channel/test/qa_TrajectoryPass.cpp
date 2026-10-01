@@ -299,7 +299,7 @@ const boost::ut::suite<"trajectory pass"> trajectoryPassTests = [] {
         // The correcting blocks rotate and interpolate the noise as well as the signal. The two runs see the same noise
         // distribution but not the same realization. The agreement is statistical, and its bound is the counting error.
         const double sigma = std::sqrt(clean.ber * (1. - clean.ber) / static_cast<double>(clean.counted));
-        std::println("[pass] criterion 14: {} symbols over a {} s pass at {} Hz — envelope delay moves {:.1f} samples ({:.1f} for a radial approach at {} m/s), chain lag {:.0f} samples "
+        std::println("[pass] corrected pass: {} symbols over a {} s pass at {} Hz — envelope delay moves {:.1f} samples ({:.1f} for a radial approach at {} m/s), chain lag {:.0f} samples "
                      "(bias {:.5f} + 2 x latency {:.5f} + filters), transient {} samples skipped",
             clean.counted, kSeconds, kFs, excursion, radial, kSpeed, corrected.lagSamples, corrected.biasSamples, corrected.latency, corrected.transient);
         std::println("[pass] BER {:.6f} corrected against {:.6f} clean, difference {:.2e} at one sigma {:.2e}; delay left in {:.4f} over the first minute; {:.2f} s", corrected.ber, clean.ber, corrected.ber - clean.ber, sigma, leftIn.ber, elapsed);

@@ -289,7 +289,7 @@ int main() {
             worst = std::max(worst, static_cast<double>(std::abs(out[k + shift] - signal[k])));
         }
         const double bound = gr::filter::arbitraryInterpolationError(kBank, kRoll, 1);
-        std::println("[range] criterion 7: L = {}, q = 1, lag {} samples ({} commanded + {:.6f} line): worst {:.3e} against the bound {:.3e}", kBank, lag, commanded, latency, worst, bound);
+        std::println("[range] constant delay: L = {}, q = 1, lag {} samples ({} commanded + {:.6f} line): worst {:.3e} against the bound {:.3e}", kBank, lag, commanded, latency, worst, bound);
         expect(that % (worst < bound)) << std::format("the constant delay is a plain shift to the L = {} interpolation bound: {:.3e} against {:.3e}", kBank, worst, bound);
         expect(that % (block->nBankRebuilds() == 0ULL)) << "cutting the first bank is not a rebuild";
     };
@@ -326,7 +326,7 @@ int main() {
                     }
                 }
             }
-            std::println("[range] criterion 8: L = {:3}, q = {}: worst {:.6e} against the envelope {:.6e} = interpolation {:.6e} + ripple {:.6e} + stopband {:.6e}", arm.bank, arm.order, worstAll, bound, interp, rippleFloor(design.rippleDb), stopbandFloor(design.stopbandDb));
+            std::println("[range] swept probe: L = {:3}, q = {}: worst {:.6e} against the envelope {:.6e} = interpolation {:.6e} + ripple {:.6e} + stopband {:.6e}", arm.bank, arm.order, worstAll, bound, interp, rippleFloor(design.rippleDb), stopbandFloor(design.stopbandDb));
             expect(that % (worstAll < bound)) << std::format("L = {}, q = {} misses its own envelope: {:.6e} against {:.6e}", arm.bank, arm.order, worstAll, bound);
         }
     };
@@ -362,7 +362,7 @@ int main() {
         const double         measuredCarrier = slopeOf(std::span<const double>(carrierRes)) / kTwoPi * fs;
 
         const double measuredRatio = measuredEnv / measuredCarrier;
-        std::println("[range] criterion 6: envelope shift {:.7f} Hz against {:.7f}; carrier shift {:.4f} Hz against {:.4f}; ratio {:.6e} against f_b/f_c {:.6e}", measuredEnv, expected, measuredCarrier, carrier, measuredRatio, ratio);
+        std::println("[range] delay and Doppler: envelope shift {:.7f} Hz against {:.7f}; carrier shift {:.4f} Hz against {:.4f}; ratio {:.6e} against f_b/f_c {:.6e}", measuredEnv, expected, measuredCarrier, carrier, measuredRatio, ratio);
 
         expect(that % (measuredEnv > 0.)) << "a closing pass shifts the envelope's tone up";
         expect(that % (measuredCarrier > 0.)) << "and reads high on the carrier, which is the same sign convention";
@@ -390,7 +390,7 @@ int main() {
             expect(block->schedulePosition() == SchedulePosition::Inside);
             expect(that % (std::abs(block->currentDelaySamples() - expected * 1e6) <= 1e-9)) << "the same delay in samples at the block's own rate";
         }
-        std::println("[range] criterion 5: worst interpolant disagreement {:.3e} s over the knots and ten interior points", worst);
+        std::println("[range] reported delay: worst interpolant disagreement {:.3e} s over the knots and ten interior points", worst);
 
         const auto before = at(-500'000'000LL);
         expect(that % (before->currentDelaySeconds() == kD0)) << "before the table the first value holds, never an extrapolation";
@@ -532,13 +532,13 @@ int main() {
         const double              worstBand  = pair(delays, std::span<const C>(band));
         const double              bound      = floorWorst + commutationSamples * signalSlope;
 
-        std::println("[range] criterion 12: band-limited worst {:.3e} against {:.3e} = the flat-table interpolation error {:.3e} + commutation {:.3e} samples * the signal's own slope {:.3e} = {:.3e}", worstBand, bound, floorWorst, commutationSamples, signalSlope, commutationSamples * signalSlope);
+        std::println("[range] apply then correct: band-limited worst {:.3e} against {:.3e} = the flat-table interpolation error {:.3e} + commutation {:.3e} samples * the signal's own slope {:.3e} = {:.3e}", worstBand, bound, floorWorst, commutationSamples, signalSlope, commutationSamples * signalSlope);
         expect(that % (worstBand < bound)) << std::format("the pair recovers a band-limited signal to the commutation term: {:.3e} against {:.3e}", worstBand, bound);
         expect(that % (worstBand > 0.)) << "the pair is not an exact inverse, and the residual is measured rather than assumed away";
 
         const std::vector<C> white      = fullBand(n);
         const double         worstWhite = pair(delays, std::span<const C>(white));
-        std::println("[range] criterion 12: the same pair on a full-band signal reads {:.3e} — that signal has energy at Nyquist, where the bank is a stopband and not a delay, so the figure measures the interpolator outside its design band and is not the commutation term", worstWhite);
+        std::println("[range] apply then correct: the same pair on a full-band signal reads {:.3e} — that signal has energy at Nyquist, where the bank is a stopband and not a delay, so the figure measures the interpolator outside its design band and is not the commutation term", worstWhite);
         expect(that % (worstWhite > 10. * worstBand)) << "a full-band signal is a different measurement, not a wider tolerance";
     };
 
@@ -661,7 +661,7 @@ int main() {
                 break;
             }
         }
-        std::println("[range] criterion 9: the trigger-armed line settles into the hand-set one after {} samples, its own history; first disagreement past that {}", fromTrigger->historySamples(), first);
+        std::println("[range] trigger anchor: the trigger-armed line settles into the hand-set one after {} samples, its own history; first disagreement past that {}", fromTrigger->historySamples(), first);
         expect(that % (first == 0UZ)) << "past the arming transient the two anchors give the same stream, to the bit";
         expect(that % (fromTrigger->anchorIndex() == static_cast<std::uint64_t>(at))) << "the tag's own stream index becomes the anchor index";
         expect(that % (fromTrigger->anchorNs() == static_cast<std::int64_t>(tNs))) << "and the tag's value becomes the anchor time";
@@ -733,7 +733,7 @@ int main() {
             const std::complex<double> ratio = std::complex<double>(static_cast<double>(triggered.samples[k].real()), static_cast<double>(triggered.samples[k].imag())) * std::conj(std::complex<double>(static_cast<double>(hand.samples[k].real()), static_cast<double>(hand.samples[k].imag())));
             worst                            = std::max(worst, std::abs(ratio - reference));
         }
-        std::println("[range] criterion 9 (shift): the trigger-armed and hand-set streams differ by one fixed rotation of {:.4f} rad, held to {:.3e} over {} samples", std::arg(reference), worst, n - at);
+        std::println("[range] shift trigger anchor: the trigger-armed and hand-set streams differ by one fixed rotation of {:.4f} rad, held to {:.3e} over {} samples", std::arg(reference), worst, n - at);
         expect(that % (worst < 1e-5)) << std::format("the difference is a constant rotation, not a drift: {:.3e}", worst);
         expect(that % (std::abs(std::abs(reference) - 1.) < 1e-5)) << "and a rotation, not a gain";
     };

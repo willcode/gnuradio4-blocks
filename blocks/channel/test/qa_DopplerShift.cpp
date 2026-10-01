@@ -143,7 +143,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
             worst                 = std::max(worst, std::abs(measured - probe.wanted));
             expect(lt(std::abs(measured - probe.wanted), 1e-3)) << std::format("{}: measured {:.9f} Hz, wanted {:.9f}", probe.what, measured, probe.wanted);
         }
-        std::println("[doppler] criterion 1: worst discriminator disagreement {:.3e} Hz over a {} sample window at {} Hz", worst, kWindow, fs);
+        std::println("[doppler] two-knot ramp: worst discriminator disagreement {:.3e} Hz over a {} sample window at {} Hz", worst, kWindow, fs);
 
         // the knots themselves, read through the block's own observable and not the discriminator
         auto atStart = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}});
@@ -182,7 +182,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         for (std::size_t k = 0UZ; k < nSamples; ++k) {
             worst = std::max(worst, static_cast<double>(std::abs(restored[k] - input[k])));
         }
-        std::println("[doppler] criterion 3: worst round-trip error {:.3e} on unit-magnitude samples over {} samples", worst, nSamples);
+        std::println("[doppler] apply then correct: worst round-trip error {:.3e} on unit-magnitude samples over {} samples", worst, nSamples);
         // two float phasor multiplies plus one float cos/sin each. The bound is a few ULP of one, not of the run.
         expect(lt(worst, 4e-6)) << std::format("worst {:.3e}", worst);
     };
@@ -410,7 +410,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         // not the same realization. The agreement is statistical, and its bound is the counting error. At this rate
         // over this many symbols, one standard deviation is sqrt(N*p)/N, about 2.8e-5 in the rate.
         const double sigma = std::sqrt(clean * static_cast<double>(kSymbols)) / static_cast<double>(kSymbols);
-        std::println("[doppler] criterion 6: {} symbols over a {} s pass at {} Hz — BER {:.6f} corrected against {:.6f} with no pass, difference {:.2e}, one sigma {:.2e}, {:.2f} s", kSymbols, kSeconds, fs, withPass, clean, withPass - clean, sigma, elapsed);
+        std::println("[doppler] corrected pass: {} symbols over a {} s pass at {} Hz — BER {:.6f} corrected against {:.6f} with no pass, difference {:.2e}, one sigma {:.2e}, {:.2f} s", kSymbols, kSeconds, fs, withPass, clean, withPass - clean, sigma, elapsed);
         expect(gt(clean, 1e-3)) << "the reference run must actually be making errors for the comparison to mean anything";
         expect(lt(std::abs(withPass - clean), 5. * sigma)) << std::format("BER {:.6f} corrected against {:.6f}", withPass, clean);
     };
