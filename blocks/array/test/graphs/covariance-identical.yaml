@@ -1,0 +1,35 @@
+# One source feeds both inputs, so every snapshot is (x, x) and each estimate is |x|^2 averaged in all
+# four entries: a rank-one matrix with equal entries. The four samples have |x|^2 of 2, 4, 1 and 1, an
+# average of 2. The source repeats once, so two windows of four give two equal estimates.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source
+      values: !!complex32
+        - (1.0, 1.0)
+        - (2.0, 0.0)
+        - (0.0, -1.0)
+        - (1.0, 0.0)
+      repeat: !!uint32 2
+  - id: gr::blocks::array::CovarianceEstimate<complex<float32>>
+    parameters:
+      name: covariance
+      window: !!uint32 4
+  - id: gr::blocks::testing::ExpectDataSetSink<complex<float32>>
+    parameters:
+      name: estimates
+      extents: !!uint32 [2, 2]
+      expected: !!complex32
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+        - (2.0, 0.0)
+      tolerance: 1e-6
+connections:
+  - [source, out, covariance, "in#0"]
+  - [source, out, covariance, "in#1"]
+  - [covariance, out, estimates, in]

@@ -1,0 +1,44 @@
+# The quadrature pair in exponential mode with a forgetting factor of 0.5 and a window of 2. Every
+# snapshot has the same outer product [[1, -j], [j, 1]], and the weighted average divides by the sum of
+# the weights, so both estimates equal it.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_0
+      values: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 1.0)
+        - (-1.0, 0.0)
+        - (0.0, -1.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_1
+      values: !!complex32
+        - (0.0, 1.0)
+        - (-1.0, 0.0)
+        - (0.0, -1.0)
+        - (1.0, 0.0)
+  - id: gr::blocks::array::CovarianceEstimate<complex<float32>>
+    parameters:
+      name: covariance
+      window: !!uint32 2
+      mode: exponential
+      forgetting_factor: 0.5
+  - id: gr::blocks::testing::ExpectDataSetSink<complex<float32>>
+    parameters:
+      name: estimates
+      extents: !!uint32 [2, 2]
+      expected: !!complex32
+        - (1.0, 0.0)
+        - (0.0, -1.0)
+        - (0.0, 1.0)
+        - (1.0, 0.0)
+        - (1.0, 0.0)
+        - (0.0, -1.0)
+        - (0.0, 1.0)
+        - (1.0, 0.0)
+      tolerance: 1e-6
+connections:
+  - [input_0, out, covariance, "in#0"]
+  - [input_1, out, covariance, "in#1"]
+  - [covariance, out, estimates, in]

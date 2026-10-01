@@ -11,9 +11,72 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 namespace gr::blocks::testing {
+
+namespace detail {
+
+/// Returns whether the distance between the samples is at most `tolerance + relativeTolerance * |reference|`.
+/// With finite tolerances, the comparison runs at a quarter of the scale when the distance or the bound exceeds
+/// the largest double. At that scale the distance between two finite samples, real or complex, stays finite.
+/// A bound that still exceeds the largest double then exceeds every such distance.
+/// With a non-finite tolerance, the comparison runs at full scale. A quarter of a subnormal expected sample can
+/// round to zero, and an infinite relative tolerance times zero is NaN.
+template<typename Sample>
+[[nodiscard]] bool withinDistance(const Sample& value, const Sample& reference, double tolerance, double relativeTolerance) {
+    const double distance = std::abs(value - reference);
+    const double bound    = tolerance + relativeTolerance * std::abs(reference);
+    if (!std::isfinite(tolerance) || !std::isfinite(relativeTolerance)) {
+        return distance <= bound;
+    }
+    if (std::isfinite(distance) && std::isfinite(bound)) {
+        return distance <= bound;
+    }
+    constexpr double scale = 0.25;
+    return std::abs(value * scale - reference * scale) <= tolerance * scale + relativeTolerance * std::abs(reference * scale);
+}
+
+/// A NaN matches a NaN. An infinity, or a complex value with an infinite part, matches only an equal value. Any other
+/// value matches within the tolerances.
+template<typename T>
+[[nodiscard]] bool withinTolerance(const T& value, const T& reference, double tolerance, double relativeTolerance) {
+    if constexpr (meta::complex_like<T>) {
+        const bool valueNan     = std::isnan(value.real()) || std::isnan(value.imag());
+        const bool referenceNan = std::isnan(reference.real()) || std::isnan(reference.imag());
+        if (valueNan || referenceNan) {
+            return valueNan && referenceNan;
+        }
+        const bool valueInf     = std::isinf(value.real()) || std::isinf(value.imag());
+        const bool referenceInf = std::isinf(reference.real()) || std::isinf(reference.imag());
+        if (valueInf || referenceInf) {
+            return value == reference;
+        }
+        const std::complex<double> v(static_cast<double>(value.real()), static_cast<double>(value.imag()));
+        const std::complex<double> r(static_cast<double>(reference.real()), static_cast<double>(reference.imag()));
+        return withinDistance(v, r, tolerance, relativeTolerance);
+    } else {
+        if constexpr (std::floating_point<T>) {
+            if (std::isnan(value) || std::isnan(reference)) {
+                return std::isnan(value) && std::isnan(reference);
+            }
+            if (std::isinf(value) || std::isinf(reference)) {
+                return value == reference;
+            }
+        }
+        const auto asDouble = [](const T& sample) {
+            if constexpr (std::same_as<T, double>) {
+                return sample;
+            } else {
+                return static_cast<double>(sample);
+            }
+        };
+        return withinDistance(asDouble(value), asDouble(reference), tolerance, relativeTolerance);
+    }
+}
+
+} // namespace detail
 
 GR_REGISTER_BLOCK(gr::blocks::testing::VectorSource, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float> ])
 
@@ -183,58 +246,90 @@ carries the key. A tag at the end-of-stream index, one past the last sample, has
         return work::Status::ERROR;
     }
 
-    [[nodiscard]] bool matches(const T& value, const T& reference) const {
-        if constexpr (meta::complex_like<T>) {
-            const bool valueNan     = std::isnan(value.real()) || std::isnan(value.imag());
-            const bool referenceNan = std::isnan(reference.real()) || std::isnan(reference.imag());
-            if (valueNan || referenceNan) {
-                return valueNan && referenceNan;
-            }
-            const bool valueInf     = std::isinf(value.real()) || std::isinf(value.imag());
-            const bool referenceInf = std::isinf(reference.real()) || std::isinf(reference.imag());
-            if (valueInf || referenceInf) {
-                return value == reference;
-            }
-            return within(std::complex<double>(value), std::complex<double>(reference));
-        } else {
-            if constexpr (std::floating_point<T>) {
-                if (std::isnan(value) || std::isnan(reference)) {
-                    return std::isnan(value) && std::isnan(reference);
-                }
-                if (std::isinf(value) || std::isinf(reference)) {
-                    return value == reference;
-                }
-            }
-            return within(asDouble(value), asDouble(reference));
+    [[nodiscard]] bool matches(const T& value, const T& reference) const { return detail::withinTolerance(value, reference, tolerance.value, relative_tolerance.value); }
+};
+
+GR_REGISTER_BLOCK(gr::blocks::testing::ExpectDataSetSink, [T], [ float, double, std::complex<float>, std::complex<double> ])
+
+template<typename T>
+struct ExpectDataSetSink : Block<ExpectDataSetSink<T>> {
+    using Description = Doc<R""(@brief Compares the signal values of each input DataSet with `expected` and reports the first difference as an error.
+
+`expected` holds the signal values of every expected DataSet, one after the other. Each DataSet must have the
+extents `extents`, and its values must match the next slice of `expected` within
+`tolerance + relative_tolerance * |expected|`. The first DataSet of other extents and the first value that does
+not match end the run with an error. A stream that ends with a DataSet count other than the length of `expected`
+over the size of one DataSet is the same error.
+)"">;
+
+    PortIn<DataSet<T>, Async> in;
+
+    Annotated<std::vector<T>, "expected", Doc<"signal values of the expected DataSets, in order">>       expected{};
+    Annotated<std::vector<gr::Size_t>, "extents", Doc<"extents of every expected DataSet">>              extents{};
+    Annotated<double, "tolerance", Doc<"absolute deviation accepted per value">>                         tolerance          = 0.0;
+    Annotated<double, "relative_tolerance", Doc<"deviation accepted per value, relative to |expected|">> relative_tolerance = 0.0;
+    Annotated<gr::Size_t, "received", Doc<"DataSets received and matched">>                              received           = 0U;
+
+    GR_MAKE_REFLECTABLE(ExpectDataSetSink, in, expected, extents, tolerance, relative_tolerance, received);
+
+    bool _failed = false;
+
+    void start() {
+        received = 0U;
+        _failed  = false;
+    }
+
+    [[nodiscard]] std::size_t valuesPerDataSet() const {
+        std::size_t count = 1UZ;
+        for (const gr::Size_t extent : extents.value) {
+            count *= static_cast<std::size_t>(extent);
+        }
+        return count;
+    }
+
+    void stop() {
+        const std::size_t perDataSet = valuesPerDataSet();
+        const std::size_t wanted     = perDataSet == 0UZ ? 0UZ : expected->size() / perDataSet;
+        if (!_failed && static_cast<std::size_t>(received.value) != wanted) {
+            _failed = true;
+            this->emitErrorMessage("stop", std::format("the stream ended after {} DataSets, expected {}", received.value, wanted));
         }
     }
 
-    [[nodiscard]] static double asDouble(const T& sample) {
-        if constexpr (std::same_as<T, double>) {
-            return sample;
-        } else {
-            return static_cast<double>(sample);
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& input) {
+        if (_failed) {
+            return work::Status::ERROR;
         }
+        const std::size_t               perDataSet = valuesPerDataSet();
+        const std::vector<std::int32_t> wantedExtents(extents->begin(), extents->end());
+        for (std::size_t i = 0UZ; i < input.size(); ++i) {
+            const DataSet<T>& dataSet = input[i];
+            const std::size_t index   = static_cast<std::size_t>(received.value);
+            if (dataSet.extents != wantedExtents) {
+                return fail(std::format("DataSet {} has extents {}, expected {}", index, dataSet.extents, wantedExtents));
+            }
+            const std::size_t first = index * perDataSet;
+            if (first + perDataSet > expected->size()) {
+                return fail(std::format("DataSet {} holding {} is beyond the {} expected values", index, dataSet.signal_values, expected->size()));
+            }
+            if (dataSet.signal_values.size() != perDataSet) {
+                return fail(std::format("DataSet {} holds {} values, expected {}", index, dataSet.signal_values.size(), perDataSet));
+            }
+            for (std::size_t v = 0UZ; v < perDataSet; ++v) {
+                if (!detail::withinTolerance(dataSet.signal_values[v], expected.value[first + v], tolerance.value, relative_tolerance.value)) {
+                    return fail(std::format("value {} of DataSet {} is {}, expected {}", v, index, dataSet.signal_values[v], expected.value[first + v]));
+                }
+            }
+            received = static_cast<gr::Size_t>(index + 1UZ);
+        }
+        std::ignore = input.consume(input.size());
+        return work::Status::OK;
     }
 
-    /// Returns whether the distance between the samples is at most `tolerance + relative_tolerance * |reference|`.
-    /// With finite tolerances, the sink compares at a quarter of the scale when the distance or the bound exceeds
-    /// the largest double. At that scale the distance between two finite samples, real or complex, stays finite.
-    /// A bound that still exceeds the largest double then exceeds every such distance.
-    /// With a non-finite tolerance, the sink compares at full scale. A quarter of a subnormal expected sample can
-    /// round to zero, and an infinite relative tolerance times zero is NaN.
-    template<typename Sample>
-    [[nodiscard]] bool within(const Sample& value, const Sample& reference) const {
-        const double distance = std::abs(value - reference);
-        const double bound    = tolerance.value + relative_tolerance.value * std::abs(reference);
-        if (!std::isfinite(tolerance.value) || !std::isfinite(relative_tolerance.value)) {
-            return distance <= bound;
-        }
-        if (std::isfinite(distance) && std::isfinite(bound)) {
-            return distance <= bound;
-        }
-        constexpr double scale = 0.25;
-        return std::abs(value * scale - reference * scale) <= tolerance.value * scale + relative_tolerance.value * std::abs(reference * scale);
+    [[nodiscard]] work::Status fail(const std::string& message) {
+        _failed = true;
+        this->emitErrorMessage("processBulk", message);
+        return work::Status::ERROR;
     }
 };
 
