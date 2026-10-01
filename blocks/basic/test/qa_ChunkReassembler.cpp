@@ -754,7 +754,6 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         }
     };
 
-    // Every emitted packet has one metadata map and 1 to 2^31 - 1 items
     "every emitted packet has one metadata map and 1 to 2^31 - 1 items"_test = [] {
         const std::vector<std::uint8_t> file   = referenceFile(kFileBytes);
         const auto                      chunks = splitIntoChunks(file, kChunkSize);
