@@ -1,0 +1,46 @@
+# Hypot: out = sqrt(a^2 + b^2), without overflow in the squares.
+#   (3,4) -> 5, (-5,12) -> 13, (0,0) -> 0, (-1.5,0) -> 1.5
+#   float32 (1e30,1e30): a^2 overflows float32; float32 stores 1e30 as 1.0000000150474662e30, times sqrt(2)
+#     -> 1.414213583653426e30
+#   float64 (1e200,1e200): 1e200 * sqrt(2) -> 1.414213562373095e200
+# Tolerance: 4 eps of the type relative to the expected value (2^-21 for float32, 2^-50 for float64).
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_a_f32
+      values: !!float32 [3.0, -5.0, 0.0, -1.5, 1e+30]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_b_f32
+      values: !!float32 [4.0, 12.0, 0.0, 0.0, 1e+30]
+  - id: gr::blocks::math::Hypot<float32>
+    parameters:
+      name: hypot_f32
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [5.0, 13.0, 0.0, 1.5, 1.414213583653426e+30]
+      relative_tolerance: 4.76837158203125e-07
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_a_f64
+      values: !!float64 [3.0, -5.0, 0.0, -1.5, 1e+200]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_b_f64
+      values: !!float64 [4.0, 12.0, 0.0, 0.0, 1e+200]
+  - id: gr::blocks::math::Hypot<float64>
+    parameters:
+      name: hypot_f64
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [5.0, 13.0, 0.0, 1.5, 1.414213562373095e+200]
+      relative_tolerance: 8.881784197001252e-16
+connections:
+  - [source_a_f32, out, hypot_f32, a]
+  - [source_b_f32, out, hypot_f32, b]
+  - [hypot_f32, out, sink_f32, in]
+  - [source_a_f64, out, hypot_f64, a]
+  - [source_b_f64, out, hypot_f64, b]
+  - [hypot_f64, out, sink_f64, in]

@@ -1,0 +1,61 @@
+# Atan2: out = the angle of the point (b, a), in radians; a is the ordinate, b the abscissa.
+#   the four quadrants: (1,1) -> pi/4, (1,-1) -> 3pi/4, (-1,-1) -> -3pi/4, (-1,1) -> -pi/4
+#   (0,-1) -> pi, (2,0) -> pi/2, (0,0) -> 0, (3,4) -> atan(3/4) = 0.6435011087932844
+#   atan(a/b) gives pi/4 for (-1,-1) and -pi/4 for (1,-1); atan2 differs in the second and third quadrants.
+# Tolerance: 4 eps of the type relative to the expected value (2^-21 for float32, 2^-50 for float64).
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_a_f32
+      values: !!float32 [1.0, 1.0, -1.0, -1.0, 0.0, 2.0, 0.0, 3.0]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_b_f32
+      values: !!float32 [1.0, -1.0, -1.0, 1.0, -1.0, 0.0, 0.0, 4.0]
+  - id: gr::blocks::math::Atan2<float32>
+    parameters:
+      name: atan2_f32
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32
+        - 0.7853981633974483
+        - 2.356194490192345
+        - -2.356194490192345
+        - -0.7853981633974483
+        - 3.141592653589793
+        - 1.5707963267948966
+        - 0.0
+        - 0.6435011087932844
+      relative_tolerance: 4.76837158203125e-07
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_a_f64
+      values: !!float64 [1.0, 1.0, -1.0, -1.0, 0.0, 2.0, 0.0, 3.0]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_b_f64
+      values: !!float64 [1.0, -1.0, -1.0, 1.0, -1.0, 0.0, 0.0, 4.0]
+  - id: gr::blocks::math::Atan2<float64>
+    parameters:
+      name: atan2_f64
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64
+        - 0.7853981633974483
+        - 2.356194490192345
+        - -2.356194490192345
+        - -0.7853981633974483
+        - 3.141592653589793
+        - 1.5707963267948966
+        - 0.0
+        - 0.6435011087932844
+      relative_tolerance: 8.881784197001252e-16
+connections:
+  - [source_a_f32, out, atan2_f32, a]
+  - [source_b_f32, out, atan2_f32, b]
+  - [atan2_f32, out, sink_f32, in]
+  - [source_a_f64, out, atan2_f64, a]
+  - [source_b_f64, out, atan2_f64, b]
+  - [atan2_f64, out, sink_f64, in]

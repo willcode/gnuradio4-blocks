@@ -1,0 +1,79 @@
+# Modulo: out = the remainder of a / b with the sign of a; 0 where b is 0.
+#   int16:   (7,3) -> 1, (-7,3) -> -1, (7,-3) -> 1, (-7,-3) -> -1, (5,0) -> 0, (-32768,-1) -> 0, (0,4) -> 0
+#   int32:   the same first six with -2147483648, and (100000,7) -> 100000 - 7 * 14285 = 5
+#   real:    (5.5,2) -> 1.5, (-5.5,2) -> -1.5, (5.5,-2) -> 1.5, (2,0) -> 0, (0,3) -> 0,
+#            (10,0.75) -> 10 - 13 * 0.75 = 0.25; fmod is exact, so no tolerance
+blocks:
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_a_i16
+      values: [7, -7, 7, -7, 5, -32768, 0]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_b_i16
+      values: [3, 3, -3, -3, 0, -1, 4]
+  - id: gr::blocks::math::Modulo<int16>
+    parameters:
+      name: modulo_i16
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16
+      expected: [1, -1, 1, -1, 0, 0, 0]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_a_i32
+      values: [7, -7, 7, -7, 5, -2147483648, 100000]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_b_i32
+      values: [3, 3, -3, -3, 0, -1, 7]
+  - id: gr::blocks::math::Modulo<int32>
+    parameters:
+      name: modulo_i32
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink_i32
+      expected: [1, -1, 1, -1, 0, 0, 5]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_a_f32
+      values: !!float32 [5.5, -5.5, 5.5, 2.0, 0.0, 10.0]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_b_f32
+      values: !!float32 [2.0, 2.0, -2.0, 0.0, 3.0, 0.75]
+  - id: gr::blocks::math::Modulo<float32>
+    parameters:
+      name: modulo_f32
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [1.5, -1.5, 1.5, 0.0, 0.0, 0.25]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_a_f64
+      values: !!float64 [5.5, -5.5, 5.5, 2.0, 0.0, 10.0]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_b_f64
+      values: !!float64 [2.0, 2.0, -2.0, 0.0, 3.0, 0.75]
+  - id: gr::blocks::math::Modulo<float64>
+    parameters:
+      name: modulo_f64
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [1.5, -1.5, 1.5, 0.0, 0.0, 0.25]
+connections:
+  - [source_a_i16, out, modulo_i16, a]
+  - [source_b_i16, out, modulo_i16, b]
+  - [modulo_i16, out, sink_i16, in]
+  - [source_a_i32, out, modulo_i32, a]
+  - [source_b_i32, out, modulo_i32, b]
+  - [modulo_i32, out, sink_i32, in]
+  - [source_a_f32, out, modulo_f32, a]
+  - [source_b_f32, out, modulo_f32, b]
+  - [modulo_f32, out, sink_f32, in]
+  - [source_a_f64, out, modulo_f64, a]
+  - [source_b_f64, out, modulo_f64, b]
+  - [modulo_f64, out, sink_f64, in]

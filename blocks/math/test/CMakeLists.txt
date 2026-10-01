@@ -11,46 +11,54 @@ target_link_libraries(qa_ExpressionBulk PRIVATE gr-math gr-testing)
 add_ut_test(qa_Rotator)
 target_link_libraries(qa_Rotator PRIVATE gr-math gr-testing)
 
-# one graph file per Unary alias, each chain a VectorSource into the alias into an ExpectSink
+# one graph file per Unary and Binary alias: each chain one VectorSource (two for a Binary alias) into the alias into an
+# ExpectSink
 foreach(
-  _alias
-  negate
-  abs
-  conjugate
-  square
-  sqrt
-  reciprocal
-  exp
-  log
-  log10
-  log2
-  sin
-  cos
-  tan
-  atan
-  sinh
-  cosh
-  tanh
-  power
-  floor
-  ceil
-  round
-  sign
-  deg-to-rad
-  rad-to-deg
-  magnitude
-  magnitude-squared
-  phase
-  real
-  imag)
+  _graph
+  unary-negate
+  unary-abs
+  unary-conjugate
+  unary-square
+  unary-sqrt
+  unary-reciprocal
+  unary-exp
+  unary-log
+  unary-log10
+  unary-log2
+  unary-sin
+  unary-cos
+  unary-tan
+  unary-atan
+  unary-sinh
+  unary-cosh
+  unary-tanh
+  unary-power
+  unary-floor
+  unary-ceil
+  unary-round
+  unary-sign
+  unary-deg-to-rad
+  unary-rad-to-deg
+  unary-magnitude
+  unary-magnitude-squared
+  unary-phase
+  unary-real
+  unary-imag
+  binary-multiply-conjugate
+  binary-max
+  binary-min
+  binary-pow
+  binary-atan2
+  binary-hypot
+  binary-modulo)
   string(
     REPLACE "-"
             "_"
             _test
-            "${_alias}")
+            "${_graph}")
   gr_add_graph_test(
-    graph_math_unary_${_test}
-    graphs/unary-${_alias}.yaml
+    graph_math_${_test}
+    graphs/${_graph}.yaml
     PLUGIN_DIRS
     $<TARGET_FILE_DIR:GrMathBlocksShared>)
 endforeach()

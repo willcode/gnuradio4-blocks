@@ -1,0 +1,98 @@
+# Min: out = the smaller of a and b, sample by sample.
+#   uint8:   a 0 200 7 255          b 5 100 7 0             -> 0 100 7 0
+#   int16:   a -3 0 7 -32768        b 2 -5 7 32767          -> -3 -5 7 -32768
+#   int32:   a -3 0 7 100000        b 2 -5 7 -100000        -> -3 -5 7 -100000
+#   float32: a -1.5 0 2.25 -0.5     b 0.5 -3 2.25 -0.75     -> -1.5 -3 2.25 -0.75
+#   float64: a -1.5 0 2.25 1e300    b 0.5 -3 2.25 -1e300    -> -1.5 -3 2.25 -1e300
+blocks:
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_a_u8
+      values: [0, 200, 7, 255]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_b_u8
+      values: [5, 100, 7, 0]
+  - id: gr::blocks::math::Min<uint8>
+    parameters:
+      name: min_u8
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink_u8
+      expected: [0, 100, 7, 0]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_a_i16
+      values: [-3, 0, 7, -32768]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_b_i16
+      values: [2, -5, 7, 32767]
+  - id: gr::blocks::math::Min<int16>
+    parameters:
+      name: min_i16
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16
+      expected: [-3, -5, 7, -32768]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_a_i32
+      values: [-3, 0, 7, 100000]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_b_i32
+      values: [2, -5, 7, -100000]
+  - id: gr::blocks::math::Min<int32>
+    parameters:
+      name: min_i32
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink_i32
+      expected: [-3, -5, 7, -100000]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_a_f32
+      values: !!float32 [-1.5, 0.0, 2.25, -0.5]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_b_f32
+      values: !!float32 [0.5, -3.0, 2.25, -0.75]
+  - id: gr::blocks::math::Min<float32>
+    parameters:
+      name: min_f32
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [-1.5, -3.0, 2.25, -0.75]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_a_f64
+      values: !!float64 [-1.5, 0.0, 2.25, 1e+300]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_b_f64
+      values: !!float64 [0.5, -3.0, 2.25, -1e+300]
+  - id: gr::blocks::math::Min<float64>
+    parameters:
+      name: min_f64
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [-1.5, -3.0, 2.25, -1e+300]
+connections:
+  - [source_a_u8, out, min_u8, a]
+  - [source_b_u8, out, min_u8, b]
+  - [min_u8, out, sink_u8, in]
+  - [source_a_i16, out, min_i16, a]
+  - [source_b_i16, out, min_i16, b]
+  - [min_i16, out, sink_i16, in]
+  - [source_a_i32, out, min_i32, a]
+  - [source_b_i32, out, min_i32, b]
+  - [min_i32, out, sink_i32, in]
+  - [source_a_f32, out, min_f32, a]
+  - [source_b_f32, out, min_f32, b]
+  - [min_f32, out, sink_f32, in]
+  - [source_a_f64, out, min_f64, a]
+  - [source_b_f64, out, min_f64, b]
+  - [min_f64, out, sink_f64, in]
