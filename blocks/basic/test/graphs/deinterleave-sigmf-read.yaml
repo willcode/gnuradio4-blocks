@@ -1,0 +1,32 @@
+# The two-channel recording the write test made, read back and split. Each output carries its channel's
+# three samples. The recording's num_channels tag sets the count and is not forwarded. Its sample_rate
+# tag at index 0 reaches the outputs at index 0.
+blocks:
+  - id: gr::blocks::fileio::SigMfSource<complex<float32>>
+    parameters:
+      name: player
+      file_name: interleave-two-channel
+  - id: gr::blocks::basic::Deinterleave<complex<float32>>
+    parameters:
+      name: deinterleave
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: channel_0
+      expected: !!complex32
+        - (1.0, -1.0)
+        - (2.0, -2.0)
+        - (3.0, -3.0)
+      tag_key: num_channels
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: channel_1
+      expected: !!complex32
+        - (10.0, 1.0)
+        - (20.0, 2.0)
+        - (30.0, 3.0)
+      tag_key: sample_rate
+      tag_indices: !!uint32 [0]
+connections:
+  - [player, out, deinterleave, in]
+  - [deinterleave, "out#0", channel_0, in]
+  - [deinterleave, "out#1", channel_1, in]

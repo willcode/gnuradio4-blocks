@@ -1,0 +1,46 @@
+# Two channels interleaved and recorded. Channel 0 carries (1,-1) (2,-2) (3,-3), channel 1 carries (10,1)
+# (20,2) (30,3). The interleaved stream alternates them, item j*2+k from channel k, and carries the
+# num_channels tag at index 0 only. The recording goes to the file_name the test sets under the build
+# tree, at 1000 samples per second of one channel.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: channel_0
+      values: !!complex32
+        - (1.0, -1.0)
+        - (2.0, -2.0)
+        - (3.0, -3.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: channel_1
+      values: !!complex32
+        - (10.0, 1.0)
+        - (20.0, 2.0)
+        - (30.0, 3.0)
+  - id: gr::blocks::basic::Interleave<complex<float32>>
+    parameters:
+      name: interleave
+      num_channels: !!uint32 2
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: interleaved
+      expected: !!complex32
+        - (1.0, -1.0)
+        - (10.0, 1.0)
+        - (2.0, -2.0)
+        - (20.0, 2.0)
+        - (3.0, -3.0)
+        - (30.0, 3.0)
+      tag_key: num_channels
+      tag_indices: !!uint32 [0]
+  - id: gr::blocks::fileio::SigMfSink<complex<float32>>
+    parameters:
+      name: recorder
+      file_name: interleave-two-channel
+      overwrite: true
+      sample_rate: !!float32 1000.0
+connections:
+  - [channel_0, out, interleave, "in#0"]
+  - [channel_1, out, interleave, "in#1"]
+  - [interleave, out, interleaved, in]
+  - [interleave, out, recorder, in]

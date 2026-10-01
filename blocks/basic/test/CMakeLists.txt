@@ -56,3 +56,50 @@ gr_add_graph_test(
   graphs/converter-ports.yaml
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+
+# a two-channel recording written through Interleave, then read back through Deinterleave
+set(_interleaveRecording "${CMAKE_CURRENT_BINARY_DIR}/interleave-two-channel")
+gr_add_graph_test(
+  graph_basic_interleave_sigmf_write
+  graphs/interleave-sigmf-write.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>
+  $<TARGET_FILE_DIR:GrFileIoBlocksShared>
+  SET
+  "recorder.file_name=${_interleaveRecording}")
+gr_add_graph_test(
+  graph_basic_deinterleave_sigmf_read
+  graphs/deinterleave-sigmf-read.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>
+  $<TARGET_FILE_DIR:GrFileIoBlocksShared>
+  SET
+  "player.file_name=${_interleaveRecording}")
+set_tests_properties(graph_basic_deinterleave_sigmf_read PROPERTIES DEPENDS graph_basic_interleave_sigmf_write)
+add_test(NAME graph_basic_interleave_sigmf_meta COMMAND grep -Eq "\"core:num_channels\": *2([^0-9]|$)"
+                                                        "${_interleaveRecording}.sigmf-meta")
+set_tests_properties(
+  graph_basic_interleave_sigmf_meta
+  PROPERTIES DEPENDS
+             graph_basic_interleave_sigmf_write
+             LABELS
+             graph)
+gr_add_graph_test(
+  graph_basic_deinterleave_tag
+  graphs/deinterleave-tag.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+gr_add_graph_test(
+  graph_basic_deinterleave_count_mismatch
+  graphs/deinterleave-count-mismatch.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>
+  $<TARGET_FILE_DIR:GrFileIoBlocksShared>
+  SET
+  "player.file_name=${_interleaveRecording}")
+set_tests_properties(
+  graph_basic_deinterleave_count_mismatch
+  PROPERTIES DEPENDS
+             graph_basic_interleave_sigmf_write
+             PASS_REGULAR_EXPRESSION
+             "the stream carries 2 channels and the block has 3 outputs")

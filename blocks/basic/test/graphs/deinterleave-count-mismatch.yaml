@@ -1,0 +1,25 @@
+# The two-channel recording split by a block with three outputs. The recording's num_channels tag of 2
+# disagrees with the three outputs, and the run ends with an error that names both counts.
+blocks:
+  - id: gr::blocks::fileio::SigMfSource<complex<float32>>
+    parameters:
+      name: player
+      file_name: interleave-two-channel
+  - id: gr::blocks::basic::Deinterleave<complex<float32>>
+    parameters:
+      name: deinterleave
+      num_channels: !!uint32 3
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: channel_0
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: channel_1
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: channel_2
+connections:
+  - [player, out, deinterleave, in]
+  - [deinterleave, "out#0", channel_0, in]
+  - [deinterleave, "out#1", channel_1, in]
+  - [deinterleave, "out#2", channel_2, in]
