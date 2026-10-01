@@ -755,7 +755,7 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
     };
 
     // Every emitted packet has one metadata map and 1 to 2^31 - 1 items
-    "every emitted packet is admissible by the Tier-1 predicates"_test = [] {
+    "every emitted packet has one metadata map and 1 to 2^31 - 1 items"_test = [] {
         const std::vector<std::uint8_t> file   = referenceFile(kFileBytes);
         const auto                      chunks = splitIntoChunks(file, kChunkSize);
 
@@ -770,9 +770,9 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
         expect(eq(capture.out.size(), 3UZ));
 
         for (const PacketU& packet : capture.out) {
-            expect(eq(packet.meta_information.size(), 1UZ)) << "Q1";
-            expect(ge(packet.signal_values.size(), 1UZ)) << "Q2";
-            expect(le(packet.signal_values.size(), 2'147'483'647UZ)) << "Q3";
+            expect(eq(packet.meta_information.size(), 1UZ)) << "one metadata map";
+            expect(ge(packet.signal_values.size(), 1UZ)) << "at least one item";
+            expect(le(packet.signal_values.size(), 2'147'483'647UZ)) << "at most 2^31 - 1 items";
         }
 
         // The packets pass through PacketToDataSet in one scheduler graph. That block's tag handling needs a real
