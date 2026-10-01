@@ -9,7 +9,8 @@ foreach(
   covariance-identical
   covariance-quadrature
   covariance-exponential
-  covariance-conjugate-mismatch)
+  covariance-conjugate-mismatch
+  calibration-gain-delay)
   string(
     REPLACE "-"
             "_"

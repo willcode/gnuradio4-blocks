@@ -1,0 +1,62 @@
+# Gains of (1, j) and delays of (0, 1) on two one-shot inputs, a 1 and a 2 at sample 2 of five. The longest
+# delay of 1 is paid as a lead: output 0 is input 0 advanced by one sample, the 1 at index 1, and output 1
+# is j times input 1, the 2j at index 2, one sample behind output 0. Both outputs carry four samples. The
+# tag on input 1 at sample 3 reaches output 1 at index 3, and the tag on the dropped first sample of input
+# 0 reaches output 0 at index 0.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_0
+      values: !!complex32
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+        - (1.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+      tag_indices: !!uint32 [0]
+      tag_map:
+        mark: dropped
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_1
+      values: !!complex32
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+        - (2.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+      tag_indices: !!uint32 [3]
+      tag_map:
+        mark: kept
+  - id: gr::blocks::array::ApplyChannelCalibration<complex<float32>>
+    parameters:
+      name: calibration
+      gains: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 1.0)
+      delays: !!int32 [0, 1]
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: output_0
+      expected: !!complex32
+        - (0.0, 0.0)
+        - (1.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+      tag_key: mark
+      tag_indices: !!uint32 [0]
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: output_1
+      expected: !!complex32
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, 2.0)
+        - (0.0, 0.0)
+      tag_key: mark
+      tag_indices: !!uint32 [3]
+connections:
+  - [input_0, out, calibration, "in#0"]
+  - [input_1, out, calibration, "in#1"]
+  - [calibration, "out#0", output_0, in]
+  - [calibration, "out#1", output_1, in]
