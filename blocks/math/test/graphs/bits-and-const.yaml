@@ -1,0 +1,106 @@
+# AndConst: out = in & constant, with constant 0x0F and 0xF0 repeated over the width of the type.
+#   the values in hex, as the bits of the type; the lists hold the same values in decimal.
+#   uint8, constant 0x0F:
+#     0x0F 0xF0 0xFF 0x00 0xA5 0x5A
+#     -> 0x0F 0x00 0x0F 0x00 0x05 0x0A
+#   uint8, constant 0xF0:
+#     0x0F 0xF0 0xFF 0x00 0xA5 0x5A
+#     -> 0x00 0xF0 0xF0 0x00 0xA0 0x50
+#   int16, constant 0x0F0F:
+#     0x0F0F 0xFFFF 0x7FFF 0x8000 0x1234 0xEDCB
+#     -> 0x0F0F 0x0F0F 0x0F0F 0x0000 0x0204 0x0D0B
+#   int16, constant 0xF0F0:
+#     0x0F0F 0xFFFF 0x7FFF 0x8000 0x1234 0xEDCB
+#     -> 0x0000 0xF0F0 0x70F0 0x8000 0x1030 0xE0C0
+#   int32, constant 0x0F0F0F0F:
+#     0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x80000000 0x12345678 0xEDCBA987
+#     -> 0x0F0F0F0F 0x0F0F0F0F 0x0F0F0F0F 0x00000000 0x02040608 0x0D0B0907
+#   int32, constant 0xF0F0F0F0:
+#     0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x80000000 0x12345678 0xEDCBA987
+#     -> 0x00000000 0xF0F0F0F0 0x70F0F0F0 0x80000000 0x10305070 0xE0C0A080
+blocks:
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source0_u8
+      values: [15, 240, 255, 0, 165, 90]
+  - id: gr::blocks::math::AndConst<uint8>
+    parameters:
+      name: and_const0_u8
+      constant: 15
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink0_u8
+      expected: [15, 0, 15, 0, 5, 10]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source1_u8
+      values: [15, 240, 255, 0, 165, 90]
+  - id: gr::blocks::math::AndConst<uint8>
+    parameters:
+      name: and_const1_u8
+      constant: 240
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink1_u8
+      expected: [0, 240, 240, 0, 160, 80]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source2_i16
+      values: [3855, -1, 32767, -32768, 4660, -4661]
+  - id: gr::blocks::math::AndConst<int16>
+    parameters:
+      name: and_const2_i16
+      constant: 3855
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink2_i16
+      expected: [3855, 3855, 3855, 0, 516, 3339]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source3_i16
+      values: [3855, -1, 32767, -32768, 4660, -4661]
+  - id: gr::blocks::math::AndConst<int16>
+    parameters:
+      name: and_const3_i16
+      constant: -3856
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink3_i16
+      expected: [0, -3856, 28912, -32768, 4144, -8000]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source4_i32
+      values: [252645135, -1, 2147483647, -2147483648, 305419896, -305419897]
+  - id: gr::blocks::math::AndConst<int32>
+    parameters:
+      name: and_const4_i32
+      constant: 252645135
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink4_i32
+      expected: [252645135, 252645135, 252645135, 0, 33818120, 218827015]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source5_i32
+      values: [252645135, -1, 2147483647, -2147483648, 305419896, -305419897]
+  - id: gr::blocks::math::AndConst<int32>
+    parameters:
+      name: and_const5_i32
+      constant: -252645136
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink5_i32
+      expected: [0, -252645136, 1894838512, -2147483648, 271601776, -524246912]
+connections:
+  - [source0_u8, out, and_const0_u8, in]
+  - [and_const0_u8, out, sink0_u8, in]
+  - [source1_u8, out, and_const1_u8, in]
+  - [and_const1_u8, out, sink1_u8, in]
+  - [source2_i16, out, and_const2_i16, in]
+  - [and_const2_i16, out, sink2_i16, in]
+  - [source3_i16, out, and_const3_i16, in]
+  - [and_const3_i16, out, sink3_i16, in]
+  - [source4_i32, out, and_const4_i32, in]
+  - [and_const4_i32, out, sink4_i32, in]
+  - [source5_i32, out, and_const5_i32, in]
+  - [and_const5_i32, out, sink5_i32, in]

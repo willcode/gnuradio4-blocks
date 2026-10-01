@@ -1,0 +1,159 @@
+# Or: out = the bitwise OR of all inputs, with two inputs (n_inputs 2) and three (n_inputs 3).
+#   uint8, 2 inputs:
+#     a 0x0F 0xF0 0xFF 0x00 0xA5
+#     b 0xFF 0x3C 0x0F 0xFF 0x5A
+#     a | b -> 0xFF 0xFC 0xFF 0xFF 0xFF
+#   uint8, 3 inputs:
+#     a 0x0F 0xF0 0xFF 0x00 0xA5
+#     b 0xFF 0x3C 0x0F 0xFF 0x5A
+#     c 0x33 0xFF 0xF0 0x00 0xFF
+#     a | b | c -> 0xFF 0xFF 0xFF 0xFF 0xFF
+#   int16, 2 inputs:
+#     a 0x0F0F 0xFFFF 0x7FFF 0x8000 0x1234
+#     b 0x00FF 0x5555 0xFFFF 0x7FFF 0xEDCB
+#     a | b -> 0x0FFF 0xFFFF 0xFFFF 0xFFFF 0xFFFF
+#   int16, 3 inputs:
+#     a 0x0F0F 0xFFFF 0x7FFF 0x8000 0x1234
+#     b 0x00FF 0x5555 0xFFFF 0x7FFF 0xEDCB
+#     c 0x3333 0xF0F0 0x0F0F 0x8000 0xFFFF
+#     a | b | c -> 0x3FFF 0xFFFF 0xFFFF 0xFFFF 0xFFFF
+#   int32, 2 inputs:
+#     a 0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x80000000 0x12345678
+#     b 0x0000FFFF 0x55555555 0xFFFFFFFF 0x7FFFFFFF 0xEDCBA987
+#     a | b -> 0x0F0FFFFF 0xFFFFFFFF 0xFFFFFFFF 0xFFFFFFFF 0xFFFFFFFF
+#   int32, 3 inputs:
+#     a 0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x80000000 0x12345678
+#     b 0x0000FFFF 0x55555555 0xFFFFFFFF 0x7FFFFFFF 0xEDCBA987
+#     c 0x33333333 0xF0F0F0F0 0x0F0F0F0F 0x80000000 0xFFFFFFFF
+#     a | b | c -> 0x3F3FFFFF 0xFFFFFFFF 0xFFFFFFFF 0xFFFFFFFF 0xFFFFFFFF
+blocks:
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_a2_u8
+      values: [15, 240, 255, 0, 165]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_b2_u8
+      values: [255, 60, 15, 255, 90]
+  - id: gr::blocks::math::Or<uint8>
+    parameters:
+      name: or2_u8
+      n_inputs: 2
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink2_u8
+      expected: [255, 252, 255, 255, 255]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_a3_u8
+      values: [15, 240, 255, 0, 165]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_b3_u8
+      values: [255, 60, 15, 255, 90]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_c3_u8
+      values: [51, 255, 240, 0, 255]
+  - id: gr::blocks::math::Or<uint8>
+    parameters:
+      name: or3_u8
+      n_inputs: 3
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink3_u8
+      expected: [255, 255, 255, 255, 255]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_a2_i16
+      values: [3855, -1, 32767, -32768, 4660]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_b2_i16
+      values: [255, 21845, -1, 32767, -4661]
+  - id: gr::blocks::math::Or<int16>
+    parameters:
+      name: or2_i16
+      n_inputs: 2
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink2_i16
+      expected: [4095, -1, -1, -1, -1]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_a3_i16
+      values: [3855, -1, 32767, -32768, 4660]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_b3_i16
+      values: [255, 21845, -1, 32767, -4661]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_c3_i16
+      values: [13107, -3856, 3855, -32768, -1]
+  - id: gr::blocks::math::Or<int16>
+    parameters:
+      name: or3_i16
+      n_inputs: 3
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink3_i16
+      expected: [16383, -1, -1, -1, -1]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_a2_i32
+      values: [252645135, -1, 2147483647, -2147483648, 305419896]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_b2_i32
+      values: [65535, 1431655765, -1, 2147483647, -305419897]
+  - id: gr::blocks::math::Or<int32>
+    parameters:
+      name: or2_i32
+      n_inputs: 2
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink2_i32
+      expected: [252706815, -1, -1, -1, -1]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_a3_i32
+      values: [252645135, -1, 2147483647, -2147483648, 305419896]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_b3_i32
+      values: [65535, 1431655765, -1, 2147483647, -305419897]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_c3_i32
+      values: [858993459, -252645136, 252645135, -2147483648, -1]
+  - id: gr::blocks::math::Or<int32>
+    parameters:
+      name: or3_i32
+      n_inputs: 3
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink3_i32
+      expected: [1061158911, -1, -1, -1, -1]
+connections:
+  - [source_a2_u8, out, or2_u8, "in#0"]
+  - [source_b2_u8, out, or2_u8, "in#1"]
+  - [or2_u8, out, sink2_u8, in]
+  - [source_a3_u8, out, or3_u8, "in#0"]
+  - [source_b3_u8, out, or3_u8, "in#1"]
+  - [source_c3_u8, out, or3_u8, "in#2"]
+  - [or3_u8, out, sink3_u8, in]
+  - [source_a2_i16, out, or2_i16, "in#0"]
+  - [source_b2_i16, out, or2_i16, "in#1"]
+  - [or2_i16, out, sink2_i16, in]
+  - [source_a3_i16, out, or3_i16, "in#0"]
+  - [source_b3_i16, out, or3_i16, "in#1"]
+  - [source_c3_i16, out, or3_i16, "in#2"]
+  - [or3_i16, out, sink3_i16, in]
+  - [source_a2_i32, out, or2_i32, "in#0"]
+  - [source_b2_i32, out, or2_i32, "in#1"]
+  - [or2_i32, out, sink2_i32, in]
+  - [source_a3_i32, out, or3_i32, "in#0"]
+  - [source_b3_i32, out, or3_i32, "in#1"]
+  - [source_c3_i32, out, or3_i32, "in#2"]
+  - [or3_i32, out, sink3_i32, in]

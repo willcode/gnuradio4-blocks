@@ -19,6 +19,7 @@ gr_add_block_library(
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   include/gnuradio-4.0/math/Binary.hpp
+  include/gnuradio-4.0/math/Bits.hpp
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
   include/gnuradio-4.0/math/Math.hpp
   include/gnuradio-4.0/math/Rotator.hpp

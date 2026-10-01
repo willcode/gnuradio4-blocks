@@ -11,8 +11,8 @@ target_link_libraries(qa_ExpressionBulk PRIVATE gr-math gr-testing)
 add_ut_test(qa_Rotator)
 target_link_libraries(qa_Rotator PRIVATE gr-math gr-testing)
 
-# one graph file per Unary and Binary alias: each chain one VectorSource (two for a Binary alias) into the alias into an
-# ExpectSink
+# one graph file per Unary, Binary and Bits alias: each chain one VectorSource per input of the alias into the alias
+# into an ExpectSink
 foreach(
   _graph
   unary-negate
@@ -50,7 +50,16 @@ foreach(
   binary-pow
   binary-atan2
   binary-hypot
-  binary-modulo)
+  binary-modulo
+  bits-and
+  bits-or
+  bits-xor
+  bits-not
+  bits-and-const
+  bits-or-const
+  bits-xor-const
+  bits-shift-left
+  bits-shift-right)
   string(
     REPLACE "-"
             "_"

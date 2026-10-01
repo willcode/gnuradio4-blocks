@@ -93,15 +93,11 @@ using MultiplyConst = MathOpImpl<T, std::multiplies<T>>;
 template<typename T>
 using DivideConst = MathOpImpl<T, std::divides<T>>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Add", gr::blocks::math::Add, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
-GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::Subtract, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
-GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::Multiply, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
-GR_REGISTER_BLOCK("gr::blocks::math::Divide", gr::blocks::math::Divide, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
-
-template<typename T, typename op>
-requires gr::arithmetic_or_complex_like<gr::meta::fundamental_base_value_type_t<T>>
-struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>, detail::MultiPortOpDroppedKeys<T, op>> {
-    using Description = Doc<R""(@brief Math block combining multiple inputs into a single output with a given operation
+namespace detail {
+/// the documentation of the multi-input block of `op`; a header that adds an operation specializes it
+template<typename op>
+struct MultiPortDescription {
+    using type = Doc<R""(@brief Math block combining multiple inputs into a single output with a given operation
 
     Depending on the operator op this block computes:
     - Multiply: out = in_1 * in_2 * in_3 * ...
@@ -111,6 +107,18 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>, detail::MultiPort
 
     For integral types, division by a zero divisor yields 0.
     )"">;
+};
+} // namespace detail
+
+GR_REGISTER_BLOCK("gr::blocks::math::Add", gr::blocks::math::Add, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Subtract", gr::blocks::math::Subtract, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Multiply", gr::blocks::math::Multiply, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
+GR_REGISTER_BLOCK("gr::blocks::math::Divide", gr::blocks::math::Divide, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
+
+template<typename T, typename op>
+requires gr::arithmetic_or_complex_like<gr::meta::fundamental_base_value_type_t<T>>
+struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>, detail::MultiPortOpDroppedKeys<T, op>> {
+    using Description = typename detail::MultiPortDescription<op>::type;
 
     // ports
     // The input vector starts at the default `n_inputs`. `settingsChanged` resizes it only when the value changes.

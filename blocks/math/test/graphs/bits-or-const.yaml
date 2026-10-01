@@ -1,0 +1,106 @@
+# OrConst: out = in | constant, with constant 0x0F and 0xF0 repeated over the width of the type.
+#   the values in hex, as the bits of the type; the lists hold the same values in decimal.
+#   uint8, constant 0x0F:
+#     0x0F 0xF0 0xFF 0x00 0xA5 0x5A
+#     -> 0x0F 0xFF 0xFF 0x0F 0xAF 0x5F
+#   uint8, constant 0xF0:
+#     0x0F 0xF0 0xFF 0x00 0xA5 0x5A
+#     -> 0xFF 0xF0 0xFF 0xF0 0xF5 0xFA
+#   int16, constant 0x0F0F:
+#     0x0F0F 0xFFFF 0x7FFF 0x8000 0x1234 0xEDCB
+#     -> 0x0F0F 0xFFFF 0x7FFF 0x8F0F 0x1F3F 0xEFCF
+#   int16, constant 0xF0F0:
+#     0x0F0F 0xFFFF 0x7FFF 0x8000 0x1234 0xEDCB
+#     -> 0xFFFF 0xFFFF 0xFFFF 0xF0F0 0xF2F4 0xFDFB
+#   int32, constant 0x0F0F0F0F:
+#     0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x80000000 0x12345678 0xEDCBA987
+#     -> 0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x8F0F0F0F 0x1F3F5F7F 0xEFCFAF8F
+#   int32, constant 0xF0F0F0F0:
+#     0x0F0F0F0F 0xFFFFFFFF 0x7FFFFFFF 0x80000000 0x12345678 0xEDCBA987
+#     -> 0xFFFFFFFF 0xFFFFFFFF 0xFFFFFFFF 0xF0F0F0F0 0xF2F4F6F8 0xFDFBF9F7
+blocks:
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source0_u8
+      values: [15, 240, 255, 0, 165, 90]
+  - id: gr::blocks::math::OrConst<uint8>
+    parameters:
+      name: or_const0_u8
+      constant: 15
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink0_u8
+      expected: [15, 255, 255, 15, 175, 95]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source1_u8
+      values: [15, 240, 255, 0, 165, 90]
+  - id: gr::blocks::math::OrConst<uint8>
+    parameters:
+      name: or_const1_u8
+      constant: 240
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: sink1_u8
+      expected: [255, 240, 255, 240, 245, 250]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source2_i16
+      values: [3855, -1, 32767, -32768, 4660, -4661]
+  - id: gr::blocks::math::OrConst<int16>
+    parameters:
+      name: or_const2_i16
+      constant: 3855
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink2_i16
+      expected: [3855, -1, 32767, -28913, 7999, -4145]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source3_i16
+      values: [3855, -1, 32767, -32768, 4660, -4661]
+  - id: gr::blocks::math::OrConst<int16>
+    parameters:
+      name: or_const3_i16
+      constant: -3856
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink3_i16
+      expected: [-1, -1, -1, -3856, -3340, -517]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source4_i32
+      values: [252645135, -1, 2147483647, -2147483648, 305419896, -305419897]
+  - id: gr::blocks::math::OrConst<int32>
+    parameters:
+      name: or_const4_i32
+      constant: 252645135
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink4_i32
+      expected: [252645135, -1, 2147483647, -1894838513, 524246911, -271601777]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source5_i32
+      values: [252645135, -1, 2147483647, -2147483648, 305419896, -305419897]
+  - id: gr::blocks::math::OrConst<int32>
+    parameters:
+      name: or_const5_i32
+      constant: -252645136
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink5_i32
+      expected: [-1, -1, -1, -252645136, -218827016, -33818121]
+connections:
+  - [source0_u8, out, or_const0_u8, in]
+  - [or_const0_u8, out, sink0_u8, in]
+  - [source1_u8, out, or_const1_u8, in]
+  - [or_const1_u8, out, sink1_u8, in]
+  - [source2_i16, out, or_const2_i16, in]
+  - [or_const2_i16, out, sink2_i16, in]
+  - [source3_i16, out, or_const3_i16, in]
+  - [or_const3_i16, out, sink3_i16, in]
+  - [source4_i32, out, or_const4_i32, in]
+  - [or_const4_i32, out, sink4_i32, in]
+  - [source5_i32, out, or_const5_i32, in]
+  - [or_const5_i32, out, sink5_i32, in]
