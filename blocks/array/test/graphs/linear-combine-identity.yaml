@@ -1,0 +1,45 @@
+# A 2 x 2 identity passes each input to the output of the same index.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_0
+      values: !!complex32
+        - (1.0, 2.0)
+        - (-3.0, 0.5)
+        - (0.0, -1.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_1
+      values: !!complex32
+        - (4.0, -4.0)
+        - (0.25, 0.0)
+        - (-2.0, 7.0)
+  - id: gr::blocks::array::LinearCombine<complex<float32>>
+    parameters:
+      name: combine
+      n_inputs: !!uint32 2
+      n_outputs: !!uint32 2
+      weights: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+        - (1.0, 0.0)
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: output_0
+      expected: !!complex32
+        - (1.0, 2.0)
+        - (-3.0, 0.5)
+        - (0.0, -1.0)
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: output_1
+      expected: !!complex32
+        - (4.0, -4.0)
+        - (0.25, 0.0)
+        - (-2.0, 7.0)
+connections:
+  - [input_0, out, combine, "in#0"]
+  - [input_1, out, combine, "in#1"]
+  - [combine, "out#0", output_0, in]
+  - [combine, "out#1", output_1, in]

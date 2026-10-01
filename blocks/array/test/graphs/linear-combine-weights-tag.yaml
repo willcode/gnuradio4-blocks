@@ -1,0 +1,45 @@
+# Weights of (1, 0) select the first input. A weights tag of (0, 1) on the second input at index 2
+# selects the second input from that index on. The output is 1 2 then 30 40 50.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_0
+      values: !!complex32
+        - (1.0, 0.0)
+        - (2.0, 0.0)
+        - (3.0, 0.0)
+        - (4.0, 0.0)
+        - (5.0, 0.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_1
+      values: !!complex32
+        - (10.0, 0.0)
+        - (20.0, 0.0)
+        - (30.0, 0.0)
+        - (40.0, 0.0)
+        - (50.0, 0.0)
+      tag_indices: !!uint32 [2]
+      tag_map:
+        weights: !!complex32
+          - (0.0, 0.0)
+          - (1.0, 0.0)
+  - id: gr::blocks::array::LinearCombine<complex<float32>>
+    parameters:
+      name: combine
+      weights: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 0.0)
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: selected
+      expected: !!complex32
+        - (1.0, 0.0)
+        - (2.0, 0.0)
+        - (30.0, 0.0)
+        - (40.0, 0.0)
+        - (50.0, 0.0)
+connections:
+  - [input_0, out, combine, "in#0"]
+  - [input_1, out, combine, "in#1"]
+  - [combine, "out#0", selected, in]

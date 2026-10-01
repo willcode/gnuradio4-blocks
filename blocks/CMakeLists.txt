@@ -7,6 +7,7 @@ add_subdirectory(common)
 add_subdirectory(testing)
 add_subdirectory(basic)
 add_subdirectory(analog)
+add_subdirectory(array)
 add_subdirectory(channel)
 add_subdirectory(digital)
 # after digital, whose targets the AX.25 module's QA chains link against
