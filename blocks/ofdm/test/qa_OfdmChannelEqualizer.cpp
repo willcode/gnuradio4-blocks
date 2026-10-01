@@ -282,7 +282,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         }
     };
 
-    "static multipath, with and without additive noise"_test = [] {
+    "zero forcing inverts static multipath, and noise raises the EVM within its bound"_test = [] {
         const Modulated sent  = modulate();
         const Stream    clean = toStream(std::span<const gr::DataSet<CF>>(sent.records));
         const auto      taps  = multipathTaps();

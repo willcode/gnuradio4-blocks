@@ -282,7 +282,7 @@ const boost::ut::suite<"OFDM loopback"> _loopback = [] {
      * profile's share is then read off the difference and not inferred. The bounds sit a factor above what the
      * seeded scenes measure. A regression shows, and ordinary movement does not.
      */
-    "the whole chain, at two pinned operating points"_test = [&clean, &labels, floor, meanPower] {
+    "the whole chain finds every frame and holds its bit error rate at two operating points"_test = [&clean, &labels, floor, meanPower] {
         const Selectivity profile = selectivity();
         std::println("the static profile over the 48 data carriers: |H| from {:.1f} to {:+.1f} dB, and zero forcing multiplies the noise by {:+.1f} dB on average", //
             profile.minDb, profile.maxDb, profile.meanDb);
