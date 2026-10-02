@@ -1,8 +1,8 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/basic/ConverterBlocks.hpp>
-#include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include <iostream>
+#include <numbers>
 #include <tuple>
 
 namespace unittest {
@@ -125,28 +125,6 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
     constexpr auto kArithmeticTypes = std::tuple<float, double>();
 
     "std::complex<T> to ..."_test = []<typename T>(T /*noop*/) {
-        "rad <-> deg"_test = [] {
-            static_assert(HasConstProcessOneFunction<RadiansToDegree<T>>);
-            static_assert(HasConstProcessOneFunction<DegreeToRadians<T>>);
-            expect(HasConstProcessOneFunction<RadiansToDegree<T>>);
-            expect(HasConstProcessOneFunction<DegreeToRadians<T>>);
-
-            RadiansToDegree<T> rad2deg;
-            expect(eq(rad2deg.processOne(T(0)), T(0))) << "0 [rad] = 0°";
-            expect(eq(rad2deg.processOne(T(0.5) * std::numbers::pi_v<T>), T(90))) << "pi/2 [rad] = 90°";
-            expect(eq(rad2deg.processOne(std::numbers::pi_v<T>), T(180))) << "pi [rad] = 180°";
-
-            DegreeToRadians<T> deg2rad;
-            expect(eq(deg2rad.processOne(T(0)), T(0))) << "0° = 0 [rad]";
-            expect(eq(deg2rad.processOne(T(90)), T(0.5) * std::numbers::pi_v<T>)) << "90° = pi/2 [rad]";
-            expect(eq(deg2rad.processOne(T(180)), T(std::numbers::pi_v<T>))) << "180° = pi [rad]";
-
-            for (T angle = T(0); angle < T(360); angle += T(10)) {
-                T val = rad2deg.processOne(deg2rad.processOne(angle));
-                expect(approx(val, angle, T(1e-3))) << std::format("identity {}° - diff {}°", angle, (val - angle));
-            }
-        };
-
         "complex <-> {real, imag}"_test = [] {
             static_assert(HasConstProcessOneFunction<ToRealImag<std::complex<T>>>);
             static_assert(HasConstProcessOneFunction<RealImagToComplex<T>>);
@@ -209,27 +187,6 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
             expect(eq(outputComplexData[2], std::complex<T>{T(5.0f), T(6.0f)}));
         } | std::tuple<float, double, std::int8_t, std::int16_t>();
     } | kArithmeticTypes;
-};
-
-const boost::ut::suite<"converter port names"> converterPortNames = [] {
-    using namespace boost::ut;
-    using namespace gr::blocks::basic;
-    using gr::blocks::testing::NullSink;
-    using gr::blocks::testing::NullSource;
-
-    // graph files connect these blocks by port name
-    "the one-input converters keep their port names"_test = [] {
-        gr::Graph flow;
-        auto&     complexSource = flow.emplaceBlock<NullSource<std::complex<float>>>();
-        auto&     realSource    = flow.emplaceBlock<NullSource<float>>();
-        auto&     toDegree      = flow.emplaceBlock<RadiansToDegree<float>>();
-        auto&     toRadians     = flow.emplaceBlock<DegreeToRadians<float>>();
-
-        expect(flow.connect<"out", "rad">(realSource, toDegree).has_value());
-        expect(flow.connect<"out", "deg">(realSource, toRadians).has_value());
-        expect(flow.connect<"deg", "in">(toDegree, flow.emplaceBlock<NullSink<float>>()).has_value());
-        expect(flow.connect<"rad", "in">(toRadians, flow.emplaceBlock<NullSink<float>>()).has_value());
-    };
 };
 
 int main() { /* not needed for UT */ }

@@ -40,8 +40,6 @@ foreach(
   unary-ceil
   unary-round
   unary-sign
-  unary-deg-to-rad
-  unary-rad-to-deg
   unary-magnitude-squared
   unary-angle
   unary-real

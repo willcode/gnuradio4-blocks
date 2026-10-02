@@ -4,7 +4,6 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
-#include <numbers>
 #include <type_traits>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -164,32 +163,6 @@ struct Power {
             exponent >>= 1U;
         }
         return n < 0 ? V(1) / power : power;
-    }
-};
-
-/// (x / 180) * pi
-struct DegToRad {
-    using Description = Doc<"@brief Converts each sample from degrees to radians.">;
-    template<typename T>
-    using result                = T;
-    static constexpr bool kSimd = true;
-    template<typename V, typename B>
-    [[nodiscard]] static constexpr V apply(const V& x, const B& /*block*/) noexcept {
-        using F = meta::fundamental_base_value_type_t<V>;
-        return (x / F(180)) * std::numbers::pi_v<F>;
-    }
-};
-
-/// (x / pi) * 180
-struct RadToDeg {
-    using Description = Doc<"@brief Converts each sample from radians to degrees.">;
-    template<typename T>
-    using result                = T;
-    static constexpr bool kSimd = true;
-    template<typename V, typename B>
-    [[nodiscard]] static constexpr V apply(const V& x, const B& /*block*/) noexcept {
-        using F = meta::fundamental_base_value_type_t<V>;
-        return (x / std::numbers::pi_v<F>)*F(180);
     }
 };
 
@@ -561,14 +534,6 @@ using Round = Unary<unary::Round, T>;
 GR_REGISTER_BLOCK("gr::blocks::math::Sign", gr::blocks::math::Sign, [T], [ float, double ])
 template<typename T>
 using Sign = Unary<unary::Sign, T>;
-
-GR_REGISTER_BLOCK("gr::blocks::math::DegToRad", gr::blocks::math::DegToRad, [T], [ float, double ])
-template<typename T>
-using DegToRad = Unary<unary::DegToRad, T>;
-
-GR_REGISTER_BLOCK("gr::blocks::math::RadToDeg", gr::blocks::math::RadToDeg, [T], [ float, double ])
-template<typename T>
-using RadToDeg = Unary<unary::RadToDeg, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::math::MagnitudeSquared", gr::blocks::math::MagnitudeSquared, [T], [std::complex<float>])
 template<typename T>

@@ -1,10 +1,10 @@
-# The one-input converters under their registry names, connected by their port names.
-#   Abs:             (3,4) (0,-2)  -> 5 2
-#   Abs, uint8:      0 127 128 200 255 -> 0 127 128 200 255, each sample its own absolute value
-#   Real, Imag, Arg: (3,4) (0,-2)  -> 3 0, 4 -2, atan2(4,3) -pi/2
-#   RadiansToDegree: pi/2 -pi      -> 90 -180
-#     scale 2, offset 10:          -> 90 * 2 + 10 = 190, -180 * 2 + 10 = -350
-#   DegreeToRadians: 90 -180       -> pi/2 -pi
+# The math keys for the one-input conversions of a complex or real stream, connected by their port names in and out.
+#   Abs:               (3,4) (0,-2)  -> 5 2
+#     scale 2, offset 10:            -> 5 * 2 + 10 = 20, 2 * 2 + 10 = 14
+#   Abs, uint8:        0 127 128 200 255 -> 0 127 128 200 255, each sample its own absolute value
+#   Real, Imag, Angle: (3,4) (0,-2)  -> 3 0, 4 -2, atan2(4,3) -pi/2
+#   radians to degrees, MultiplyConst by 180/pi: pi/2 -pi -> 90 -180
+#   degrees to radians, MultiplyConst by pi/180: 90 -180  -> pi/2 -pi
 blocks:
   - id: gr::blocks::testing::VectorSource<complex<float32>>
     parameters:
@@ -15,6 +15,11 @@ blocks:
   - id: gr::blocks::math::Abs<complex<float32>>
     parameters:
       name: abs
+  - id: gr::blocks::math::Abs<complex<float32>>
+    parameters:
+      name: abs_affine
+      scale: !!float32 2.0
+      offset: !!float32 10.0
   - id: gr::blocks::math::Real<complex<float32>>
     parameters:
       name: real
@@ -23,12 +28,17 @@ blocks:
       name: imag
   - id: gr::blocks::math::Angle<complex<float32>>
     parameters:
-      name: arg
+      name: angle
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
       name: abs_sink
       expected: !!float32 [5.0, 2.0]
       tolerance: 1e-6
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: abs_affine_sink
+      expected: !!float32 [20.0, 14.0]
+      tolerance: 1e-5
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
       name: real_sink
@@ -39,30 +49,21 @@ blocks:
       expected: !!float32 [4.0, -2.0]
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
-      name: arg_sink
+      name: angle_sink
       expected: !!float32 [0.9272952180016122, -1.5707963267948966]
       tolerance: 1e-6
   - id: gr::blocks::testing::VectorSource<float32>
     parameters:
       name: radians_source
       values: !!float32 [1.5707963267948966, -3.141592653589793]
-  - id: gr::blocks::basic::RadiansToDegree<float32>
+  - id: gr::blocks::math::MultiplyConst<float32>
     parameters:
-      name: to_degree
+      name: to_degrees
+      value: !!float32 57.29577951308232
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
-      name: degree_sink
+      name: degrees_sink
       expected: !!float32 [90.0, -180.0]
-      tolerance: 1e-4
-  - id: gr::blocks::basic::RadiansToDegree<float32>
-    parameters:
-      name: to_degree_affine
-      scale: !!float32 2.0
-      offset: !!float32 10.0
-  - id: gr::blocks::testing::ExpectSink<float32>
-    parameters:
-      name: degree_affine_sink
-      expected: !!float32 [190.0, -350.0]
       tolerance: 1e-4
   - id: gr::blocks::testing::VectorSource<uint8>
     parameters:
@@ -77,11 +78,12 @@ blocks:
       expected: [0, 127, 128, 200, 255]
   - id: gr::blocks::testing::VectorSource<float32>
     parameters:
-      name: degree_source
+      name: degrees_source
       values: !!float32 [90.0, -180.0]
-  - id: gr::blocks::basic::DegreeToRadians<float32>
+  - id: gr::blocks::math::MultiplyConst<float32>
     parameters:
       name: to_radians
+      value: !!float32 0.017453292519943295
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
       name: radians_sink
@@ -89,18 +91,18 @@ blocks:
       tolerance: 1e-6
 connections:
   - [complex_source, out, abs, in]
+  - [complex_source, out, abs_affine, in]
   - [complex_source, out, real, in]
   - [complex_source, out, imag, in]
-  - [complex_source, out, arg, in]
+  - [complex_source, out, angle, in]
   - [abs, out, abs_sink, in]
+  - [abs_affine, out, abs_affine_sink, in]
   - [real, out, real_sink, in]
   - [imag, out, imag_sink, in]
-  - [arg, out, arg_sink, in]
-  - [radians_source, out, to_degree, rad]
-  - [to_degree, deg, degree_sink, in]
-  - [degree_source, out, to_radians, deg]
-  - [to_radians, rad, radians_sink, in]
-  - [radians_source, out, to_degree_affine, rad]
-  - [to_degree_affine, deg, degree_affine_sink, in]
+  - [angle, out, angle_sink, in]
+  - [radians_source, out, to_degrees, in]
+  - [to_degrees, out, degrees_sink, in]
+  - [degrees_source, out, to_radians, in]
+  - [to_radians, out, radians_sink, in]
   - [uint8_source, out, abs_u8, in]
   - [abs_u8, out, abs_u8_sink, in]

@@ -8,7 +8,6 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/basic/NamespaceCompatibility.hpp>
-#include <gnuradio-4.0/math/Unary.hpp>
 #include <gnuradio-4.0/meta/UncertainValue.hpp>
 
 namespace gr::blocks::basic {
@@ -60,55 +59,6 @@ Performs scaling, i.e. 'R output = R(input * scale)'
         }
     }
 };
-
-namespace detail {
-
-/*
- * The converters below are `math::Unary` blocks whose operations name the ports these blocks have always had:
- * `rad` and `deg`, `deg` and `rad`.
- */
-
-template<typename Derived, typename T, typename R>
-struct RadiansToDegreePorts : Block<Derived> {
-    using Block<Derived>::Block;
-
-    PortIn<T>  rad;
-    PortOut<R> deg;
-
-    GR_MAKE_REFLECTABLE(RadiansToDegreePorts, rad, deg);
-};
-
-template<typename Derived, typename T, typename R>
-struct DegreeToRadiansPorts : Block<Derived> {
-    using Block<Derived>::Block;
-
-    PortIn<T>  deg;
-    PortOut<R> rad;
-
-    GR_MAKE_REFLECTABLE(DegreeToRadiansPorts, deg, rad);
-};
-
-struct RadiansToDegreeOp : math::unary::RadToDeg {
-    using Description = Doc<"@brief convert radians to degree">;
-    template<typename Derived, typename T, typename R>
-    using ports = RadiansToDegreePorts<Derived, T, R>;
-};
-
-struct DegreeToRadiansOp : math::unary::DegToRad {
-    using Description = Doc<"@brief convert degree to radians">;
-    template<typename Derived, typename T, typename R>
-    using ports = DegreeToRadiansPorts<Derived, T, R>;
-};
-
-} // namespace detail
-
-GR_REGISTER_BLOCK("gr::blocks::basic::RadiansToDegree", gr::blocks::basic::RadiansToDegree, [T], [float])
-template<std::floating_point T>
-using RadiansToDegree = math::Unary<detail::RadiansToDegreeOp, T>;
-
-GR_REGISTER_BLOCK("gr::blocks::basic::DegreeToRadians", gr::blocks::basic::DegreeToRadians, [T], [float])
-template<std::floating_point T>
-using DegreeToRadians = math::Unary<detail::DegreeToRadiansOp, T>;
 
 GR_REGISTER_BLOCK(gr::blocks::basic::ToRealImag, [T], [std::complex<float>])
 
