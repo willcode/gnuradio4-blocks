@@ -147,7 +147,7 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::basic::Throttle<float32>"sv));
         expect(registry.contains("gr::blocks::basic::KeepOneInN<float32>"sv));
         expect(registry.contains("gr::blocks::basic::KeepMInN<float32>"sv));
-        expect(registry.contains("gr::blocks::basic::MovingAverage<float32>"sv));
+        expect(registry.contains("gr::blocks::math::MovingAverage<float32>"sv));
         expect(registry.contains("gr::blocks::filter::DcBlocker<float32>"sv));
         expect(registry.contains("gr::blocks::filter::fir_filter<float32>"sv));
         expect(registry.contains("gr::blocks::fourier::FFT<float32>"sv));

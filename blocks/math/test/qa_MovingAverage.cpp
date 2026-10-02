@@ -11,12 +11,12 @@
 #include <span>
 #include <vector>
 
-#include <gnuradio-4.0/basic/MovingAverage.hpp>
+#include <gnuradio-4.0/math/MovingAverage.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
 namespace {
 
-using gr::blocks::basic::MovingAverage;
+using gr::blocks::math::MovingAverage;
 
 constexpr gr::Size_t kReseed = 4096U;
 

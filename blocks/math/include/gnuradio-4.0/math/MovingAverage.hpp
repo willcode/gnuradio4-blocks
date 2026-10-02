@@ -1,5 +1,5 @@
-#ifndef GNURADIO_MOVING_AVERAGE_HPP
-#define GNURADIO_MOVING_AVERAGE_HPP
+#ifndef GNURADIO_MATH_MOVING_AVERAGE_HPP
+#define GNURADIO_MATH_MOVING_AVERAGE_HPP
 
 #include <algorithm>
 #include <complex>
@@ -13,9 +13,9 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
-#include <gnuradio-4.0/basic/NamespaceCompatibility.hpp>
+#include <gnuradio-4.0/math/NamespaceCompatibility.hpp>
 
-namespace gr::blocks::basic {
+namespace gr::blocks::math {
 
 namespace detail {
 
@@ -35,7 +35,7 @@ struct WindowAccumulator<std::int32_t> {
 
 } // namespace detail
 
-GR_REGISTER_BLOCK(gr::blocks::basic::MovingAverage, [T], [ float, std::complex<float>, std::int16_t, std::int32_t ])
+GR_REGISTER_BLOCK(gr::blocks::math::MovingAverage, [T], [ float, std::complex<float>, std::int16_t, std::int32_t ])
 
 template<typename T>
 struct MovingAverage : Block<MovingAverage<T>> {
@@ -171,6 +171,6 @@ private:
     }
 };
 
-} // namespace gr::blocks::basic
+} // namespace gr::blocks::math
 
-#endif // GNURADIO_MOVING_AVERAGE_HPP
+#endif // GNURADIO_MATH_MOVING_AVERAGE_HPP

@@ -12,6 +12,8 @@ add_ut_test(qa_ExpressionBulk)
 target_link_libraries(qa_ExpressionBulk PRIVATE gr-math gr-testing)
 add_ut_test(qa_Rotator)
 target_link_libraries(qa_Rotator PRIVATE gr-math gr-testing)
+add_ut_test(qa_MovingAverage)
+target_link_libraries(qa_MovingAverage PRIVATE gr-math gr-testing)
 
 # one graph file per Unary, Binary, Bits and Reduce alias and per Stream block: each chain one VectorSource per input of
 # the block into the block into an ExpectSink; the packing round trip, UnpackBits into PackBits; and a Reduce and a
