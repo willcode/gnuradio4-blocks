@@ -205,36 +205,171 @@ struct Sign {
     }
 };
 
-/// one real function of the C library, applied sample by sample
-#define GR_MATH_UNARY_LIBM(Name, function, brief)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-    struct Name {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              \
-        using Description = Doc<brief>;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        \
-        template<typename T>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-        using result                = T;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
-        static constexpr bool kSimd = false;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   \
-        template<typename V, typename B>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       \
-        [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
-            return std::function(x);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           \
-        }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
-    };
+// Each operation below applies one function of the C library to one real sample.
+struct Sqrt {
+    using Description = Doc<"@brief Outputs the square root of each sample, and NaN for a negative sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::sqrt(x);
+    }
+};
 
-GR_MATH_UNARY_LIBM(Sqrt, sqrt, "@brief Outputs the square root of each sample, and NaN for a negative sample.")
-GR_MATH_UNARY_LIBM(Exp, exp, "@brief Outputs e raised to each sample.")
-GR_MATH_UNARY_LIBM(Log, log, "@brief Outputs the natural logarithm of each sample.")
-GR_MATH_UNARY_LIBM(Log10, log10, "@brief Outputs the base-10 logarithm of each sample. With scale 10 a power reads in dB.")
-GR_MATH_UNARY_LIBM(Log2, log2, "@brief Outputs the base-2 logarithm of each sample.")
-GR_MATH_UNARY_LIBM(Sin, sin, "@brief Outputs the sine of each sample, in radians.")
-GR_MATH_UNARY_LIBM(Cos, cos, "@brief Outputs the cosine of each sample, in radians.")
-GR_MATH_UNARY_LIBM(Tan, tan, "@brief Outputs the tangent of each sample, in radians.")
-GR_MATH_UNARY_LIBM(Atan, atan, "@brief Outputs the arc tangent of each sample, in radians.")
-GR_MATH_UNARY_LIBM(Sinh, sinh, "@brief Outputs the hyperbolic sine of each sample.")
-GR_MATH_UNARY_LIBM(Cosh, cosh, "@brief Outputs the hyperbolic cosine of each sample.")
-GR_MATH_UNARY_LIBM(Tanh, tanh, "@brief Outputs the hyperbolic tangent of each sample.")
-GR_MATH_UNARY_LIBM(Floor, floor, "@brief Rounds each sample down to an integer value.")
-GR_MATH_UNARY_LIBM(Ceil, ceil, "@brief Rounds each sample up to an integer value.")
-GR_MATH_UNARY_LIBM(Round, round, "@brief Rounds each sample to the nearest integer value, halves away from zero.")
+struct Exp {
+    using Description = Doc<"@brief Outputs e raised to each sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::exp(x);
+    }
+};
 
-#undef GR_MATH_UNARY_LIBM
+struct Log {
+    using Description = Doc<"@brief Outputs the natural logarithm of each sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::log(x);
+    }
+};
+
+struct Log10 {
+    using Description = Doc<"@brief Outputs the base-10 logarithm of each sample. With scale 10 a power reads in dB.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::log10(x);
+    }
+};
+
+struct Log2 {
+    using Description = Doc<"@brief Outputs the base-2 logarithm of each sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::log2(x);
+    }
+};
+
+struct Sin {
+    using Description = Doc<"@brief Outputs the sine of each sample, in radians.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::sin(x);
+    }
+};
+
+struct Cos {
+    using Description = Doc<"@brief Outputs the cosine of each sample, in radians.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::cos(x);
+    }
+};
+
+struct Tan {
+    using Description = Doc<"@brief Outputs the tangent of each sample, in radians.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::tan(x);
+    }
+};
+
+struct Atan {
+    using Description = Doc<"@brief Outputs the arc tangent of each sample, in radians.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::atan(x);
+    }
+};
+
+struct Sinh {
+    using Description = Doc<"@brief Outputs the hyperbolic sine of each sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::sinh(x);
+    }
+};
+
+struct Cosh {
+    using Description = Doc<"@brief Outputs the hyperbolic cosine of each sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::cosh(x);
+    }
+};
+
+struct Tanh {
+    using Description = Doc<"@brief Outputs the hyperbolic tangent of each sample.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::tanh(x);
+    }
+};
+
+struct Floor {
+    using Description = Doc<"@brief Rounds each sample down to an integer value.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::floor(x);
+    }
+};
+
+struct Ceil {
+    using Description = Doc<"@brief Rounds each sample up to an integer value.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::ceil(x);
+    }
+};
+
+struct Round {
+    using Description = Doc<"@brief Rounds each sample to the nearest integer value, halves away from zero.">;
+    template<typename T>
+    using result                = T;
+    static constexpr bool kSimd = false;
+    template<typename V, typename B>
+    [[nodiscard]] static V apply(const V& x, const B& /*block*/) noexcept {
+        return std::round(x);
+    }
+};
 
 /// the magnitude of a complex sample; the absolute value of a real one
 struct Magnitude : Abs {
