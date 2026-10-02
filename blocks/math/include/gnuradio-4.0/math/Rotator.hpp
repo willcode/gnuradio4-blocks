@@ -97,9 +97,35 @@ is attached to.
 
     // rotating by 'frequency_shift' moves the spectrum, so the center frequency a passing tag announces moves by the
     // same amount in the opposite direction: what sits at the output's zero frequency arrived at -'frequency_shift'.
+    // The framework's end-of-stream call passes processedIn 0 and output spans of no samples. Each tag the input holds
+    // at or past its read position then leaves at the end-of-stream index, without its end_of_stream key, which the
+    // framework publishes itself.
     template<typename TInputSpans, typename TOutputSpans>
-    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t /*processedIn*/) {
+    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
         std::optional<property_map> cachedSettings;
+        if (processedIn == 0UZ) {
+            const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+            gr::for_each_reader_span(
+                [&](auto& inSpan) {
+                    if (!inSpan.isSync || !inSpan.isConnected) {
+                        return;
+                    }
+                    for (const gr::Tag& tag : inSpan.rawTags) {
+                        if (tag.index < inSpan.streamIndex) { // forwarded by an earlier call
+                            continue;
+                        }
+                        property_map forwarded = this->filterAndSubstituteTag(tag.map, cachedSettings);
+                        forwarded.erase(endOfStream);
+                        if (forwarded.empty()) {
+                            continue;
+                        }
+                        retuneCenterFrequency(forwarded);
+                        gr::for_each_writer_span([&forwarded](auto& outSpan) { outSpan.publishTag(forwarded, 0UZ); }, outputSpans);
+                    }
+                },
+                inputSpans);
+            return;
+        }
         gr::for_each_reader_span(
             [&](auto& inSpan) {
                 if (!inSpan.isSync || !inSpan.isConnected) {

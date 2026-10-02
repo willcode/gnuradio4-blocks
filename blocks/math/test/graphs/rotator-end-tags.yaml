@@ -1,0 +1,46 @@
+# SampleDelay by 1 places a tag past its last output at the end-of-stream index. Rotator at phase increment 0
+# multiplies each sample by 1 and forwards a tag on input i on output i.
+#   source, 8 samples          tags 1, 7
+#   SampleDelay, 8 samples     tags 2, 8 (7 + 1 is the end-of-stream index)
+#   Rotator, 8 samples         tags 2, 8 (the end-of-stream call places the tag at 8 at the end, 8)
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source
+      values: !!complex32
+        - (1.0, 0.0)
+        - (2.0, 0.0)
+        - (3.0, 0.0)
+        - (4.0, 0.0)
+        - (5.0, 0.0)
+        - (6.0, 0.0)
+        - (7.0, 0.0)
+        - (8.0, 0.0)
+      tag_indices: !!uint32 [1, 7]
+      tag_map:
+        trigger_name: mark
+  - id: gr::blocks::basic::SampleDelay<complex<float32>>
+    parameters:
+      name: delay
+      delay: !!uint32 1
+  - id: gr::blocks::math::Rotator<complex<float32>>
+    parameters:
+      name: rotator
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink
+      expected: !!complex32
+        - (0.0, 0.0)
+        - (1.0, 0.0)
+        - (2.0, 0.0)
+        - (3.0, 0.0)
+        - (4.0, 0.0)
+        - (5.0, 0.0)
+        - (6.0, 0.0)
+        - (7.0, 0.0)
+      tag_key: trigger_name
+      tag_indices: !!uint32 [2, 8]
+connections:
+  - [source, out, delay, in]
+  - [delay, out, rotator, in]
+  - [rotator, out, sink, in]

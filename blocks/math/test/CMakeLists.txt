@@ -95,3 +95,11 @@ set_tests_properties(graph_math_stream_matrix_bad_extents PROPERTIES PASS_REGULA
                                                                      "matrix of extents 6 does not divide into rows 4")
 set_tests_properties(graph_math_stream_dot_product_empty
                      PROPERTIES PASS_REGULAR_EXPRESSION "vector of extents 0 is not 1-D with at least one entry")
+
+# Rotator forwards the tags past its last input at the end-of-stream index
+gr_add_graph_test(
+  graph_math_rotator_end_tags
+  graphs/rotator-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrMathBlocksShared>
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
