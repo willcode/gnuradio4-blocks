@@ -68,7 +68,8 @@ target_link_libraries(
           gr-sync
           gr-testing)
 
-# CpmModulate and LinearEqualizer forward the tags left on their input at the end-of-stream index
+# CpmModulate, LinearEqualizer, ConstellationSoftDecoder and PreambleCorrelator forward the tags left on their input at
+# the end-of-stream index
 gr_add_graph_test(
   graph_digital_cpm_modulate_end_tags
   graphs/cpm-modulate-end-tags.yaml
@@ -78,5 +79,16 @@ gr_add_graph_test(
 gr_add_graph_test(
   graph_digital_linear_equalizer_end_tags
   graphs/linear-equalizer-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrDigitalBlocksShared>)
+gr_add_graph_test(
+  graph_digital_constellation_soft_decoder_end_tags
+  graphs/constellation-soft-decoder-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrDigitalBlocksShared>
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+gr_add_graph_test(
+  graph_digital_preamble_correlator_end_tags
+  graphs/preamble-correlator-end-tags.yaml
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>)

@@ -139,7 +139,11 @@ detector's tags would silently retune this block's own label.
      * each arises.
      */
     template<typename TInputSpans, typename TOutputSpans>
-    void forwardTags(TInputSpans& inputSpans, TOutputSpans& /*outputSpans*/, std::size_t processedIn) {
+    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (processedIn == 0UZ) {
+            releaseAtEndOfStream(inputSpans, outputSpans);
+            return;
+        }
         const auto delay = static_cast<std::uint64_t>(_reference.size());
         gr::for_each_reader_span(
             [this, processedIn, delay](auto& span) {
@@ -154,6 +158,40 @@ detector's tags would silently retune this block's own label.
                 }
             },
             inputSpans);
+    }
+
+    /**
+     * @brief Publish every held tag, and every tag left on the input, at the end-of-stream index.
+     *
+     * The framework's end-of-stream call passes `processedIn` 0 and output spans of no samples, where offset 0 is the
+     * end-of-stream index. A held tag belongs to an output past the last one made, and so does a tag on one of the
+     * input's last `N` samples or past them. The `end_of_stream` key is dropped, as the framework publishes its own.
+     */
+    template<typename TInputSpans, typename TOutputSpans>
+    void releaseAtEndOfStream(TInputSpans& inputSpans, TOutputSpans& outputSpans) {
+        const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+        gr::for_each_reader_span(
+            [this, &endOfStream](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const gr::Tag& tag : span.rawTags) {
+                    if (tag.index < span.streamIndex) { // placed by an earlier call
+                        continue;
+                    }
+                    property_map map = tag.map;
+                    map.erase(endOfStream);
+                    if (!map.empty()) {
+                        _pendingTags.emplace_back(static_cast<std::uint64_t>(tag.index), std::move(map));
+                    }
+                }
+            },
+            inputSpans);
+        std::ranges::stable_sort(_pendingTags, std::ranges::less{}, &std::pair<std::uint64_t, property_map>::first);
+        for (const auto& [at, map] : _pendingTags) {
+            gr::for_each_writer_span([&map](auto& span) { span.publishTag(map, 0UZ); }, outputSpans);
+        }
+        _pendingTags.clear();
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& corrSpan) {

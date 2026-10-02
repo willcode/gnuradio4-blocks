@@ -129,8 +129,32 @@ precondition. `max_log` is the default and needs no transcendental; it is exact 
     [[nodiscard]] std::size_t bitsPerSymbol() const noexcept { return _bits; }
 
     /// @brief One input symbol becomes `m` outputs, so a tag at input `t` belongs at output `m*t` — integer, in `std::size_t`.
+    /// The framework's end-of-stream call passes `processedIn` 0 and output spans of no samples. Each tag the input
+    /// holds at or past its read position then leaves at offset 0, the end-of-stream index, without its
+    /// `end_of_stream` key, which the framework publishes itself.
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (processedIn == 0UZ) {
+            const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+            gr::for_each_reader_span(
+                [&outputSpans, &endOfStream](auto& inSpan) {
+                    if (!inSpan.isSync || !inSpan.isConnected) {
+                        return;
+                    }
+                    for (const gr::Tag& tag : inSpan.rawTags) {
+                        if (tag.index < inSpan.streamIndex) { // forwarded by an earlier call
+                            continue;
+                        }
+                        property_map map = tag.map;
+                        map.erase(endOfStream);
+                        if (!map.empty()) {
+                            gr::for_each_writer_span([&map](auto& outSpan) { outSpan.publishTag(map, 0UZ); }, outputSpans);
+                        }
+                    }
+                },
+                inputSpans);
+            return;
+        }
         const std::size_t                                 bits = _bits;
         std::vector<std::pair<std::size_t, property_map>> arriving;
         gr::for_each_reader_span(
