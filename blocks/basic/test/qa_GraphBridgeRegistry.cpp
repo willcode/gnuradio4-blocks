@@ -63,7 +63,7 @@ blocks:
     parameters:
       name: bridge_in
       bridge_name: {}
-  - id: gr::blocks::basic::Real<complex<float32>>
+  - id: gr::blocks::math::Real<complex<float32>>
     parameters:
       name: real_part
   - id: gr::blocks::basic::DataSink<float32>
@@ -72,7 +72,7 @@ blocks:
       signal_name: {}
 connections:
   - [bridge_in, out, real_part, in]
-  - [real_part, real, level_sink, in]
+  - [real_part, out, level_sink, in]
 )",
         bridgeName, signalName);
 }

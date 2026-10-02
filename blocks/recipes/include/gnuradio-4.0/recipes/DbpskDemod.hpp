@@ -174,7 +174,7 @@ struct DbpskDemod {
             e42 = gr::pmt::Value(std::pmr::string("OUTPUT"));
             t40.push_back(std::move(e42));
             gr::pmt::Value e43;
-            e43 = gr::pmt::Value(std::pmr::string("real"));
+            e43 = gr::pmt::Value(std::pmr::string("out"));
             t40.push_back(std::move(e43));
             gr::pmt::Value e44;
             e44 = gr::pmt::Value(std::pmr::string("out"));
@@ -354,7 +354,7 @@ struct DbpskDemod {
             gr::property_map m103;
             m103[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("decision"));
             m102[std::pmr::string("parameters")] = gr::pmt::Value(std::move(m103));
-            m102[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::basic::Real<complex<float32>>"));
+            m102[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::math::Real<complex<float32>>"));
             e101 = gr::pmt::Value(std::move(m102));
             t82.push_back(std::move(e101));
             m31[std::pmr::string("blocks")] = gr::pmt::Value(std::move(t82));

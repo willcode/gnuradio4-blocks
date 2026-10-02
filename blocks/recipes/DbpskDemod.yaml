@@ -130,7 +130,7 @@ blocks:
         - id: "gr::blocks::digital::DifferentialPhasor<float32>"
           parameters:
             name: phasor
-        - id: "gr::blocks::basic::Real<complex<float32>>"
+        - id: "gr::blocks::math::Real<complex<float32>>"
           parameters:
             name: decision
       connections:
@@ -142,4 +142,4 @@ blocks:
         - [phasor, 0, decision, 0]
       exported_ports:
         - [translate, INPUT, in, in]
-        - [decision, OUTPUT, real, out]
+        - [decision, OUTPUT, out, out]

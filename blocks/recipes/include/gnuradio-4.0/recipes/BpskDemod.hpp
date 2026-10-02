@@ -183,7 +183,7 @@ struct BpskDemod {
             e44 = gr::pmt::Value(std::pmr::string("OUTPUT"));
             t42.push_back(std::move(e44));
             gr::pmt::Value e45;
-            e45 = gr::pmt::Value(std::pmr::string("real"));
+            e45 = gr::pmt::Value(std::pmr::string("out"));
             t42.push_back(std::move(e45));
             gr::pmt::Value e46;
             e46 = gr::pmt::Value(std::pmr::string("out"));
@@ -366,7 +366,7 @@ struct BpskDemod {
             gr::property_map m105;
             m105[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("decision"));
             m104[std::pmr::string("parameters")] = gr::pmt::Value(std::move(m105));
-            m104[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::basic::Real<complex<float32>>"));
+            m104[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::math::Real<complex<float32>>"));
             e103 = gr::pmt::Value(std::move(m104));
             t84.push_back(std::move(e103));
             m33[std::pmr::string("blocks")] = gr::pmt::Value(std::move(t84));

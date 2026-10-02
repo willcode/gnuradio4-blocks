@@ -131,7 +131,7 @@ blocks:
             order: !!uint32 2
             detector_gain: !!float64 1.0
             noise_bandwidth: "=costas_noise_bandwidth"
-        - id: "gr::blocks::basic::Real<complex<float32>>"
+        - id: "gr::blocks::math::Real<complex<float32>>"
           parameters:
             name: decision
       connections:
@@ -143,4 +143,4 @@ blocks:
         - [costas, 0, decision, 0]
       exported_ports:
         - [translate, INPUT, in, in]
-        - [decision, OUTPUT, real, out]
+        - [decision, OUTPUT, out, out]

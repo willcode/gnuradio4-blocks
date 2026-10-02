@@ -15,10 +15,10 @@ blocks:
   - id: gr::blocks::math::Abs<complex<float32>>
     parameters:
       name: abs
-  - id: gr::blocks::basic::Real<complex<float32>>
+  - id: gr::blocks::math::Real<complex<float32>>
     parameters:
       name: real
-  - id: gr::blocks::basic::Imag<complex<float32>>
+  - id: gr::blocks::math::Imag<complex<float32>>
     parameters:
       name: imag
   - id: gr::blocks::math::Angle<complex<float32>>
@@ -93,8 +93,8 @@ connections:
   - [complex_source, out, imag, in]
   - [complex_source, out, arg, in]
   - [abs, out, abs_sink, in]
-  - [real, real, real_sink, in]
-  - [imag, imag, imag_sink, in]
+  - [real, out, real_sink, in]
+  - [imag, out, imag_sink, in]
   - [arg, out, arg_sink, in]
   - [radians_source, out, to_degree, rad]
   - [to_degree, deg, degree_sink, in]

@@ -65,28 +65,8 @@ namespace detail {
 
 /*
  * The converters below are `math::Unary` blocks whose operations name the ports these blocks have always had:
- * `in` and `imag`, `in` and `real`, `rad` and `deg`, `deg` and `rad`.
+ * `rad` and `deg`, `deg` and `rad`.
  */
-
-template<typename Derived, typename T, typename R>
-struct ImagPorts : Block<Derived> {
-    using Block<Derived>::Block;
-
-    PortIn<T>  in;
-    PortOut<R> imag;
-
-    GR_MAKE_REFLECTABLE(ImagPorts, in, imag);
-};
-
-template<typename Derived, typename T, typename R>
-struct RealPorts : Block<Derived> {
-    using Block<Derived>::Block;
-
-    PortIn<T>  in;
-    PortOut<R> real;
-
-    GR_MAKE_REFLECTABLE(RealPorts, in, real);
-};
 
 template<typename Derived, typename T, typename R>
 struct RadiansToDegreePorts : Block<Derived> {
@@ -108,18 +88,6 @@ struct DegreeToRadiansPorts : Block<Derived> {
     GR_MAKE_REFLECTABLE(DegreeToRadiansPorts, deg, rad);
 };
 
-struct ImagOp : math::unary::Imag {
-    using Description = Doc<"@brief basic block to the imaginary component of a complex input stream">;
-    template<typename Derived, typename T, typename R>
-    using ports = ImagPorts<Derived, T, R>;
-};
-
-struct RealOp : math::unary::Real {
-    using Description = Doc<"@brief basic block to the real component of a complex input stream">;
-    template<typename Derived, typename T, typename R>
-    using ports = RealPorts<Derived, T, R>;
-};
-
 struct RadiansToDegreeOp : math::unary::RadToDeg {
     using Description = Doc<"@brief convert radians to degree">;
     template<typename Derived, typename T, typename R>
@@ -133,16 +101,6 @@ struct DegreeToRadiansOp : math::unary::DegToRad {
 };
 
 } // namespace detail
-
-GR_REGISTER_BLOCK("gr::blocks::basic::Imag", gr::blocks::basic::Imag, [T], [std::complex<float>])
-template<typename T>
-requires std::is_arithmetic_v<T> || meta::complex_like<T>
-using Imag = math::Unary<detail::ImagOp, T>;
-
-GR_REGISTER_BLOCK("gr::blocks::basic::Real", gr::blocks::basic::Real, [T], [std::complex<float>])
-template<typename T>
-requires std::is_arithmetic_v<T> || meta::complex_like<T>
-using Real = math::Unary<detail::RealOp, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::basic::RadiansToDegree", gr::blocks::basic::RadiansToDegree, [T], [float])
 template<std::floating_point T>

@@ -12,10 +12,10 @@ add_basic_test(qa_SampleDelay)
 gr_pin_test_optimization(qa_SampleDelay BUILD_TYPE)
 add_basic_test(qa_GraphBridge)
 
-# the two halves are loaded by block id through the global registry, so the shared library carrying the basic blocks has
-# to be loaded for those ids to resolve
+# the two halves are loaded by block id through the global registry, so the shared libraries carrying the basic and the
+# math blocks have to be loaded for those ids to resolve
 add_basic_test(qa_GraphBridgeRegistry)
-target_link_libraries(qa_GraphBridgeRegistry PRIVATE gnuradio4::GrBasicBlocksShared)
+target_link_libraries(qa_GraphBridgeRegistry PRIVATE gnuradio4::GrBasicBlocksShared gnuradio4::GrMathBlocksShared)
 set_tests_properties(qa_GraphBridgeRegistry PROPERTIES TIMEOUT 60)
 
 add_basic_test(qa_IqCorrection)
