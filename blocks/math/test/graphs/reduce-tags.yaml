@@ -1,9 +1,9 @@
 # Reduce tags: a tag at input index i lands at output index i / n. The source publishes one map at each listed
 # index, with the auto-forward key trigger_name and the key mark, which is not auto-forwarded.
-#   Sum<float32>, n 4, 14 samples: tags at 1 6 8 13 -> output 0 1 2; 13 is in the unconsumed remainder 12 13,
-#     so its tag goes to the end-of-stream index 3, where the sink sees no sample.
+#   Sum<float32>, n 4, 14 samples: tags at 1 6 8 13 -> output 0 1 2 3; 13 is in the unconsumed remainder 12 13,
+#     so its tag goes to the end-of-stream index 3, which the sink records as index 3 without a sample.
 #     samples 1..14 -> 1+2+3+4 = 10, 5+6+7+8 = 26, 9+10+11+12 = 42
-#   Argmax<int16>, n 2, 7 samples: tags at 0 3 5 6 -> output 0 1 2; 6 is the unconsumed remainder.
+#   Argmax<int16>, n 2, 7 samples: tags at 0 3 5 6 -> output 0 1 2 3; 6 is the unconsumed remainder, its tag at the end index 3.
 #     -1 4 | 0 0 | 9 -9 | 3 -> 1, 0, 0
 # The second sink of each chain checks that no tag carries mark.
 blocks:
@@ -38,7 +38,7 @@ blocks:
       name: sink_f32
       expected: !!float32 [10.0, 26.0, 42.0]
       tag_key: trigger_name
-      tag_indices: !!uint32 [0, 1, 2]
+      tag_indices: !!uint32 [0, 1, 2, 3]
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
       name: sink_f32_mark
@@ -61,7 +61,7 @@ blocks:
       name: sink_i16
       expected: !!uint32 [1, 0, 0]
       tag_key: trigger_name
-      tag_indices: !!uint32 [0, 1, 2]
+      tag_indices: !!uint32 [0, 1, 2, 3]
   - id: gr::blocks::testing::ExpectSink<uint32>
     parameters:
       name: sink_i16_mark
