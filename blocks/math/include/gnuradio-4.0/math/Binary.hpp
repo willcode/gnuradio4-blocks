@@ -37,7 +37,7 @@ struct MultiplyConjugate {
 
 /// the larger of a and b; a when either is NaN
 struct Max {
-    using Description = Doc<"@brief Outputs the larger of the two input samples.">;
+    using Description = Doc<"@brief Outputs the larger of the two input samples. A NaN in either input gives the sample of a.">;
     template<typename T>
     using result                = T;
     static constexpr bool kSimd = true;
@@ -55,7 +55,7 @@ struct Max {
 
 /// the smaller of a and b; a when either is NaN
 struct Min {
-    using Description = Doc<"@brief Outputs the smaller of the two input samples.">;
+    using Description = Doc<"@brief Outputs the smaller of the two input samples. A NaN in either input gives the sample of a.">;
     template<typename T>
     using result                = T;
     static constexpr bool kSimd = true;
@@ -71,7 +71,7 @@ struct Min {
     }
 };
 
-/// the remainder of a / b with the sign of a: `%` for an integer type, `fmod` for a real one; 0 when b is 0. An integer
+/// the remainder of a / b with the sign of a: `%` for an integer type, `fmod` for a real one; 0 when b is 0. A signed
 /// b of -1 gives its exact remainder 0 without the division, which overflows for the lowest value of the type.
 struct Modulo {
     using Description = Doc<"@brief Outputs the remainder of a divided by b with the sign of a, and 0 where b is 0.">;
@@ -81,7 +81,7 @@ struct Modulo {
     template<typename V, typename B>
     [[nodiscard]] static V apply(const V& a, const V& b, const B& /*block*/) noexcept {
         if constexpr (std::integral<V>) {
-            return b == V{} || b == V(-1) ? V{} : static_cast<V>(a % b);
+            return b == V{} || (std::is_signed_v<V> && b == V(-1)) ? V{} : static_cast<V>(a % b);
         } else {
             return b == V{} ? V{} : std::fmod(a, b);
         }
@@ -183,7 +183,7 @@ GR_REGISTER_BLOCK("gr::blocks::math::Hypot", gr::blocks::math::Hypot, [T], [ flo
 template<typename T>
 using Hypot = Binary<binary::Hypot, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Modulo", gr::blocks::math::Modulo, [T], [ int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Modulo", gr::blocks::math::Modulo, [T], [ uint8_t, int16_t, int32_t, float, double ])
 template<typename T>
 using Modulo = Binary<binary::Modulo, T>;
 

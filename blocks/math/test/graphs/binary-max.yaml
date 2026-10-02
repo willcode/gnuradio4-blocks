@@ -4,6 +4,7 @@
 #   int32:   a -3 0 7 100000        b 2 -5 7 -100000        -> 2 0 7 100000
 #   float32: a -1.5 0 2.25 -0.5     b 0.5 -3 2.25 -0.75     -> 0.5 0 2.25 -0.5
 #   float64: a -1.5 0 2.25 1e300    b 0.5 -3 2.25 -1e300    -> 0.5 0 2.25 1e300
+#   NaN:     a NaN 1.5 NaN          b 2 NaN NaN             -> NaN 1.5 NaN, the sample of a, in both real types
 blocks:
   - id: gr::blocks::testing::VectorSource<uint8>
     parameters:
@@ -80,6 +81,36 @@ blocks:
     parameters:
       name: sink_f64
       expected: !!float64 [0.5, 0.0, 2.25, 1e+300]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_a_f32n
+      values: !!float32 [.nan, 1.5, .nan]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_b_f32n
+      values: !!float32 [2.0, .nan, .nan]
+  - id: gr::blocks::math::Max<float32>
+    parameters:
+      name: max_f32n
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32n
+      expected: !!float32 [.nan, 1.5, .nan]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_a_f64n
+      values: !!float64 [.nan, 1.5, .nan]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_b_f64n
+      values: !!float64 [2.0, .nan, .nan]
+  - id: gr::blocks::math::Max<float64>
+    parameters:
+      name: max_f64n
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64n
+      expected: !!float64 [.nan, 1.5, .nan]
 connections:
   - [source_a_u8, out, max_u8, a]
   - [source_b_u8, out, max_u8, b]
@@ -96,3 +127,9 @@ connections:
   - [source_a_f64, out, max_f64, a]
   - [source_b_f64, out, max_f64, b]
   - [max_f64, out, sink_f64, in]
+  - [source_a_f32n, out, max_f32n, a]
+  - [source_b_f32n, out, max_f32n, b]
+  - [max_f32n, out, sink_f32n, in]
+  - [source_a_f64n, out, max_f64n, a]
+  - [source_b_f64n, out, max_f64n, b]
+  - [max_f64n, out, sink_f64n, in]
