@@ -67,3 +67,16 @@ target_link_libraries(
           gr-filter
           gr-sync
           gr-testing)
+
+# CpmModulate and LinearEqualizer forward the tags left on their input at the end-of-stream index
+gr_add_graph_test(
+  graph_digital_cpm_modulate_end_tags
+  graphs/cpm-modulate-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrDigitalBlocksShared>
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+gr_add_graph_test(
+  graph_digital_linear_equalizer_end_tags
+  graphs/linear-equalizer-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrDigitalBlocksShared>)

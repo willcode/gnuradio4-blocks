@@ -160,8 +160,14 @@ observations, on the measurement conventions, is what will make them readable ou
     }
 
     /// @brief One symbol out per `samples_per_symbol` in, so a tag at input `t` belongs at output `t / sps`.
+    /// The framework's end-of-stream call passes `processedIn` 0, and the tags the input holds at or past its read
+    /// position leave at the end-of-stream index by the framework's default rule.
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (processedIn == 0UZ) {
+            this->forwardRemainingInputTags(inputSpans, outputSpans);
+            return;
+        }
         const std::size_t                                 sps = _sps;
         std::optional<property_map>                       cachedSettings;
         std::vector<std::pair<std::size_t, property_map>> arriving;

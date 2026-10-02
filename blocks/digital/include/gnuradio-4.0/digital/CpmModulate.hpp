@@ -88,8 +88,14 @@ Turning bits into that grid is an affine map on two levels and a Gray map above 
     }
 
     /// @brief One symbol becomes `samples_per_symbol` outputs, so a tag at input `t` belongs at output `sps*t`.
+    /// The framework's end-of-stream call passes `processedIn` 0, and the tags the input holds at or past its read
+    /// position leave at the end-of-stream index by the framework's default rule.
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (processedIn == 0UZ) {
+            this->forwardRemainingInputTags(inputSpans, outputSpans);
+            return;
+        }
         const auto                                        sps = static_cast<std::size_t>(samples_per_symbol.value);
         std::optional<property_map>                       cachedSettings;
         std::vector<std::pair<std::size_t, property_map>> arriving;
