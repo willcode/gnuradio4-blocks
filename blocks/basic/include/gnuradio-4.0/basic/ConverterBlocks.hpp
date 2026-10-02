@@ -65,7 +65,7 @@ namespace detail {
 
 /*
  * The converters below are `math::Unary` blocks whose operations name the ports these blocks have always had:
- * `in` and `imag`, `in` and `real`, `in` and `arg`, `rad` and `deg`, `deg` and `rad`.
+ * `in` and `imag`, `in` and `real`, `rad` and `deg`, `deg` and `rad`.
  */
 
 template<typename Derived, typename T, typename R>
@@ -86,16 +86,6 @@ struct RealPorts : Block<Derived> {
     PortOut<R> real;
 
     GR_MAKE_REFLECTABLE(RealPorts, in, real);
-};
-
-template<typename Derived, typename T, typename R>
-struct ArgPorts : Block<Derived> {
-    using Block<Derived>::Block;
-
-    PortIn<T>  in;
-    PortOut<R> arg;
-
-    GR_MAKE_REFLECTABLE(ArgPorts, in, arg);
 };
 
 template<typename Derived, typename T, typename R>
@@ -130,12 +120,6 @@ struct RealOp : math::unary::Real {
     using ports = RealPorts<Derived, T, R>;
 };
 
-struct ArgOp : math::unary::Phase {
-    using Description = Doc<"@brief basic block to calculate the argument (phase angle, [radians]) of a complex input stream">;
-    template<typename Derived, typename T, typename R>
-    using ports = ArgPorts<Derived, T, R>;
-};
-
 struct RadiansToDegreeOp : math::unary::RadToDeg {
     using Description = Doc<"@brief convert radians to degree">;
     template<typename Derived, typename T, typename R>
@@ -159,11 +143,6 @@ GR_REGISTER_BLOCK("gr::blocks::basic::Real", gr::blocks::basic::Real, [T], [std:
 template<typename T>
 requires std::is_arithmetic_v<T> || meta::complex_like<T>
 using Real = math::Unary<detail::RealOp, T>;
-
-GR_REGISTER_BLOCK("gr::blocks::basic::Arg", gr::blocks::basic::Arg, [T], [std::complex<float>])
-template<typename T>
-requires std::is_arithmetic_v<T> || meta::complex_like<T>
-using Arg = math::Unary<detail::ArgOp, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::basic::RadiansToDegree", gr::blocks::basic::RadiansToDegree, [T], [float])
 template<std::floating_point T>

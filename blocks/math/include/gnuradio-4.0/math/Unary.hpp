@@ -388,8 +388,8 @@ struct MagnitudeSquared {
 };
 
 /// the argument of a complex sample in radians, in (-pi, pi]; 0 or pi for a real one
-struct Phase {
-    using Description = Doc<"@brief Outputs the phase of each complex sample, in radians.">;
+struct Angle {
+    using Description = Doc<"@brief Outputs the angle of each complex sample, in radians.">;
     template<typename T>
     using result                = meta::fundamental_base_value_type_t<T>;
     static constexpr bool kSimd = false;
@@ -574,9 +574,9 @@ GR_REGISTER_BLOCK("gr::blocks::math::MagnitudeSquared", gr::blocks::math::Magnit
 template<typename T>
 using MagnitudeSquared = Unary<unary::MagnitudeSquared, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Phase", gr::blocks::math::Phase, [T], [std::complex<float>])
+GR_REGISTER_BLOCK("gr::blocks::math::Angle", gr::blocks::math::Angle, [T], [std::complex<float>])
 template<typename T>
-using Phase = Unary<unary::Phase, T>;
+using Angle = Unary<unary::Angle, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::math::Real", gr::blocks::math::Real, [T], [std::complex<float>])
 template<typename T>

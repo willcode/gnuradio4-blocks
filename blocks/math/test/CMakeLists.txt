@@ -43,7 +43,7 @@ foreach(
   unary-deg-to-rad
   unary-rad-to-deg
   unary-magnitude-squared
-  unary-phase
+  unary-angle
   unary-real
   unary-imag
   binary-multiply-conjugate

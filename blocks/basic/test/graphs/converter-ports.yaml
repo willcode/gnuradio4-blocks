@@ -21,7 +21,7 @@ blocks:
   - id: gr::blocks::basic::Imag<complex<float32>>
     parameters:
       name: imag
-  - id: gr::blocks::basic::Arg<complex<float32>>
+  - id: gr::blocks::math::Angle<complex<float32>>
     parameters:
       name: arg
   - id: gr::blocks::testing::ExpectSink<float32>
@@ -95,7 +95,7 @@ connections:
   - [abs, out, abs_sink, in]
   - [real, real, real_sink, in]
   - [imag, imag, imag_sink, in]
-  - [arg, arg, arg_sink, in]
+  - [arg, out, arg_sink, in]
   - [radians_source, out, to_degree, rad]
   - [to_degree, deg, degree_sink, in]
   - [degree_source, out, to_radians, deg]
