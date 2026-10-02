@@ -1,25 +1,9 @@
 # Modulo: out = the remainder of a / b with the sign of a; 0 where b is 0.
-#   uint8:   (200,0) -> 0, (200,255) -> 200, (255,255) -> 0, (7,3) -> 1; 255 is the maximum of the type
 #   int16:   (7,3) -> 1, (-7,3) -> -1, (7,-3) -> 1, (-7,-3) -> -1, (5,0) -> 0, (-32768,-1) -> 0, (0,4) -> 0
 #   int32:   the same first six with -2147483648, and (100000,7) -> 100000 - 7 * 14285 = 5
 #   real:    (5.5,2) -> 1.5, (-5.5,2) -> -1.5, (5.5,-2) -> 1.5, (2,0) -> 0, (0,3) -> 0,
 #            (10,0.75) -> 10 - 13 * 0.75 = 0.25; fmod is exact, so no tolerance
 blocks:
-  - id: gr::blocks::testing::VectorSource<uint8>
-    parameters:
-      name: source_a_u8
-      values: [200, 200, 255, 7]
-  - id: gr::blocks::testing::VectorSource<uint8>
-    parameters:
-      name: source_b_u8
-      values: [0, 255, 255, 3]
-  - id: gr::blocks::math::Modulo<uint8>
-    parameters:
-      name: modulo_u8
-  - id: gr::blocks::testing::ExpectSink<uint8>
-    parameters:
-      name: sink_u8
-      expected: [0, 200, 0, 1]
   - id: gr::blocks::testing::VectorSource<int16>
     parameters:
       name: source_a_i16
@@ -81,9 +65,6 @@ blocks:
       name: sink_f64
       expected: !!float64 [1.5, -1.5, 1.5, 0.0, 0.0, 0.25]
 connections:
-  - [source_a_u8, out, modulo_u8, a]
-  - [source_b_u8, out, modulo_u8, b]
-  - [modulo_u8, out, sink_u8, in]
   - [source_a_i16, out, modulo_i16, a]
   - [source_b_i16, out, modulo_i16, b]
   - [modulo_i16, out, sink_i16, in]

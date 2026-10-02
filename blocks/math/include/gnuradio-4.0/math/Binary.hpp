@@ -183,7 +183,7 @@ GR_REGISTER_BLOCK("gr::blocks::math::Hypot", gr::blocks::math::Hypot, [T], [ flo
 template<typename T>
 using Hypot = Binary<binary::Hypot, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Modulo", gr::blocks::math::Modulo, [T], [ uint8_t, int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Modulo", gr::blocks::math::Modulo, [T], [ int16_t, int32_t, float, double ])
 template<typename T>
 using Modulo = Binary<binary::Modulo, T>;
 
