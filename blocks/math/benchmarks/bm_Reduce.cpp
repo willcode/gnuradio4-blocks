@@ -64,7 +64,7 @@ Arm makeArm(std::string name, std::size_t n) {
 
 int main() {
     using namespace gr::blocks::math;
-    std::array arms{makeArm<Sum, float>("Sum<float32> n 4", 4UZ), makeArm<Sum, float>("Sum<float32> n 64", 64UZ), makeArm<ReduceMax, float>("ReduceMax<float32> n 4", 4UZ), makeArm<ReduceMax, float>("ReduceMax<float32> n 64", 64UZ), makeArm<Rms, std::complex<float>>("Rms<complex<float32>> n 64", 64UZ)};
+    std::array arms{makeArm<Sum, float>("Sum<float32> n 4", 4UZ), makeArm<Sum, float>("Sum<float32> n 64", 64UZ), makeArm<Max, float>("Max<float32> n 4", 4UZ), makeArm<Max, float>("Max<float32> n 64", 64UZ), makeArm<Rms, std::complex<float>>("Rms<complex<float32>> n 64", 64UZ)};
 
     // the arms interleaved pass by pass, the warm-up passes discarded
     for (std::size_t round = 0UZ; round < kWarmUp + kRounds; ++round) {

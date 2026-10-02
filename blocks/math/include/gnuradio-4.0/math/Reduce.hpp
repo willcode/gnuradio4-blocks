@@ -293,13 +293,13 @@ GR_REGISTER_BLOCK("gr::blocks::math::Mean", gr::blocks::math::Mean, [T], [ int16
 template<typename T>
 using Mean = Reduce<reduce::Mean, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::ReduceMax", gr::blocks::math::ReduceMax, [T], [ uint8_t, int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Max", gr::blocks::math::Max, [T], [ uint8_t, int16_t, int32_t, float, double ])
 template<typename T>
-using ReduceMax = Reduce<reduce::Max, T>;
+using Max = Reduce<reduce::Max, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::ReduceMin", gr::blocks::math::ReduceMin, [T], [ uint8_t, int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Min", gr::blocks::math::Min, [T], [ uint8_t, int16_t, int32_t, float, double ])
 template<typename T>
-using ReduceMin = Reduce<reduce::Min, T>;
+using Min = Reduce<reduce::Min, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::math::Argmax", gr::blocks::math::Argmax, [T], [ uint8_t, int16_t, int32_t, float, double ])
 template<typename T>

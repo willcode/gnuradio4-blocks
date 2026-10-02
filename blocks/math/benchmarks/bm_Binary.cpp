@@ -82,7 +82,7 @@ Arm makeArm(std::string name) {
 
 int main() {
     using namespace gr::blocks::math;
-    std::array arms{makeArm<Max, float>("Max<float32>"), makeArm<MultiplyConjugate, std::complex<float>>("MultiplyConjugate<complex<float32>>"), makeArm<Hypot, float>("Hypot<float32>")};
+    std::array arms{makeArm<Maximum, float>("Maximum<float32>"), makeArm<MultiplyConjugate, std::complex<float>>("MultiplyConjugate<complex<float32>>"), makeArm<Hypot, float>("Hypot<float32>")};
 
     // the arms interleaved pass by pass, the warm-up passes discarded
     for (std::size_t round = 0UZ; round < kWarmUp + kRounds; ++round) {

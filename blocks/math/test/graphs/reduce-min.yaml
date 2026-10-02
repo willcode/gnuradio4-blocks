@@ -1,4 +1,4 @@
-# ReduceMin: one output per group of n, the smallest sample of the group. The samples past the last whole
+# Min: one output per group of n, the smallest sample of the group. The samples past the last whole
 # group stay unconsumed at the end of the stream.
 #   uint8, n 2:   0 200 | 7 255 | 3 3 | 9                -> 0, 7, 3; 9 unconsumed
 #   int16, n 4:   -3 0 7 -32768 | -5 -9 -1 -2 | 4 4      -> -32768, -9; 4 4 unconsumed
@@ -13,7 +13,7 @@ blocks:
     parameters:
       name: source_u8
       values: [0, 200, 7, 255, 3, 3, 9]
-  - id: gr::blocks::math::ReduceMin<uint8>
+  - id: gr::blocks::math::Min<uint8>
     parameters:
       name: min_u8
       n: 2
@@ -25,7 +25,7 @@ blocks:
     parameters:
       name: source_i16
       values: [-3, 0, 7, -32768, -5, -9, -1, -2, 4, 4]
-  - id: gr::blocks::math::ReduceMin<int16>
+  - id: gr::blocks::math::Min<int16>
     parameters:
       name: min_i16
       n: 4
@@ -37,7 +37,7 @@ blocks:
     parameters:
       name: source_i32
       values: [-3, 0, 100000, -100000]
-  - id: gr::blocks::math::ReduceMin<int32>
+  - id: gr::blocks::math::Min<int32>
     parameters:
       name: min_i32
       n: 1
@@ -59,7 +59,7 @@ blocks:
         - -1.0
         - 8.0
         - 9.0
-  - id: gr::blocks::math::ReduceMin<float32>
+  - id: gr::blocks::math::Min<float32>
     parameters:
       name: min_f32
       n: 4
@@ -71,7 +71,7 @@ blocks:
     parameters:
       name: source_f64
       values: !!float64 [-1.5, 0.0, 2.25, 1e+300, -3.0, -1e+300, 5.0]
-  - id: gr::blocks::math::ReduceMin<float64>
+  - id: gr::blocks::math::Min<float64>
     parameters:
       name: min_f64
       n: 2
@@ -166,7 +166,7 @@ blocks:
         - 100.0
         - 200.0
         - 300.0
-  - id: gr::blocks::math::ReduceMin<float32>
+  - id: gr::blocks::math::Min<float32>
     parameters:
       name: min_f32_long
       n: 40

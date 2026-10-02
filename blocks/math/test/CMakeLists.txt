@@ -48,8 +48,8 @@ foreach(
   unary-real
   unary-imag
   binary-multiply-conjugate
-  binary-max
-  binary-min
+  binary-maximum
+  binary-minimum
   binary-pow
   binary-atan2
   binary-hypot

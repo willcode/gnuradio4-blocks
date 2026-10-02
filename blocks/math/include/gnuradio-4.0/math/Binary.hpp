@@ -163,13 +163,13 @@ GR_REGISTER_BLOCK("gr::blocks::math::MultiplyConjugate", gr::blocks::math::Multi
 template<typename T>
 using MultiplyConjugate = Binary<binary::MultiplyConjugate, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Max", gr::blocks::math::Max, [T], [ uint8_t, int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Maximum", gr::blocks::math::Maximum, [T], [ uint8_t, int16_t, int32_t, float, double ])
 template<typename T>
-using Max = Binary<binary::Max, T>;
+using Maximum = Binary<binary::Max, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Min", gr::blocks::math::Min, [T], [ uint8_t, int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Minimum", gr::blocks::math::Minimum, [T], [ uint8_t, int16_t, int32_t, float, double ])
 template<typename T>
-using Min = Binary<binary::Min, T>;
+using Minimum = Binary<binary::Min, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::math::Pow", gr::blocks::math::Pow, [T], [ float, double ])
 template<typename T>

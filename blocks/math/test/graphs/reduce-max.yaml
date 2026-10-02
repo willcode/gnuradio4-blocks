@@ -1,4 +1,4 @@
-# ReduceMax: one output per group of n, the largest sample of the group. The samples past the last whole
+# Max: one output per group of n, the largest sample of the group. The samples past the last whole
 # group stay unconsumed at the end of the stream.
 #   uint8, n 2:   0 200 | 7 255 | 3 3 | 9                -> 200, 255, 3; 9 unconsumed
 #   int16, n 4:   -3 0 7 -32768 | -5 -9 -1 -2 | 4 4      -> 7, -1; 4 4 unconsumed
@@ -13,7 +13,7 @@ blocks:
     parameters:
       name: source_u8
       values: [0, 200, 7, 255, 3, 3, 9]
-  - id: gr::blocks::math::ReduceMax<uint8>
+  - id: gr::blocks::math::Max<uint8>
     parameters:
       name: max_u8
       n: 2
@@ -25,7 +25,7 @@ blocks:
     parameters:
       name: source_i16
       values: [-3, 0, 7, -32768, -5, -9, -1, -2, 4, 4]
-  - id: gr::blocks::math::ReduceMax<int16>
+  - id: gr::blocks::math::Max<int16>
     parameters:
       name: max_i16
       n: 4
@@ -37,7 +37,7 @@ blocks:
     parameters:
       name: source_i32
       values: [-3, 0, 100000, -100000]
-  - id: gr::blocks::math::ReduceMax<int32>
+  - id: gr::blocks::math::Max<int32>
     parameters:
       name: max_i32
       n: 1
@@ -59,7 +59,7 @@ blocks:
         - -1.0
         - 8.0
         - 9.0
-  - id: gr::blocks::math::ReduceMax<float32>
+  - id: gr::blocks::math::Max<float32>
     parameters:
       name: max_f32
       n: 4
@@ -71,7 +71,7 @@ blocks:
     parameters:
       name: source_f64
       values: !!float64 [-1.5, 0.0, 2.25, 1e+300, -3.0, -1e+300, 5.0]
-  - id: gr::blocks::math::ReduceMax<float64>
+  - id: gr::blocks::math::Max<float64>
     parameters:
       name: max_f64
       n: 2
@@ -166,7 +166,7 @@ blocks:
         - 100.0
         - 200.0
         - 300.0
-  - id: gr::blocks::math::ReduceMax<float32>
+  - id: gr::blocks::math::Max<float32>
     parameters:
       name: max_f32_long
       n: 40
