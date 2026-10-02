@@ -113,7 +113,8 @@ struct FirFilterCore {
      * Input `i` maps to output `round((i + d) / M)`, where `d` is the taps' delay. A half rounds up. A tag whose output
      * a later call makes is held for that call. A tag is placed once, when it crosses, under the delay and the
      * decimation in force then. A later taps or decimation change leaves every held tag where it is. Tags leave in the
-     * order they arrived. A tag held past the stream's last output leaves at the end-of-stream index.
+     * order they arrived. A tag held past the stream's last output leaves at the end-of-stream index, and the
+     * end-of-stream call publishes the input's remaining tags there too.
      *
      * This replaces the framework's forwarding rather than adjusting it, and it is also where a `decimation` change
      * takes its new origin: the change is applied on the settings path, between calls, where neither absolute offset
@@ -122,6 +123,10 @@ struct FirFilterCore {
      */
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (isEndOfStreamCall(outputSpans, processedIn)) {
+            _tags.releaseAtEndOfStream(inputSpans, outputSpans, [this](property_map& tag) { self().scaleSampleRateByChunkRatio(tag); });
+            return;
+        }
         if (_reorigin) {
             gr::for_each_reader_span(
                 [this](auto& span) {
@@ -166,7 +171,8 @@ struct FirFilterCore {
     }
 
     /// @brief Make as many of the outputs of the stream's last input as the output span holds, and publish every held
-    /// tag, at the end-of-stream index for a tag past the last output.
+    /// tag, at the end-of-stream index for a tag past the last output. The end-of-stream call then publishes the tags
+    /// past the last input sample at the same index.
     template<InputSpanLike TInput, OutputSpanLike TOutput>
     [[nodiscard]] work::Status processEpilogue(TInput& input, TOutput& output) {
         if (dropAtStop(self(), _tags, output)) {
@@ -176,7 +182,6 @@ struct FirFilterCore {
         if (outputs > 0UZ) {
             std::ignore = processBulk(std::span<const TSample>(input.data(), outputs * _decimation), std::span<TOut>(output.data(), outputs));
         }
-        _tags.takeRemainder(self().in, static_cast<std::uint64_t>(input.streamIndex) + static_cast<std::uint64_t>(input.size()), [this](property_map& tag) { self().scaleSampleRateByChunkRatio(tag); });
         _tags.release(output, outputs, true);
         output.publish(outputs);
         return work::Status::OK;

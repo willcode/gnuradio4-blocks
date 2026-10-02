@@ -134,7 +134,8 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
      * Input `i` maps to output `round((i*L + d) / M)`, where `d` is the prototype's delay at the interpolated rate. A
      * half rounds up. A tag whose output a later call makes is held for that call. A tag is placed once, when it
      * crosses, under the delay and the ratio in force then. A later rebuild leaves every held tag where it is. Tags
-     * leave in the order they arrived. A tag held past the stream's last output leaves at the end-of-stream index.
+     * leave in the order they arrived. A tag held past the stream's last output leaves at the end-of-stream index, and
+     * the end-of-stream call publishes the input's remaining tags there too.
      *
      * This replaces the framework's forwarding rather than adjusting it: the default publishes a tag at the output
      * index matching its input index, which is only right at a ratio of one. It is also where a ratio change takes its
@@ -144,6 +145,10 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
      */
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (detail::isEndOfStreamCall(outputSpans, processedIn)) {
+            _tags.releaseAtEndOfStream(inputSpans, outputSpans, [this](property_map& tag) { this->scaleSampleRateByChunkRatio(tag); });
+            return;
+        }
         if (_reorigin) {
             gr::for_each_reader_span(
                 [this](auto& span) {
@@ -188,7 +193,8 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
     }
 
     /// @brief Make as many of the outputs of the stream's last input as the output span holds, and publish every held
-    /// tag, at the end-of-stream index for a tag past the last output.
+    /// tag, at the end-of-stream index for a tag past the last output. The end-of-stream call then publishes the tags
+    /// past the last input sample at the same index.
     template<InputSpanLike TInput, OutputSpanLike TOutput>
     [[nodiscard]] work::Status processEpilogue(TInput& input, TOutput& output) {
         if (detail::dropAtStop(*this, _tags, output)) {
@@ -198,7 +204,6 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
         if (chunks > 0UZ) {
             std::ignore = processBulk(std::span<const T>(input.data(), chunks * static_cast<std::size_t>(_decimation)), std::span<T>(output.data(), chunks * static_cast<std::size_t>(_interpolation)));
         }
-        _tags.takeRemainder(this->in, static_cast<std::uint64_t>(input.streamIndex) + static_cast<std::uint64_t>(input.size()), [this](property_map& tag) { this->scaleSampleRateByChunkRatio(tag); });
         _tags.release(output, chunks * static_cast<std::size_t>(_interpolation), true);
         output.publish(chunks * static_cast<std::size_t>(_interpolation));
         return work::Status::OK;

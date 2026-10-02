@@ -1,0 +1,39 @@
+# Two fir_filter blocks in a row, each with b = [0, 0, 1]: out[n] = in[n - 2], a delay of 2 samples,
+# 8 outputs for 8 inputs. A tag on input i leaves on output i + 2 while that output exists, and at the end-of-stream
+# index otherwise.
+#   source tags        1, 7
+#   first filter       3, 8 (7 + 2 lies past the last output; the epilogue places it at the end, 8)
+#   second filter      5, 8 (the tag at 8 sits past the last input; the end-of-stream call places it at 8)
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source
+      values: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+      tag_indices: !!uint32 [1, 7]
+      tag_map:
+        trigger_name: mark
+  - id: gr::blocks::filter::fir_filter<float32>
+    parameters:
+      name: first
+      b: !!float32 [0.0, 0.0, 1.0]
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: after_first
+      expected: [0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [3, 8]
+  - id: gr::blocks::filter::fir_filter<float32>
+    parameters:
+      name: second
+      b: !!float32 [0.0, 0.0, 1.0]
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: after_second
+      expected: [0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [5, 8]
+connections:
+  - [source, out, first, in]
+  - [first, out, after_first, in]
+  - [first, out, second, in]
+  - [second, out, after_second, in]

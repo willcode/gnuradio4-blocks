@@ -83,6 +83,19 @@ inline void holdTag(HeldTags& held, std::uint64_t& latest, std::uint64_t delayed
 }
 
 /**
+ * @brief Tell the framework's end-of-stream call from an ordinary forwardTags() call.
+ *
+ * The end-of-stream call hands the block no input to process and output spans of no samples. Offset 0 of such an
+ * output span is the end-of-stream index.
+ */
+template<typename TOutputSpans>
+[[nodiscard]] bool isEndOfStreamCall(TOutputSpans& outputSpans, std::size_t processedIn) {
+    bool noOutput = true;
+    gr::for_each_writer_span([&noOutput](auto& span) { noOutput = noOutput && span.size() == 0UZ; }, outputSpans);
+    return processedIn == 0UZ && noOutput;
+}
+
+/**
  * @brief The tags a delaying block holds for outputs it has not made yet.
  *
  * A tag leaves on the output that carries its input sample's energy, up to the block's delay past its input. The block
@@ -135,7 +148,9 @@ struct TagDelayLine {
     /**
      * @brief Hold for the end-of-stream index every tag in the tag ring of @p in at or past input offset @p from, each
      * rewritten by @p rewrite. The ring holds such a tag when no call consumed its sample. It also holds the tags past
-     * the last input sample. The `end_of_stream` key is removed, since the framework publishes its own.
+     * the last input sample, where a block upstream publishes the tags it held past its own end. The `end_of_stream`
+     * key is removed, since the framework publishes its own. A block on asynchronous ports calls this from its
+     * epilogue. The framework's end-of-stream call reaches synchronous inputs alone.
      */
     template<typename TPort, typename TRewrite>
     void takeRemainder(TPort& in, std::uint64_t from, TRewrite&& rewrite) {
@@ -154,6 +169,45 @@ struct TagDelayLine {
                 held.emplace_back(kStreamEnd, std::move(tag));
             }
         }
+    }
+
+    /**
+     * @brief Publish at the end-of-stream index every held tag, and every tag of @p inputSpans at or past the read
+     * position, each of the latter rewritten by @p rewrite.
+     *
+     * The framework's end-of-stream call hands the block those tags: the tags on input no call consumed, and the tags
+     * past the last input sample, where a block upstream publishes the tags it held past its own end. A tag before the
+     * read position was taken by an earlier call. The `end_of_stream` key stays behind, since the framework publishes
+     * its own.
+     */
+    template<typename TInputSpans, typename TOutputSpans, typename TRewrite>
+    void releaseAtEndOfStream(TInputSpans& inputSpans, TOutputSpans& outputSpans, TRewrite&& rewrite) {
+        const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+        gr::for_each_reader_span(
+            [&](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const Tag& remaining : span.rawTags) {
+                    if (remaining.index < span.streamIndex) {
+                        continue;
+                    }
+                    property_map tag(remaining.map);
+                    tag.erase(endOfStream);
+                    rewrite(tag);
+                    if (!tag.empty()) {
+                        held.emplace_back(kStreamEnd, std::move(tag));
+                    }
+                }
+            },
+            inputSpans);
+        gr::for_each_writer_span(
+            [this](auto& span) {
+                if (span.isSync && span.isConnected) {
+                    release(span, 0UZ, true);
+                }
+            },
+            outputSpans);
     }
 
     /// @brief The outputs a call of @p chunks input chunks of @p outChunk outputs each makes into a span of @p room
@@ -242,12 +296,24 @@ struct DelayedTagFilter {
     /**
      * @brief Hold each tag for its delayed output and publish those this call makes. Without a delay, the framework's
      * own forwarding runs. Tags still held from an earlier delay then leave on the call's first output, ahead of every
-     * tag the framework forwards.
+     * tag the framework forwards. The end-of-stream call publishes every held tag and the input's remaining tags at the
+     * end-of-stream index.
      */
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
         const std::size_t                  decimation = self().tagDecimation();
         const std::optional<std::uint64_t> twiceDelay = self().twiceTagDelay();
+        if (isEndOfStreamCall(outputSpans, processedIn)) {
+            std::optional<property_map> cachedSettings;
+            _tags.releaseAtEndOfStream(inputSpans, outputSpans, [&](property_map& tag) {
+                if (twiceDelay.has_value()) {
+                    self().scaleSampleRateByChunkRatio(tag);
+                } else {
+                    tag = self().filterAndSubstituteTag(tag, cachedSettings);
+                }
+            });
+            return;
+        }
         if (!twiceDelay.has_value()) {
             gr::for_each_writer_span(
                 [this](auto& span) {
@@ -310,31 +376,28 @@ struct DelayedTagFilter {
      * tag, at the end-of-stream index for a tag past the last output.
      *
      * Without a delay the epilogue makes no output. The tags that no call forwarded leave at the end-of-stream index
-     * through the framework's key filter. The tags of a partial last chunk are among them.
+     * through the framework's key filter. The tags of a partial last chunk are among them. The end-of-stream call then
+     * publishes the tags past the last input sample at the same index.
      */
     template<InputSpanLike TInput, OutputSpanLike TOutput>
     [[nodiscard]] work::Status processEpilogue(TInput& input, TOutput& output) {
         if (dropAtStop(self(), _tags, output)) {
             return work::Status::OK;
         }
-        const std::uint64_t past    = static_cast<std::uint64_t>(input.streamIndex) + static_cast<std::uint64_t>(input.size());
-        std::size_t         outputs = 0UZ;
+        std::size_t outputs = 0UZ;
         if (self().twiceTagDelay().has_value()) {
             outputs = std::min(input.size() / self().tagDecimation(), output.size());
             if (outputs > 0UZ) {
                 std::ignore = processBulk(std::span<const TIn>(input.data(), outputs * self().tagDecimation()), std::span<TOut>(output.data(), outputs));
             }
-            _tags.takeRemainder(self().in, past, [this](property_map& tag) { self().scaleSampleRateByChunkRatio(tag); });
         } else {
-            std::optional<property_map> cachedSettings;
-            const auto                  forwarded = [&](property_map& tag) { tag = self().filterAndSubstituteTag(tag, cachedSettings); };
             if (input.size() < self().tagDecimation()) {
+                std::optional<property_map> cachedSettings;
                 _tags.take(input, input.size(), [&](std::uint64_t, property_map& tag) {
-                    forwarded(tag);
+                    tag = self().filterAndSubstituteTag(tag, cachedSettings);
                     return TagDelayLine::kStreamEnd;
                 });
             }
-            _tags.takeRemainder(self().in, past, forwarded);
         }
         _tags.release(output, outputs, true);
         output.publish(outputs);

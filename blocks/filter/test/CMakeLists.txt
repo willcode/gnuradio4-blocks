@@ -30,3 +30,30 @@ target_link_libraries(qa_Channelizer PRIVATE gr-filter gr-testing)
 # The sdr module registers qa_DcBlocker for its own block; this one tests filter/DcBlocker.hpp.
 add_ut_test(qa_FilterDcBlocker)
 target_link_libraries(qa_FilterDcBlocker PRIVATE gr-filter gr-testing)
+
+# each block forwards the tags it holds and the tags past its last input at the end-of-stream index
+foreach(_graph fir-filter-end-tags time-domain-fir-end-tags decimator-end-tags)
+  string(
+    REPLACE "-"
+            "_"
+            _test
+            "${_graph}")
+  gr_add_graph_test(
+    graph_filter_${_test}
+    graphs/${_graph}.yaml
+    PLUGIN_DIRS
+    $<TARGET_FILE_DIR:GrFilterBlocksShared>)
+endforeach()
+foreach(_graph rational-resampler-end-tags staged-decimator-end-tags)
+  string(
+    REPLACE "-"
+            "_"
+            _test
+            "${_graph}")
+  gr_add_graph_test(
+    graph_filter_${_test}
+    graphs/${_graph}.yaml
+    PLUGIN_DIRS
+    $<TARGET_FILE_DIR:GrFilterBlocksShared>
+    $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+endforeach()
