@@ -250,7 +250,7 @@ struct CcsdsRsFrames {
             m77[std::pmr::string("output_bit_order")] = gr::pmt::Value(std::pmr::string("MsbFirst"));
             m77[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("packer"));
             m76[std::pmr::string("parameters")] = gr::pmt::Value(std::move(m77));
-            m76[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::digital::RecordRepackBits"));
+            m76[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::math::RecordRepackBits"));
             e75 = gr::pmt::Value(std::move(m76));
             t62.push_back(std::move(e75));
             gr::pmt::Value e78;

@@ -204,12 +204,12 @@ inert.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        detail::convertWholePeriods(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), "gr::blocks::digital::PackBits");
+        detail::convertWholePeriods(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), "gr::blocks::math::PackBits");
         return work::Status::OK;
     }
 
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        outSpan.publish(detail::convertTail(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), flush_partial, "gr::blocks::digital::PackBits"));
+        outSpan.publish(detail::convertTail(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), flush_partial, "gr::blocks::math::PackBits"));
         return work::Status::OK;
     }
 };
@@ -277,12 +277,12 @@ unchanged: the item rate rises by `k` but the sample rate does not.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        detail::convertWholePeriods(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), "gr::blocks::digital::UnpackBits");
+        detail::convertWholePeriods(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), "gr::blocks::math::UnpackBits");
         return work::Status::OK;
     }
 
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        outSpan.publish(detail::convertTail(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), flush_partial, "gr::blocks::digital::UnpackBits"));
+        outSpan.publish(detail::convertTail(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), flush_partial, "gr::blocks::math::UnpackBits"));
         return work::Status::OK;
     }
 };
@@ -365,12 +365,12 @@ nothing can trail it.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        detail::convertWholePeriods(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), "gr::blocks::digital::RepackBits");
+        detail::convertWholePeriods(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), "gr::blocks::math::RepackBits");
         return work::Status::OK;
     }
 
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        outSpan.publish(detail::convertTail(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), flush_partial, "gr::blocks::digital::RepackBits"));
+        outSpan.publish(detail::convertTail(_repack, std::span<const std::uint8_t>(inSpan.data(), inSpan.size()), std::span<std::uint8_t>(outSpan.data(), outSpan.size()), flush_partial, "gr::blocks::math::RepackBits"));
         return work::Status::OK;
     }
 };
@@ -429,7 +429,7 @@ struct RecordRepackBits : Block<RecordRepackBits> {
 
     void stop() {
         if (nRecordsRefused > 0ULL) {
-            std::println(stderr, "gr::blocks::digital::RecordRepackBits '{}': {} record(s) refused, their bit count not a whole number of {}-bit fields", this->name, nRecordsRefused, bits_out.value);
+            std::println(stderr, "gr::blocks::math::RecordRepackBits '{}': {} record(s) refused, their bit count not a whole number of {}-bit fields", this->name, nRecordsRefused, bits_out.value);
         }
     }
 

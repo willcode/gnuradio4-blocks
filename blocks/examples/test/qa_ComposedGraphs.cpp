@@ -34,7 +34,6 @@
 #include <gnuradio-4.0/channel/DopplerShift.hpp>
 #include <gnuradio-4.0/channel/RangeDelay.hpp>
 #include <gnuradio-4.0/digital/AccessCodeCorrelator.hpp>
-#include <gnuradio-4.0/digital/BitPacking.hpp>
 #include <gnuradio-4.0/digital/CrcBlocks.hpp>
 #include <gnuradio-4.0/digital/DelimiterExtractor.hpp>
 #include <gnuradio-4.0/digital/DelimiterFramer.hpp>
@@ -48,6 +47,7 @@
 #include <gnuradio-4.0/fileio/WavBlocks.hpp>
 #include <gnuradio-4.0/filter/DcBlocker.hpp>
 #include <gnuradio-4.0/filter/DesignedFilter.hpp>
+#include <gnuradio-4.0/math/BitPacking.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/recipes/AfskDemod.hpp>
@@ -1055,7 +1055,7 @@ struct PassBits {
     auto& rs = flow.emplaceBlock<gr::blocks::fec::RsEncode>(ao40ReedSolomon());
     // The randomizer runs over the coded block, data and parity alike, and one record is one epoch.
     auto& random = flow.emplaceBlock<gr::blocks::digital::AdditiveScrambler<Record>>(ao40Randomizer());
-    auto& unpack = flow.emplaceBlock<gr::blocks::digital::RecordRepackBits>({{"bits_in", gr::Size_t{8}}, {"bits_out", gr::Size_t{1}}});
+    auto& unpack = flow.emplaceBlock<gr::blocks::math::RecordRepackBits>({{"bits_in", gr::Size_t{8}}, {"bits_out", gr::Size_t{1}}});
     auto& conv   = flow.emplaceBlock<gr::blocks::fec::ConvEncode>(ao40Trellis());
     auto& sync   = flow.emplaceBlock<SyncInsert>();
     sync._word   = syncVector();
@@ -1292,7 +1292,7 @@ template<typename TPlant>
     trellis["termination"]      = std::string("terminated");
     auto& viterbi               = flow.emplaceBlock<gr::blocks::fec::ViterbiDecodeSoft>(trellis);
     auto& decoded               = flow.emplaceBlock<ItemCounter<Record>>();
-    auto& pack                  = flow.emplaceBlock<gr::blocks::digital::RecordRepackBits>({{"bits_in", gr::Size_t{1}}, {"bits_out", gr::Size_t{8}}});
+    auto& pack                  = flow.emplaceBlock<gr::blocks::math::RecordRepackBits>({{"bits_in", gr::Size_t{1}}, {"bits_out", gr::Size_t{8}}});
     auto& derandom              = flow.emplaceBlock<gr::blocks::digital::AdditiveScrambler<Record>>(ao40Randomizer());
     auto& rs                    = flow.emplaceBlock<gr::blocks::fec::RsDecode>(ao40ReedSolomon());
     auto& sink                  = flow.emplaceBlock<RecordSink>();

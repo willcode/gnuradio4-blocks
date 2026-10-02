@@ -95,11 +95,3 @@ set_tests_properties(graph_math_stream_matrix_bad_extents PROPERTIES PASS_REGULA
                                                                      "matrix of extents 6 does not divide into rows 4")
 set_tests_properties(graph_math_stream_dot_product_empty
                      PROPERTIES PASS_REGULAR_EXPRESSION "vector of extents 0 is not 1-D with at least one entry")
-
-# the packing blocks under their compatibility keys, which the digital plugin registers
-gr_add_graph_test(
-  graph_math_bits_pack_roundtrip_digital
-  graphs/bits-pack-roundtrip-digital.yaml
-  PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrMathBlocksShared>
-  $<TARGET_FILE_DIR:GrDigitalBlocksShared>)

@@ -294,7 +294,7 @@ struct CcsdsConcatenatedFrames {
             m90[std::pmr::string("output_bit_order")] = gr::pmt::Value(std::pmr::string("MsbFirst"));
             m90[std::pmr::string("name")] = gr::pmt::Value(std::pmr::string("packer"));
             m89[std::pmr::string("parameters")] = gr::pmt::Value(std::move(m90));
-            m89[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::digital::RecordRepackBits"));
+            m89[std::pmr::string("id")] = gr::pmt::Value(std::pmr::string("gr::blocks::math::RecordRepackBits"));
             e88 = gr::pmt::Value(std::move(m89));
             t72.push_back(std::move(e88));
             gr::pmt::Value e91;

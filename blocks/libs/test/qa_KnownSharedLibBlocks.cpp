@@ -162,10 +162,10 @@ const boost::ut::suite TagTests = [] {
         expect(registry.contains("gr::blocks::basic::StreamToDataSet<float32>"sv));
         expect(registry.contains("gr::blocks::electrical::ThreePhasePowerMetrics<float32>"sv));
         expect(registry.contains("gr::blocks::testing::TagSource<float32>"sv));
-        expect(registry.contains("gr::blocks::digital::PackBits"sv));
-        expect(registry.contains("gr::blocks::digital::UnpackBits"sv));
-        expect(registry.contains("gr::blocks::digital::RepackBits"sv));
-        expect(registry.contains("gr::blocks::digital::RecordRepackBits"sv));
+        expect(registry.contains("gr::blocks::math::PackBits"sv));
+        expect(registry.contains("gr::blocks::math::UnpackBits"sv));
+        expect(registry.contains("gr::blocks::math::RepackBits"sv));
+        expect(registry.contains("gr::blocks::math::RecordRepackBits"sv));
         expect(registry.contains("gr::blocks::digital::AdditiveScrambler<uint8>"sv));
         expect(registry.contains("gr::blocks::digital::AdditiveScrambler<gr::DataSet<uint8>>"sv));
         expect(registry.contains("gr::blocks::digital::MultiplicativeScrambler"sv));
@@ -214,7 +214,7 @@ const boost::ut::suite TagTests = [] {
         expect(registry.create("gr::blocks::filter::BasicDecimatingFilter<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::filter::FrequencyEstimatorFrequencyDomainDecimating<float32>"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::basic::StreamToDataSet<float32>"sv, {}) != nullptr);
-        expect(registry.create("gr::blocks::digital::RepackBits"sv, {}) != nullptr);
+        expect(registry.create("gr::blocks::math::RepackBits"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::digital::AdditiveScrambler<uint8>"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::digital::ManchesterDecoder"sv, {}) != nullptr);
         expect(registry.create("gr::blocks::basic::DataSetToStream<float32>"sv, {}) != nullptr);
