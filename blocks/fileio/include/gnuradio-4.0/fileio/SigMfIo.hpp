@@ -1331,7 +1331,7 @@ private:
             }
         }
         for (gr::sigmf::Capture& segment : metadata.captures) {
-            liftCarried(segment.extra, gr::sigmf::detail::kCaptureKnownKeys, segment, countReconciliation);
+            liftCarried(segment.extra, gr::sigmf::kCaptureKnownKeys, segment, countReconciliation);
         }
         if (nSampleRateChanges != 0U) {
             declareExtension(metadata.global.extra);
@@ -1345,7 +1345,7 @@ private:
         }
         metadata.annotations = _annotations;
         for (gr::sigmf::Annotation& annotation : metadata.annotations) {
-            dropKnown(annotation.extra, gr::sigmf::detail::kAnnotationKnownKeys, countReconciliation);
+            dropKnown(annotation.extra, gr::sigmf::kAnnotationKnownKeys, countReconciliation);
         }
         return metadata;
     }

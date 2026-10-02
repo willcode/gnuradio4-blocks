@@ -5,6 +5,7 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/BlockingSync.hpp>
 #include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/meta/utils.hpp>
 
 #include <gnuradio-4.0/algorithm/signal/NoiseGenerator.hpp>
 #include <gnuradio-4.0/algorithm/signal/SignalGeneratorCore.hpp>
@@ -256,7 +257,7 @@ Operating modes:
 
         if (signal_type == UniformNoise || signal_type == TriangularNoise || signal_type == GaussianNoise) {
             _currentTime += _timeTick;
-            if constexpr (gr::signal::detail::is_complex_v<T>) {
+            if constexpr (gr::meta::complex_like<T>) {
                 using F           = typename T::value_type;
                 const auto sample = _noise.generateComplexSample();
                 return T(static_cast<F>(sample.real()), static_cast<F>(sample.imag()));
@@ -271,14 +272,14 @@ Operating modes:
             const bool   expired = dur > 0. && _currentTime > dur;
             _currentTime += _timeTick;
             if (expired) {
-                if constexpr (gr::signal::detail::is_complex_v<T>) {
+                if constexpr (gr::meta::complex_like<T>) {
                     using F = typename T::value_type;
                     return T(static_cast<F>(sv), F(0));
                 } else {
                     return toOutputType(sv);
                 }
             }
-            if constexpr (gr::signal::detail::is_complex_v<T>) {
+            if constexpr (gr::meta::complex_like<T>) {
                 using F           = typename T::value_type;
                 const auto sample = _tone.generateComplexSample();
                 return T(static_cast<F>(sample.real()), static_cast<F>(sample.imag()));
@@ -313,7 +314,7 @@ Operating modes:
         }
         _currentTime += _timeTick;
 
-        if constexpr (gr::signal::detail::is_complex_v<T>) {
+        if constexpr (gr::meta::complex_like<T>) {
             using F = typename T::value_type;
             return T(static_cast<F>(value), F(0));
         } else {
