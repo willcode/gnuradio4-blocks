@@ -20,9 +20,9 @@
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
-#include <gnuradio-4.0/algorithm/MeasurementSlot.hpp>
 #include <gnuradio-4.0/algorithm/digital/AdaptiveFir.hpp>
 #include <gnuradio-4.0/algorithm/digital/Constellation.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementSlot.hpp>
 
 #include <gnuradio-4.0/digital/ConstellationSettings.hpp>
 

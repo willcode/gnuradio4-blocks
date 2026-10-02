@@ -19,7 +19,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
-#include <gnuradio-4.0/algorithm/MeasurementSlot.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementSlot.hpp>
 #include <gnuradio-4.0/algorithm/signal/Phasor.hpp>
 #include <gnuradio-4.0/algorithm/timing/FrequencySchedule.hpp>
 #include <gnuradio-4.0/algorithm/timing/SampleClock.hpp>

@@ -22,9 +22,9 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
-#include <gnuradio-4.0/algorithm/MeasurementRecord.hpp>
-#include <gnuradio-4.0/algorithm/MeasurementSlot.hpp>
 #include <gnuradio-4.0/algorithm/digital/Constellation.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementRecord.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementSlot.hpp>
 
 #include <gnuradio-4.0/digital/ConstellationSettings.hpp>
 

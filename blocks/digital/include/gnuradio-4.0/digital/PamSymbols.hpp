@@ -16,8 +16,8 @@
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/DataSet.hpp>
 #include <gnuradio-4.0/Port.hpp>
-#include <gnuradio-4.0/algorithm/MeasurementRecord.hpp>
-#include <gnuradio-4.0/algorithm/MeasurementSlot.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementRecord.hpp>
+#include <gnuradio-4.0/algorithm/measurement/MeasurementSlot.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
 namespace gr::blocks::digital {
