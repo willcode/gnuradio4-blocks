@@ -1,0 +1,96 @@
+# Mean: one output per group of n, the mean of the group; an integer mean is the 64-bit sum over n, truncated
+# toward zero. The samples past the last whole group stay unconsumed at the end of the stream.
+#   int16, n 4:   30000 20000 10000 0 | -7 0 2 0 | 1 1  -> 60000/4 = 15000 (a 16-bit sum would wrap), -5/4 -> -1
+#   int32, n 2:   2e9 2e9 | -3 0 | 7 2 | 9               -> 2e9, -3/2 -> -1, 9/2 -> 4; 9 unconsumed
+#   float32, n 4: -1.5 0 2.5 4 | 0.25 -0.25 3 1 | 8 9    -> 1.25, 1; 8 9 unconsumed
+#   float64, n 1: -1.5 0 2.5 1e300                       -> the input
+#   complex, n 2: (1,-2) (-0.5,3) | (0,0) (2.5,-1) | (7,7) -> (0.25,0.5), (1.25,-0.5); (7,7) unconsumed
+blocks:
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_i16
+      values: [30000, 20000, 10000, 0, -7, 0, 2, 0, 1, 1]
+  - id: gr::blocks::math::Mean<int16>
+    parameters:
+      name: mean_i16
+      n: 4
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16
+      expected: [15000, -1]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_i32
+      values: [2000000000, 2000000000, -3, 0, 7, 2, 9]
+  - id: gr::blocks::math::Mean<int32>
+    parameters:
+      name: mean_i32
+      n: 2
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink_i32
+      expected: [2000000000, -1, 4]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32
+      values: !!float32
+        - -1.5
+        - 0.0
+        - 2.5
+        - 4.0
+        - 0.25
+        - -0.25
+        - 3.0
+        - 1.0
+        - 8.0
+        - 9.0
+  - id: gr::blocks::math::Mean<float32>
+    parameters:
+      name: mean_f32
+      n: 4
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [1.25, 1.0]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_f64
+      values: !!float64 [-1.5, 0.0, 2.5, 1e+300]
+  - id: gr::blocks::math::Mean<float64>
+    parameters:
+      name: mean_f64
+      n: 1
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [-1.5, 0.0, 2.5, 1e+300]
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32
+      values: !!complex32
+        - (1.0, -2.0)
+        - (-0.5, 3.0)
+        - (0.0, 0.0)
+        - (2.5, -1.0)
+        - (7.0, 7.0)
+  - id: gr::blocks::math::Mean<complex<float32>>
+    parameters:
+      name: mean_c32
+      n: 2
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32
+      expected: !!complex32
+        - (0.25, 0.5)
+        - (1.25, -0.5)
+connections:
+  - [source_i16, out, mean_i16, in]
+  - [mean_i16, out, sink_i16, in]
+  - [source_i32, out, mean_i32, in]
+  - [mean_i32, out, sink_i32, in]
+  - [source_f32, out, mean_f32, in]
+  - [mean_f32, out, sink_f32, in]
+  - [source_f64, out, mean_f64, in]
+  - [mean_f64, out, sink_f64, in]
+  - [source_c32, out, mean_c32, in]
+  - [mean_c32, out, sink_c32, in]

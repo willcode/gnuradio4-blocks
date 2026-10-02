@@ -1,0 +1,196 @@
+# Sum: one output per group of n, the sum of the group; an integer sum is computed in 64 bits and narrowed.
+# The samples past the last whole group stay unconsumed at the end of the stream and give no output.
+#   int16, n 4:   30000 20000 -1 0 | -7 0 2 9 | 5 6     -> 49999 - 65536 = -15537, 4; 5 6 unconsumed
+#   int32, n 2:   2e9 2e9 | -3 0 | 7 1 | 9               -> 4e9 - 2^32 = -294967296, -3, 8; 9 unconsumed
+#   float32, n 4: -1.5 0 2.5 4 | 0.25 -0.25 3 1 | 8 9    -> 5, 4; 8 9 unconsumed
+#   float64, n 1: -1.5 0 2.5 1e300                       -> the input
+#   complex, n 2: (1,-2) (-0.5,3) | (0,0) (2.5,-1) | (7,7) -> (0.5,1), (2.5,-1); (7,7) unconsumed
+#   float32 long, n 40: a permutation of -20..19 | 19 down to -20 | 100 200 300 unconsumed;
+#                      groups of 40 fill whole simd vectors
+#                      -> -20, -20
+blocks:
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_i16
+      values: [30000, 20000, -1, 0, -7, 0, 2, 9, 5, 6]
+  - id: gr::blocks::math::Sum<int16>
+    parameters:
+      name: sum_i16
+      n: 4
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16
+      expected: [-15537, 4]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_i32
+      values: [2000000000, 2000000000, -3, 0, 7, 1, 9]
+  - id: gr::blocks::math::Sum<int32>
+    parameters:
+      name: sum_i32
+      n: 2
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink_i32
+      expected: [-294967296, -3, 8]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32
+      values: !!float32
+        - -1.5
+        - 0.0
+        - 2.5
+        - 4.0
+        - 0.25
+        - -0.25
+        - 3.0
+        - 1.0
+        - 8.0
+        - 9.0
+  - id: gr::blocks::math::Sum<float32>
+    parameters:
+      name: sum_f32
+      n: 4
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [5.0, 4.0]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_f64
+      values: !!float64 [-1.5, 0.0, 2.5, 1e+300]
+  - id: gr::blocks::math::Sum<float64>
+    parameters:
+      name: sum_f64
+      n: 1
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [-1.5, 0.0, 2.5, 1e+300]
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32
+      values: !!complex32
+        - (1.0, -2.0)
+        - (-0.5, 3.0)
+        - (0.0, 0.0)
+        - (2.5, -1.0)
+        - (7.0, 7.0)
+  - id: gr::blocks::math::Sum<complex<float32>>
+    parameters:
+      name: sum_c32
+      n: 2
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32
+      expected: !!complex32
+        - (0.5, 1.0)
+        - (2.5, -1.0)
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32_long
+      values: !!float32
+        - -20.0
+        - -13.0
+        - -6.0
+        - 1.0
+        - 8.0
+        - 15.0
+        - -18.0
+        - -11.0
+        - -4.0
+        - 3.0
+        - 10.0
+        - 17.0
+        - -16.0
+        - -9.0
+        - -2.0
+        - 5.0
+        - 12.0
+        - 19.0
+        - -14.0
+        - -7.0
+        - 0.0
+        - 7.0
+        - 14.0
+        - -19.0
+        - -12.0
+        - -5.0
+        - 2.0
+        - 9.0
+        - 16.0
+        - -17.0
+        - -10.0
+        - -3.0
+        - 4.0
+        - 11.0
+        - 18.0
+        - -15.0
+        - -8.0
+        - -1.0
+        - 6.0
+        - 13.0
+        - 19.0
+        - 18.0
+        - 17.0
+        - 16.0
+        - 15.0
+        - 14.0
+        - 13.0
+        - 12.0
+        - 11.0
+        - 10.0
+        - 9.0
+        - 8.0
+        - 7.0
+        - 6.0
+        - 5.0
+        - 4.0
+        - 3.0
+        - 2.0
+        - 1.0
+        - 0.0
+        - -1.0
+        - -2.0
+        - -3.0
+        - -4.0
+        - -5.0
+        - -6.0
+        - -7.0
+        - -8.0
+        - -9.0
+        - -10.0
+        - -11.0
+        - -12.0
+        - -13.0
+        - -14.0
+        - -15.0
+        - -16.0
+        - -17.0
+        - -18.0
+        - -19.0
+        - -20.0
+        - 100.0
+        - 200.0
+        - 300.0
+  - id: gr::blocks::math::Sum<float32>
+    parameters:
+      name: sum_f32_long
+      n: 40
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32_long
+      expected: !!float32 [-20.0, -20.0]
+connections:
+  - [source_i16, out, sum_i16, in]
+  - [sum_i16, out, sink_i16, in]
+  - [source_i32, out, sum_i32, in]
+  - [sum_i32, out, sink_i32, in]
+  - [source_f32, out, sum_f32, in]
+  - [sum_f32, out, sink_f32, in]
+  - [source_f64, out, sum_f64, in]
+  - [sum_f64, out, sink_f64, in]
+  - [source_c32, out, sum_c32, in]
+  - [sum_c32, out, sink_c32, in]
+  - [source_f32_long, out, sum_f32_long, in]
+  - [sum_f32_long, out, sink_f32_long, in]

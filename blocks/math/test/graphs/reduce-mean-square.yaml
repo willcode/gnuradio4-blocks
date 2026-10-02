@@ -1,0 +1,60 @@
+# MeanSquare: one output per group of n, the mean of the squared magnitudes of the group, in the real type.
+# The samples past the last whole group stay unconsumed at the end of the stream.
+#   float32, n 1: -1.5 0 2 3                                    -> 2.25 0 4 9
+#   float64, n 2: -3 4 | 0 2 | -1.5 0.5 | 7                     -> 12.5, 2, 1.25; 7 unconsumed
+#   complex, n 4: (3,4) (0,0) (-1,0) (0,-2) | (1,1) (-1,1) (1,-1) (-1,-1) | (5,5) (6,6)
+#                 -> (25+0+1+4)/4 = 7.5, 8/4 = 2; (5,5) (6,6) unconsumed
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32
+      values: !!float32 [-1.5, 0.0, 2.0, 3.0]
+  - id: gr::blocks::math::MeanSquare<float32>
+    parameters:
+      name: mean_square_f32
+      n: 1
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [2.25, 0.0, 4.0, 9.0]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_f64
+      values: !!float64 [-3.0, 4.0, 0.0, 2.0, -1.5, 0.5, 7.0]
+  - id: gr::blocks::math::MeanSquare<float64>
+    parameters:
+      name: mean_square_f64
+      n: 2
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [12.5, 2.0, 1.25]
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32
+      values: !!complex32
+        - (3.0, 4.0)
+        - (0.0, 0.0)
+        - (-1.0, 0.0)
+        - (0.0, -2.0)
+        - (1.0, 1.0)
+        - (-1.0, 1.0)
+        - (1.0, -1.0)
+        - (-1.0, -1.0)
+        - (5.0, 5.0)
+        - (6.0, 6.0)
+  - id: gr::blocks::math::MeanSquare<complex<float32>>
+    parameters:
+      name: mean_square_c32
+      n: 4
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_c32
+      expected: !!float32 [7.5, 2.0]
+connections:
+  - [source_f32, out, mean_square_f32, in]
+  - [mean_square_f32, out, sink_f32, in]
+  - [source_f64, out, mean_square_f64, in]
+  - [mean_square_f64, out, sink_f64, in]
+  - [source_c32, out, mean_square_c32, in]
+  - [mean_square_c32, out, sink_c32, in]

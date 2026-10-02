@@ -1,0 +1,67 @@
+# Rms: one output per group of n, the square root of the mean square of the group, in the real type.
+# The samples past the last whole group stay unconsumed at the end of the stream.
+# Tolerance: 4 eps of the output type relative to the expected value (2^-21 for float32, 2^-50 for float64).
+#   float32, n 1: -1.5 0 2 3                                    -> 1.5 0 2 3
+#   float64, n 2: -3 4 | 0 2 | -1.5 0.5 | 7                     -> sqrt(12.5), sqrt(2), sqrt(1.25); 7 unconsumed
+#   complex, n 4: (3,4) (0,0) (-1,0) (0,-2) | (1,1) (-1,1) (1,-1) (-1,-1) | (5,5) (6,6)
+#                 -> sqrt(7.5), sqrt(2); (5,5) (6,6) unconsumed
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32
+      values: !!float32 [-1.5, 0.0, 2.0, 3.0]
+  - id: gr::blocks::math::Rms<float32>
+    parameters:
+      name: rms_f32
+      n: 1
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [1.5, 0.0, 2.0, 3.0]
+      relative_tolerance: 4.76837158203125e-07
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_f64
+      values: !!float64 [-3.0, 4.0, 0.0, 2.0, -1.5, 0.5, 7.0]
+  - id: gr::blocks::math::Rms<float64>
+    parameters:
+      name: rms_f64
+      n: 2
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64
+        - 3.5355339059327378
+        - 1.4142135623730951
+        - 1.118033988749895
+      relative_tolerance: 8.881784197001252e-16
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32
+      values: !!complex32
+        - (3.0, 4.0)
+        - (0.0, 0.0)
+        - (-1.0, 0.0)
+        - (0.0, -2.0)
+        - (1.0, 1.0)
+        - (-1.0, 1.0)
+        - (1.0, -1.0)
+        - (-1.0, -1.0)
+        - (5.0, 5.0)
+        - (6.0, 6.0)
+  - id: gr::blocks::math::Rms<complex<float32>>
+    parameters:
+      name: rms_c32
+      n: 4
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_c32
+      expected: !!float32 [2.7386127875258306, 1.4142135623730951]
+      relative_tolerance: 4.76837158203125e-07
+connections:
+  - [source_f32, out, rms_f32, in]
+  - [rms_f32, out, sink_f32, in]
+  - [source_f64, out, rms_f64, in]
+  - [rms_f64, out, sink_f64, in]
+  - [source_c32, out, rms_c32, in]
+  - [rms_c32, out, sink_c32, in]

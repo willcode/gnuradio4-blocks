@@ -13,8 +13,8 @@ target_link_libraries(qa_ExpressionBulk PRIVATE gr-math gr-testing)
 add_ut_test(qa_Rotator)
 target_link_libraries(qa_Rotator PRIVATE gr-math gr-testing)
 
-# one graph file per Unary, Binary and Bits alias: each chain one VectorSource per input of the alias into the alias
-# into an ExpectSink; and the packing round trip, UnpackBits into PackBits
+# one graph file per Unary, Binary, Bits and Reduce alias: each chain one VectorSource per input of the alias into the
+# alias into an ExpectSink; the packing round trip, UnpackBits into PackBits; and a Reduce tag placement
 foreach(
   _graph
   unary-negate
@@ -62,7 +62,16 @@ foreach(
   bits-xor-const
   bits-shift-left
   bits-shift-right
-  bits-pack-roundtrip)
+  bits-pack-roundtrip
+  reduce-sum
+  reduce-mean
+  reduce-max
+  reduce-min
+  reduce-argmax
+  reduce-argmin
+  reduce-mean-square
+  reduce-rms
+  reduce-tags)
   string(
     REPLACE "-"
             "_"
