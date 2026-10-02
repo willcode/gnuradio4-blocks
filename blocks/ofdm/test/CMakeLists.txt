@@ -33,8 +33,15 @@ target_link_libraries(
           gnuradio4::gr-filter
           gnuradio4::gr-testing)
 
-# The OFDM recipes test. The composites load, and the numerology reaches every interior block. The test links the
-# shared library. The interior registry ids the recipes name are then registered when it runs.
+# The OFDM recipes test. The composites load, and the numerology reaches every interior block. The test links the shared
+# library. The interior registry ids the recipes name are then registered when it runs.
 add_ut_test(qa_OfdmRecipes)
 target_link_libraries(qa_OfdmRecipes PRIVATE gnuradio-core gnuradio4::gr-ofdm gnuradio4::GrOfdmBlocksShared)
 target_compile_definitions(qa_OfdmRecipes PRIVATE RECIPES_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../recipes")
+
+# SchmidlCoxSync forwards the tags its delay carries past the last output at the end-of-stream index
+gr_add_graph_test(
+  graph_ofdm_schmidl_cox_sync_end_tags
+  graphs/schmidl-cox-sync-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrOfdmBlocksShared>)

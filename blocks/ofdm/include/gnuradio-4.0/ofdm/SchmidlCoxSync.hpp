@@ -207,7 +207,11 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
 
     /// @brief Take in the arriving input tags at the output index their sample reaches, which is `delaySamples()` later.
     template<typename TInputSpans, typename TOutputSpans>
-    void forwardTags(TInputSpans& inputSpans, TOutputSpans& /*outputSpans*/, std::size_t processedIn) {
+    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (processedIn == 0UZ) {
+            releaseAtEndOfStream(inputSpans, outputSpans);
+            return;
+        }
         const auto delay = static_cast<std::uint64_t>(_delay);
         gr::for_each_reader_span(
             [this, processedIn, delay](auto& span) {
@@ -222,6 +226,43 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
                 }
             },
             inputSpans);
+    }
+
+    /**
+     * @brief Publish every held input tag, and every tag left on the input, at the end-of-stream index.
+     *
+     * The framework's end-of-stream call passes `processedIn` 0 and output spans of no samples, where offset 0 is the
+     * end-of-stream index. A held tag belongs to an output past the last one made, and so does a tag on one of the
+     * input's last `delaySamples()` samples or past them. The `end_of_stream` key is dropped, as the framework
+     * publishes its own. A held detection marks a frame whose first sample is never output, and it is dropped.
+     */
+    template<typename TInputSpans, typename TOutputSpans>
+    void releaseAtEndOfStream(TInputSpans& inputSpans, TOutputSpans& outputSpans) {
+        const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+        gr::for_each_reader_span(
+            [this, &endOfStream](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const gr::Tag& tag : span.rawTags) {
+                    if (tag.index < span.streamIndex) { // placed by an earlier call
+                        continue;
+                    }
+                    property_map map = tag.map;
+                    map.erase(endOfStream);
+                    if (!map.empty()) {
+                        _pending.emplace_back(static_cast<std::uint64_t>(tag.index), std::move(map), std::nullopt, false);
+                    }
+                }
+            },
+            inputSpans);
+        std::ranges::stable_sort(_pending, std::ranges::less{}, &PendingTag::at);
+        for (const PendingTag& tag : _pending) {
+            if (!tag.ownDetection) {
+                gr::for_each_writer_span([&tag](auto& span) { span.publishTag(tag.map, 0UZ); }, outputSpans);
+            }
+        }
+        _pending.clear();
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
