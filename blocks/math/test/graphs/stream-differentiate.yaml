@@ -1,0 +1,81 @@
+# Differentiate: y[i] = x[i] - x[i-1]; the first output is the first input. An integer difference wraps.
+#   int16:   30000 -30000 5 5 -7         -> 30000, -60000 + 65536 = 5536, 30005, 0, -12
+#   int32:   2e9 -2e9 3                  -> 2e9, -4e9 + 2^32 = 294967296, 2000000003
+#   float32: 1.5 0.25 -2 -2 8            -> 1.5, -1.25, -2.25, 0, 10
+#   float64: -1e300 1e300 0.5            -> -1e300, 2e300, -1e300 (0.5 is below its last bit)
+#   complex: (1,2) (0.5,-1) (0.5,-1) (-2,3) -> (1,2), (-0.5,-3), (0,0), (-2.5,4)
+blocks:
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_i16
+      values: [30000, -30000, 5, 5, -7]
+  - id: gr::blocks::math::Differentiate<int16>
+    parameters:
+      name: differentiate_i16
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16
+      expected: [30000, 5536, 30005, 0, -12]
+  - id: gr::blocks::testing::VectorSource<int32>
+    parameters:
+      name: source_i32
+      values: [2000000000, -2000000000, 3]
+  - id: gr::blocks::math::Differentiate<int32>
+    parameters:
+      name: differentiate_i32
+  - id: gr::blocks::testing::ExpectSink<int32>
+    parameters:
+      name: sink_i32
+      expected: [2000000000, 294967296, 2000000003]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32
+      values: !!float32 [1.5, 0.25, -2.0, -2.0, 8.0]
+  - id: gr::blocks::math::Differentiate<float32>
+    parameters:
+      name: differentiate_f32
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [1.5, -1.25, -2.25, 0.0, 10.0]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_f64
+      values: !!float64 [-1e+300, 1e+300, 0.5]
+  - id: gr::blocks::math::Differentiate<float64>
+    parameters:
+      name: differentiate_f64
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [-1e+300, 2e+300, -1e+300]
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32
+      values: !!complex32
+        - (1.0, 2.0)
+        - (0.5, -1.0)
+        - (0.5, -1.0)
+        - (-2.0, 3.0)
+  - id: gr::blocks::math::Differentiate<complex<float32>>
+    parameters:
+      name: differentiate_c32
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32
+      expected: !!complex32
+        - (1.0, 2.0)
+        - (-0.5, -3.0)
+        - (0.0, 0.0)
+        - (-2.5, 4.0)
+connections:
+  - [source_i16, out, differentiate_i16, in]
+  - [differentiate_i16, out, sink_i16, in]
+  - [source_i32, out, differentiate_i32, in]
+  - [differentiate_i32, out, sink_i32, in]
+  - [source_f32, out, differentiate_f32, in]
+  - [differentiate_f32, out, sink_f32, in]
+  - [source_f64, out, differentiate_f64, in]
+  - [differentiate_f64, out, sink_f64, in]
+  - [source_c32, out, differentiate_c32, in]
+  - [differentiate_c32, out, sink_c32, in]

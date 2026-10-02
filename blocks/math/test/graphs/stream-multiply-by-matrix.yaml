@@ -1,0 +1,116 @@
+# MultiplyByMatrix: each group of columns samples gives rows samples, out[r] = sum over c of m[r][c] * in[c].
+# The matrix is given row by row with rows set. A last group shorter than columns stays unconsumed.
+#   float32, 2 x 3 [1 2 -1; 0.5 0 3]: 1 2 3 | -1 0.5 4 | 2 2
+#     -> 1+4-3 = 2, 0.5+9 = 9.5 | -1+1-4 = -4, -0.5+12 = 11.5; 2 2 unconsumed
+#   float64, 3 x 1 [2; -1; 0.5]: 1.5 | -4 -> 3, -1.5, 0.75 | -8, 4, -2
+#   complex, 2 x 2 identity: (1,2) (-3,0.5) | (0,-1) (4,4) -> the input
+#   complex, 2 x 2 rotation by a quarter turn [0 -1; 1 0]: (1,2) (-3,0.5) | (0,-1) (4,4) | (5,5)
+#     -> (3,-0.5), (1,2) | (-4,-4), (0,-1); (5,5) unconsumed
+#   complex, 1 x 2 [j, 1+j]: (1,2) (3,-1) -> j(1+2j) + (1+j)(3-j) = (-2,1) + (4,2) = (2,3)
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32
+      values: !!float32 [1.0, 2.0, 3.0, -1.0, 0.5, 4.0, 2.0, 2.0]
+  - id: gr::blocks::math::MultiplyByMatrix<float32>
+    parameters:
+      name: multiply_by_matrix_f32
+      matrix: !!float32 [1.0, 2.0, -1.0, 0.5, 0.0, 3.0]
+      rows: 2
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32
+      expected: !!float32 [2.0, 9.5, -4.0, 11.5]
+  - id: gr::blocks::testing::VectorSource<float64>
+    parameters:
+      name: source_f64
+      values: !!float64 [1.5, -4.0]
+  - id: gr::blocks::math::MultiplyByMatrix<float64>
+    parameters:
+      name: multiply_by_matrix_f64
+      matrix: !!float64 [2.0, -1.0, 0.5]
+      rows: 3
+  - id: gr::blocks::testing::ExpectSink<float64>
+    parameters:
+      name: sink_f64
+      expected: !!float64 [3.0, -1.5, 0.75, -8.0, 4.0, -2.0]
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32_identity
+      values: !!complex32
+        - (1.0, 2.0)
+        - (-3.0, 0.5)
+        - (0.0, -1.0)
+        - (4.0, 4.0)
+  - id: gr::blocks::math::MultiplyByMatrix<complex<float32>>
+    parameters:
+      name: multiply_by_matrix_c32_identity
+      matrix: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, 0.0)
+        - (1.0, 0.0)
+      rows: 2
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32_identity
+      expected: !!complex32
+        - (1.0, 2.0)
+        - (-3.0, 0.5)
+        - (0.0, -1.0)
+        - (4.0, 4.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32_rotation
+      values: !!complex32
+        - (1.0, 2.0)
+        - (-3.0, 0.5)
+        - (0.0, -1.0)
+        - (4.0, 4.0)
+        - (5.0, 5.0)
+  - id: gr::blocks::math::MultiplyByMatrix<complex<float32>>
+    parameters:
+      name: multiply_by_matrix_c32_rotation
+      matrix: !!complex32
+        - (0.0, 0.0)
+        - (-1.0, 0.0)
+        - (1.0, 0.0)
+        - (0.0, 0.0)
+      rows: 2
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32_rotation
+      expected: !!complex32
+        - (3.0, -0.5)
+        - (1.0, 2.0)
+        - (-4.0, -4.0)
+        - (0.0, -1.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32_product
+      values: !!complex32
+        - (1.0, 2.0)
+        - (3.0, -1.0)
+  - id: gr::blocks::math::MultiplyByMatrix<complex<float32>>
+    parameters:
+      name: multiply_by_matrix_c32_product
+      matrix: !!complex32
+        - (0.0, 1.0)
+        - (1.0, 1.0)
+      rows: 1
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32_product
+      expected: !!complex32
+        - (2.0, 3.0)
+connections:
+  - [source_f32, out, multiply_by_matrix_f32, in]
+  - [multiply_by_matrix_f32, out, sink_f32, in]
+  - [source_f64, out, multiply_by_matrix_f64, in]
+  - [multiply_by_matrix_f64, out, sink_f64, in]
+  - [source_c32_identity, out, multiply_by_matrix_c32_identity, in]
+  - [multiply_by_matrix_c32_identity, out, sink_c32_identity, in]
+  - [source_c32_rotation, out, multiply_by_matrix_c32_rotation, in]
+  - [multiply_by_matrix_c32_rotation, out, sink_c32_rotation, in]
+  - [source_c32_product, out, multiply_by_matrix_c32_product, in]
+  - [multiply_by_matrix_c32_product, out, sink_c32_product, in]

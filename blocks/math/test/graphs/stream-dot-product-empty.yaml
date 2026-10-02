@@ -1,0 +1,16 @@
+# An empty vector. The run ends with an error that names its extents.
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source
+      values: !!float32 [1.0, 2.0, 3.0]
+  - id: gr::blocks::math::DotProduct<float32>
+    parameters:
+      name: dot
+      vector: !!float32 []
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink
+connections:
+  - [source, out, dot, in]
+  - [dot, out, sink, in]

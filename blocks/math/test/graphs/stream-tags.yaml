@@ -1,0 +1,145 @@
+# Stream tags: CumulativeSum and Differentiate pass a tag at its own index with every key; MultiplyByMatrix
+# places a tag at input index i on output (i / columns) * rows, DotProduct on i / n, each with the
+# auto-forward keys only. The source publishes one map at each listed index with the auto-forward key
+# trigger_name and the key mark, which is not auto-forwarded.
+#   CumulativeSum<float32>: 1..6, tags at 0 3 5 -> 1 3 6 10 15 21, tags at 0 3 5
+#   Differentiate<int16>: 3 5 2 2 -1, tags at 1 4 -> 3 2 -3 0 -3, tags at 1 4; the scheduler
+#     starts a call at each tag, so the differences at 1 and 4 take their previous sample from the call before
+#   MultiplyByMatrix<float32>, 2 x 3 [1 0 0; 0 0 1]: 1..10, tags at 1 3 8 9
+#     -> 1 3 | 4 6 | 7 9, tags at 0 2 4; 10 and its tag at 9 are the unconsumed remainder
+#   DotProduct<complex<float32>>, vector 1 1: (k,-k) for k = 1..7, tags at 0 3 4 6
+#     -> (3,-3) (7,-7) (11,-11), tags at 0 1 2; (7,-7) and its tag at 6 are the unconsumed remainder
+# The second sink of each chain checks mark: at the tag indices after the two one-to-one blocks, absent
+# after the two grouping blocks.
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32_cumulativesum
+      values: !!float32 [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+      tag_indices: !!uint32 [0, 3, 5]
+      tag_map:
+        trigger_name: frame
+        mark: frame
+  - id: gr::blocks::math::CumulativeSum<float32>
+    parameters:
+      name: tags_f32_cumulativesum
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32_cumulativesum
+      expected: !!float32 [1.0, 3.0, 6.0, 10.0, 15.0, 21.0]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [0, 3, 5]
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32_cumulativesum_mark
+      expected: !!float32 [1.0, 3.0, 6.0, 10.0, 15.0, 21.0]
+      tag_key: mark
+      tag_indices: !!uint32 [0, 3, 5]
+  - id: gr::blocks::testing::VectorSource<int16>
+    parameters:
+      name: source_i16_differentiate
+      values: [3, 5, 2, 2, -1]
+      tag_indices: !!uint32 [1, 4]
+      tag_map:
+        trigger_name: frame
+        mark: frame
+  - id: gr::blocks::math::Differentiate<int16>
+    parameters:
+      name: tags_i16_differentiate
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16_differentiate
+      expected: [3, 2, -3, 0, -3]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [1, 4]
+  - id: gr::blocks::testing::ExpectSink<int16>
+    parameters:
+      name: sink_i16_differentiate_mark
+      expected: [3, 2, -3, 0, -3]
+      tag_key: mark
+      tag_indices: !!uint32 [1, 4]
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source_f32_multiplybymatrix
+      values: !!float32
+        - 1.0
+        - 2.0
+        - 3.0
+        - 4.0
+        - 5.0
+        - 6.0
+        - 7.0
+        - 8.0
+        - 9.0
+        - 10.0
+      tag_indices: !!uint32 [1, 3, 8, 9]
+      tag_map:
+        trigger_name: frame
+        mark: frame
+  - id: gr::blocks::math::MultiplyByMatrix<float32>
+    parameters:
+      name: tags_f32_multiplybymatrix
+      matrix: !!float32 [1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+      rows: 2
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32_multiplybymatrix
+      expected: !!float32 [1.0, 3.0, 4.0, 6.0, 7.0, 9.0]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [0, 2, 4]
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_f32_multiplybymatrix_mark
+      expected: !!float32 [1.0, 3.0, 4.0, 6.0, 7.0, 9.0]
+      tag_key: mark
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32_dotproduct
+      values: !!complex32
+        - (1.0, -1.0)
+        - (2.0, -2.0)
+        - (3.0, -3.0)
+        - (4.0, -4.0)
+        - (5.0, -5.0)
+        - (6.0, -6.0)
+        - (7.0, -7.0)
+      tag_indices: !!uint32 [0, 3, 4, 6]
+      tag_map:
+        trigger_name: frame
+        mark: frame
+  - id: gr::blocks::math::DotProduct<complex<float32>>
+    parameters:
+      name: tags_c32_dotproduct
+      vector: !!complex32
+        - (1.0, 0.0)
+        - (1.0, 0.0)
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32_dotproduct
+      expected: !!complex32
+        - (3.0, -3.0)
+        - (7.0, -7.0)
+        - (11.0, -11.0)
+      tag_key: trigger_name
+      tag_indices: !!uint32 [0, 1, 2]
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: sink_c32_dotproduct_mark
+      expected: !!complex32
+        - (3.0, -3.0)
+        - (7.0, -7.0)
+        - (11.0, -11.0)
+      tag_key: mark
+connections:
+  - [source_f32_cumulativesum, out, tags_f32_cumulativesum, in]
+  - [tags_f32_cumulativesum, out, sink_f32_cumulativesum, in]
+  - [tags_f32_cumulativesum, out, sink_f32_cumulativesum_mark, in]
+  - [source_i16_differentiate, out, tags_i16_differentiate, in]
+  - [tags_i16_differentiate, out, sink_i16_differentiate, in]
+  - [tags_i16_differentiate, out, sink_i16_differentiate_mark, in]
+  - [source_f32_multiplybymatrix, out, tags_f32_multiplybymatrix, in]
+  - [tags_f32_multiplybymatrix, out, sink_f32_multiplybymatrix, in]
+  - [tags_f32_multiplybymatrix, out, sink_f32_multiplybymatrix_mark, in]
+  - [source_c32_dotproduct, out, tags_c32_dotproduct, in]
+  - [tags_c32_dotproduct, out, sink_c32_dotproduct, in]
+  - [tags_c32_dotproduct, out, sink_c32_dotproduct_mark, in]

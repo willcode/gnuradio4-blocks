@@ -13,8 +13,9 @@ target_link_libraries(qa_ExpressionBulk PRIVATE gr-math gr-testing)
 add_ut_test(qa_Rotator)
 target_link_libraries(qa_Rotator PRIVATE gr-math gr-testing)
 
-# one graph file per Unary, Binary, Bits and Reduce alias: each chain one VectorSource per input of the alias into the
-# alias into an ExpectSink; the packing round trip, UnpackBits into PackBits; and a Reduce tag placement
+# one graph file per Unary, Binary, Bits and Reduce alias and per Stream block: each chain one VectorSource per input of
+# the block into the block into an ExpectSink; the packing round trip, UnpackBits into PackBits; and a Reduce and a
+# Stream tag placement
 foreach(
   _graph
   unary-negate
@@ -71,7 +72,14 @@ foreach(
   reduce-argmin
   reduce-mean-square
   reduce-rms
-  reduce-tags)
+  reduce-tags
+  stream-cumulative-sum
+  stream-differentiate
+  stream-multiply-by-matrix
+  stream-dot-product
+  stream-tags
+  stream-matrix-bad-extents
+  stream-dot-product-empty)
   string(
     REPLACE "-"
             "_"
@@ -83,6 +91,10 @@ foreach(
     PLUGIN_DIRS
     $<TARGET_FILE_DIR:GrMathBlocksShared>)
 endforeach()
+set_tests_properties(graph_math_stream_matrix_bad_extents PROPERTIES PASS_REGULAR_EXPRESSION
+                                                                     "matrix of extents 6 does not divide into rows 4")
+set_tests_properties(graph_math_stream_dot_product_empty
+                     PROPERTIES PASS_REGULAR_EXPRESSION "vector of extents 0 is not 1-D with at least one entry")
 
 # the packing blocks under their compatibility keys, which the digital plugin registers
 gr_add_graph_test(
