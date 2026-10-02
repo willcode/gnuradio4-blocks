@@ -103,3 +103,10 @@ set_tests_properties(
              graph_basic_interleave_sigmf_write
              PASS_REGULAR_EXPRESSION
              "the stream carries 2 channels and the block has 3 outputs")
+
+# SampleDelay forwards the tags it holds past its last output at the end-of-stream index
+gr_add_graph_test(
+  graph_basic_sample_delay_end_tags
+  graphs/sample-delay-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)

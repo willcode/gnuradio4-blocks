@@ -11,6 +11,7 @@
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
 #include <gnuradio-4.0/basic/NamespaceCompatibility.hpp>
@@ -27,7 +28,7 @@ struct SampleDelay : Block<SampleDelay<T>> {
 Not `gr::blocks::testing::Delay`, which is a wall-clock start-up hold and does not delay the stream at all.
 `delay = 0` is a bit-exact pass-through and is the default. The line costs `delay * sizeof(T)` bytes and has no upper
 bound. A tag at input offset `t` is republished at output offset `t + delay`, so a marker stays with the sample it
-marks.
+marks. A tag whose output offset lies past the stream's last output leaves at the end-of-stream index.
 )"">;
 
     PortIn<T>  in;
@@ -72,13 +73,34 @@ marks.
      * Replaces the framework's forwarding rather than adjusting it, and republishes what it saw rather than only the
      * reserved keys. A held tag's position is carried relative to the next output offset, so a delay change moves it
      * with its sample by moving that position.
+     *
+     * The framework's end-of-stream call passes `processedIn` 0 and output spans of no samples, whose offset 0 is the
+     * end-of-stream index. The stream makes no later output, so every held tag and every tag the input holds at or past
+     * its read position leaves there, its delayed index clamped to the end. The `end_of_stream` key stays behind, since
+     * the framework publishes its own.
      */
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        const bool streamEnds = processedIn == 0UZ;
+
         std::vector<std::pair<std::size_t, gr::property_map>> arriving;
         gr::for_each_reader_span(
-            [&arriving, processedIn, this](auto& span) {
+            [&arriving, processedIn, streamEnds, this](auto& span) {
                 if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                if (streamEnds) {
+                    const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+                    for (const gr::Tag& tag : span.rawTags) {
+                        if (tag.index < span.streamIndex) { // placed by an earlier call
+                            continue;
+                        }
+                        gr::property_map map = tag.map;
+                        map.erase(endOfStream);
+                        if (!map.empty()) {
+                            arriving.emplace_back(tag.index - span.streamIndex + _delay, std::move(map));
+                        }
+                    }
                     return;
                 }
                 for (const auto& [relIndex, tagMap] : span.tags(processedIn)) {
@@ -101,6 +123,10 @@ marks.
                     return;
                 }
                 const auto place = [&](const std::pair<std::size_t, gr::property_map>& tag) {
+                    if (streamEnds) {
+                        span.publishTag(tag.second, std::min(tag.first, span.size()));
+                        return;
+                    }
                     if (tag.first >= processedIn) { // its output is not in this call: hold it rather than move it
                         deferred.emplace_back(tag.first - processedIn, tag.second);
                         return;

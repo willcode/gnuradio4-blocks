@@ -1,0 +1,26 @@
+# SampleDelay at delay 3 over 8 samples: the output is the input preceded by 3 zeros and cut to 8 samples.
+# A tag at input t leaves at output t + 3 while that output exists, and at the end-of-stream index otherwise.
+#   input tags      1, 7
+#   delayed         4, 10
+#   output tags     4, 8 (10 lies past the last output, 7; the stream ends at index 8)
+blocks:
+  - id: gr::blocks::testing::VectorSource<float32>
+    parameters:
+      name: source
+      values: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+      tag_indices: !!uint32 [1, 7]
+      tag_map:
+        trigger_name: mark
+  - id: gr::blocks::basic::SampleDelay<float32>
+    parameters:
+      name: delay
+      delay: !!uint32 3
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink
+      expected: [0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [4, 8]
+connections:
+  - [source, out, delay, in]
+  - [delay, out, sink, in]
