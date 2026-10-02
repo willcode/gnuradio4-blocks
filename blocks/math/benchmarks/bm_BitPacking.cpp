@@ -11,7 +11,7 @@
 #include <tuple>
 #include <vector>
 
-#include <gnuradio-4.0/digital/BitPacking.hpp>
+#include <gnuradio-4.0/math/BitPacking.hpp>
 
 // A regrouping costs what the bits cost, not what the items cost: one period of `lcm(bitsIn, bitsOut)` bits is the
 // same work however the widths on either side are arranged, so `8:3` and `3:8` are one number reported two ways.
@@ -24,9 +24,9 @@
 
 namespace {
 
-using gr::blocks::digital::PackBits;
-using gr::blocks::digital::RepackBits;
-using gr::blocks::digital::UnpackBits;
+using gr::blocks::math::PackBits;
+using gr::blocks::math::RepackBits;
+using gr::blocks::math::UnpackBits;
 using gr::blocks::testing::bench::Arm;
 using gr::blocks::testing::span::InputSpan;
 using gr::blocks::testing::span::OutputSpan;

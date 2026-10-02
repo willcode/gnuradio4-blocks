@@ -11,5 +11,7 @@ function(add_math_benchmark BM_NAME)
 endfunction()
 
 add_math_benchmark(bm_Binary)
+add_math_benchmark(bm_BitPacking)
+target_link_libraries(bm_BitPacking PRIVATE gnuradio4::gr-testing)
 add_math_benchmark(bm_Rotator)
 add_math_benchmark(bm_Unary)

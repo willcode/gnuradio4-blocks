@@ -1,0 +1,60 @@
+# UnpackBits into PackBits under the gr::blocks::digital keys, k 8: the bytes come back unchanged.
+# A sink also checks the bits between the two blocks. Those bits pin the bit order, which a round trip cannot.
+# The digital keys are a compatibility registration of the math blocks in the digital plugin.
+#   bytes            0x83 0x1E = [131, 30]
+#   bits, MsbFirst   10000011 00011110
+#   bits, LsbFirst   11000001 01111000 (each byte's bits from position 0 up)
+blocks:
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_msb
+      values: [131, 30]
+  - id: gr::blocks::digital::UnpackBits
+    parameters:
+      name: unpack_msb
+      k: 8
+      bit_order: "MsbFirst"
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: bits_msb
+      expected: [1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0]
+  - id: gr::blocks::digital::PackBits
+    parameters:
+      name: pack_msb
+      k: 8
+      bit_order: "MsbFirst"
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: bytes_msb
+      expected: [131, 30]
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source_lsb
+      values: [131, 30]
+  - id: gr::blocks::digital::UnpackBits
+    parameters:
+      name: unpack_lsb
+      k: 8
+      bit_order: "LsbFirst"
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: bits_lsb
+      expected: [1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0]
+  - id: gr::blocks::digital::PackBits
+    parameters:
+      name: pack_lsb
+      k: 8
+      bit_order: "LsbFirst"
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: bytes_lsb
+      expected: [131, 30]
+connections:
+  - [source_msb, out, unpack_msb, in]
+  - [unpack_msb, out, bits_msb, in]
+  - [unpack_msb, out, pack_msb, in]
+  - [pack_msb, out, bytes_msb, in]
+  - [source_lsb, out, unpack_lsb, in]
+  - [unpack_lsb, out, bits_lsb, in]
+  - [unpack_lsb, out, pack_lsb, in]
+  - [pack_lsb, out, bytes_lsb, in]

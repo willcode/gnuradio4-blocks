@@ -1,6 +1,6 @@
 add_library(gr-digital INTERFACE)
 add_library(gnuradio4::gr-digital ALIAS gr-digital)
-target_link_libraries(gr-digital INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm)
+target_link_libraries(gr-digital INTERFACE gnuradio4::gnuradio-core gnuradio4::gnuradio-algorithm gr-math-headers)
 target_include_directories(gr-digital INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/>
                                                 $<INSTALL_INTERFACE:include/>)
 install(TARGETS gr-digital EXPORT gnuradio4Targets)

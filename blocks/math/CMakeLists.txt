@@ -1,4 +1,5 @@
-# the math headers without the expression library, for a module that uses Unary.hpp alone
+# the math headers without the expression library, for a module that uses Unary.hpp or BitPacking.hpp alone;
+# BitPacking.hpp also needs gnuradio4::gnuradio-algorithm
 add_library(gr-math-headers INTERFACE)
 add_library(gnuradio4::gr-math-headers ALIAS gr-math-headers)
 target_link_libraries(gr-math-headers INTERFACE gnuradio4::gnuradio-core)
@@ -19,6 +20,7 @@ gr_add_block_library(
   ${GR4_BLOCK_STATIC_LIBRARY}
   HEADERS
   include/gnuradio-4.0/math/Binary.hpp
+  include/gnuradio-4.0/math/BitPacking.hpp
   include/gnuradio-4.0/math/Bits.hpp
   include/gnuradio-4.0/math/ExpressionBlocks.hpp
   include/gnuradio-4.0/math/Math.hpp

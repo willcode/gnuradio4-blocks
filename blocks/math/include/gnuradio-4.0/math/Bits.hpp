@@ -8,6 +8,7 @@
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/math/BitPacking.hpp>
 #include <gnuradio-4.0/math/Math.hpp>
 #include <gnuradio-4.0/math/Unary.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>

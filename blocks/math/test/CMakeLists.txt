@@ -1,3 +1,5 @@
+add_ut_test(qa_BitPacking)
+target_link_libraries(qa_BitPacking PRIVATE gr-math gr-testing)
 add_ut_test(qa_Math)
 target_link_libraries(qa_Math PRIVATE gr-math gr-testing)
 add_ut_test(qa_MathMultiplyDivide)
@@ -12,7 +14,7 @@ add_ut_test(qa_Rotator)
 target_link_libraries(qa_Rotator PRIVATE gr-math gr-testing)
 
 # one graph file per Unary, Binary and Bits alias: each chain one VectorSource per input of the alias into the alias
-# into an ExpectSink
+# into an ExpectSink; and the packing round trip, UnpackBits into PackBits
 foreach(
   _graph
   unary-negate
@@ -59,7 +61,8 @@ foreach(
   bits-or-const
   bits-xor-const
   bits-shift-left
-  bits-shift-right)
+  bits-shift-right
+  bits-pack-roundtrip)
   string(
     REPLACE "-"
             "_"
@@ -71,3 +74,11 @@ foreach(
     PLUGIN_DIRS
     $<TARGET_FILE_DIR:GrMathBlocksShared>)
 endforeach()
+
+# the packing blocks under their compatibility keys, which the digital plugin registers
+gr_add_graph_test(
+  graph_math_bits_pack_roundtrip_digital
+  graphs/bits-pack-roundtrip-digital.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrMathBlocksShared>
+  $<TARGET_FILE_DIR:GrDigitalBlocksShared>)

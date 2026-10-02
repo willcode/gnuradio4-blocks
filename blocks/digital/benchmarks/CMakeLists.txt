@@ -11,7 +11,6 @@ function(add_digital_benchmark BM_NAME)
   target_compile_options(${BM_NAME} PRIVATE -O3)
 endfunction()
 
-add_digital_benchmark(bm_BitPacking)
 add_digital_benchmark(bm_ConstellationBlocks)
 add_digital_benchmark(bm_CpmModulate)
 add_digital_benchmark(bm_CrcBlocks)

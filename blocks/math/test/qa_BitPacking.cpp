@@ -15,16 +15,16 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
-#include <gnuradio-4.0/digital/BitPacking.hpp>
+#include <gnuradio-4.0/math/BitPacking.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_bit_packing {
 
-using gr::blocks::digital::PackBits;
-using gr::blocks::digital::RepackBits;
-using gr::blocks::digital::UnpackBits;
+using gr::blocks::math::PackBits;
+using gr::blocks::math::RepackBits;
+using gr::blocks::math::UnpackBits;
 using gr::blocks::testing::span::InputSpan;
 using gr::blocks::testing::span::OutputSpan;
 using gr::testing::ProcessFunction;
@@ -874,7 +874,7 @@ const boost::ut::suite<"UnpackBits"> unpackBitsTests = [] {
 
 const boost::ut::suite<"record repack"> recordRepackTests = [] {
     using namespace boost::ut;
-    using gr::blocks::digital::RecordRepackBits;
+    using gr::blocks::math::RecordRepackBits;
     using Record = gr::DataSet<std::uint8_t>;
 
     const auto recordOf = [](std::vector<std::uint8_t> values) {
