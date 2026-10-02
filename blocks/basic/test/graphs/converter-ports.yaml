@@ -12,7 +12,7 @@ blocks:
       values: !!complex32
         - (3.0, 4.0)
         - (0.0, -2.0)
-  - id: gr::blocks::basic::Abs<complex<float32>>
+  - id: gr::blocks::math::Abs<complex<float32>>
     parameters:
       name: abs
   - id: gr::blocks::basic::Real<complex<float32>>
@@ -68,7 +68,7 @@ blocks:
     parameters:
       name: uint8_source
       values: [0, 127, 128, 200, 255]
-  - id: gr::blocks::basic::Abs<uint8>
+  - id: gr::blocks::math::Abs<uint8>
     parameters:
       name: abs_u8
   - id: gr::blocks::testing::ExpectSink<uint8>
@@ -92,7 +92,7 @@ connections:
   - [complex_source, out, real, in]
   - [complex_source, out, imag, in]
   - [complex_source, out, arg, in]
-  - [abs, abs, abs_sink, in]
+  - [abs, out, abs_sink, in]
   - [real, real, real_sink, in]
   - [imag, imag, imag_sink, in]
   - [arg, arg, arg_sink, in]
@@ -103,4 +103,4 @@ connections:
   - [radians_source, out, to_degree_affine, rad]
   - [to_degree_affine, deg, degree_affine_sink, in]
   - [uint8_source, out, abs_u8, in]
-  - [abs_u8, abs, abs_u8_sink, in]
+  - [abs_u8, out, abs_u8_sink, in]

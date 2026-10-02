@@ -27,10 +27,10 @@ blocks:
       weights: !!complex32
         - (1.0, 0.0)
         - (0.0, 1.0)
-  - id: gr::blocks::math::Magnitude<complex<float32>>
+  - id: gr::blocks::math::Abs<complex<float32>>
     parameters:
       name: steered_magnitude
-  - id: gr::blocks::math::Magnitude<complex<float32>>
+  - id: gr::blocks::math::Abs<complex<float32>>
     parameters:
       name: orthogonal_magnitude
   - id: gr::blocks::testing::ExpectSink<float32>

@@ -82,7 +82,7 @@ struct Negate {
 
 /// the absolute value of a real sample and the magnitude of a complex one, in the real type of the input
 struct Abs {
-    using Description = Doc<"@brief Outputs the absolute value of each sample.">;
+    using Description = Doc<"@brief Outputs the absolute value of each sample, and the magnitude of a complex sample.">;
     template<typename T>
     using result                = meta::fundamental_base_value_type_t<T>;
     static constexpr bool kSimd = true;
@@ -371,11 +371,6 @@ struct Round {
     }
 };
 
-/// the magnitude of a complex sample; the absolute value of a real one
-struct Magnitude : Abs {
-    using Description = Doc<"@brief Outputs the magnitude of each complex sample.">;
-};
-
 /// re*re + im*im of a complex sample; x*x of a real one
 struct MagnitudeSquared {
     using Description = Doc<"@brief Outputs the squared magnitude of each complex sample.">;
@@ -483,7 +478,7 @@ GR_REGISTER_BLOCK("gr::blocks::math::Negate", gr::blocks::math::Negate, [T], [ i
 template<typename T>
 using Negate = Unary<unary::Negate, T>;
 
-GR_REGISTER_BLOCK("gr::blocks::math::Abs", gr::blocks::math::Abs, [T], [ uint8_t, int16_t, int32_t, float, double ])
+GR_REGISTER_BLOCK("gr::blocks::math::Abs", gr::blocks::math::Abs, [T], [ uint8_t, int16_t, int32_t, float, double, std::complex<float> ])
 template<typename T>
 using Abs = Unary<unary::Abs, T>;
 
@@ -574,10 +569,6 @@ using DegToRad = Unary<unary::DegToRad, T>;
 GR_REGISTER_BLOCK("gr::blocks::math::RadToDeg", gr::blocks::math::RadToDeg, [T], [ float, double ])
 template<typename T>
 using RadToDeg = Unary<unary::RadToDeg, T>;
-
-GR_REGISTER_BLOCK("gr::blocks::math::Magnitude", gr::blocks::math::Magnitude, [T], [std::complex<float>])
-template<typename T>
-using Magnitude = Unary<unary::Magnitude, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::math::MagnitudeSquared", gr::blocks::math::MagnitudeSquared, [T], [std::complex<float>])
 template<typename T>

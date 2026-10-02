@@ -55,7 +55,8 @@ gr_add_graph_test(
   graph_basic_converter_ports
   graphs/converter-ports.yaml
   PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>
+  $<TARGET_FILE_DIR:GrMathBlocksShared>)
 
 # a two-channel recording written through Interleave, then read back through Deinterleave
 set(_interleaveRecording "${CMAKE_CURRENT_BINARY_DIR}/interleave-two-channel")

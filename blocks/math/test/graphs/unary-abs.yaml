@@ -1,8 +1,10 @@
-# Abs over its five types: out = |in|; an unsigned sample is its own absolute value.
+# Abs over its six types: out = |in|; an unsigned sample is its own absolute value, and a complex sample gives its
+# magnitude as float32.
 #   uint8: 0 1 200        -> 0 1 200
 #   int16: -5 0 7         -> 5 0 7
 #   int32: -100000 0 3    -> 100000 0 3
 #   real:  -1.5 0 2.25    -> 1.5 0 2.25
+#   complex: (3,4) (0,0) (-1,0) (0,-2.5) (1,1) -> 5 0 1 2.5 sqrt(2)
 blocks:
   - id: gr::blocks::testing::VectorSource<uint8>
     parameters:
@@ -59,6 +61,24 @@ blocks:
     parameters:
       name: sink_f64
       expected: !!float64 [1.5, 0.0, 2.25]
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: source_c32
+      values: !!complex32
+        - (3.0, 4.0)
+        - (0.0, 0.0)
+        - (-1.0, 0.0)
+        - (0.0, -2.5)
+        - (1.0, 1.0)
+  - id: gr::blocks::math::Abs<complex<float32>>
+    parameters:
+      name: abs_c32
+  - id: gr::blocks::testing::ExpectSink<float32>
+    parameters:
+      name: sink_c32
+      expected: !!float32 [5.0, 0.0, 1.0, 2.5, 1.4142135623730951]
+      relative_tolerance: 1e-6
+      tolerance: 1e-6
 connections:
   - [source_u8, out, abs_u8, in]
   - [abs_u8, out, sink_u8, in]
@@ -70,3 +90,5 @@ connections:
   - [abs_f32, out, sink_f32, in]
   - [source_f64, out, abs_f64, in]
   - [abs_f64, out, sink_f64, in]
+  - [source_c32, out, abs_c32, in]
+  - [abs_c32, out, sink_c32, in]

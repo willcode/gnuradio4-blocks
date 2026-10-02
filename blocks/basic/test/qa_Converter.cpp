@@ -125,21 +125,6 @@ const boost::ut::suite<"complex To/From conversion tests"> complexConversion = [
     constexpr auto kArithmeticTypes = std::tuple<float, double>();
 
     "std::complex<T> to ..."_test = []<typename T>(T /*noop*/) {
-        "std::abs([complex<T>, T])"_test = [] {
-            static_assert(HasConstProcessOneFunction<Abs<std::complex<T>>>);
-            static_assert(HasConstProcessOneFunction<Abs<T>>);
-            expect(HasConstProcessOneFunction<Abs<std::complex<T>>>);
-            expect(HasConstProcessOneFunction<Abs<T>>);
-
-            Abs<std::complex<T>> complexConverter;
-            expect(eq(complexConverter.processOne(std::complex<T>{1, 0}), T(1)));
-            expect(eq(complexConverter.processOne(std::complex<T>{0, 1}), T(1)));
-            expect(eq(complexConverter.processOne(std::complex<T>{1, 1}), T(std::sqrt(2))));
-
-            Abs<T> converter;
-            expect(eq(converter.processOne(T(1)), T(1)));
-        };
-
         "std::Real([complex<T>, T])"_test = [] {
             static_assert(HasConstProcessOneFunction<Real<std::complex<T>>>);
             static_assert(HasConstProcessOneFunction<Real<T>>);
@@ -282,20 +267,17 @@ const boost::ut::suite<"converter port names"> converterPortNames = [] {
         gr::Graph flow;
         auto&     complexSource = flow.emplaceBlock<NullSource<std::complex<float>>>();
         auto&     realSource    = flow.emplaceBlock<NullSource<float>>();
-        auto&     abs           = flow.emplaceBlock<Abs<std::complex<float>>>();
         auto&     real          = flow.emplaceBlock<Real<std::complex<float>>>();
         auto&     imag          = flow.emplaceBlock<Imag<std::complex<float>>>();
         auto&     arg           = flow.emplaceBlock<Arg<std::complex<float>>>();
         auto&     toDegree      = flow.emplaceBlock<RadiansToDegree<float>>();
         auto&     toRadians     = flow.emplaceBlock<DegreeToRadians<float>>();
 
-        expect(flow.connect<"out", "in">(complexSource, abs).has_value());
         expect(flow.connect<"out", "in">(complexSource, real).has_value());
         expect(flow.connect<"out", "in">(complexSource, imag).has_value());
         expect(flow.connect<"out", "in">(complexSource, arg).has_value());
         expect(flow.connect<"out", "rad">(realSource, toDegree).has_value());
         expect(flow.connect<"out", "deg">(realSource, toRadians).has_value());
-        expect(flow.connect<"abs", "in">(abs, flow.emplaceBlock<NullSink<float>>()).has_value());
         expect(flow.connect<"real", "in">(real, flow.emplaceBlock<NullSink<float>>()).has_value());
         expect(flow.connect<"imag", "in">(imag, flow.emplaceBlock<NullSink<float>>()).has_value());
         expect(flow.connect<"arg", "in">(arg, flow.emplaceBlock<NullSink<float>>()).has_value());

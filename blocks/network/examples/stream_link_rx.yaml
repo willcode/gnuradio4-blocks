@@ -32,7 +32,7 @@ blocks:
       bind: false
       pattern: pull
       max_message_bytes: !!uint64 1048576
-  - id: gr::blocks::basic::Abs<complex<float32>>
+  - id: gr::blocks::math::Abs<complex<float32>>
     parameters:
       name: magnitude
   - id: gr::blocks::basic::DataSink<float32>
@@ -49,4 +49,4 @@ blocks:
       max_message_bytes: !!uint64 1048576
 connections:
   - [link_rx, out, magnitude, in]
-  - [magnitude, abs, level_sink, in]
+  - [magnitude, out, level_sink, in]

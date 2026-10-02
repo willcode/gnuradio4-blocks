@@ -42,7 +42,6 @@ foreach(
   unary-sign
   unary-deg-to-rad
   unary-rad-to-deg
-  unary-magnitude
   unary-magnitude-squared
   unary-phase
   unary-real

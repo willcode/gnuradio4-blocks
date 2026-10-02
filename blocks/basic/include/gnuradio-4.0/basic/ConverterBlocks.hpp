@@ -65,18 +65,8 @@ namespace detail {
 
 /*
  * The converters below are `math::Unary` blocks whose operations name the ports these blocks have always had:
- * `in` and `abs`, `in` and `imag`, `in` and `real`, `in` and `arg`, `rad` and `deg`, `deg` and `rad`.
+ * `in` and `imag`, `in` and `real`, `in` and `arg`, `rad` and `deg`, `deg` and `rad`.
  */
-
-template<typename Derived, typename T, typename R>
-struct AbsPorts : Block<Derived> {
-    using Block<Derived>::Block;
-
-    PortIn<T>  in;
-    PortOut<R> abs;
-
-    GR_MAKE_REFLECTABLE(AbsPorts, in, abs);
-};
 
 template<typename Derived, typename T, typename R>
 struct ImagPorts : Block<Derived> {
@@ -128,12 +118,6 @@ struct DegreeToRadiansPorts : Block<Derived> {
     GR_MAKE_REFLECTABLE(DegreeToRadiansPorts, deg, rad);
 };
 
-struct AbsOp : math::unary::Abs {
-    using Description = Doc<"@brief basic block to calculate the absolute (magnitude) value of a complex or arithmetic input stream">;
-    template<typename Derived, typename T, typename R>
-    using ports = AbsPorts<Derived, T, R>;
-};
-
 struct ImagOp : math::unary::Imag {
     using Description = Doc<"@brief basic block to the imaginary component of a complex input stream">;
     template<typename Derived, typename T, typename R>
@@ -165,11 +149,6 @@ struct DegreeToRadiansOp : math::unary::DegToRad {
 };
 
 } // namespace detail
-
-GR_REGISTER_BLOCK("gr::blocks::basic::Abs", gr::blocks::basic::Abs, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float> ])
-template<typename T>
-requires std::is_arithmetic_v<T> || meta::complex_like<T>
-using Abs = math::Unary<detail::AbsOp, T>;
 
 GR_REGISTER_BLOCK("gr::blocks::basic::Imag", gr::blocks::basic::Imag, [T], [std::complex<float>])
 template<typename T>
