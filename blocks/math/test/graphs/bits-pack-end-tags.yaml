@@ -1,0 +1,59 @@
+# SampleDelay by 1 places a tag past its last output at the end-of-stream index. UnpackBits and RepackBits then see
+# that tag past their last input, and PackBits sees the tag UnpackBits places at its own end.
+#   source, 4 bytes                    0x00 0x83 0x1E 0xFF, tags 1, 3
+#   SampleDelay, 4 bytes               0x00 0x00 0x83 0x1E, tags 2, 4 (3 + 1 is the end-of-stream index)
+#   UnpackBits k 4, 16 bits            the low 4 bits of each byte, 0000 0000 0011 1110,
+#                                      tags 2 * 4 = 8, 16 (the end-of-stream call places the tag at 4 at the end, 16)
+#   PackBits k 4, 4 items              0 0 3 14, tags 8 / 4 = 2, 4 (the tag at 16 is past its last input: the end, 4)
+#   RepackBits 8 to 4, 8 nibbles       0 0 0 0 8 3 1 14, tags 2 * 2 = 4, 8 (the end, 8)
+blocks:
+  - id: gr::blocks::testing::VectorSource<uint8>
+    parameters:
+      name: source
+      values: [0, 131, 30, 255]
+      tag_indices: !!uint32 [1, 3]
+      tag_map:
+        trigger_name: mark
+  - id: gr::blocks::basic::SampleDelay<uint8>
+    parameters:
+      name: delay
+      delay: !!uint32 1
+  - id: gr::blocks::math::UnpackBits
+    parameters:
+      name: unpack
+      k: 4
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: bits_sink
+      expected: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [8, 16]
+  - id: gr::blocks::math::PackBits
+    parameters:
+      name: pack
+      k: 4
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: bytes_sink
+      expected: [0, 0, 3, 14]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [2, 4]
+  - id: gr::blocks::math::RepackBits
+    parameters:
+      name: repack
+      bits_in: 8
+      bits_out: 4
+  - id: gr::blocks::testing::ExpectSink<uint8>
+    parameters:
+      name: nibbles_sink
+      expected: [0, 0, 0, 0, 8, 3, 1, 14]
+      tag_key: trigger_name
+      tag_indices: !!uint32 [4, 8]
+connections:
+  - [source, out, delay, in]
+  - [delay, out, unpack, in]
+  - [unpack, out, bits_sink, in]
+  - [unpack, out, pack, in]
+  - [pack, out, bytes_sink, in]
+  - [delay, out, repack, in]
+  - [repack, out, nibbles_sink, in]

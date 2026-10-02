@@ -42,6 +42,11 @@ inline void requireFieldWidth(gr::Size_t bits, std::string_view setting) {
  * current call and the eighth may not, and at `8:1` unpacking a tag near the end of a call routinely lands past the
  * output span. Order and multiplicity are preserved and no tag is deduplicated. Every key is republished verbatim,
  * a key outside the auto-forward set included.
+ *
+ * The framework's end-of-stream call passes `processedIn` 0 and output spans of no samples, where offset 0 is the
+ * end-of-stream index. The epilogue's call can also pass `processedIn` 0, with output room. At the end-of-stream call
+ * every held tag, and every tag the input holds at or past its read position, leaves at the end-of-stream index. The
+ * `end_of_stream` key is dropped there, as the framework publishes its own.
  */
 struct RepackTagRoute {
     std::vector<std::pair<std::uint64_t, property_map>> pending{};
@@ -50,6 +55,12 @@ struct RepackTagRoute {
 
     template<typename TInputSpans, typename TOutputSpans>
     void forward(const gr::digital::BitRepack& cfg, TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        bool noOutput = true;
+        gr::for_each_writer_span([&noOutput](auto& span) { noOutput = noOutput && span.size() == 0UZ; }, outputSpans);
+        if (processedIn == 0UZ && noOutput) {
+            releaseAtEndOfStream(inputSpans, outputSpans);
+            return;
+        }
         std::vector<std::pair<std::uint64_t, property_map>> arriving;
         gr::for_each_reader_span(
             [&arriving, &cfg, processedIn](auto& span) {
@@ -98,6 +109,43 @@ struct RepackTagRoute {
             outputSpans);
 
         pending = std::move(deferred);
+    }
+
+    template<typename TInputSpans, typename TOutputSpans>
+    void releaseAtEndOfStream(TInputSpans& inputSpans, TOutputSpans& outputSpans) {
+        const std::pmr::string    endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+        std::vector<property_map> remaining;
+        for (auto& tag : pending) {
+            remaining.push_back(std::move(tag.second));
+        }
+        pending.clear();
+        gr::for_each_reader_span(
+            [&remaining, &endOfStream](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const gr::Tag& tag : span.rawTags) {
+                    if (tag.index < span.streamIndex) { // placed by an earlier call
+                        continue;
+                    }
+                    property_map map = tag.map;
+                    map.erase(endOfStream);
+                    if (!map.empty()) {
+                        remaining.push_back(std::move(map));
+                    }
+                }
+            },
+            inputSpans);
+        gr::for_each_writer_span(
+            [&remaining](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const property_map& map : remaining) {
+                    span.publishTag(map, 0UZ);
+                }
+            },
+            outputSpans);
     }
 };
 

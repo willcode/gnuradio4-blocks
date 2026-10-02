@@ -96,6 +96,14 @@ set_tests_properties(graph_math_stream_matrix_bad_extents PROPERTIES PASS_REGULA
 set_tests_properties(graph_math_stream_dot_product_empty
                      PROPERTIES PASS_REGULAR_EXPRESSION "vector of extents 0 is not 1-D with at least one entry")
 
+# the bit packers forward the tags past their last input at the end-of-stream index
+gr_add_graph_test(
+  graph_math_bits_pack_end_tags
+  graphs/bits-pack-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrMathBlocksShared>
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
+
 # Rotator forwards the tags past its last input at the end-of-stream index
 gr_add_graph_test(
   graph_math_rotator_end_tags
