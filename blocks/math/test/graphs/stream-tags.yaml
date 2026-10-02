@@ -6,9 +6,9 @@
 #   Differentiate<int16>: 3 5 2 2 -1, tags at 1 4 -> 3 2 -3 0 -3, tags at 1 4; the scheduler
 #     starts a call at each tag, so the differences at 1 and 4 take their previous sample from the call before
 #   MultiplyByMatrix<float32>, 2 x 3 [1 0 0; 0 0 1]: 1..10, tags at 1 3 8 9
-#     -> 1 3 | 4 6 | 7 9, tags at 0 2 4; 10 and its tag at 9 are the unconsumed remainder
+#     -> 1 3 | 4 6 | 7 9, tags at 0 2 4 6; 10 is the unconsumed remainder, its tag at the end-of-stream index 6
 #   DotProduct<complex<float32>>, vector 1 1: (k,-k) for k = 1..7, tags at 0 3 4 6
-#     -> (3,-3) (7,-7) (11,-11), tags at 0 1 2; (7,-7) and its tag at 6 are the unconsumed remainder
+#     -> (3,-3) (7,-7) (11,-11), tags at 0 1 2 3; (7,-7) is the unconsumed remainder, its tag at the end index 3
 # The second sink of each chain checks mark: at the tag indices after the two one-to-one blocks, absent
 # after the two grouping blocks.
 blocks:
@@ -86,7 +86,7 @@ blocks:
       name: sink_f32_multiplybymatrix
       expected: !!float32 [1.0, 3.0, 4.0, 6.0, 7.0, 9.0]
       tag_key: trigger_name
-      tag_indices: !!uint32 [0, 2, 4]
+      tag_indices: !!uint32 [0, 2, 4, 6]
   - id: gr::blocks::testing::ExpectSink<float32>
     parameters:
       name: sink_f32_multiplybymatrix_mark
@@ -121,7 +121,7 @@ blocks:
         - (7.0, -7.0)
         - (11.0, -11.0)
       tag_key: trigger_name
-      tag_indices: !!uint32 [0, 1, 2]
+      tag_indices: !!uint32 [0, 1, 2, 3]
   - id: gr::blocks::testing::ExpectSink<complex<float32>>
     parameters:
       name: sink_c32_dotproduct_mark
