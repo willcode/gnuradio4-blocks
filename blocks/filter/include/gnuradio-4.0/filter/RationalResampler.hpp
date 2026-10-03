@@ -111,7 +111,11 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
             const std::uint64_t g = std::gcd(l, m);
             l /= g;
             m /= g;
-            const gr::filter::ResamplerDesign design = gr::filter::designResampler(static_cast<std::size_t>(l), static_cast<std::size_t>(m), static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            const auto designed = gr::filter::designResampler(static_cast<std::size_t>(l), static_cast<std::size_t>(m), static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            if (!designed) {
+                throw gr::exception(designed.error().message, designed.error().sourceLocation);
+            }
+            const gr::filter::ResamplerDesign& design = *designed;
             if (!design.ok) {
                 throw gr::exception(std::format("no filter under the tap cap meets {} dB stopband and {} dB ripple for {}/{}", attenuation_db.value, max_ripple_db.value, l, m));
             }
@@ -202,7 +206,9 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
         }
         const std::size_t chunks = std::min(input.size() / static_cast<std::size_t>(_decimation), output.size() / static_cast<std::size_t>(_interpolation));
         if (chunks > 0UZ) {
-            std::ignore = processBulk(std::span<const T>(input.data(), chunks * static_cast<std::size_t>(_decimation)), std::span<T>(output.data(), chunks * static_cast<std::size_t>(_interpolation)));
+            if (const work::Status status = processBulk(std::span<const T>(input.data(), chunks * static_cast<std::size_t>(_decimation)), std::span<T>(output.data(), chunks * static_cast<std::size_t>(_interpolation))); status != work::Status::OK) {
+                return status;
+            }
         }
         _tags.release(output, chunks * static_cast<std::size_t>(_interpolation), true);
         output.publish(chunks * static_cast<std::size_t>(_interpolation));
@@ -212,9 +218,13 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) {
         // The framework hands whole chunks — M in, L out — so the phase is zero at every call
         // boundary and the two counts agree exactly. Anything else is a contract violation.
-        const std::size_t made = _resampler->process(input, output);
-        if (made != output.size()) {
-            throw gr::exception(std::format("{} input samples yield {} outputs, not the {} reserved", input.size(), made, output.size()));
+        const auto made = _resampler->process(input, output);
+        if (!made) {
+            this->emitErrorMessage("processBulk", made.error());
+            return work::Status::ERROR;
+        }
+        if (*made != output.size()) {
+            throw gr::exception(std::format("{} input samples yield {} outputs, not the {} reserved", input.size(), *made, output.size()));
         }
         return work::Status::OK;
     }
