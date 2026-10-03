@@ -432,7 +432,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         params.fLow                    = 100.0;
         params.fHigh                   = 200.0;
         params.fs                      = 1000.0;
-        const std::vector<float> taps  = gr::filter::fir::designFilter<float>(gr::filter::Type::LOWPASS, params, gr::algorithm::window::Type::Hamming).b;
+        const std::vector<float> taps  = gr::filter::fir::designFilter<float>(gr::filter::Type::LOWPASS, params, gr::algorithm::window::Type::Hamming).value().b;
         const std::uint64_t      twice = gr::blocks::filter::detail::twiceTapDelay(std::span<const float>(taps));
         expect(gt(twice, 4ULL)) << "the design delays the last two inputs past the last output";
 
