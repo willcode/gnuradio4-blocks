@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/sdr/NamespaceCompatibility.hpp>
 
 #include <chrono>
+#include <expected>
 #include <thread>
 
 namespace gr::blocks::sdr {
@@ -218,7 +219,9 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         _activationFailed.store(false, std::memory_order_relaxed);
         rebuildDcFilter();
         reinitDevice();
-        rebuildRateEstimator();
+        if (auto rebuilt = rebuildRateEstimator(); !rebuilt) {
+            failStart(rebuilt.error().message, rebuilt.error().sourceLocation);
+        }
         _activation.activate([this] {
             if (auto r = _rxStream.activate(); !r) {
                 _activationError = r.error();
@@ -312,7 +315,11 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
             while (ioActive()) {
                 this->applyChangedSettings();
-                applyDirtyFlags();
+                if (auto applied = applyDirtyFlags(); !applied) {
+                    this->emitErrorMessage("ioReadLoop()", applied.error());
+                    _ioStopRequested.store(true, std::memory_order_release);
+                    break;
+                }
 
                 const std::size_t nRead = readSize(max_chunk_size, capacity, outWriter.available(), mtu);
                 if (nRead == 0UZ) {
@@ -380,7 +387,11 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
 
             while (ioActive()) {
                 this->applyChangedSettings();
-                applyDirtyFlags();
+                if (auto applied = applyDirtyFlags(); !applied) {
+                    this->emitErrorMessage("ioReadLoop()", applied.error());
+                    _ioStopRequested.store(true, std::memory_order_release);
+                    break;
+                }
 
                 std::size_t room = std::numeric_limits<std::size_t>::max();
                 for (auto& w : outWriters) {
@@ -916,15 +927,21 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         }
     }
 
-    void rebuildRateEstimator() {
+    // Returns the filter design's error for a cutoff and update rate the rate estimator cannot realize.
+    [[nodiscard]] std::expected<void, gr::Error> rebuildRateEstimator() {
         if (ppm_estimator_cutoff > 0.f) {
             // one update per read, each read at the size readSize() gives when every output has room
             const std::size_t nRead         = readSize(max_chunk_size, outputCapacity(), outputCapacity(), _rxStream.mtu());
             double            nomRate       = static_cast<double>(sample_rate.value);
             double            updateHz      = (nomRate > 0.0) ? (nomRate / static_cast<double>(nRead)) : 250.0;
             _rateEstimator.filter_cutoff_hz = ppm_estimator_cutoff;
-            _rateEstimator.reset(nomRate, updateHz);
+            try {
+                _rateEstimator.reset(nomRate, updateHz);
+            } catch (const gr::exception& e) {
+                return std::unexpected(gr::Error(e.message, e.sourceLocation));
+            }
         }
+        return {};
     }
 
     void applyDcBlocker(std::complex<float>* samples, std::size_t nSamples) {
@@ -987,13 +1004,14 @@ Tested with RTL-SDR and LimeSDR drivers.)">;
         }
     }
 
-    void applyDirtyFlags() {
+    [[nodiscard]] std::expected<void, gr::Error> applyDirtyFlags() {
         if (_dcFilterDirty.exchange(false, std::memory_order_acquire)) {
             rebuildDcFilter();
         }
         if (_rateEstimatorDirty.exchange(false, std::memory_order_acquire)) {
-            rebuildRateEstimator();
+            return rebuildRateEstimator();
         }
+        return {};
     }
 
     template<typename U>
