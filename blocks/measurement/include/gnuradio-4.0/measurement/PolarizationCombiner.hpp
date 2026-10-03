@@ -19,6 +19,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
+#include <gnuradio-4.0/algorithm/math/Decibel.hpp>
 #include <gnuradio-4.0/algorithm/measurement/MeasurementRecord.hpp>
 #include <gnuradio-4.0/algorithm/measurement/MeasurementSlot.hpp>
 #include <gnuradio-4.0/algorithm/measurement/PolarizationCombiner.hpp>
@@ -48,9 +49,9 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::PolarizationCombiner)
  * A degenerate window has no noise in either branch or no correlation between them. It makes an SNR figure or the
  * amplitude ratio unbounded. Both are reported saturated at `1e6` linear (`60 dB`) and not as an infinity.
  * `nSaturatedFigures()` counts every saturation, which marks the record's finite number as a bound and not a
- * measurement. A branch whose estimated signal power is exactly zero has a signal-to-noise ratio of zero and a
- * decibel figure of `-inf`. Those channels read `0` dB, and the record's `valid` is false, as for a degenerate
- * window. No non-finite value reaches a record or a reader.
+ * measurement. A branch whose estimated signal power is exactly zero has a signal-to-noise ratio of zero. Its decibel
+ * figure is the library's floor, `gr::math::kDbFloor` (`-300 dB`). A figure at or below that floor reads `0` dB, and
+ * the record's `valid` is false, as for a degenerate window. No non-finite value reaches a record or a reader.
  */
 struct PolarizationCombiner : Block<PolarizationCombiner> {
     using Description = Doc<R""(
@@ -388,11 +389,12 @@ private:
     }
 
     /**
-     * @brief The five decibel figures a window reports, with an infinite value replaced by zero and flagged.
+     * @brief The five decibel figures a window reports, with an unmeasured value replaced by zero and flagged.
      *
-     * A branch whose estimated signal power is exactly zero has a signal-to-noise ratio of zero. Its logarithm is
-     * `-inf`, and the difference of two such values is a NaN. Zero is the placeholder a degenerate window also uses.
-     * `finite` marks the record invalid. No reader and no record channel carries a non-finite number.
+     * A figure is unmeasured when it is not finite or lies at or below `gr::math::kDbFloor`, the level of a zero
+     * signal-to-noise ratio. The gain is unmeasured when the combined figure is, or when both branch figures are; it
+     * is taken against the larger measured branch. Zero is the placeholder a degenerate window also uses. `finite`
+     * marks the record invalid. No reader and no record channel carries a non-finite number.
      */
     struct DbFigures {
         double branch0{0.};
@@ -406,14 +408,19 @@ private:
         const double branch0  = e.branchSnrDb(0UZ);
         const double branch1  = e.branchSnrDb(1UZ);
         const double combined = e.combinedSnrDb();
-        const double gain     = combined - std::max(branch0, branch1);
+        const auto   measured = [](double db) noexcept { return std::isfinite(db) && db > gr::math::kDbFloor; };
+        const bool   has0     = measured(branch0);
+        const bool   has1     = measured(branch1);
+        const bool   hasC     = measured(combined);
+        const double gain     = (has0 && has1) ? combined - std::max(branch0, branch1) : combined - (has0 ? branch0 : branch1);
+        const bool   hasGain  = hasC && (has0 || has1) && std::isfinite(gain);
 
         DbFigures figures;
-        figures.finite   = std::isfinite(branch0) && std::isfinite(branch1) && std::isfinite(combined) && std::isfinite(gain);
-        figures.branch0  = std::isfinite(branch0) ? branch0 : 0.;
-        figures.branch1  = std::isfinite(branch1) ? branch1 : 0.;
-        figures.combined = std::isfinite(combined) ? combined : 0.;
-        figures.gain     = std::isfinite(gain) ? gain : 0.;
+        figures.finite   = has0 && has1 && hasC && hasGain;
+        figures.branch0  = has0 ? branch0 : 0.;
+        figures.branch1  = has1 ? branch1 : 0.;
+        figures.combined = hasC ? combined : 0.;
+        figures.gain     = hasGain ? gain : 0.;
         return figures;
     }
 
