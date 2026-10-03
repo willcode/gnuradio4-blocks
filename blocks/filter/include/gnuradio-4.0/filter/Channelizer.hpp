@@ -8,6 +8,7 @@
 #include <format>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -42,7 +43,11 @@ namespace detail {
     if (family == "root_nyquist" && span < 2UZ) {
         throw gr::exception(std::format("span is the channel spacings the prototype covers and must be at least 2, got {}", span));
     }
-    return gr::filter::designChannelizerPrototype(channels, family, attenuationDb, transition, std::max(span, 2UZ), oversample);
+    auto designed = gr::filter::designChannelizerPrototype(channels, family, attenuationDb, transition, std::max(span, 2UZ), oversample);
+    if (!designed) {
+        throw gr::exception(designed.error().message, designed.error().sourceLocation);
+    }
+    return std::move(*designed);
 }
 
 /// The documentation the two banks share, so their settings read the same way.
@@ -139,9 +144,12 @@ channel rate and not the input rate.
             design_ok           = measured.ok;
         } else { // a supplied prototype has no target either, and it is measured on the same terms
             const auto measured = gr::filter::measureChannelizerPrototype(designed, channels, transition, factor);
-            stopband_db         = measured.stopbandDb;
-            ripple_db           = measured.rippleDb;
-            design_ok           = measured.ok;
+            if (!measured) {
+                throw gr::exception(measured.error().message, measured.error().sourceLocation);
+            }
+            stopband_db = measured->stopbandDb;
+            ripple_db   = measured->rippleDb;
+            design_ok   = measured->ok;
         }
 
         _bank.configure(channels, designed, factor);
@@ -261,9 +269,12 @@ block carries it around the bank.
             design_ok           = measured.ok;
         } else { // a supplied prototype has no target either, and it is measured on the same terms
             const auto measured = gr::filter::measureChannelizerPrototype(designed, channels, transition, factor);
-            stopband_db         = measured.stopbandDb;
-            ripple_db           = measured.rippleDb;
-            design_ok           = measured.ok;
+            if (!measured) {
+                throw gr::exception(measured.error().message, measured.error().sourceLocation);
+            }
+            stopband_db = measured->stopbandDb;
+            ripple_db   = measured->rippleDb;
+            design_ok   = measured->ok;
         }
 
         _bank.configure(channels, designed, factor);
