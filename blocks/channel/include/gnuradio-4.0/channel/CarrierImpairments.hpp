@@ -61,10 +61,14 @@ the impairment does not move what the stream is centered on, it moves the signal
         if (sample_rate <= 0.f) {
             throw gr::exception(std::format("FrequencyOffset: 'sample_rate' must be positive, got {}", sample_rate.value));
         }
-        _phasor.setIncrement(2. * std::numbers::pi_v<double> * frequency_offset / static_cast<double>(sample_rate));
+        if (const auto set = _phasor.setIncrement(2. * std::numbers::pi_v<double> * frequency_offset / static_cast<double>(sample_rate)); !set) {
+            throw gr::exception(std::format("FrequencyOffset: 'frequency_offset': {}", set.error().message), set.error().sourceLocation);
+        }
         _chirping = false;
         if (newSettings.contains("phase_offset")) {
-            _phasor.setPhase(phase_offset);
+            if (const auto set = _phasor.setPhase(phase_offset); !set) {
+                throw gr::exception(std::format("FrequencyOffset: 'phase_offset': {}", set.error().message), set.error().sourceLocation);
+            }
             _position = 0ULL;
         }
     }
@@ -84,7 +88,10 @@ the impairment does not move what the stream is centered on, it moves the signal
             const double twoPi = 2. * std::numbers::pi_v<double>;
             const double step  = twoPi * drift / (fs * fs);
             if (!_chirping) {
-                _phasor.setIncrement(twoPi * frequency_offset / fs + 0.5 * step + static_cast<double>(_position) * step);
+                if (const auto set = _phasor.setIncrement(twoPi * frequency_offset / fs + 0.5 * step + static_cast<double>(_position) * step); !set) {
+                    this->emitErrorMessage("processBulk", set.error());
+                    return work::Status::ERROR;
+                }
                 _chirping = true;
             }
             _phasor.mixChirp(step, input.first(nSamples), written);

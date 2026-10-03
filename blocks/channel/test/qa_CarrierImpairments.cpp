@@ -4,9 +4,11 @@
 #include <cmath>
 #include <complex>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <print>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -170,6 +172,22 @@ const boost::ut::suite<"carrier impairments"> carrierTests = [] {
     "the sample rate must be positive"_test = [] {
         expect(throws([] { std::ignore = configured<FrequencyOffset<C>>({{"sample_rate", 0.f}}); }));
         expect(throws([] { std::ignore = configured<PhaseNoise<C>>({{"sample_rate", -1.f}}); }));
+    };
+
+    "a non-finite offset or phase is refused naming the setting"_test = [] {
+        const auto refusal = [](gr::property_map settings) -> std::string {
+            try {
+                std::ignore = configured<FrequencyOffset<C>>(std::move(settings));
+            } catch (const gr::exception& error) {
+                return error.message;
+            }
+            return {};
+        };
+        const double      infinity = std::numeric_limits<double>::infinity();
+        const std::string offset   = refusal({{"frequency_offset", infinity}});
+        const std::string phase    = refusal({{"phase_offset", std::numeric_limits<double>::quiet_NaN()}});
+        expect(offset.starts_with("FrequencyOffset: 'frequency_offset': gr::signal::Phasor: increment must be finite")) << offset;
+        expect(phase.starts_with("FrequencyOffset: 'phase_offset': gr::signal::Phasor: phase must be finite")) << phase;
     };
 
     // the walk's step variance is what the stated linewidth means
