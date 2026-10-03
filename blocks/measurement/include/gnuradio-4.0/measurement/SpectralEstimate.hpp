@@ -121,12 +121,16 @@ struct SegmentAccumulator {
             skipping  = 0UZ;
             gridStart = streamAt;
         }
-        hop       = hopSize;
-        nAverages = averages;
-        maxHold   = holdMode;
-        shape     = windowParam;
-        window    = gr::algorithm::window::create<Real>(windowType, fftSize, windowParam);
-        scale     = gr::algorithm::fft::spectralScale(std::span<const Real>(window), sampleRate);
+        hop          = hopSize;
+        nAverages    = averages;
+        maxHold      = holdMode;
+        shape        = windowParam;
+        auto created = gr::algorithm::window::create<Real>(windowType, fftSize, windowParam);
+        if (!created) {
+            throw gr::exception(created.error().message, created.error().sourceLocation);
+        }
+        window = std::move(*created);
+        scale  = gr::algorithm::fft::spectralScale(std::span<const Real>(window), sampleRate);
         hold.assign(bins(), Real{0});
         restart();
     }
@@ -359,10 +363,8 @@ inline void requireSampleRate(float sampleRate) {
 /// repeated here. The record states the parameter in force, and a second copy of the number could go stale.
 [[nodiscard]] inline float windowParamFor(gr::algorithm::window::Type windowType, float param) {
     const float shape = (param == 0.f || std::isnan(param)) ? gr::algorithm::window::detail::defaultParameter<float>(windowType) : param;
-    try {
-        gr::algorithm::window::detail::validateParameter<float>(windowType, shape);
-    } catch (const std::invalid_argument& refusal) {
-        throw gr::exception(std::format("window_param: {}", refusal.what()));
+    if (const auto valid = gr::algorithm::window::detail::validateParameter<float>(windowType, shape); !valid) {
+        throw gr::exception(std::format("window_param: {}", valid.error().message));
     }
     return shape;
 }

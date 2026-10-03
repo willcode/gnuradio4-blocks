@@ -558,8 +558,8 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         const auto stated  = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}, {"window_param", kBeta}});
         const auto omitted = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}});
 
-        const auto direct  = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft, kBeta);
-        const auto library = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft);
+        const auto direct  = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft, kBeta).value();
+        const auto library = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft).value();
 
         expect(eq(stated->_core.window.size(), direct.size()));
         for (std::size_t k = 0UZ; k < std::min(stated->_core.window.size(), direct.size()); ++k) {
