@@ -9,6 +9,7 @@
 #include "ScopedWorkingDirectory.hpp"
 
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
 #include <string_view>
@@ -96,12 +97,13 @@ void runTest(const gr::blocks::fileio::Mode mode) {
             expect(eq(files.size(), 1U)) << testCaseName;
         }
         for (const auto& file : files) {
-            auto fileSize = gr::blocks::fileio::detail::getFileSize(file);
+            const std::expected<std::uintmax_t, gr::Error> fileSize = gr::blocks::fileio::detail::getFileSize(file);
+            expect(fatal(fileSize.has_value())) << testCaseName;
             if (mode == gr::blocks::fileio::Mode::multi) {
                 // less-equal 'le' because files can be legitimally zero-sized
-                expect(le(fileSize, maxFileSize)) << testCaseName;
+                expect(le(*fileSize, maxFileSize)) << testCaseName;
             } else {
-                expect(eq(fileSize, nSamples * sizeof(DataType))) << testCaseName;
+                expect(eq(*fileSize, nSamples * sizeof(DataType))) << testCaseName;
             }
         }
     };
@@ -371,6 +373,19 @@ const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
         expect(written.has_value()) << errorMessage(written);
         std::error_code ec;
         expect(eq(std::filesystem::file_size(workingDirectory.directory / "missing/sub/tone.f32", ec), nSamples * sizeof(float))) << ec.message();
+    };
+
+    "getFileSize returns a missing file as an error"_test = [] {
+        ScopedWorkingDirectory      workingDirectory;
+        const std::filesystem::path missing = workingDirectory.directory / "absent.f32";
+
+        const std::expected<std::uintmax_t, gr::Error> size = gr::blocks::fileio::detail::getFileSize(missing);
+        expect(!size.has_value());
+        if (!size) {
+            expect(eq(size.error().message, std::format("file '{}' does not exist.", missing.string())));
+        }
+        std::ofstream(missing, std::ios::binary) << "0123";
+        expect(eq(gr::blocks::fileio::detail::getFileSize(missing).value_or(0U), std::uintmax_t{4U}));
     };
 
     "BasicFileSource refuses a file name whose directory does not exist"_test = [] {

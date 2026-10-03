@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <complex>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -42,11 +43,16 @@ inline std::vector<std::filesystem::path> getSortedFilesContaining(const std::st
     return matchingFiles;
 }
 
-[[nodiscard]] inline std::uintmax_t getFileSize(const std::filesystem::path& filePath) {
+[[nodiscard]] inline std::expected<std::uintmax_t, gr::Error> getFileSize(const std::filesystem::path& filePath) {
     if (!std::filesystem::exists(filePath)) {
-        throw std::runtime_error(std::format("file '{}' does not exist.", filePath.string()));
+        return std::unexpected(gr::Error(std::format("file '{}' does not exist.", filePath.string())));
     }
-    return std::filesystem::file_size(filePath);
+    std::error_code      sizeError;
+    const std::uintmax_t size = std::filesystem::file_size(filePath, sizeError);
+    if (sizeError) {
+        return std::unexpected(gr::Error(std::format("cannot read the size of '{}': {}", filePath.string(), sizeError.message())));
+    }
+    return size;
 }
 
 // Deletes the regular files of the file name's directory whose names hold its file name. A directory that cannot be
