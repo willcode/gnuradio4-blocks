@@ -244,11 +244,19 @@ no single delay.
         params.fs    = static_cast<double>(sample_rate);
 
         if (filter_type == FilterType::FIR) { // design FIR filter
-            const FilterCoefficients<ValueType> coefficients = fir::designFilter<ValueType>(filter_response, params, fir_design_method);
-            _twiceFirDelay                                   = detail::twiceTapDelay(std::span<const ValueType>(coefficients.b));
-            _filter                                          = FilterImpl(coefficients);
+            const auto designed = fir::designFilter<ValueType>(filter_response, params, fir_design_method);
+            if (!designed) {
+                throw gr::exception(designed.error().message, designed.error().sourceLocation);
+            }
+            const FilterCoefficients<ValueType>& coefficients = *designed;
+            _twiceFirDelay                                    = detail::twiceTapDelay(std::span<const ValueType>(coefficients.b));
+            _filter                                           = FilterImpl(coefficients);
         } else if (filter_type == FilterType::IIR) { // design IIR filter
-            _filter = FilterImpl(iir::designFilter<ValueType>(filter_response, params, iir_design_method));
+            const auto designed = iir::designFilter<ValueType>(filter_response, params, iir_design_method);
+            if (!designed) {
+                throw gr::exception(designed.error().message, designed.error().sourceLocation);
+            }
+            _filter = FilterImpl(*designed);
         }
     }
 
