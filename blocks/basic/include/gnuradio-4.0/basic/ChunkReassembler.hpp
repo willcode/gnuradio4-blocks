@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <optional>
@@ -299,10 +300,10 @@ span. At end of stream every open file is incomplete. It is published on `incomp
                 _engine->release(id);
             }
 
-            if (result.status == gr::packet::ChunkReassembler::Status::refused) {
+            if (!result.has_value()) {
                 if (rejectConnected && onReject < rejectSpan.size()) {
                     rejectSpan[onReject] = record;
-                    rejectSpan.publishTag(property_map{{property_map::key_type("discard_reason"), pmt::Value(std::string(detail::chunk_reassembler::refusalReasonName(result.reason)))}}, onReject);
+                    rejectSpan.publishTag(property_map{{property_map::key_type("discard_reason"), pmt::Value(std::string(detail::chunk_reassembler::refusalReasonName(result.error())))}}, onReject);
                     ++onReject;
                 }
                 // the kernel's own refusal counters already count this whether or not reject is connected
@@ -557,8 +558,8 @@ private:
             format = gr::packet::OffsetChunkFormat{.identifier = identifier, .offset = gr::packet::FieldSpec{static_cast<std::size_t>(offset_offset.value), static_cast<std::size_t>(offset_bytes.value)}, .chunk_count = count, .total_size = size, .check_value = {}, .last_flag = lastFlag, .payload_offset = static_cast<std::size_t>(payload_offset.value), .payload_trim = static_cast<std::size_t>(payload_trim.value), .chunk_size = static_cast<std::size_t>(chunk_size.value), .byte_order = order};
         }
 
-        if (const gr::packet::FormatError error = gr::packet::validateChunkFormat(format); error != gr::packet::FormatError::ok) {
-            throw gr::exception(std::format("chunk_format '{}' is refused: {} ({})", chunk_format.value, gr::packet::formatErrorName(error), describeFields()));
+        if (const std::expected<void, gr::packet::FormatError> valid = gr::packet::validateChunkFormat(format); !valid) {
+            throw gr::exception(std::format("chunk_format '{}' is refused: {} ({})", chunk_format.value, gr::packet::formatErrorName(valid.error()), describeFields()));
         }
 
         return gr::packet::ChunkReassembler::Config{.format = format, .max_open_files = static_cast<std::size_t>(max_open_files.value), .max_file_bytes = max_file_bytes.value, .max_gaps = static_cast<std::size_t>(max_gaps.value), .evict_after_records = evict_after_records.value, .require_crc_ok = require_crc_ok.value, .new_file_on_index_regression = new_file_on_index_regression.value};

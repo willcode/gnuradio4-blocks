@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <numeric>
 #include <optional>
@@ -815,9 +816,9 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
                 descriptor.payload_end     = kStep;
                 const std::vector<std::uint8_t> chunk(file.begin() + static_cast<std::ptrdiff_t>(offset), file.begin() + static_cast<std::ptrdiff_t>(offset + kStep));
                 const auto                      result = engine.pushDescriptor(descriptor, std::span<const std::uint8_t>(chunk));
-                expect(result.status == gr::packet::ChunkReassembler::Status::accepted || result.status == gr::packet::ChunkReassembler::Status::completed) << std::format("offset {}", offset);
-                if (result.status == gr::packet::ChunkReassembler::Status::completed) {
-                    completedId = result.completed_id;
+                expect(result.has_value()) << std::format("offset {}", offset);
+                if (result.has_value() && result->completed()) {
+                    completedId = result->completed_id;
                 }
             }
             expect(eq(engine.counters().refused_no_position, 0ULL));
@@ -841,7 +842,8 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             first.payload_begin = 0UZ;
             first.payload_end   = kStep;
             const std::vector<std::uint8_t> firstChunk(file.begin(), file.begin() + static_cast<std::ptrdiff_t>(kStep));
-            expect(engine.pushDescriptor(first, std::span<const std::uint8_t>(firstChunk)).status == gr::packet::ChunkReassembler::Status::accepted);
+            const auto                      firstResult = engine.pushDescriptor(first, std::span<const std::uint8_t>(firstChunk));
+            expect(firstResult.has_value() && !firstResult->completed());
 
             ChunkDescriptor holeAhead;
             holeAhead.total_size    = file.size();
@@ -849,7 +851,8 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             holeAhead.payload_begin = 0UZ;
             holeAhead.payload_end   = kStep;
             const std::vector<std::uint8_t> aheadChunk(file.begin() + 2 * static_cast<std::ptrdiff_t>(kStep), file.begin() + 3 * static_cast<std::ptrdiff_t>(kStep));
-            expect(engine.pushDescriptor(holeAhead, std::span<const std::uint8_t>(aheadChunk)).status == gr::packet::ChunkReassembler::Status::accepted);
+            const auto                      aheadResult = engine.pushDescriptor(holeAhead, std::span<const std::uint8_t>(aheadChunk));
+            expect(aheadResult.has_value() && !aheadResult->completed());
 
             ChunkDescriptor degenerate; // neither offset nor index
             degenerate.total_size    = file.size();
@@ -857,8 +860,8 @@ const boost::ut::suite<"ChunkReassembler"> chunkReassemblerTests = [] {
             degenerate.payload_end   = kStep;
             const std::vector<std::uint8_t> anyChunk(kStep, 0x00U);
             const auto                      result = engine.pushDescriptor(degenerate, std::span<const std::uint8_t>(anyChunk));
-            expect(result.status == gr::packet::ChunkReassembler::Status::refused);
-            expect(result.reason == gr::packet::ChunkReassembler::RefusalReason::no_position);
+            expect(!result.has_value());
+            expect(result == std::unexpected(gr::packet::ChunkReassembler::RefusalReason::no_position));
             expect(eq(engine.counters().refused_no_position, 1ULL));
             expect(eq(engine.departed().size(), 1UZ)) << "the file is evicted in the same call";
             if (!engine.departed().empty()) {
