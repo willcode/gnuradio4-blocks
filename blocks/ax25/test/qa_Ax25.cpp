@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <span>
 #include <string>
@@ -506,13 +507,13 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
         };
 
         expect(nothrow([&staged, &with] { staged(with("via", std::string("WIDE1-1,WIDE2-2*"))); })) << "two hops, one of them already repeated";
-        expect(throws([&staged, &with] { staged(with("source", std::string("n0call"))); })) << "a lowercase callsign";
-        expect(throws([&staged, &with] { staged(with("destination", std::string("ABCDEFG"))); })) << "seven callsign characters";
-        expect(throws([&staged, &with] { staged(with("source", std::string("N0CALL-16"))); })) << "an SSID above fifteen";
-        expect(throws([&staged, &with] { staged(with("via", std::string("A1,A2,A3,A4,A5,A6,A7,A8,A9"))); })) << "a ninth hop";
-        expect(throws([&staged, &with] { staged(with("control_type", std::string("I"))); })) << "the sequenced types need numbers no setting supplies";
-        expect(throws([&staged, &with] { staged(with("control_type", std::string("RR"))); }));
-        expect(throws([&staged, &with] { staged(with("control_type", std::string("U"))); })) << "the unnamed catch-all is a decode outcome, not a frame to build";
+        expect(throws<gr::exception>([&staged, &with] { staged(with("source", std::string("n0call"))); })) << "a lowercase callsign";
+        expect(throws<gr::exception>([&staged, &with] { staged(with("destination", std::string("ABCDEFG"))); })) << "seven callsign characters";
+        expect(throws<gr::exception>([&staged, &with] { staged(with("source", std::string("N0CALL-16"))); })) << "an SSID above fifteen";
+        expect(throws<gr::exception>([&staged, &with] { staged(with("via", std::string("A1,A2,A3,A4,A5,A6,A7,A8,A9"))); })) << "a ninth hop";
+        expect(throws<gr::exception>([&staged, &with] { staged(with("control_type", std::string("I"))); })) << "the sequenced types need numbers no setting supplies";
+        expect(throws<gr::exception>([&staged, &with] { staged(with("control_type", std::string("RR"))); }));
+        expect(throws<gr::exception>([&staged, &with] { staged(with("control_type", std::string("U"))); })) << "the unnamed catch-all is a decode outcome, not a frame to build";
         expect(throws([] {
             Ax25Encode block = make<Ax25Encode>({{"source", std::string("N0CALL")}});
             block.start();
@@ -536,6 +537,31 @@ const boost::ut::suite<"ax25"> ax25Tests = [] {
                 expect(eq(metaString(back[1UZ], "ax25_destination"), std::string("APRS"))) << "and the record after the refused one is built from the settings";
             }
         }
+    };
+
+    "the text parsers return the refusal with the rule it breaks"_test = [] {
+        namespace detail = gr::blocks::ax25::detail;
+
+        const std::expected<detail::Address, gr::Error> address = detail::addressFromText("N0CALL-16", false);
+        expect(!address.has_value()) << "an SSID above fifteen";
+        if (!address) {
+            expect(eq(address.error().message, std::string("an SSID is a one or two digit number in [0, 15], got 'N0CALL-16'")));
+        }
+        const std::expected<detail::Address, gr::Error> repeated = detail::addressFromText("WIDE1-1*", true);
+        expect(repeated.has_value() && repeated->repeated && repeated->ssid == 1U) << "a repeater's '*' sets the H bit";
+
+        const std::expected<std::vector<detail::Address>, gr::Error> via = detail::viaFromText("WIDE1-1,wide2-2");
+        expect(!via.has_value()) << "one refused hop refuses the path";
+        if (!via) {
+            expect(eq(via.error().message, std::string("a callsign is one to six characters of 'A'-'Z' and '0'-'9', got 'wide2-2'")));
+        }
+
+        const std::expected<std::uint8_t, gr::Error> control = detail::controlFromName("RR");
+        expect(!control.has_value()) << "a supervisory type needs a sequence number";
+        if (!control) {
+            expect(control.error().message.ends_with("got 'RR'"));
+        }
+        expect(eq(detail::controlFromName("UI").value_or(std::uint8_t{0U}), std::uint8_t{0x03U}));
     };
 
     "the HDLC chain returns every frame, and one flipped wire bit fails its check sequence"_test = [] {

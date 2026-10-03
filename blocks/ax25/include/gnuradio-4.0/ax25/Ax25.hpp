@@ -4,13 +4,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <iterator>
 #include <limits>
 #include <optional>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -115,11 +115,11 @@ struct Frame {
     return text;
 }
 
-/// @brief Parses @p text as one address and throws `std::invalid_argument` when the grammar refuses it.
+/// @brief Parses @p text as one address. A text the grammar refuses returns an error that names the rule.
 ///
 /// A trailing '*' is accepted on a repeater alone and sets its H bit. A chain that regenerates received frames uses it
 /// to reproduce them. A new frame carries no '*' and leaves the bit clear.
-[[nodiscard]] inline Address addressFromText(std::string_view text, bool repeater) {
+[[nodiscard]] inline std::expected<Address, gr::Error> addressFromText(std::string_view text, bool repeater) {
     Address          address;
     std::string_view rest = text;
     if (repeater && rest.ends_with('*')) {
@@ -130,30 +130,30 @@ struct Frame {
     const std::size_t      dash = rest.find('-');
     const std::string_view call = dash == std::string_view::npos ? rest : rest.substr(0UZ, dash);
     if (call.empty() || call.size() > kCallsignChars) {
-        throw std::invalid_argument(std::format("a callsign is one to six characters of 'A'-'Z' and '0'-'9', got '{}'", text));
+        return std::unexpected(gr::Error(std::format("a callsign is one to six characters of 'A'-'Z' and '0'-'9', got '{}'", text)));
     }
     for (const char character : call) {
         const bool letter = character >= 'A' && character <= 'Z';
         const bool digit  = character >= '0' && character <= '9';
         if (!letter && !digit) {
-            throw std::invalid_argument(std::format("a callsign is one to six characters of 'A'-'Z' and '0'-'9', got '{}'", text));
+            return std::unexpected(gr::Error(std::format("a callsign is one to six characters of 'A'-'Z' and '0'-'9', got '{}'", text)));
         }
     }
 
     if (dash != std::string_view::npos) {
         const std::string_view digits = rest.substr(dash + 1UZ);
         if (digits.empty() || digits.size() > 2UZ) {
-            throw std::invalid_argument(std::format("an SSID is a one or two digit number in [0, 15], got '{}'", text));
+            return std::unexpected(gr::Error(std::format("an SSID is a one or two digit number in [0, 15], got '{}'", text)));
         }
         unsigned ssid = 0U;
         for (const char digit : digits) {
             if (digit < '0' || digit > '9') {
-                throw std::invalid_argument(std::format("an SSID is a one or two digit number in [0, 15], got '{}'", text));
+                return std::unexpected(gr::Error(std::format("an SSID is a one or two digit number in [0, 15], got '{}'", text)));
             }
             ssid = ssid * 10U + static_cast<unsigned>(digit - '0');
         }
         if (ssid > kMaxSsid) {
-            throw std::invalid_argument(std::format("an SSID is a one or two digit number in [0, 15], got '{}'", text));
+            return std::unexpected(gr::Error(std::format("an SSID is a one or two digit number in [0, 15], got '{}'", text)));
         }
         address.ssid = ssid;
     }
@@ -163,7 +163,7 @@ struct Frame {
 }
 
 /// @brief Read @p text as a comma-separated repeater path, refusing a ninth hop.
-[[nodiscard]] inline std::vector<Address> viaFromText(std::string_view text) {
+[[nodiscard]] inline std::expected<std::vector<Address>, gr::Error> viaFromText(std::string_view text) {
     std::vector<Address> hops;
     if (text.empty()) {
         return hops;
@@ -172,9 +172,13 @@ struct Frame {
         const std::size_t      comma = text.find(',', at);
         const std::string_view hop   = comma == std::string_view::npos ? text.substr(at) : text.substr(at, comma - at);
         if (hops.size() == kMaxRepeaters) {
-            throw std::invalid_argument(std::format("a path names at most eight repeaters, got '{}'", text));
+            return std::unexpected(gr::Error(std::format("a path names at most eight repeaters, got '{}'", text)));
         }
-        hops.push_back(addressFromText(hop, true));
+        std::expected<Address, gr::Error> parsed = addressFromText(hop, true);
+        if (!parsed) {
+            return std::unexpected(std::move(parsed.error()));
+        }
+        hops.push_back(std::move(*parsed));
         if (comma == std::string_view::npos) {
             return hops;
         }
@@ -230,13 +234,13 @@ inline void packAddress(const Address& address, bool highBit, bool last, std::ve
 }
 
 /// @brief The control byte @p name spells with its poll/final bit clear, refusing the types a setting cannot number.
-[[nodiscard]] inline std::uint8_t controlFromName(std::string_view name) {
+[[nodiscard]] inline std::expected<std::uint8_t, gr::Error> controlFromName(std::string_view name) {
     for (const auto& [modifier, label] : kUnnumbered) {
         if (label == name) {
             return static_cast<std::uint8_t>(modifier);
         }
     }
-    throw std::invalid_argument(std::format("must be one of 'UI', 'DM', 'SABM', 'DISC', 'UA', 'SABME', 'FRMR', 'XID' or 'TEST'; the I and supervisory types carry sequence numbers no setting supplies, got '{}'", name));
+    return std::unexpected(gr::Error(std::format("must be one of 'UI', 'DM', 'SABM', 'DISC', 'UA', 'SABME', 'FRMR', 'XID' or 'TEST'; the I and supervisory types carry sequence numbers no setting supplies, got '{}'", name)));
 }
 
 /// @brief Parses @p frame by position, seven bytes per subfield, then the control byte and the protocol identifier.
@@ -475,12 +479,12 @@ struct Ax25Encode : Block<Ax25Encode> {
 
     /// @brief Rebuilds the frame's fixed parts from the settings, refusing by name what the grammar does not accept.
     void rebuild() {
-        try {
-            _control = detail::controlFromName(control_type.value);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::format("control_type {}", error.what()));
+        const std::expected<std::uint8_t, gr::Error> control = detail::controlFromName(control_type.value);
+        if (!control) {
+            throw gr::exception(std::format("control_type {}", control.error().message));
         }
-        _hasPid = control_type.value == "UI";
+        _control = *control;
+        _hasPid  = control_type.value == "UI";
         if (pid.value > detail::kMaxByte) {
             throw gr::exception(std::format("pid is one byte and must be in [0, 255], got {}", pid.value));
         }
@@ -490,11 +494,11 @@ struct Ax25Encode : Block<Ax25Encode> {
         if (!source.value.empty()) {
             _source = address(source.value, false, "source");
         }
-        try {
-            _via = detail::viaFromText(via.value);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::format("via: {}", error.what()));
+        std::expected<std::vector<detail::Address>, gr::Error> hops = detail::viaFromText(via.value);
+        if (!hops) {
+            throw gr::exception(std::format("via: {}", hops.error().message));
         }
+        _via        = std::move(*hops);
         _configured = !destination.value.empty() && !source.value.empty();
     }
 
@@ -544,10 +548,10 @@ struct Ax25Encode : Block<Ax25Encode> {
             }
             if (!refused) {
                 if (const std::optional<std::string> text = string(meta, "ax25_via"); text.has_value()) {
-                    try {
-                        path = detail::viaFromText(*text);
-                    } catch (const std::invalid_argument& error) {
-                        std::println(stderr, "gr::blocks::ax25::Ax25Encode '{}': dropping a record whose ax25_via override {}", this->name, error.what());
+                    if (std::expected<std::vector<detail::Address>, gr::Error> hops = detail::viaFromText(*text); hops) {
+                        path = std::move(*hops);
+                    } else {
+                        std::println(stderr, "gr::blocks::ax25::Ax25Encode '{}': dropping a record whose ax25_via override {}", this->name, hops.error().message);
                         refused = true;
                     }
                 }
@@ -611,22 +615,22 @@ struct Ax25Encode : Block<Ax25Encode> {
 private:
     /// @brief One setting's address, with the refusal reported under the setting's own name.
     [[nodiscard]] static detail::Address address(const std::string& text, bool repeater, std::string_view setting) {
-        try {
-            return detail::addressFromText(text, repeater);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::format("{}: {}", setting, error.what()));
+        std::expected<detail::Address, gr::Error> parsed = detail::addressFromText(text, repeater);
+        if (!parsed) {
+            throw gr::exception(std::format("{}: {}", setting, parsed.error().message));
         }
+        return std::move(*parsed);
     }
 
     /// @brief One record's address override, stating the key it failed under and leaving @p target alone when it did.
     [[nodiscard]] bool overrideAddress(const std::string& text, bool repeater, std::string_view key, detail::Address& target) {
-        try {
-            target = detail::addressFromText(text, repeater);
-            return true;
-        } catch (const std::invalid_argument& error) {
-            std::println(stderr, "gr::blocks::ax25::Ax25Encode '{}': dropping a record whose {} override {}", this->name, key, error.what());
+        std::expected<detail::Address, gr::Error> parsed = detail::addressFromText(text, repeater);
+        if (!parsed) {
+            std::println(stderr, "gr::blocks::ax25::Ax25Encode '{}': dropping a record whose {} override {}", this->name, key, parsed.error().message);
             return false;
         }
+        target = std::move(*parsed);
+        return true;
     }
 
     [[nodiscard]] static std::optional<std::string> string(const property_map* map, const char* key) {
@@ -722,20 +726,21 @@ struct Ax25AddressFilter : Block<Ax25AddressFilter> {
             throw gr::exception(std::format("direction must be 'destination', 'source' or 'either', got '{}'", direction.value));
         }
         if (!address.value.empty()) {
-            _hasSsid = address.value.find('-') != std::string::npos;
-            try {
-                _address = detail::addressFromText(address.value, false);
-            } catch (const std::invalid_argument& error) {
-                throw gr::exception(std::format("address: {}", error.what()));
+            _hasSsid                                         = address.value.find('-') != std::string::npos;
+            std::expected<detail::Address, gr::Error> parsed = detail::addressFromText(address.value, false);
+            if (!parsed) {
+                throw gr::exception(std::format("address: {}", parsed.error().message));
             }
+            _address = std::move(*parsed);
         }
         if (!digipeater.value.empty()) {
             _digipeaterHasSsid = digipeater.value.find('-') != std::string::npos;
-            try { // the setting names a hop without the '*' marker, as `address` names an address
-                _digipeater = detail::addressFromText(digipeater.value, false);
-            } catch (const std::invalid_argument& error) {
-                throw gr::exception(std::format("digipeater: {}", error.what()));
+            // the setting names a hop without the '*' marker, as `address` names an address
+            std::expected<detail::Address, gr::Error> parsed = detail::addressFromText(digipeater.value, false);
+            if (!parsed) {
+                throw gr::exception(std::format("digipeater: {}", parsed.error().message));
             }
+            _digipeater = std::move(*parsed);
         }
         _configured = !address.value.empty() && !direction.value.empty();
     }
@@ -818,15 +823,14 @@ private:
 
     /// @brief Whether @p text parses as the address that `address` names, under its SSID rule.
     [[nodiscard]] bool addressMatches(const std::string& text) const {
-        try {
-            const detail::Address parsed = detail::addressFromText(text, false);
-            if (parsed.call != _address.call) {
-                return false;
-            }
-            return !_hasSsid || parsed.ssid == _address.ssid;
-        } catch (const std::invalid_argument&) {
-            return false; // a value the grammar refuses matches nothing and throws nothing mid-stream
+        const std::expected<detail::Address, gr::Error> parsed = detail::addressFromText(text, false);
+        if (!parsed) {
+            return false; // a value the grammar refuses matches nothing
         }
+        if (parsed->call != _address.call) {
+            return false;
+        }
+        return !_hasSsid || parsed->ssid == _address.ssid;
     }
 
     /// @brief Whether `digipeater` names a hop present in @p via with its repeated ('*') marker.
@@ -837,13 +841,10 @@ private:
         for (std::size_t at = 0UZ; at <= via.size();) {
             const std::size_t      comma = via.find(',', at);
             const std::string_view hop   = comma == std::string::npos ? std::string_view(via).substr(at) : std::string_view(via).substr(at, comma - at);
-            try {
-                const detail::Address parsed = detail::addressFromText(hop, true);
-                if (parsed.repeated && parsed.call == _digipeater.call && (!_digipeaterHasSsid || parsed.ssid == _digipeater.ssid)) {
-                    return true;
-                }
-            } catch (const std::invalid_argument&) {
-                // a hop the grammar does not accept names no repeater, and the hops beside it still do
+            // a hop the grammar does not accept names no repeater, and the hops beside it still do
+            const std::expected<detail::Address, gr::Error> parsed = detail::addressFromText(hop, true);
+            if (parsed && parsed->repeated && parsed->call == _digipeater.call && (!_digipeaterHasSsid || parsed->ssid == _digipeater.ssid)) {
+                return true;
             }
             if (comma == std::string::npos) {
                 break;
