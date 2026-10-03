@@ -300,7 +300,7 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
         _spectrum.assign(fftLength, Complex{});
         _binCarriers.resize(fftLength);
         for (std::size_t bin = 0UZ; bin < fftLength; ++bin) {
-            _binCarriers[bin] = gr::ofdm::CarrierMap::carrierOf(fftLength, bin);
+            _binCarriers[bin] = detail::carrierAt(fftLength, bin);
         }
         _shape.build(std::span<const int>(_binCarriers), signal_name.value,
             property_map{{std::pmr::string(detail::kFftLenKey), pmt::Value(static_cast<std::uint64_t>(fft_len.value))}, //

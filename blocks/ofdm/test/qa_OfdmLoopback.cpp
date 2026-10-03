@@ -99,10 +99,10 @@ template<typename TBlock>
     std::vector<CF> word(kFft, CF{});
     std::uint32_t   state = 987654321U;
     const auto      place = [&word, &state](std::int32_t carrier) {
-        state                                            = state * 1664525U + 1013904223U;
-        const float re                                   = ((state >> 16U) & 1U) != 0U ? 0.70710678f : -0.70710678f;
-        const float im                                   = ((state >> 17U) & 1U) != 0U ? 0.70710678f : -0.70710678f;
-        word[gr::ofdm::CarrierMap::binOf(kFft, carrier)] = CF(re, im);
+        state                                                    = state * 1664525U + 1013904223U;
+        const float re                                           = ((state >> 16U) & 1U) != 0U ? 0.70710678f : -0.70710678f;
+        const float im                                           = ((state >> 17U) & 1U) != 0U ? 0.70710678f : -0.70710678f;
+        word[gr::ofdm::CarrierMap::binOf(kFft, carrier).value()] = CF(re, im);
     };
     for (const std::int32_t carrier : dataCarriers()) {
         place(carrier);
@@ -127,7 +127,7 @@ template<typename TBlock>
     ConstellationEncoder<float> encoder = make<ConstellationEncoder<float>>({{"constellation", std::string("qpsk")}});
     const auto                  symbols = shim::run<CF>(encoder, labels, 4096UZ);
 
-    const auto      preamble = gr::ofdm::schmidlCoxPreamble(static_cast<std::size_t>(kFft), 52UZ, 0xC0FFEEULL);
+    const auto      preamble = gr::ofdm::schmidlCoxPreamble(static_cast<std::size_t>(kFft), 52UZ, 0xC0FFEEULL).value();
     const auto      sounding = channelSounding();
     std::vector<CF> words(preamble.begin(), preamble.end());
     words.insert(words.end(), sounding.begin(), sounding.end());

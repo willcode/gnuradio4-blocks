@@ -130,11 +130,11 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         expect(eq(values.size(), static_cast<std::size_t>(kFft)));
 
         for (std::size_t k = 0UZ; k < data.size(); ++k) {
-            const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, data[k]);
+            const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, data[k]).value();
             expect(values[bin] == input[k]) << std::format("data carrier {} landed in bin {}", data[k], bin);
         }
         for (std::size_t p = 0UZ; p < pilots.size(); ++p) {
-            const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, pilots[p]);
+            const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, pilots[p]).value();
             expect(values[bin] == pilotValues[p]) << std::format("pilot carrier {} landed in bin {}", pilots[p], bin);
         }
 
@@ -172,7 +172,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
 
         for (std::size_t s = 0UZ; s < 3UZ; ++s) {
             for (std::size_t p = 0UZ; p < pilots.size(); ++p) {
-                const std::size_t bin      = gr::ofdm::CarrierMap::binOf(kFft, pilots[p]);
+                const std::size_t bin      = gr::ofdm::CarrierMap::binOf(kFft, pilots[p]).value();
                 const std::size_t expected = (s * pilots.size() + p) % cycle.size();
                 expect(records[s].signal_values[bin] == cycle[expected]) << std::format("symbol {} pilot slot {}", s, p);
             }
@@ -247,9 +247,9 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         expect(eq(block.nPadded(), 2UZ * data.size() - partial));
 
         // the padded carriers are zero, and the carriers that arrived are untouched
-        const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, data[partial]);
+        const std::size_t bin = gr::ofdm::CarrierMap::binOf(kFft, data[partial]).value();
         expect(records[2UZ].signal_values[bin] == CF{});
-        const std::size_t kept = gr::ofdm::CarrierMap::binOf(kFft, data[partial - 1UZ]);
+        const std::size_t kept = gr::ofdm::CarrierMap::binOf(kFft, data[partial - 1UZ]).value();
         expect(records[2UZ].signal_values[kept] == input[data.size() + partial - 1UZ]);
     };
 

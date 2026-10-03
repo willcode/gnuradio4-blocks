@@ -85,10 +85,10 @@ template<typename TBlock>
     std::vector<CF> word(kFft, CF{});
     std::uint32_t   state = 987654321U;
     for (const std::int32_t carrier : dataCarriers()) {
-        word[gr::ofdm::CarrierMap::binOf(kFft, carrier)] = qpsk(state);
+        word[gr::ofdm::CarrierMap::binOf(kFft, carrier).value()] = qpsk(state);
     }
     for (const std::int32_t carrier : pilotCarriers()) {
-        word[gr::ofdm::CarrierMap::binOf(kFft, carrier)] = qpsk(state);
+        word[gr::ofdm::CarrierMap::binOf(kFft, carrier).value()] = qpsk(state);
     }
     return word;
 }
@@ -96,7 +96,7 @@ template<typename TBlock>
 [[nodiscard]] std::vector<CF> pilotCycle() { return {CF(1.f, 0.f), CF(1.f, 0.f), CF(1.f, 0.f), CF(-1.f, 0.f)}; }
 
 [[nodiscard]] gr::property_map numerology() {
-    const auto      preamble = gr::ofdm::schmidlCoxPreamble(static_cast<std::size_t>(kFft), 52UZ, 0xC0FFEEULL);
+    const auto      preamble = gr::ofdm::schmidlCoxPreamble(static_cast<std::size_t>(kFft), 52UZ, 0xC0FFEEULL).value();
     const auto      sounding = channelSounding();
     std::vector<CF> words(preamble.begin(), preamble.end());
     words.insert(words.end(), sounding.begin(), sounding.end());
@@ -389,11 +389,11 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
 
     "a numerology the estimator cannot work on is refused by name"_test = [] {
         expect(throws([] {
-            gr::property_map settings                  = equalizerSettings("cpe");
-            std::vector<CF>  word                      = channelSounding();
-            word[gr::ofdm::CarrierMap::binOf(kFft, 3)] = CF{};
-            settings["sync_word"]                      = interleave(word);
-            std::ignore                                = make<OfdmChannelEqualizer>(settings);
+            gr::property_map settings                          = equalizerSettings("cpe");
+            std::vector<CF>  word                              = channelSounding();
+            word[gr::ofdm::CarrierMap::binOf(kFft, 3).value()] = CF{};
+            settings["sync_word"]                              = interleave(word);
+            std::ignore                                        = make<OfdmChannelEqualizer>(settings);
         })) << "a sync word silent on an occupied carrier";
         expect(throws([] {
             gr::property_map settings = equalizerSettings("cpe");

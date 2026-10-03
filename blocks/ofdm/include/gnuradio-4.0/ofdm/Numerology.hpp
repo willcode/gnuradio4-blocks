@@ -4,6 +4,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <span>
 #include <stdexcept>
@@ -78,18 +79,39 @@ inline void requireFftLength(gr::Size_t fftLength) {
     }
 }
 
-/// @brief Build the numerology, restating the kernel's refusal as the failure a graph reports.
+/// @brief Build the numerology. A numerology the kernel refuses throws the kernel's gr::exception.
 [[nodiscard]] inline gr::ofdm::CarrierMap buildMap(gr::Size_t fftLength, std::span<const std::int32_t> dataCarriers, std::span<const std::int32_t> pilotCarriers) {
     requireFftLength(fftLength);
     // The kernel takes `int`, the same width as the settings type on every platform this builds for. The copy lets
     // the two types differ without this file noticing.
     const std::vector<int> data(dataCarriers.begin(), dataCarriers.end());
     const std::vector<int> pilots(pilotCarriers.begin(), pilotCarriers.end());
-    try {
-        return gr::ofdm::CarrierMap(static_cast<std::size_t>(fftLength), std::span<const int>(data), std::span<const int>(pilots));
-    } catch (const std::invalid_argument& error) {
-        throw gr::exception(error.what());
+    return gr::ofdm::CarrierMap(static_cast<std::size_t>(fftLength), std::span<const int>(data), std::span<const int>(pilots));
+}
+
+/// @brief Throws a numerology check's error as the failure a graph reports.
+inline void requireValid(const std::expected<void, gr::Error>& checked) {
+    if (!checked) {
+        throw gr::exception(checked.error().message, checked.error().sourceLocation);
     }
+}
+
+/// @brief The signed carrier of FFT bin @p bin. A bin outside the transform throws the kernel's message.
+[[nodiscard]] inline int carrierAt(std::size_t fftLength, std::size_t bin) {
+    const auto carrier = gr::ofdm::CarrierMap::carrierOf(fftLength, bin);
+    if (!carrier) {
+        throw gr::exception(carrier.error().message, carrier.error().sourceLocation);
+    }
+    return *carrier;
+}
+
+/// @brief The FFT bin of signed carrier @p carrier. A carrier outside the transform throws the kernel's message.
+[[nodiscard]] inline std::size_t binAt(std::size_t fftLength, int carrier) {
+    const auto bin = gr::ofdm::CarrierMap::binOf(fftLength, carrier);
+    if (!bin) {
+        throw gr::exception(bin.error().message, bin.error().sourceLocation);
+    }
+    return *bin;
 }
 
 /// @brief An interleaved re,im setting as complex values, refusing an odd length by name.

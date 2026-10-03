@@ -69,16 +69,16 @@ struct OfdmChannelEqualizer : Block<OfdmChannelEqualizer, NoTagPropagation> {
     PortOut<DataSet<Complex>, Async>         out;
     PortOut<DataSet<float>, Optional, Async> channel;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length and record length in bins, a power of two">>                                  fft_len = 64U;
-    Annotated<std::vector<std::int32_t>, "data_carriers", Visible, Doc<"signed logical carrier indices the output holds, in order">>              data_carriers{};
-    Annotated<std::vector<std::int32_t>, "pilot_carriers", Visible, Doc<"signed logical carrier indices the tracking reads">>                     pilot_carriers{};
-    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im pilots, read by (s * n_pilots + p) % len">>                             pilot_symbols{};
-    Annotated<std::vector<float>, "sync_word", Doc<"interleaved re,im known symbol of fft_len carriers for least squares">>                       sync_word{};
-    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head">>                                                               n_sync      = 1U;
-    Annotated<gr::Size_t, "sync_index", Doc<"index of the known symbol among the frame's sync symbols">>                                          sync_index  = 0U;
-    Annotated<std::string, "tracking", Visible, Doc<"'cpe', 'cpe_interp' or 'none'">>                                                             tracking    = std::string("cpe");
-    Annotated<float, "alpha", Visible, Doc<"single-pole coefficient of the 'cpe_interp' update, in (0, 1]">>                                      alpha       = 0.1f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                signal_name = std::string("ofdm_equalized");
+    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length and record length in bins, a power of two">>                     fft_len = 64U;
+    Annotated<std::vector<std::int32_t>, "data_carriers", Visible, Doc<"signed logical carrier indices the output holds, in order">> data_carriers{};
+    Annotated<std::vector<std::int32_t>, "pilot_carriers", Visible, Doc<"signed logical carrier indices the tracking reads">>        pilot_carriers{};
+    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im pilots, read by (s * n_pilots + p) % len">>                pilot_symbols{};
+    Annotated<std::vector<float>, "sync_word", Doc<"interleaved re,im known symbol of fft_len carriers for least squares">>          sync_word{};
+    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head">>                                                  n_sync      = 1U;
+    Annotated<gr::Size_t, "sync_index", Doc<"index of the known symbol among the frame's sync symbols">>                             sync_index  = 0U;
+    Annotated<std::string, "tracking", Visible, Doc<"'cpe', 'cpe_interp' or 'none'">>                                                tracking    = std::string("cpe");
+    Annotated<float, "alpha", Visible, Doc<"single-pole coefficient of the 'cpe_interp' update, in (0, 1]">>                         alpha       = 0.1f;
+    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                   signal_name = std::string("ofdm_equalized");
 
     Annotated<std::string, "constellation", gr::blocks::digital::detail::ConstellationSettingsDoc, Visible> constellation = std::string("qpsk");
     Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, for 'psk' and 'qam'">>                          arity         = 4U;
@@ -151,18 +151,10 @@ struct OfdmChannelEqualizer : Block<OfdmChannelEqualizer, NoTagPropagation> {
         gr::ofdm::CarrierMap map = detail::buildMap(fft_len, std::span<const std::int32_t>(data_carriers.value), std::span<const std::int32_t>(pilot_carriers.value));
 
         std::vector<Complex> pilots = detail::complexFrom(std::span<const float>(pilot_symbols.value), "pilot_symbols");
-        try {
-            map.validatePilotCycle(pilots.size());
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(error.what());
-        }
+        detail::requireValid(map.validatePilotCycle(pilots.size()));
 
         std::vector<Complex> known = detail::complexFrom(std::span<const float>(sync_word.value), "sync_word");
-        try {
-            map.validateSyncWord(std::span<const Complex>(known));
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(error.what());
-        }
+        detail::requireValid(map.validateSyncWord(std::span<const Complex>(known)));
 
         if (tracking.value != "cpe" && tracking.value != "cpe_interp" && tracking.value != "none") {
             throw gr::exception(std::format("tracking must be 'cpe', 'cpe_interp' or 'none', got '{}'", tracking.value));
@@ -182,12 +174,12 @@ struct OfdmChannelEqualizer : Block<OfdmChannelEqualizer, NoTagPropagation> {
         const std::size_t fftLength = static_cast<std::size_t>(fft_len.value);
         for (const std::size_t bin : map.dataBins()) {
             if (known[bin] == Complex{}) {
-                throw gr::exception(std::format("sync_word carries nothing on data carrier {}, so the channel cannot be estimated there", gr::ofdm::CarrierMap::carrierOf(fftLength, bin)));
+                throw gr::exception(std::format("sync_word carries nothing on data carrier {}, so the channel cannot be estimated there", detail::carrierAt(fftLength, bin)));
             }
         }
         for (const std::size_t bin : map.pilotBins()) {
             if (known[bin] == Complex{}) {
-                throw gr::exception(std::format("sync_word carries nothing on pilot carrier {}, so the channel cannot be estimated there", gr::ofdm::CarrierMap::carrierOf(fftLength, bin)));
+                throw gr::exception(std::format("sync_word carries nothing on pilot carrier {}, so the channel cannot be estimated there", detail::carrierAt(fftLength, bin)));
             }
         }
 
@@ -294,7 +286,7 @@ private:
         _occupied.reserve(carriers.size());
         _between.reserve(carriers.size());
         for (const int carrier : carriers) {
-            _occupied.push_back(gr::ofdm::CarrierMap::binOf(fftLength, carrier));
+            _occupied.push_back(detail::binAt(fftLength, carrier));
             _occupiedAxis.push_back(carrier);
 
             Between where{};

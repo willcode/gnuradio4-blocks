@@ -54,7 +54,7 @@ constexpr std::size_t kFft = 64UZ;
     }
     std::vector<int> carriers(fftLength);
     for (std::size_t bin = 0UZ; bin < fftLength; ++bin) {
-        carriers[bin] = gr::ofdm::CarrierMap::carrierOf(fftLength, bin);
+        carriers[bin] = gr::ofdm::CarrierMap::carrierOf(fftLength, bin).value();
     }
     return gr::blocks::ofdm::detail::makeSymbolRecord(std::move(values), std::span<const int>(carriers), "data", "test", //
         gr::property_map{{std::pmr::string("symbol_in_frame"), gr::pmt::Value(static_cast<std::uint64_t>(symbolInFrame))}});
@@ -232,7 +232,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
         expect(eq(out.size(), 1UZ));
         double worst = 0.;
         for (std::size_t bin = 0UZ; bin < kFft; ++bin) {
-            const int    carrier = gr::ofdm::CarrierMap::carrierOf(kFft, bin);
+            const int    carrier = gr::ofdm::CarrierMap::carrierOf(kFft, bin).value();
             const double phase   = 2. * std::numbers::pi * static_cast<double>(carrier) * static_cast<double>(kOffset) / static_cast<double>(kFft);
             const CF     want    = records[0UZ].signal_values[bin] * CF(static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase)));
             worst                = std::max(worst, static_cast<double>(std::abs(out[0UZ].signal_values[bin] - want)));
@@ -283,7 +283,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
         std::vector<gr::DataSet<CF>> records;
         std::vector<int>             carriers(kFft);
         for (std::size_t bin = 0UZ; bin < kFft; ++bin) {
-            carriers[bin] = gr::ofdm::CarrierMap::carrierOf(kFft, bin);
+            carriers[bin] = gr::ofdm::CarrierMap::carrierOf(kFft, bin).value();
         }
         for (std::size_t s = 0UZ; s < kSymbols; ++s) {
             std::vector<CF> values(kFft, CF{});

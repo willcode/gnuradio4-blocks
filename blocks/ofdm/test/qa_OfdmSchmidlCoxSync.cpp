@@ -75,7 +75,7 @@ template<typename TBlock>
 [[nodiscard]] std::vector<CF> transmit() {
     const auto      data     = dataCarriers();
     const auto      pilots   = pilotCarriers();
-    const auto      preamble = gr::ofdm::schmidlCoxPreamble(static_cast<std::size_t>(kFft), 52UZ, 0xC0FFEEULL);
+    const auto      preamble = gr::ofdm::schmidlCoxPreamble(static_cast<std::size_t>(kFft), 52UZ, 0xC0FFEEULL).value();
     std::vector<CF> pilotValues{CF(1.f, 0.f), CF(1.f, 0.f), CF(1.f, 0.f), CF(-1.f, 0.f)};
 
     CarrierAllocator allocator = make<CarrierAllocator>({{"fft_len", kFft}, {"data_carriers", data}, {"pilot_carriers", pilots}, //

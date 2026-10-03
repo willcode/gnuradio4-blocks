@@ -68,8 +68,8 @@ void init(TBlock& block) {
     std::vector<CF> word(kFft, CF{});
     std::uint32_t   state = 987654321U;
     const auto      place = [&word, &state](std::int32_t carrier) {
-        state                                            = state * 1664525U + 1013904223U;
-        word[gr::ofdm::CarrierMap::binOf(kFft, carrier)] = CF(((state >> 16U) & 1U) != 0U ? 0.7071f : -0.7071f, ((state >> 17U) & 1U) != 0U ? 0.7071f : -0.7071f);
+        state                                                    = state * 1664525U + 1013904223U;
+        word[gr::ofdm::CarrierMap::binOf(kFft, carrier).value()] = CF(((state >> 16U) & 1U) != 0U ? 0.7071f : -0.7071f, ((state >> 17U) & 1U) != 0U ? 0.7071f : -0.7071f);
     };
     for (const std::int32_t carrier : dataCarriers()) {
         place(carrier);

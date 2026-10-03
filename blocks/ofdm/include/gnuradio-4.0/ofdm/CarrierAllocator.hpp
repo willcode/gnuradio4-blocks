@@ -102,11 +102,7 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
         gr::ofdm::CarrierMap map = detail::buildMap(fft_len, std::span<const std::int32_t>(data_carriers.value), std::span<const std::int32_t>(pilot_carriers.value));
 
         std::vector<Complex> pilots = detail::complexFrom(std::span<const float>(pilot_symbols.value), "pilot_symbols");
-        try {
-            map.validatePilotCycle(pilots.size());
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(error.what());
-        }
+        detail::requireValid(map.validatePilotCycle(pilots.size()));
 
         std::vector<std::vector<Complex>> words = detail::syncWordsFrom(std::span<const float>(sync_words.value), static_cast<std::size_t>(fft_len));
         if (frame_len.value == 0U && !words.empty()) {
@@ -116,7 +112,7 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
         const std::size_t fftLength = static_cast<std::size_t>(fft_len.value);
         _binCarriers.resize(fftLength);
         for (std::size_t bin = 0UZ; bin < fftLength; ++bin) {
-            _binCarriers[bin] = gr::ofdm::CarrierMap::carrierOf(fftLength, bin);
+            _binCarriers[bin] = detail::carrierAt(fftLength, bin);
         }
 
         _nData = map.nData();
