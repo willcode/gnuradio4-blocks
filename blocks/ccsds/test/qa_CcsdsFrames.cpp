@@ -1,6 +1,8 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <expected>
 #include <span>
 #include <string>
 #include <vector>
@@ -17,6 +19,16 @@ using gr::blocks::testing::span::InputSpan;
 using gr::blocks::testing::span::OutputSpan;
 
 namespace {
+
+/// Writes the first `count` octets of a built header over the front of `into`. Returns false when the build refused.
+template<typename Octets>
+bool put(const std::expected<Octets, gr::ccsds::WriteStatus>& built, std::span<std::uint8_t> into, std::size_t count = std::tuple_size_v<Octets>) {
+    if (!built) {
+        return false;
+    }
+    std::copy_n(built->begin(), count, into.begin());
+    return true;
+}
 
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
@@ -117,7 +129,7 @@ template<typename TBlock>
 /// A TM frame of `frameLength` octets, the header written over a zero-filled record.
 [[nodiscard]] std::vector<std::uint8_t> tmFrame(const gr::ccsds::TmPrimaryHeader& header, std::size_t frameLength) {
     std::vector<std::uint8_t> frame(frameLength, 0U);
-    std::ignore = gr::ccsds::writeTmPrimaryHeader(header, frame);
+    std::ignore = put(gr::ccsds::writeTmPrimaryHeader(header), frame);
     return frame;
 }
 
@@ -139,8 +151,9 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         // packet order clear, segment length '11', FHP 0 -> 02 A3 C8 11 18 00 (132.0-B-3 4.1.2)
         {
             const std::vector<std::uint8_t> octets{0x02, 0xA3, 0xC8, 0x11, 0x18, 0x00};
-            TmPrimaryHeader                 header{};
-            expect(parseTmPrimaryHeader(octets, header) == ParseStatus::ok);
+            const auto                      parsed = parseTmPrimaryHeader(octets);
+            expect(parsed.has_value() >> fatal);
+            const TmPrimaryHeader& header = parsed->header;
             expect(eq(header.version, std::uint8_t{0}));
             expect(eq(header.spacecraft_id, std::uint16_t{42}));
             expect(eq(header.virtual_channel, std::uint8_t{1}));
@@ -153,17 +166,17 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             expect(eq(header.segment_length_id, std::uint8_t{3}));
             expect(eq(header.first_header_pointer, std::uint16_t{0}));
             std::vector<std::uint8_t> written(6UZ, 0U);
-            expect(writeTmPrimaryHeader(header, written) == WriteStatus::ok);
+            expect(put(writeTmPrimaryHeader(header), written));
             expect(that % (written == octets));
         }
         // same header, FHP 2047 and FHP 2046 -> 02 A3 C8 11 1F FF and 02 A3 C8 11 1F FE
         {
             TmPrimaryHeader           header{.version = 0, .spacecraft_id = 42, .virtual_channel = 1, .ocf_present = true, .master_frame_count = 200, .vc_frame_count = 17, .secondary_header = false, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = kFhpNoPacketStart};
             std::vector<std::uint8_t> written(6UZ, 0U);
-            expect(writeTmPrimaryHeader(header, written) == WriteStatus::ok);
+            expect(put(writeTmPrimaryHeader(header), written));
             expect(that % (written == std::vector<std::uint8_t>{0x02, 0xA3, 0xC8, 0x11, 0x1F, 0xFF}));
             header.first_header_pointer = kFhpOnlyIdleData;
-            expect(writeTmPrimaryHeader(header, written) == WriteStatus::ok);
+            expect(put(writeTmPrimaryHeader(header), written));
             expect(that % (written == std::vector<std::uint8_t>{0x02, 0xA3, 0xC8, 0x11, 0x1F, 0xFE}));
         }
         // AOS primary header: TFVN 01, SCID 42, VCID 63, VC count 0xFFFFFF, replay set, cycle use set,
@@ -171,24 +184,24 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         {
             AosPrimaryHeader          header{.version = 1, .spacecraft_id = 42, .virtual_channel = 63, .vc_frame_count = 0xFFFFFFU, .replay = true, .vc_count_cycle_used = true, .reserved = 0, .vc_count_cycle = 15, .has_fhec = false, .frame_header_error_control = 0};
             std::vector<std::uint8_t> written(6UZ, 0U);
-            expect(writeAosPrimaryHeader(header, written) == WriteStatus::ok);
+            expect(put(writeAosPrimaryHeader(header), written, aosPrimaryHeaderOctets(header.has_fhec)));
             expect(that % (written == std::vector<std::uint8_t>{0x4A, 0xBF, 0xFF, 0xFF, 0xFF, 0xCF})) << "the same SCID of 42 gives 02 in TM and 4A in AOS";
-            AosPrimaryHeader parsed{};
-            expect(parseAosPrimaryHeader(written, false, parsed) == ParseStatus::ok);
-            expect(that % (parsed == header));
+            const auto parsed = parseAosPrimaryHeader(written, false);
+            expect(parsed.has_value() >> fatal);
+            expect(that % (parsed->header == header));
         }
         // M_PDU header, FHP 2047 -> 07 FF
         {
             MpduHeader                mpdu{.reserved = 0, .first_header_pointer = kFhpNoPacketStart};
             std::vector<std::uint8_t> written(2UZ, 0U);
-            expect(writeMpduHeader(mpdu, written) == WriteStatus::ok);
+            expect(put(writeMpduHeader(mpdu), written));
             expect(that % (written == std::vector<std::uint8_t>{0x07, 0xFF}));
         }
         // TC primary header: SCID 42, VCID 1, frame length field 999, sequence 7 -> 00 2A 07 E7 07
         {
             TcPrimaryHeader           header{.version = 0, .bypass = false, .control_command = false, .reserved = 0, .spacecraft_id = 42, .virtual_channel = 1, .frame_length = 999, .sequence_number = 7};
             std::vector<std::uint8_t> written(5UZ, 0U);
-            expect(writeTcPrimaryHeader(header, written) == WriteStatus::ok);
+            expect(put(writeTcPrimaryHeader(header), written));
             expect(that % (written == std::vector<std::uint8_t>{0x00, 0x2A, 0x07, 0xE7, 0x07}));
             expect(eq(totalTcFrameOctets(header), std::size_t{1000}));
         }
@@ -196,7 +209,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         {
             TmSecondaryHeaderId       id{.version = 0, .length = 63};
             std::vector<std::uint8_t> written(1UZ, 0U);
-            expect(writeTmSecondaryHeaderId(id, written) == WriteStatus::ok);
+            expect(put(writeTmSecondaryHeaderId(id), written));
             expect(that % (written == std::vector<std::uint8_t>{0x3F}));
             expect(eq(tmSecondaryHeaderOctets(id), std::size_t{64}));
         }
@@ -204,7 +217,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         {
             Clcw                      clcw{.control_word_type = false, .version = 0, .status = 0, .cop_in_effect = 1, .virtual_channel = 1, .reserved = 0, .no_rf_available = true, .no_bit_lock = true, .lockout = true, .wait = true, .retransmit = true, .farm_b_counter = 3, .reserved_bit = 0, .report_value = 255};
             std::vector<std::uint8_t> written(4UZ, 0U);
-            expect(writeClcw(clcw, written) == WriteStatus::ok);
+            expect(put(writeClcw(clcw), written));
             expect(that % (written == std::vector<std::uint8_t>{0x01, 0x04, 0xFE, 0xFF}));
         }
         // space packet primary header: APID 100, sequence flags 11, sequence count 5, data length 0 -> 00 64 C0 05 00 00
@@ -289,14 +302,14 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         TmPrimaryHeader shHeader        = tmHeader(0U, 0U, 0U);
         shHeader.secondary_header       = true;
         std::vector<std::uint8_t> badSh = tmFrame(shHeader, 20UZ);
-        expect(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 0}, std::span<std::uint8_t>(badSh).subspan(kTmPrimaryHeaderSize)) == WriteStatus::ok);
+        expect(put(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 0}), std::span<std::uint8_t>(badSh).subspan(kTmPrimaryHeaderSize)));
 
         // 6 primary + 14 secondary + 4 OCF is 24 octets of overhead in a 20-octet frame, so no data field survives
         TmPrimaryHeader geometryHeader        = tmHeader(0U, 0U, 0U);
         geometryHeader.secondary_header       = true;
         geometryHeader.ocf_present            = true;
         std::vector<std::uint8_t> badGeometry = tmFrame(geometryHeader, 20UZ);
-        expect(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 13}, std::span<std::uint8_t>(badGeometry).subspan(kTmPrimaryHeaderSize)) == WriteStatus::ok);
+        expect(put(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 13}), std::span<std::uint8_t>(badGeometry).subspan(kTmPrimaryHeaderSize)));
 
         // 4.1.2.7.5.2 admits only '11' as segment length identifier under a zero sync flag.
         // The frame is reported, not refused.
@@ -317,6 +330,21 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(eq(block.nFrames, std::uint64_t{2}));
         expect(eq(block.nDuplicateFrames, std::uint64_t{0}));
         expect(eq(block.nFramesLost, std::uint64_t{0})) << "a refused frame never enters the gap state, so the two published frames are continuous";
+    };
+
+    "a secondary header identification of another version is refused"_test = [] {
+        auto            block                  = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}});
+        TmPrimaryHeader shHeader               = tmHeader(0U, 0U, 0U);
+        shHeader.secondary_header              = true;
+        std::vector<std::uint8_t> otherVersion = tmFrame(shHeader, 20UZ);
+        otherVersion[kTmPrimaryHeaderSize]     = 0x43U; // version '01', length field 3
+        std::vector<std::uint8_t> versionZero  = otherVersion;
+        versionZero[kTmPrimaryHeaderSize]      = 0x03U; // version '00', length field 3
+        const TmPorts ports                    = driveTm(block, std::vector<Record>{recordOf(otherVersion), recordOf(versionZero)}, false, false);
+        expect(eq(ports.out.size(), 1UZ));
+        expect(eq(block.nBadSecondaryHeader, std::uint64_t{1}));
+        expect(eq(block.nSecondaryHeaders, std::uint64_t{1}));
+        expect(eq(block.nFrames, std::uint64_t{1}));
     };
 
     "the spacecraft filter and the crc gate are counted drops"_test = [] {
@@ -344,8 +372,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
         std::vector<std::uint8_t> good(30UZ, 0U);
         const AosPrimaryHeader    header{.version = 1, .spacecraft_id = 7, .virtual_channel = 3, .vc_frame_count = 0, .replay = false, .vc_count_cycle_used = false, .reserved = 0, .vc_count_cycle = 0, .has_fhec = false, .frame_header_error_control = 0};
-        expect(writeAosPrimaryHeader(header, good) == WriteStatus::ok);
-        expect(writeMpduHeader(MpduHeader{.reserved = 0, .first_header_pointer = 0}, std::span<std::uint8_t>(good).subspan(kAosPrimaryHeaderSize)) == WriteStatus::ok);
+        expect(put(writeAosPrimaryHeader(header), good, aosPrimaryHeaderOctets(header.has_fhec)));
+        expect(put(writeMpduHeader(MpduHeader{.reserved = 0, .first_header_pointer = 0}), std::span<std::uint8_t>(good).subspan(kAosPrimaryHeaderSize)));
 
         const std::vector<std::uint8_t> truncated(good.begin(), good.begin() + 20);
         std::vector<std::uint8_t>       tmVersion = good;
@@ -372,7 +400,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         const auto frameOf = [](std::uint16_t lengthField, std::size_t octets) {
             const TcPrimaryHeader     header{.version = 0, .bypass = false, .control_command = false, .reserved = 0, .spacecraft_id = 1, .virtual_channel = 1, .frame_length = lengthField, .sequence_number = 0};
             std::vector<std::uint8_t> frame(octets, 0U);
-            std::ignore = writeTcPrimaryHeader(header, frame);
+            std::ignore = put(writeTcPrimaryHeader(header), frame);
             return frame;
         };
 
@@ -399,9 +427,9 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
         std::vector<std::uint8_t> frame(30UZ, 0U);
         AosPrimaryHeader          header{.version = 1, .spacecraft_id = 7, .virtual_channel = 3, .vc_frame_count = 0, .replay = false, .vc_count_cycle_used = false, .reserved = 0, .vc_count_cycle = 0, .has_fhec = false, .frame_header_error_control = 0};
-        expect(writeAosPrimaryHeader(header, frame) == WriteStatus::ok);
+        expect(put(writeAosPrimaryHeader(header), frame, aosPrimaryHeaderOctets(header.has_fhec)));
         MpduHeader mpdu{.reserved = 0, .first_header_pointer = 5};
-        expect(writeMpduHeader(mpdu, std::span<std::uint8_t>(frame).subspan(kAosPrimaryHeaderSize)) == WriteStatus::ok);
+        expect(put(writeMpduHeader(mpdu), std::span<std::uint8_t>(frame).subspan(kAosPrimaryHeaderSize)));
 
         const std::vector<Record> aosRecords{recordOf(frame)};
         std::vector<Record>       outBuf(4UZ), ocfBuf(4UZ);
@@ -424,7 +452,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
         TcPrimaryHeader           header{.version = 0, .bypass = false, .control_command = false, .reserved = 0, .spacecraft_id = 1, .virtual_channel = 1, .frame_length = 9, .sequence_number = 0}; // total 10 octets
         std::vector<std::uint8_t> frame(15UZ, 0xAAU);                                                                                                                                                // five octets of trailing surplus
-        expect(writeTcPrimaryHeader(header, frame) == WriteStatus::ok);
+        expect(put(writeTcPrimaryHeader(header), frame));
 
         const std::vector<Record> out = drive1(block, std::vector<Record>{recordOf(frame)});
         expect(eq(out.size(), 1UZ));
@@ -439,11 +467,11 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
         std::vector<std::uint8_t> frame(6 + 20 + 10 + 4, 0U);
         TmPrimaryHeader           header{.version = 0, .spacecraft_id = 1, .virtual_channel = 0, .ocf_present = true, .master_frame_count = 0, .vc_frame_count = 0, .secondary_header = true, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = 0};
-        expect(writeTmPrimaryHeader(header, frame) == WriteStatus::ok);
+        expect(put(writeTmPrimaryHeader(header), frame));
         TmSecondaryHeaderId shId{.version = 0, .length = 19}; // 20-octet secondary header, 19 octets of data after the id octet
-        expect(writeTmSecondaryHeaderId(shId, std::span<std::uint8_t>(frame).subspan(kTmPrimaryHeaderSize)) == WriteStatus::ok);
+        expect(put(writeTmSecondaryHeaderId(shId), std::span<std::uint8_t>(frame).subspan(kTmPrimaryHeaderSize)));
         Clcw clcw{.control_word_type = false, .version = 0, .status = 0, .cop_in_effect = 0, .virtual_channel = 0, .reserved = 0, .no_rf_available = false, .no_bit_lock = false, .lockout = false, .wait = false, .retransmit = false, .farm_b_counter = 0, .reserved_bit = 0, .report_value = 0};
-        expect(writeClcw(clcw, std::span<std::uint8_t>(frame).last(4UZ)) == WriteStatus::ok);
+        expect(put(writeClcw(clcw), std::span<std::uint8_t>(frame).last(4UZ)));
 
         std::vector<Record>       outBuf(4UZ);
         std::vector<Record>       shBuf(4UZ);
@@ -477,8 +505,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         const auto frameWithOcf = [](std::span<const std::uint8_t> ocfOctets) {
             std::vector<std::uint8_t> frame(kFrameLength, 0U);
             const TmPrimaryHeader     header{.version = 0, .spacecraft_id = 1, .virtual_channel = 0, .ocf_present = true, .master_frame_count = 0, .vc_frame_count = 0, .secondary_header = true, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = 0};
-            std::ignore = writeTmPrimaryHeader(header, frame);
-            std::ignore = writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 19}, std::span<std::uint8_t>(frame).subspan(kTmPrimaryHeaderSize));
+            std::ignore = put(writeTmPrimaryHeader(header), frame);
+            std::ignore = put(writeTmSecondaryHeaderId(TmSecondaryHeaderId{.version = 0, .length = 19}), std::span<std::uint8_t>(frame).subspan(kTmPrimaryHeaderSize));
             std::ranges::copy(ocfOctets, frame.end() - static_cast<std::ptrdiff_t>(kOcfSize));
             return frame;
         };
@@ -523,6 +551,19 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
                 expect(!metaBool(ports.ocf[0], "ccsds_ocf_sdls"));
             }
         }
+        // a Type-1 field with CLCW version '01' is a control word of another kind
+        {
+            auto                            block = make<TmFrameDecode>({{"frame_length", kFrameLength}});
+            const std::vector<std::uint8_t> otherWord{0x20U, 0x11U, 0x22U, 0x33U};
+            const TmPorts                   ports = driveTm(block, std::vector<Record>{recordOf(frameWithOcf(otherWord))});
+            expect(eq(ports.ocf.size(), 1UZ));
+            if (ports.ocf.size() == 1UZ) {
+                expect(eq(metaSize(ports.ocf[0], "ccsds_ocf_type"), gr::Size_t{0}));
+                expect(!metaHas(ports.ocf[0], "ccsds_clcw_version")) << "none of the eleven CLCW keys is written for a word the CLCW parse refuses";
+                expect(!metaHas(ports.ocf[0], "ccsds_clcw_report_value"));
+                expect(that % (ports.ocf[0].signal_values == otherWord));
+            }
+        }
     };
 
     "a full OCF port holds the whole frame back"_test = [] {
@@ -559,7 +600,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             const auto aosFrame = [](std::uint32_t count) {
                 std::vector<std::uint8_t> frame(30UZ, 0U);
                 const AosPrimaryHeader    header{.version = 1, .spacecraft_id = 7, .virtual_channel = 3, .vc_frame_count = count, .replay = false, .vc_count_cycle_used = false, .reserved = 0, .vc_count_cycle = 0, .has_fhec = false, .frame_header_error_control = 0};
-                std::ignore = writeAosPrimaryHeader(header, frame);
+                std::ignore = put(writeAosPrimaryHeader(header), frame, aosPrimaryHeaderOctets(header.has_fhec));
                 return frame;
             };
             const std::vector<Record> records{recordOf(aosFrame(0U)), recordOf(aosFrame(1U))};
@@ -713,11 +754,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         const std::vector<Record> frames = drive1(block, in, 300UZ);
         expect(eq(frames.size(), 258UZ));
 
-        const auto headerAt = [&frames](std::size_t index) {
-            TmPrimaryHeader header{};
-            std::ignore = parseTmPrimaryHeader(frames[index].signal_values, header);
-            return header;
-        };
+        const auto headerAt = [&frames](std::size_t index) { return parseTmPrimaryHeader(frames[index].signal_values).value_or(Parsed<TmPrimaryHeader>{}).header; };
         expect(eq(headerAt(0UZ).vc_frame_count, std::uint8_t{0}));
         expect(eq(headerAt(255UZ).vc_frame_count, std::uint8_t{255}));
         expect(eq(headerAt(256UZ).vc_frame_count, std::uint8_t{0})) << "the virtual channel count wraps modulo 256, 4.1.2.6.2";
@@ -737,9 +774,11 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         const std::vector<Record> frames = drive1(block, std::vector<Record>{recordOf(std::vector<std::uint8_t>(22UZ, 0U)), recordOf(std::vector<std::uint8_t>(22UZ, 0U))});
         expect(eq(frames.size(), 2UZ));
 
-        AosPrimaryHeader before{}, after{};
-        expect(parseAosPrimaryHeader(frames[0].signal_values, false, before) == ParseStatus::ok);
-        expect(parseAosPrimaryHeader(frames[1].signal_values, false, after) == ParseStatus::ok);
+        const auto parsedBefore = parseAosPrimaryHeader(frames[0].signal_values, false);
+        const auto parsedAfter  = parseAosPrimaryHeader(frames[1].signal_values, false);
+        expect((parsedBefore.has_value() && parsedAfter.has_value()) >> fatal);
+        const AosPrimaryHeader& before = parsedBefore->header;
+        const AosPrimaryHeader& after  = parsedAfter->header;
         expect(eq(before.vc_frame_count, std::uint32_t{0xFFFFFF}));
         expect(eq(before.vc_count_cycle, std::uint8_t{0}));
         expect(eq(after.vc_frame_count, std::uint32_t{0}));
@@ -761,11 +800,11 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(that % (firstPad == std::vector<std::uint8_t>{0xFF, 0xFF, 0xFF, 0xFF, 0x6D, 0xB6, 0xD8, 0x61, 0x45, 0x1F}));
         expect(that % (secondPad != firstPad)) << "the generator carries across frames rather than restarting, 4.1.4.6.2.1";
 
-        TmPrimaryHeader header{};
-        expect(parseTmPrimaryHeader(frames[0].signal_values, header) == ParseStatus::ok);
-        expect(eq(header.first_header_pointer, std::uint16_t{3})) << "the pointer is written as the metadata gave it, the fill notwithstanding";
-        expect(parseTmPrimaryHeader(frames[1].signal_values, header) == ParseStatus::ok);
-        expect(eq(header.first_header_pointer, kFhpNoPacketStart)) << "a record with no pointer key claims nothing about its zone";
+        const auto first  = parseTmPrimaryHeader(frames[0].signal_values);
+        const auto second = parseTmPrimaryHeader(frames[1].signal_values);
+        expect((first.has_value() && second.has_value()) >> fatal);
+        expect(eq(first->header.first_header_pointer, std::uint16_t{3})) << "the pointer is written as the metadata gave it, the fill notwithstanding";
+        expect(eq(second->header.first_header_pointer, kFhpNoPacketStart)) << "a record with no pointer key claims nothing about its zone";
     };
 
     "the encoders refuse what they cannot write"_test = [] {
@@ -779,9 +818,9 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         expect(eq(tm.nBadPointerKey, std::uint64_t{1}));
         expect(eq(tm.nRefusedHeader, std::uint64_t{0}));
         if (frames.size() == 1UZ) {
-            TmPrimaryHeader header{};
-            expect(parseTmPrimaryHeader(frames[0].signal_values, header) == ParseStatus::ok);
-            expect(eq(header.first_header_pointer, kFhpNoPacketStart));
+            const auto parsed = parseTmPrimaryHeader(frames[0].signal_values);
+            expect(parsed.has_value() >> fatal);
+            expect(eq(parsed->header.first_header_pointer, kFhpNoPacketStart));
         }
 
         std::ignore = drive1(tm, std::vector<Record>{recordOf(std::vector<std::uint8_t>(15UZ, 0U))});

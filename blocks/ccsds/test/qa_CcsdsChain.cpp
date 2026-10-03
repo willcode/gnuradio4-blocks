@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <span>
 #include <string>
 #include <thread>
@@ -179,6 +180,20 @@ void runGraph(gr::scheduler::Simple<>& scheduler, gr::Graph flow, TCollect&& col
 
 using namespace qa_ccsds_chain;
 
+namespace {
+
+/// Writes the first `count` octets of a built header over the front of `into`. Returns false when the build refused.
+template<typename Octets>
+bool put(const std::expected<Octets, gr::ccsds::WriteStatus>& built, std::span<std::uint8_t> into, std::size_t count = std::tuple_size_v<Octets>) {
+    if (!built) {
+        return false;
+    }
+    std::copy_n(built->begin(), count, into.begin());
+    return true;
+}
+
+} // namespace
+
 const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
     using namespace boost::ut;
     using namespace gr::blocks::ccsds;
@@ -314,7 +329,7 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         auto                        aosDecode = make<AosFrameDecode>({{"frame_length", gr::Size_t{250}}, {"data_unit", std::string("m_pdu")}, {"has_fhec", true}});
         Record                      raw       = recordOf(std::vector<std::uint8_t>(250UZ, 0U));
         gr::ccsds::AosPrimaryHeader header{.version = 1, .spacecraft_id = 1, .virtual_channel = 0, .vc_frame_count = 0, .replay = false, .vc_count_cycle_used = false, .reserved = 0, .vc_count_cycle = 0, .has_fhec = true, .frame_header_error_control = 0};
-        std::ignore = gr::ccsds::writeAosPrimaryHeader(header, raw.signal_values);
+        std::ignore = put(gr::ccsds::writeAosPrimaryHeader(header), raw.signal_values, gr::ccsds::aosPrimaryHeaderOctets(header.has_fhec));
         std::vector<Record>       scratch(4UZ);
         std::vector<Record>       ocfScratch(4UZ);
         const std::vector<Record> rawIn{raw};
@@ -383,12 +398,12 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
 
         std::vector<std::uint8_t>  frame1(20UZ, 0U);
         gr::ccsds::TmPrimaryHeader h1{.version = 0, .spacecraft_id = 1, .virtual_channel = 0, .ocf_present = false, .master_frame_count = 0, .vc_frame_count = 0, .secondary_header = false, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = 0};
-        std::ignore                       = gr::ccsds::writeTmPrimaryHeader(h1, frame1);
+        std::ignore                       = put(gr::ccsds::writeTmPrimaryHeader(h1), frame1);
         std::vector<std::uint8_t>  frame2 = frame1;
         gr::ccsds::TmPrimaryHeader h2     = h1;
         h2.vc_frame_count                 = 5; // a gap of five, four frames missing
         h2.master_frame_count             = 5;
-        std::ignore                       = gr::ccsds::writeTmPrimaryHeader(h2, frame2);
+        std::ignore                       = put(gr::ccsds::writeTmPrimaryHeader(h2), frame2);
 
         gr::property_map          meta{{"discontinuity", std::string("rate_change")}, {"unrelated_key", std::string("kept")}};
         const std::vector<Record> in{recordOf(frame1), recordOf(frame2, meta)};
@@ -448,7 +463,7 @@ const boost::ut::suite<"CcsdsChain"> ccsdsChainTests = [] {
         auto                       frameDecode = make<TmFrameDecode>({{"frame_length", gr::Size_t{20}}});
         std::vector<std::uint8_t>  frame(20UZ, 0U);
         gr::ccsds::TmPrimaryHeader h{.version = 0, .spacecraft_id = 1, .virtual_channel = 0, .ocf_present = false, .master_frame_count = 0, .vc_frame_count = 0, .secondary_header = false, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = 0};
-        std::ignore = gr::ccsds::writeTmPrimaryHeader(h, frame);
+        std::ignore = put(gr::ccsds::writeTmPrimaryHeader(h), frame);
 
         std::vector<Record>       outBuf(4UZ), shBuf(4UZ), ocfBuf(4UZ);
         const std::vector<Record> frameIn{recordOf(frame)};

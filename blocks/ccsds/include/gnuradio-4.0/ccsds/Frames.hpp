@@ -59,7 +59,8 @@ inline constexpr std::size_t kAosVirtualChannels = 64UZ; // 732.0-B-4 4.1.2.3, s
  * Bit 0 selects the report type. A Type-1 report is the CLCW of 232.0-B-4 4.2.1.1.2, and its eleven fields are
  * parsed. A Type-2 report is four opaque octets of the SDLS protocol. Only its bit 1 (4.1.5.5) is read. The two
  * reports carry different `protocol` labels because they are different objects. Only the Type-1 record holds a
- * control link word.
+ * control link word. A Type-1 field whose CLCW version is not '00' is a control word of another kind, and its record
+ * carries none of the eleven keys.
  */
 inline void writeOcfMetadata(property_map& map, std::span<const std::uint8_t> ocfBytes) {
     const gr::ccsds::OcfReportType type   = gr::ccsds::ocfReportType(ocfBytes);
@@ -70,8 +71,11 @@ inline void writeOcfMetadata(property_map& map, std::span<const std::uint8_t> oc
         map.insert_or_assign(property_map::key_type("ccsds_ocf_sdls"), pmt::Value(type == gr::ccsds::OcfReportType::type_2_sdls));
         return;
     }
-    gr::ccsds::Clcw clcw{};
-    static_cast<void>(gr::ccsds::parseClcw(ocfBytes, clcw));
+    const auto parsed = gr::ccsds::parseClcw(ocfBytes);
+    if (!parsed) {
+        return;
+    }
+    const gr::ccsds::Clcw& clcw = parsed->header;
     map.insert_or_assign(property_map::key_type("ccsds_clcw_version"), pmt::Value(gr::Size_t{clcw.version}));
     map.insert_or_assign(property_map::key_type("ccsds_clcw_status"), pmt::Value(gr::Size_t{clcw.status}));
     map.insert_or_assign(property_map::key_type("ccsds_clcw_cop_in_effect"), pmt::Value(gr::Size_t{clcw.cop_in_effect}));
@@ -187,12 +191,12 @@ struct TmFrameDecode : Block<TmFrameDecode> {
                 continue;
             }
 
-            gr::ccsds::TmPrimaryHeader   header{};
-            const gr::ccsds::ParseStatus status = gr::ccsds::parseTmPrimaryHeader(bytes, header);
-            if (status == gr::ccsds::ParseStatus::bad_version) {
-                ++nWrongVersion;
+            const auto parsed = gr::ccsds::parseTmPrimaryHeader(bytes);
+            if (!parsed) {
+                ++(parsed.error() == gr::ccsds::ParseStatus::bad_version ? nWrongVersion : nRefusedShort);
                 continue;
             }
+            const gr::ccsds::TmPrimaryHeader& header = parsed->header;
             if (spacecraft_id.value != frames_detail::kUnsetScid && header.spacecraft_id != spacecraft_id.value) {
                 ++nFilteredScid;
                 continue;
@@ -211,11 +215,12 @@ struct TmFrameDecode : Block<TmFrameDecode> {
                     ++nBadSecondaryHeader;
                     continue;
                 }
-                static_cast<void>(gr::ccsds::parseTmSecondaryHeaderId(bytes.subspan(gr::ccsds::kTmPrimaryHeaderSize), shId));
-                if (!gr::ccsds::tmSecondaryHeaderUsable(shId)) {
+                const auto parsedSh = gr::ccsds::parseTmSecondaryHeaderId(bytes.subspan(gr::ccsds::kTmPrimaryHeaderSize));
+                if (!parsedSh || !gr::ccsds::tmSecondaryHeaderUsable(parsedSh->header)) {
                     ++nBadSecondaryHeader;
                     continue;
                 }
+                shId       = parsedSh->header;
                 tfshOctets = gr::ccsds::tmSecondaryHeaderOctets(shId);
                 if (gr::ccsds::kTmPrimaryHeaderSize + tfshOctets > frame_length.value) {
                     ++nBadSecondaryHeader;
@@ -238,7 +243,7 @@ struct TmFrameDecode : Block<TmFrameDecode> {
             if ((header.secondary_header && shConnected && madeSh >= shSpan.size()) || (header.ocf_present && ocfConnected && madeOcf >= ocfSpan.size())) {
                 break;
             }
-            if (status == gr::ccsds::ParseStatus::reserved_violation) {
+            if (parsed->reserved_violation) {
                 ++nReservedViolations; // the frame is still valid, reported and not refused
             }
 
@@ -451,12 +456,12 @@ struct AosFrameDecode : Block<AosFrameDecode> {
                 continue;
             }
 
-            gr::ccsds::AosPrimaryHeader  header{};
-            const gr::ccsds::ParseStatus status = gr::ccsds::parseAosPrimaryHeader(bytes, has_fhec.value, header);
-            if (status == gr::ccsds::ParseStatus::bad_version) {
-                ++nWrongVersion;
+            const auto parsed = gr::ccsds::parseAosPrimaryHeader(bytes, has_fhec.value);
+            if (!parsed) {
+                ++(parsed.error() == gr::ccsds::ParseStatus::bad_version ? nWrongVersion : nRefusedShort);
                 continue;
             }
+            const gr::ccsds::AosPrimaryHeader& header = parsed->header;
             if (spacecraft_id.value != frames_detail::kUnsetScid && header.spacecraft_id != spacecraft_id.value) {
                 ++nFilteredScid;
                 continue;
@@ -473,7 +478,7 @@ struct AosFrameDecode : Block<AosFrameDecode> {
             if (has_ocf.value && ocfConnected && madeOcf >= ocfSpan.size()) {
                 break;
             }
-            if (status == gr::ccsds::ParseStatus::reserved_violation) {
+            if (parsed->reserved_violation) {
                 ++nReservedViolations; // the frame is still valid, reported and not refused
             }
 
@@ -502,14 +507,13 @@ struct AosFrameDecode : Block<AosFrameDecode> {
             gr::Size_t  pointer     = 0U;
             bool        havePointer = false;
             if (_isMpdu) {
-                gr::ccsds::MpduHeader        mpdu{};
-                const gr::ccsds::ParseStatus mpduStatus = gr::ccsds::parseMpduHeader(bytes.subspan(_dataFieldStart, gr::ccsds::kMpduHeaderSize), mpdu);
-                if (mpduStatus == gr::ccsds::ParseStatus::reserved_violation) {
+                const auto mpdu = gr::ccsds::parseMpduHeader(bytes.subspan(_dataFieldStart, gr::ccsds::kMpduHeaderSize));
+                if (mpdu && mpdu->reserved_violation) {
                     ++nReservedViolations;
                 }
                 zoneStart   = _dataFieldStart + gr::ccsds::kMpduHeaderSize;
                 zoneLength  = _dataFieldLength - gr::ccsds::kMpduHeaderSize;
-                pointer     = mpdu.first_header_pointer;
+                pointer     = mpdu ? gr::Size_t{mpdu->header.first_header_pointer} : gr::Size_t{0U};
                 havePointer = true;
             }
 
@@ -612,13 +616,13 @@ struct TcFrameDecode : Block<TcFrameDecode> {
                 ++nRefusedShort;
                 continue;
             }
-            gr::ccsds::TcPrimaryHeader   header{};
-            const gr::ccsds::ParseStatus status = gr::ccsds::parseTcPrimaryHeader(bytes, header);
-            if (status == gr::ccsds::ParseStatus::bad_version) {
-                ++nWrongVersion;
+            const auto parsed = gr::ccsds::parseTcPrimaryHeader(bytes);
+            if (!parsed) {
+                ++(parsed.error() == gr::ccsds::ParseStatus::bad_version ? nWrongVersion : nRefusedShort);
                 continue;
             }
-            if (status == gr::ccsds::ParseStatus::reserved_violation) {
+            const gr::ccsds::TcPrimaryHeader& header = parsed->header;
+            if (parsed->reserved_violation) {
                 ++nReservedViolations;
             }
             const std::size_t totalOctets = gr::ccsds::totalTcFrameOctets(header);
@@ -778,17 +782,21 @@ struct TmFrameEncode : Block<TmFrameEncode> {
 
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(frame_length.value, std::uint8_t{0U});
-            if (gr::ccsds::writeTmPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
+            const auto primary = gr::ccsds::writeTmPrimaryHeader(header);
+            if (!primary) {
                 ++nRefusedHeader; // the block drops and counts a record whose header cannot be written, and no frame goes out with a zeroed header
                 continue;
             }
+            std::ranges::copy(*primary, frame.signal_values.begin());
             std::size_t at = gr::ccsds::kTmPrimaryHeaderSize;
             if (header.secondary_header) {
                 gr::ccsds::TmSecondaryHeaderId shId{.version = 0U, .length = static_cast<std::uint8_t>(secondary_header.value.size() - 1UZ)};
-                if (gr::ccsds::writeTmSecondaryHeaderId(shId, std::span<std::uint8_t>(frame.signal_values).subspan(at)) != gr::ccsds::WriteStatus::ok) {
+                const auto                     identification = gr::ccsds::writeTmSecondaryHeaderId(shId);
+                if (!identification) {
                     ++nRefusedHeader;
                     continue;
                 }
+                std::ranges::copy(*identification, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(at));
                 std::ranges::copy(secondary_header.value, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(at + gr::ccsds::kTmSecondaryHeaderIdSize));
                 at += tfshOctets;
             }
@@ -924,10 +932,12 @@ struct AosFrameEncode : Block<AosFrameEncode> {
 
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(frame_length.value, std::uint8_t{0U});
-            if (gr::ccsds::writeAosPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
+            const auto primary = gr::ccsds::writeAosPrimaryHeader(header);
+            if (!primary) {
                 ++nRefusedHeader; // the block drops and counts a record whose header cannot be written, and no frame goes out with a zeroed header
                 continue;
             }
+            std::ranges::copy_n(primary->begin(), static_cast<std::ptrdiff_t>(_primaryHeaderOctets), frame.signal_values.begin());
             std::size_t at = _primaryHeaderOctets + std::size_t{insert_zone_length.value};
             if (_isMpdu) {
                 const std::optional<gr::Size_t> pointer = detail::readSize(detail::metaOf(record), "ccsds_first_header_pointer");
@@ -936,10 +946,12 @@ struct AosFrameEncode : Block<AosFrameEncode> {
                 }
                 const bool            havePointer = pointer.has_value() && *pointer <= gr::Size_t{gr::ccsds::kFhpNoPacketStart};
                 gr::ccsds::MpduHeader mpdu{.reserved = 0U, .first_header_pointer = havePointer ? static_cast<std::uint16_t>(*pointer) : gr::ccsds::kFhpNoPacketStart};
-                if (gr::ccsds::writeMpduHeader(mpdu, std::span<std::uint8_t>(frame.signal_values).subspan(at)) != gr::ccsds::WriteStatus::ok) {
+                const auto            mpduOctets = gr::ccsds::writeMpduHeader(mpdu);
+                if (!mpduOctets) {
                     ++nRefusedHeader;
                     continue;
                 }
+                std::ranges::copy(*mpduOctets, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(at));
                 at += gr::ccsds::kMpduHeaderSize;
             }
             std::ranges::copy(record.signal_values, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(at));
@@ -1051,10 +1063,12 @@ struct TcFrameEncode : Block<TcFrameEncode> {
 
             DataSet<std::uint8_t> frame;
             frame.signal_values.resize(totalOctets, std::uint8_t{0U});
-            if (gr::ccsds::writeTcPrimaryHeader(header, std::span<std::uint8_t>(frame.signal_values)) != gr::ccsds::WriteStatus::ok) {
+            const auto primary = gr::ccsds::writeTcPrimaryHeader(header);
+            if (!primary) {
                 ++nRefusedHeader; // the block drops and counts a record whose header cannot be written, and no frame goes out with a zeroed header
                 continue;
             }
+            std::ranges::copy(*primary, frame.signal_values.begin());
             std::ranges::copy(record.signal_values, frame.signal_values.begin() + static_cast<std::ptrdiff_t>(gr::ccsds::kTcPrimaryHeaderSize));
 
             detail::startRecord(record, frame, "ccsds");

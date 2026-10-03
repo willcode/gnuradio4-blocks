@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <print>
 #include <span>
@@ -27,6 +28,16 @@ using gr::blocks::testing::span::InputSpan;
 using gr::blocks::testing::span::OutputSpan;
 
 namespace {
+
+/// Writes the first `count` octets of a built header over the front of `into`. Returns false when the build refused.
+template<typename Octets>
+bool put(const std::expected<Octets, gr::ccsds::WriteStatus>& built, std::span<std::uint8_t> into, std::size_t count = std::tuple_size_v<Octets>) {
+    if (!built) {
+        return false;
+    }
+    std::copy_n(built->begin(), count, into.begin());
+    return true;
+}
 
 struct Arm {
     std::string             label;
@@ -85,7 +96,7 @@ constexpr std::size_t kFramesPerCall = 256UZ;
     for (std::size_t i = 0UZ; i < kFramesPerCall; ++i) {
         std::vector<std::uint8_t>  frame(2046UZ, static_cast<std::uint8_t>(i));
         gr::ccsds::TmPrimaryHeader header{.version = 0, .spacecraft_id = 42, .virtual_channel = 1, .ocf_present = false, .master_frame_count = static_cast<std::uint8_t>(i), .vc_frame_count = static_cast<std::uint8_t>(i), .secondary_header = false, .sync_flag = false, .packet_order = false, .segment_length_id = 3, .first_header_pointer = 0};
-        std::ignore = gr::ccsds::writeTmPrimaryHeader(header, frame);
+        std::ignore = put(gr::ccsds::writeTmPrimaryHeader(header), frame);
         frames.push_back(recordOf(frame));
     }
     return frames;
@@ -150,12 +161,11 @@ int main() {
     const auto                driveCuc = [&] {
         double sum = 0.0;
         for (std::uint32_t i = 0U; i < kFramesPerCall; ++i) {
-            cucField[0] = static_cast<std::uint8_t>(i >> 24U);
-            cucField[1] = static_cast<std::uint8_t>(i >> 16U);
-            cucField[2] = static_cast<std::uint8_t>(i >> 8U);
-            cucField[3] = static_cast<std::uint8_t>(i);
-            gr::ccsds::Instant instant{};
-            std::ignore = gr::ccsds::decode(cucField, cucLayout, -gr::ccsds::kEpoch1958Ns, 0, instant);
+            cucField[0]                      = static_cast<std::uint8_t>(i >> 24U);
+            cucField[1]                      = static_cast<std::uint8_t>(i >> 16U);
+            cucField[2]                      = static_cast<std::uint8_t>(i >> 8U);
+            cucField[3]                      = static_cast<std::uint8_t>(i);
+            const gr::ccsds::Instant instant = gr::ccsds::decode(cucField, cucLayout, -gr::ccsds::kEpoch1958Ns, 0).value_or(gr::ccsds::Instant{});
             sum += static_cast<double>(instant.ns);
         }
         return sum;

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <optional>
@@ -315,11 +316,10 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                 continue;
             }
 
-            const std::span<const std::uint8_t> fromOffset     = bytes.subspan(offset.value);
-            gr::ccsds::Layout                   layout         = _layout;
-            std::size_t                         consumedOctets = 0UZ;
-            gr::ccsds::TimeStatus               status         = gr::ccsds::TimeStatus::ok;
-            gr::ccsds::Instant                  instant{};
+            const std::span<const std::uint8_t>                      fromOffset     = bytes.subspan(offset.value);
+            gr::ccsds::Layout                                        layout         = _layout;
+            std::size_t                                              consumedOctets = 0UZ;
+            std::expected<gr::ccsds::Instant, gr::ccsds::TimeStatus> decodedTime;
 
             if (_isAscii) {
                 std::string_view  text(reinterpret_cast<const char*>(fromOffset.data()), fromOffset.size());
@@ -327,14 +327,14 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                 if (nul != std::string_view::npos) {
                     text = text.substr(0UZ, nul);
                 }
-                status = gr::ccsds::decodeAscii(text, _kind, instant);
+                decodedTime = gr::ccsds::decodeAscii(text, _kind);
                 // The code ends at the NUL that closes it, or at the end of the payload when there is
                 // no NUL. A NUL belongs to the code it terminates, and `strip` removes it with the code.
                 consumedOctets = nul != std::string_view::npos ? nul + 1UZ : text.size();
             } else {
                 if (!_implicit) {
-                    status = gr::ccsds::parsePField(fromOffset, layout);
-                    if (status == gr::ccsds::TimeStatus::short_field) {
+                    const auto pField = gr::ccsds::parsePField(fromOffset);
+                    if (!pField && pField.error() == gr::ccsds::TimeStatus::short_field) {
                         // The payload does not reach the end of the P-field. The record is short of the
                         // code, and nothing has been parsed from it yet.
                         ++nShortRecord;
@@ -345,8 +345,8 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                         ++made;
                         continue;
                     }
-                    if (status != gr::ccsds::TimeStatus::ok) {
-                        countStatus(status);
+                    if (!pField) {
+                        countStatus(pField.error());
                         if (require_time.value) {
                             continue;
                         }
@@ -354,6 +354,7 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                         ++made;
                         continue;
                     }
+                    layout = *pField;
                     // The wire declares the code and its epoch, and the settings declare the same two
                     // facts. When they disagree, the block refuses the record. Decoding under the wire's
                     // facts would make `ccsds_time_code` name a code the instant did not come from.
@@ -379,12 +380,12 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                     continue;
                 }
                 const std::int64_t epochNs = epoch.value == "custom" ? epoch_ns.value : 0;
-                status                     = gr::ccsds::decode(fromOffset.subspan(layout.p_field_octets), layout, epochNs, tai_utc_offset_s.value, instant);
+                decodedTime                = gr::ccsds::decode(fromOffset.subspan(layout.p_field_octets), layout, epochNs, tai_utc_offset_s.value);
                 consumedOctets             = needed;
             }
 
-            if (status != gr::ccsds::TimeStatus::ok) {
-                countStatus(status);
+            if (!decodedTime) {
+                countStatus(decodedTime.error());
                 if (require_time.value) {
                     continue;
                 }
@@ -393,6 +394,7 @@ struct TimeCodeDecode : Block<TimeCodeDecode> {
                 ++made;
                 continue;
             }
+            const gr::ccsds::Instant& instant = *decodedTime;
 
             DataSet<std::uint8_t> decoded;
             if (strip.value) {
@@ -593,28 +595,23 @@ struct TimeCodeEncode : Block<TimeCodeEncode> {
             std::vector<std::uint8_t> code_bytes;
             bool                      ok = false;
             if (_isAscii) {
-                const std::size_t           base   = _kind == gr::ccsds::TimeCodeKind::ascii_a ? 19UZ : 17UZ;
-                const std::size_t           needed = base + (fraction_digits.value != 0U ? 1UZ + fraction_digits.value : 0UZ) + (terminator.value ? 1UZ : 0UZ);
-                std::vector<char>           text(needed, '\0');
-                std::size_t                 written = 0UZ;
-                const gr::ccsds::TimeStatus status  = gr::ccsds::encodeAscii(instant, _kind, static_cast<std::uint8_t>(fraction_digits.value), terminator.value, std::span<char>(text), written);
-                if (status == gr::ccsds::TimeStatus::ok) {
-                    code_bytes.assign(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(written));
+                const auto text = gr::ccsds::encodeAscii(instant, _kind, static_cast<std::uint8_t>(fraction_digits.value), terminator.value);
+                if (text) {
+                    const std::span<const char> characters = text->view();
+                    code_bytes.assign(characters.begin(), characters.end());
                     ok = true;
                 } else {
                     ++nAxisOverflow;
                 }
             } else {
-                std::size_t               pFieldOctets = 0UZ;
-                std::vector<std::uint8_t> pField(2UZ, std::uint8_t{0U});
+                gr::ccsds::PField pField{};
                 if (_explicit) {
-                    static_cast<void>(gr::ccsds::writePField(_layout, std::span<std::uint8_t>(pField), pFieldOctets));
+                    pField = gr::ccsds::writePField(_layout).value_or(gr::ccsds::PField{});
                 }
-                std::vector<std::uint8_t>   tField(gr::ccsds::timeFieldOctets(_layout), std::uint8_t{0U});
-                const gr::ccsds::TimeStatus status = gr::ccsds::encode(instant, _layout, epochNs, tai_utc_offset_s.value, std::span<std::uint8_t>(tField));
-                if (status == gr::ccsds::TimeStatus::ok) {
-                    code_bytes.assign(pField.begin(), pField.begin() + static_cast<std::ptrdiff_t>(pFieldOctets));
-                    code_bytes.insert(code_bytes.end(), tField.begin(), tField.end());
+                const auto tField = gr::ccsds::encode(instant, _layout, epochNs, tai_utc_offset_s.value);
+                if (tField) {
+                    code_bytes.assign(pField.view().begin(), pField.view().end());
+                    code_bytes.insert(code_bytes.end(), tField->view().begin(), tField->view().end());
                     ok = true;
                 } else {
                     ++nAxisOverflow;
