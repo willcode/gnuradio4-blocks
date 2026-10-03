@@ -2,8 +2,10 @@
 #include <boost/ut.hpp>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <numbers>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <gnuradio-4.0/math/Rotator.hpp>
@@ -203,6 +205,25 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         const T continued = first.back() * std::polar(1.0, static_cast<double>(rot.phase_increment));
         expect(approx(second.front().real(), continued.real(), 1e-9)) << "phase must not reset on a settings change that omits initial_phase";
         expect(approx(second.front().imag(), continued.imag(), 1e-9)) << "phase must not reset on a settings change that omits initial_phase";
+    };
+
+    "Rotator - a non-finite increment or phase is refused naming the setting"_test = [] {
+        using T            = std::complex<double>;
+        const auto refusal = [](gr::property_map settings) -> std::string {
+            try {
+                Rotator<T> rot(std::move(settings));
+                rot.settings().init();
+                std::ignore = rot.settings().applyStagedParameters();
+                rot.start();
+            } catch (const gr::exception& error) {
+                return error.message;
+            }
+            return {};
+        };
+        const std::string increment = refusal({{"phase_increment", std::numeric_limits<double>::infinity()}});
+        const std::string phase     = refusal({{"initial_phase", std::numeric_limits<double>::quiet_NaN()}});
+        expect(increment.starts_with("Rotator: 'phase_increment': gr::signal::Phasor: increment must be finite")) << increment;
+        expect(phase.starts_with("Rotator: 'initial_phase': gr::signal::Phasor: phase must be finite")) << phase;
     };
 
     "Rotator - a changed initial_phase restarts the accumulator"_test = [] {

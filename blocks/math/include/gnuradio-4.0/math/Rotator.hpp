@@ -5,6 +5,8 @@
 #include <cassert>
 #include <cmath>
 #include <complex>
+#include <expected>
+#include <format>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Port.hpp>
@@ -14,6 +16,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 #include <numbers>
 #include <optional>
+#include <string_view>
 #include <tuple>
 
 namespace gr::blocks::math {
@@ -80,8 +83,8 @@ is attached to.
         } else if (newIncrement != previousIncrement) {
             // the pending advance takes the new increment, so a frequency change carries the phase forward
             const double advanced = _phasor.phase() - previousIncrement + newIncrement;
-            _phasor.setIncrement(newIncrement);
-            _phasor.setPhase(advanced);
+            adopt(_phasor.setIncrement(newIncrement), "phase_increment");
+            adopt(_phasor.setPhase(advanced), "phase_increment");
         }
     }
 
@@ -91,8 +94,15 @@ is attached to.
     /// @brief Anchor the phasor at 'initial_phase'; it is held one increment ahead throughout.
     void seedPhase() {
         const double increment = static_cast<double>(phase_increment);
-        _phasor.setIncrement(increment);
-        _phasor.setPhase(static_cast<double>(initial_phase) + increment);
+        adopt(_phasor.setIncrement(increment), "phase_increment");
+        adopt(_phasor.setPhase(static_cast<double>(initial_phase) + increment), "initial_phase");
+    }
+
+    /// @brief Throws `gr::exception` naming @p setting when the phasor refuses the value derived from it.
+    static void adopt(const std::expected<void, gr::Error>& set, std::string_view setting) {
+        if (!set) {
+            throw gr::exception(std::format("Rotator: '{}': {}", setting, set.error().message), set.error().sourceLocation);
+        }
     }
 
     // rotating by 'frequency_shift' moves the spectrum, so the center frequency a passing tag announces moves by the
