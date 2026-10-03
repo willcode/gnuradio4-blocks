@@ -8,6 +8,7 @@
 #include <numeric>
 #include <ranges>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -74,8 +75,12 @@ This block estimates the frequency of a signal using the time-domain algorithm d
         // Calculate filter coefficients
         // * IIR over FIR: reduced numerical complexity and minimizes group delay
         // * BESSEL: optimizes phase linearity in the pass-band and in turn frequency accuracy
+        auto designed = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, gr::filter::FilterParameters{.order = 2UZ, .fLow = static_cast<double>(f_max), .fs = static_cast<double>(sample_rate)}, gr::filter::iir::Design::BESSEL);
+        if (!designed) {
+            throw gr::exception(designed.error().message, designed.error().sourceLocation);
+        }
         _n_period_estimate   = n_periods * static_cast<gr::Size_t>(f_min > 0.f ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value);
-        _singleFilterSection = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, gr::filter::FilterParameters{.order = 2UZ, .fLow = static_cast<double>(f_max), .fs = static_cast<double>(sample_rate)}, gr::filter::iir::Design::BESSEL);
+        _singleFilterSection = std::move(*designed);
         _inputHistory        = HistoryBuffer<T>(std::bit_ceil(_singleFilterSection.b.size()));
         _outputHistory       = HistoryBuffer<T>(std::bit_ceil(std::max(_singleFilterSection.a.size(), std::size_t(_n_period_estimate))));
     }
@@ -238,7 +243,11 @@ This block estimates the frequency of a signal using the frequency-domain algori
             this->input_chunk_size = static_cast<gr::Size_t>(_minFFT);
         }
         _inData.resize(_minFFT, T(0));
-        _window = gr::algorithm::window::create<T>(gr::algorithm::window::Type::Hann, _minFFT);
+        auto created = gr::algorithm::window::create<T>(gr::algorithm::window::Type::Hann, _minFFT);
+        if (!created) {
+            throw gr::exception(created.error().message, created.error().sourceLocation);
+        }
+        _window = std::move(*created);
         _outData.resize(_minFFT, std::complex<T>(T(0)));
         _magnitudeSpectrum.resize(_minFFT / 2UZ, T(0));
     }
@@ -301,7 +310,11 @@ private:
         }
 
         // compute FFT and magnitude spectrum
-        _magnitudeSpectrum = computeMagnitudeSpectrum(_fftImpl.compute(_inData, _outData), _magnitudeSpectrum, ConfigMagnitude{.computeHalfSpectrum = true, .outputInDb = false});
+        auto magnitude = computeMagnitudeSpectrum(_fftImpl.compute(_inData, _outData), _magnitudeSpectrum, ConfigMagnitude{.computeHalfSpectrum = true, .outputInDb = false});
+        if (!magnitude) {
+            return _prevFrequency; // no spectrum to search
+        }
+        _magnitudeSpectrum = std::move(*magnitude);
 
         const float scaled_size = static_cast<float>(_magnitudeSpectrum.size()) * 2.f;
         std::size_t i_min       = static_cast<std::size_t>(std::floor((f_min / sample_rate) * scaled_size));
