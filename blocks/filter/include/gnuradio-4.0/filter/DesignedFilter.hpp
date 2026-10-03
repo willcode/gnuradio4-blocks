@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -146,17 +147,23 @@ private:
             .taps            = static_cast<std::size_t>(taps.value),
         };
 
-        const std::string_view which = profile.value;
-        std::vector<TTap>      designed;
+        const std::string_view which    = profile.value;
+        const auto             accepted = [](auto&& result) {
+            if (!result) {
+                throw gr::exception(result.error().message, result.error().sourceLocation);
+            }
+            return std::move(*result);
+        };
+        std::vector<TTap> designed;
         if constexpr (std::same_as<TTap, float>) {
             if (which == "lowpass") {
-                designed = gr::filter::fir::design::designLowpass(spec);
+                designed = accepted(gr::filter::fir::design::designLowpass(spec));
             } else if (which == "highpass") {
-                designed = gr::filter::fir::design::designHighpass(spec);
+                designed = accepted(gr::filter::fir::design::designHighpass(spec));
             } else if (which == "bandpass") {
-                designed = gr::filter::fir::design::designBandpass(spec);
+                designed = accepted(gr::filter::fir::design::designBandpass(spec));
             } else if (which == "bandstop") {
-                designed = gr::filter::fir::design::designBandstop(spec);
+                designed = accepted(gr::filter::fir::design::designBandstop(spec));
             } else if (which == "root_raised_cosine") {
                 if (taps.value == 0U) {
                     throw gr::exception("root_raised_cosine has no transition-width length estimate; state taps");
@@ -164,7 +171,7 @@ private:
                 if (!(symbol_rate > 0.0)) {
                     throw gr::exception(std::format("root_raised_cosine needs a positive symbol_rate, got {}", symbol_rate.value));
                 }
-                designed = gr::filter::fir::design::designRootRaisedCosine(static_cast<std::size_t>(taps.value), static_cast<double>(sample_rate), symbol_rate, alpha, gain);
+                designed = accepted(gr::filter::fir::design::designRootRaisedCosine(static_cast<std::size_t>(taps.value), static_cast<double>(sample_rate), symbol_rate, alpha, gain));
             } else if (which == "hilbert") {
                 if (taps.value == 0U) {
                     throw gr::exception("hilbert has no transition-width length estimate: the usable band is a trade against the length, so state taps");
@@ -172,7 +179,7 @@ private:
                 if (taps.value % 2U == 0U) {
                     throw gr::exception(std::format("hilbert is a type III antisymmetric design and needs an odd length, so that its group delay is a whole sample; got taps {}", taps.value));
                 }
-                designed = gr::filter::fir::design::hilbert(static_cast<std::size_t>(taps.value), gr::filter::fir::design::windowOf(spec), gain);
+                designed = accepted(gr::filter::fir::design::hilbert(static_cast<std::size_t>(taps.value), gr::filter::fir::design::windowOf(spec), gain));
             } else if (which == "complex_bandpass" || which == "complex_bandstop") {
                 throw gr::exception(std::format("profile '{}' needs the complex tap type", which));
             } else {
@@ -180,9 +187,9 @@ private:
             }
         } else {
             if (which == "complex_bandpass") {
-                designed = gr::filter::fir::design::designComplexBandpass(spec);
+                designed = accepted(gr::filter::fir::design::designComplexBandpass(spec));
             } else if (which == "complex_bandstop") {
-                designed = gr::filter::fir::design::designComplexBandstop(spec);
+                designed = accepted(gr::filter::fir::design::designComplexBandstop(spec));
             } else if (which == "lowpass" || which == "highpass" || which == "bandpass" || which == "bandstop" || which == "root_raised_cosine" || which == "hilbert") {
                 throw gr::exception(std::format("profile '{}' needs the real tap type", which));
             } else {
