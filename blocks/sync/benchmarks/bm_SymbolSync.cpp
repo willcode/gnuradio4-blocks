@@ -28,7 +28,7 @@ constexpr std::size_t kRepeats        = 7UZ;
 
 std::vector<CF> makeShapedQpsk() {
     constexpr int            kSps = 4;
-    const std::vector<float> taps = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(8 * kSps + 1), static_cast<double>(kSps), 0.35);
+    const std::vector<float> taps = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(8 * kSps + 1), static_cast<double>(kSps), 0.35).value();
 
     std::mt19937                       rng(17U);
     std::uniform_int_distribution<int> pick(0, 3);
