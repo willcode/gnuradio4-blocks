@@ -11,7 +11,6 @@
 #include <print>
 #include <ranges>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -69,8 +68,8 @@ struct ScramblerState {
  *
  * Every rejection throws `gr::exception` quoting the value that caused it, so an invalid configuration stops the graph
  * before it runs and no invalid configuration reaches the kernel. The kernel's own parsers and resolvers do the
- * reading, their `std::invalid_argument` rewrapped under the setting's name rather than a second parser being written
- * beside them. The generator is built beside the running one and moved into place only once every value has been
+ * reading. A parser's `gr::Error` and a resolver's `gr::exception` are rethrown as `gr::exception` under the setting's
+ * name. The generator is built beside the running one and moved into place only once every value has been
  * accepted, so a rejected setting leaves the configuration it was applied to intact rather than half moved.
  *
  * Three mask sources are alternatives and at most one may be staged: `taps` with `seed`, a named `profile`, or an
@@ -117,27 +116,28 @@ inline void configureScrambler(ScramblerState& state, const ScramblerSettings& w
 
     gr::digital::ScramblerConfig candidate{};
     if (!sequenceText.empty()) {
-        std::vector<std::uint8_t> bytes;
+        const auto bytes = gr::digital::sequenceFromHex(sequenceText);
+        if (!bytes) {
+            throw gr::exception(std::format("setting sequence: {}", bytes.error().message), bytes.error().sourceLocation);
+        }
         try {
-            bytes = gr::digital::sequenceFromHex(sequenceText);
-            gr::digital::configureExplicit(candidate, std::span<const std::uint8_t>(bytes), bytes.size() * 8UZ, bitsPerItem, order, wanted.sequenceRepeat);
-        } catch (const std::invalid_argument& reason) {
-            throw gr::exception(std::format("setting sequence: {}", reason.what()));
+            gr::digital::configureExplicit(candidate, std::span<const std::uint8_t>(*bytes), bytes->size() * 8UZ, bitsPerItem, order, wanted.sequenceRepeat);
+        } catch (const gr::exception& reason) {
+            throw gr::exception(std::format("setting sequence: {}", reason.message), reason.sourceLocation);
         }
     } else if (!profileName.empty()) {
         try {
             gr::digital::applyProfile(candidate, profileName, mode);
-        } catch (const std::invalid_argument& reason) {
-            throw gr::exception(std::format("setting profile: {}", reason.what()));
+        } catch (const gr::exception& reason) {
+            throw gr::exception(std::format("setting profile: {}", reason.message), reason.sourceLocation);
         }
     } else {
-        gr::digital::TapMask taps = 0ULL;
-        try {
-            taps = gr::digital::tapsFromDelayList(tapList);
-        } catch (const std::invalid_argument& reason) {
-            throw gr::exception(std::format("setting taps: {}", reason.what()));
+        const auto parsedTaps = gr::digital::tapsFromDelayList(tapList);
+        if (!parsedTaps) {
+            throw gr::exception(std::format("setting taps: {}", parsedTaps.error().message), parsedTaps.error().sourceLocation);
         }
-        const auto degree = gr::digital::degreeOf(taps);
+        const gr::digital::TapMask taps   = *parsedTaps;
+        const auto                 degree = gr::digital::degreeOf(taps);
 
         std::uint64_t seed = 0ULL;
         if (seedBits.empty()) {
@@ -147,11 +147,11 @@ inline void configureScrambler(ScramblerState& state, const ScramblerSettings& w
                 throw gr::exception(std::format("seed is the first {} bits of the sequence and has no default: the two ends of an additive link must start at the same phase", degree));
             }
         } else {
-            try {
-                seed = gr::digital::seedFromBitString(seedBits, degree);
-            } catch (const std::invalid_argument& reason) {
-                throw gr::exception(std::format("setting seed: {}", reason.what()));
+            const auto parsedSeed = gr::digital::seedFromBitString(seedBits, degree);
+            if (!parsedSeed) {
+                throw gr::exception(std::format("setting seed: {}", parsedSeed.error().message), parsedSeed.error().sourceLocation);
             }
+            seed = *parsedSeed;
             if (mode == gr::digital::ScramblerMode::Additive && seed == 0ULL) {
                 throw gr::exception(std::format("seed \"{}\" is all zeros, which is a dead generator: an all-zero additive register produces an all-zero sequence for ever and the block would silently pass its input through", seedBits));
             }
@@ -164,8 +164,8 @@ inline void configureScrambler(ScramblerState& state, const ScramblerSettings& w
     if (mode != gr::digital::ScramblerMode::Additive) {
         try {
             gr::digital::configureMonitor(candidate, wanted.invertOutput, static_cast<std::uint32_t>(wanted.forceAfter), wanted.monitorDelays);
-        } catch (const std::invalid_argument& reason) {
-            throw gr::exception(std::format("setting the forced-transition group: {}", reason.what()));
+        } catch (const gr::exception& reason) {
+            throw gr::exception(std::format("setting the forced-transition group: {}", reason.message), reason.sourceLocation);
         }
     }
 

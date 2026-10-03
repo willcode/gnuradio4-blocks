@@ -817,6 +817,19 @@ const boost::ut::suite<"the explicit sequence"> explicitSequenceTests = [] {
         expect(started(kSequence("FF E1 1D 9A", false)).empty()) << "without a period the overrun is a stream property and is the counter's, not start()'s";
     };
 
+    "a refusal from the kernel carries the setting's name and the kernel's reason"_test = [] {
+        const auto refuses = [](gr::property_map settings, std::string_view prefix) {
+            const std::string message = complaint([&settings] { std::ignore = make<AdditiveScrambler>(settings); });
+            expect(message.starts_with(prefix)) << std::format("\"{}\" does not start with \"{}\"", message, prefix);
+        };
+
+        refuses(with(ccsdsSettings(), {{"taps", std::string("1,0,5")}}), "setting taps: gr::digital::tapsFromDelayList: ");
+        refuses(with(ccsdsSettings(), {{"seed", std::string("1111")}}), "setting seed: gr::digital::seedFromBitString: ");
+        refuses(kSequence("FF E", true), "setting sequence: gr::digital::sequenceFromHex: ");
+        refuses(kProfile("ccsds132"), "setting profile: gr::digital::");
+        refuses(kProfile("g3ruh"), "setting profile: gr::digital::applyProfile: ");
+    };
+
     "the mask's spelling is read rather than guessed at"_test = [] {
         const auto refuses = [](std::string_view spelling, std::string_view why) {
             const std::string message = complaint([spelling] { std::ignore = make<AdditiveScrambler>(kSequence(spelling, true)); });
