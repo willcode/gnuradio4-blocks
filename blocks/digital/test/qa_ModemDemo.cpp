@@ -83,7 +83,7 @@ struct Payload {
     gr::Graph  graph;
     const auto values = gr::Tensor<CF>(sent.symbols.begin(), sent.symbols.end());
 
-    const auto shaping = gr::filter::fir::design::rootRaisedCosine(11UZ * kSps + 1UZ, static_cast<double>(kSps), kRolloff, static_cast<double>(kSps));
+    const auto shaping = gr::filter::fir::design::rootRaisedCosine(11UZ * kSps + 1UZ, static_cast<double>(kSps), kRolloff, static_cast<double>(kSps)).value();
 
     auto& source  = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(sent.symbols.size())}, {"values", values}, {"sample_rate", 1.f}});
     auto& shape   = graph.emplaceBlock<RationalResampler<CF>>({{"interpolation", static_cast<gr::Size_t>(kSps)}, {"decimation", gr::Size_t(1)}, {"taps", shaping}});
