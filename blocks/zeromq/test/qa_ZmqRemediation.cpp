@@ -60,7 +60,7 @@ void refusal_prefix() {
     auto           peer = zd::ZmqTransportTestAccess::peer(source._transport, sub ? zmq::socket_type::xpub : zmq::socket_type::push);
     peer.set(zmq::sockopt::linger, 0);
     peer.set(zmq::sockopt::rcvtimeo, 1000);
-    peer.connect(source.last_endpoint());
+    peer.connect(source.last_endpoint().value());
     if constexpr (sub) {
         zmq::message_t subscription;
         const auto     deadline   = std::chrono::steady_clock::now() + std::chrono::seconds{2};
@@ -144,17 +144,17 @@ void message_tags_retry(const std::string& key = {}, std::size_t tagged_item = 1
     if constexpr (pub) {
         peer.set(zmq::sockopt::subscribe, key);
     }
-    peer.connect(sink.last_endpoint());
+    peer.connect(sink.last_endpoint().value());
     // Pump the inproc attach/subscription commands before starting the batch.
-    expect(sink._transport.wait_writable(1000));
+    expect(sink._transport.wait_writable(1000) == true);
     if constexpr (pub) {
-        expect(sink._transport.socket().get(zmq::sockopt::socket_type) == zmq::socket_type::pub);
+        expect(sink._transport.socket()->get().get(zmq::sockopt::socket_type) == zmq::socket_type::pub);
         // A received probe proves the subscriber is established. Drain it fully.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
         bool       ready    = false;
         while (!ready && std::chrono::steady_clock::now() < deadline) {
             auto guard  = sink._transport.acquire_operation_guard();
-            std::ignore = sink._transport.socket().send(zmq::buffer(key), zmq::send_flags::dontwait);
+            std::ignore = sink._transport.socket()->get().send(zmq::buffer(key), zmq::send_flags::dontwait);
             zmq::message_t probe;
             ready = peer.recv(probe, zmq::recv_flags::dontwait).has_value();
         }
@@ -248,7 +248,7 @@ void encode_error() {
     if constexpr (pub) {
         peer.set(zmq::sockopt::subscribe, "");
     }
-    peer.connect(sink.last_endpoint());
+    peer.connect(sink.last_endpoint().value());
     if constexpr (rep) {
         const std::uint32_t count = 1;
         expect(peer.send(zmq::buffer(&count, sizeof(count))).has_value());
@@ -281,15 +281,15 @@ void req_refusal_recovery() {
     auto peer = zd::ZmqTransportTestAccess::peer(source._transport, zmq::socket_type::rep);
     peer.set(zmq::sockopt::linger, 0);
     peer.set(zmq::sockopt::rcvtimeo, 1000);
-    peer.connect(source.last_endpoint());
+    peer.connect(source.last_endpoint().value());
     gr::PortIn<T> reader;
     expect(source.out.connect(reader).has_value());
     int accepted = 0;
     for (const int n : {0, 0, 1, 0, 2}) {
         if (!source._req_pending) {
             const std::uint32_t count = 1;
-            expect(source._transport.wait_writable(1000));
-            expect(source._transport.socket().send(zmq::buffer(&count, sizeof(count))).has_value());
+            expect(source._transport.wait_writable(1000) == true);
+            expect(source._transport.socket()->get().send(zmq::buffer(&count, sizeof(count))).has_value());
             source._req_pending       = true;
             source._req_pending_since = std::chrono::steady_clock::now();
         }
@@ -346,11 +346,11 @@ void publication_error() {
     auto           peer = zd::ZmqTransportTestAccess::peer(source._transport, req ? zmq::socket_type::rep : sub ? zmq::socket_type::xpub : zmq::socket_type::push);
     peer.set(zmq::sockopt::linger, 0);
     peer.set(zmq::sockopt::rcvtimeo, 1000);
-    peer.connect(source.last_endpoint());
+    peer.connect(source.last_endpoint().value());
     if constexpr (req) {
         const std::uint32_t count = 1;
-        expect(source._transport.wait_writable(1000));
-        expect(source._transport.socket().send(zmq::buffer(&count, sizeof(count))).has_value());
+        expect(source._transport.wait_writable(1000) == true);
+        expect(source._transport.socket()->get().send(zmq::buffer(&count, sizeof(count))).has_value());
         source._req_pending = true;
         zmq::message_t request;
         expect(peer.recv(request).has_value() >> fatal);
@@ -383,7 +383,7 @@ void rep_request_limit() {
     sink.timeout  = 20;
     sink.linger   = 0;
     sink.start();
-    expect(eq(sink._transport.socket().get(zmq::sockopt::maxmsgsize), std::int64_t{4096}));
+    expect(eq(sink._transport.socket()->get().get(zmq::sockopt::maxmsgsize), std::int64_t{4096}));
     gr::PortOut<float> writer;
     expect(writer.connect(sink.in).has_value());
     {
@@ -397,7 +397,7 @@ void rep_request_limit() {
         zmq::socket_t peer{context, zmq::socket_type::req};
         peer.set(zmq::sockopt::linger, 0);
         peer.set(zmq::sockopt::rcvtimeo, 1000);
-        peer.connect(sink.last_endpoint());
+        peer.connect(sink.last_endpoint().value());
         const std::uint32_t count = 1;
         expect(peer.send(zmq::buffer(&count, malformed ? 3 : sizeof(count))).has_value());
         const auto     deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
@@ -430,7 +430,7 @@ void rep_request_limit() {
         zmq::socket_t monitor{context, zmq::socket_type::pair};
         monitor.set(zmq::sockopt::rcvtimeo, 2000);
         monitor.connect("inproc://oversize-monitor");
-        peer.connect(sink.last_endpoint());
+        peer.connect(sink.last_endpoint().value());
         std::vector<std::uint8_t> oversized(8192, 0);
         expect(peer.send(zmq::buffer(oversized)).has_value());
         zmq::message_t event;
@@ -469,7 +469,7 @@ void decode_allocation_error() {
     source.linger   = 0;
     source.start();
     auto peer = zd::ZmqTransportTestAccess::peer(source._transport, zmq::socket_type::push);
-    peer.connect(source.last_endpoint());
+    peer.connect(source.last_endpoint().value());
     send(peer, zd::serialize_pmt(gr::pmt::Value{"value requiring a map allocation"}, PmtWireFormat::GR4_YAML_V1).value());
     gr::PortIn<gr::pmt::Value> reader;
     expect(source.out.connect(reader).has_value());

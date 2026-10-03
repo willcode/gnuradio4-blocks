@@ -137,6 +137,9 @@ supported in GR3 mode and are rejected. Pull, Sub, and Req sources discard a
 malformed raw or PMT message, increment `receive_statistics().refused_messages`,
 and continue accepting subsequent messages. Their statistics also report total
 received messages and accepted output items for the current run.
+A Push, Pub, or Rep sink that cannot encode a value, such as a GR3 symbol
+longer than 65535 bytes, emits an error message and returns
+`work::Status::ERROR` with the value left unconsumed.
 
 ## Tag Headers
 

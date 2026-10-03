@@ -53,13 +53,13 @@ public:
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::throw_on_error(detail::ZmqSocketTransport::require_nonnegative_timeout(timeout));
         _pending_items.clear();
         _pending_tags.clear();
         _pending_offset = 0;
         _receive_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, false, max_message_size);
-        _transport.socket().set(zmq::sockopt::subscribe, key);
+        detail::throw_on_error(_transport.open(endpoint, bind, linger, hwm, false, max_message_size));
+        detail::throw_on_error(_transport.socket().transform([this](zmq::socket_t& socket) { socket.set(zmq::sockopt::subscribe, key); }));
     }
 
     void stop() {
@@ -71,8 +71,8 @@ public:
 
     void reset() { stop(); }
 
-    [[nodiscard]] std::string                  last_endpoint() const { return _transport.last_endpoint(); }
-    [[nodiscard]] detail::ZmqReceiveStatistics receive_statistics() const noexcept { return _receive_counters.snapshot(); }
+    [[nodiscard]] std::expected<std::string, gr::Error> last_endpoint() const { return _transport.last_endpoint(); }
+    [[nodiscard]] detail::ZmqReceiveStatistics          receive_statistics() const noexcept { return _receive_counters.snapshot(); }
 
     [[nodiscard]] work::Status processBulk(OutputSpanLike auto& outputSpan) {
         auto                             operation = _transport.acquire_operation_guard();
@@ -81,6 +81,13 @@ public:
         const std::size_t                nProcessOut = outputSpan.size();
         size_t                           npublished  = 0;
         std::size_t                      messages    = 0;
+
+        auto fail = [&](const gr::Error& error) {
+            outputSpan.publish(npublished);
+            this->emitErrorMessage("processBulk", error);
+            return gr::work::Status::ERROR;
+        };
+        auto receive = [this](std::size_t max_parts) { return _transport.socket().and_then([max_parts](zmq::socket_t& socket) { return detail::receive_all_parts(socket, max_parts); }); };
 
         auto publish_pending_tags = [&outputSpan](std::size_t base_offset, std::size_t consumed, std::vector<detail::ZmqTagHeaderRecord>& tags) {
             std::vector<detail::ZmqTagHeaderRecord> remaining;
@@ -98,11 +105,19 @@ public:
 
         if constexpr (is_vector_of_arithmetic_or_complex_v<T>) {
             while (npublished < nProcessOut && messages < detail::kMaxMessagesPerWork) {
-                if (!_transport.wait_readable(deadline, messages == 0 && npublished == 0, cancelled)) {
+                const auto readable = _transport.wait_readable(deadline, messages == 0 && npublished == 0, cancelled);
+                if (!readable) {
+                    return fail(readable.error());
+                }
+                if (!*readable) {
                     break;
                 }
 
-                auto parts = detail::receive_all_parts(_transport.socket(), 2);
+                auto received = receive(2);
+                if (!received) {
+                    return fail(received.error());
+                }
+                auto& parts = *received;
                 if (!parts) {
                     break;
                 }
@@ -156,11 +171,19 @@ public:
                     break;
                 }
 
-                if (!_transport.wait_readable(deadline, messages == 0 && npublished == 0, cancelled)) {
+                const auto readable = _transport.wait_readable(deadline, messages == 0 && npublished == 0, cancelled);
+                if (!readable) {
+                    return fail(readable.error());
+                }
+                if (!*readable) {
                     break;
                 }
 
-                auto parts = detail::receive_all_parts(_transport.socket(), 2);
+                auto received = receive(2);
+                if (!received) {
+                    return fail(received.error());
+                }
+                auto& parts = *received;
                 if (!parts) {
                     break;
                 }
@@ -199,12 +222,20 @@ public:
             }
         } else if constexpr (std::is_same_v<T, gr::pmt::Value>) {
             while (npublished < nProcessOut && messages < detail::kMaxMessagesPerWork) {
-                if (!_transport.wait_readable(deadline, messages == 0 && npublished == 0, cancelled)) {
+                const auto readable = _transport.wait_readable(deadline, messages == 0 && npublished == 0, cancelled);
+                if (!readable) {
+                    return fail(readable.error());
+                }
+                if (!*readable) {
                     break;
                 }
 
                 {
-                    auto parts = detail::receive_all_parts(_transport.socket(), 2);
+                    auto received = receive(2);
+                    if (!received) {
+                        return fail(received.error());
+                    }
+                    auto& parts = *received;
                     if (!parts) {
                         break;
                     }

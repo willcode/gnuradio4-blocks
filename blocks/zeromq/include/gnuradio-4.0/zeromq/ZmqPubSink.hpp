@@ -48,17 +48,17 @@ public:
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::throw_on_error(detail::ZmqSocketTransport::require_nonnegative_timeout(timeout));
         _send_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, true, std::nullopt, drop_on_hwm);
+        detail::throw_on_error(_transport.open(endpoint, bind, linger, hwm, true, std::nullopt, drop_on_hwm));
     }
 
     void stop() { _transport.close(); }
 
     void reset() { stop(); }
 
-    [[nodiscard]] std::string               last_endpoint() const { return _transport.last_endpoint(); }
-    [[nodiscard]] detail::ZmqSendStatistics send_statistics() const noexcept { return _send_counters.snapshot(); }
+    [[nodiscard]] std::expected<std::string, gr::Error> last_endpoint() const { return _transport.last_endpoint(); }
+    [[nodiscard]] detail::ZmqSendStatistics             send_statistics() const noexcept { return _send_counters.snapshot(); }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inData) {
         auto                             operation = _transport.acquire_operation_guard();
@@ -69,7 +69,17 @@ public:
             return gr::work::Status::OK;
         }
 
-        if (!_transport.wait_writable(deadline, true, cancelled)) {
+        std::size_t consumed = 0;
+        auto        fail     = [&](const gr::Error& error) {
+            std::ignore = inData.consume(consumed);
+            this->emitErrorMessage("processBulk", error);
+            return gr::work::Status::ERROR;
+        };
+        const auto writable = _transport.wait_writable(deadline, true, cancelled);
+        if (!writable) {
+            return fail(writable.error());
+        }
+        if (!*writable) {
             if (cancelled() || !drop_on_hwm) {
                 if (!cancelled()) {
                     _send_counters.record_refused();
@@ -83,9 +93,12 @@ public:
             return gr::work::Status::OK;
         }
 
-        std::size_t consumed = 0;
-        auto&       socket   = _transport.socket();
-        const auto  tags     = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
+        auto socket_result = _transport.socket();
+        if (!socket_result) {
+            return fail(socket_result.error());
+        }
+        zmq::socket_t& socket = socket_result->get();
+        const auto     tags   = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
 
         auto send_payload = [&](auto&& payload) {
             if (!key.empty()) {
@@ -105,9 +118,7 @@ public:
                 }
                 const auto encoded_header = pass_tags ? detail::message_tag_header(tags, consumed, pmt_wire_format) : detail::EncodedBytes{};
                 if (!encoded_header) {
-                    std::ignore = inData.consume(consumed);
-                    this->emitErrorMessage("processBulk", encoded_header.error());
-                    return gr::work::Status::ERROR;
+                    return fail(encoded_header.error());
                 }
                 const auto&  header        = *encoded_header;
                 const size_t size_in_bytes = a.size() * sizeof(typename T::value_type);
@@ -131,9 +142,7 @@ public:
         } else if constexpr (is_arithmetic_or_complex_v<T>) {
             const auto encoded_header = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : detail::EncodedBytes{};
             if (!encoded_header) {
-                std::ignore = inData.consume(consumed);
-                this->emitErrorMessage("processBulk", encoded_header.error());
-                return gr::work::Status::ERROR;
+                return fail(encoded_header.error());
             }
             const auto&    header        = *encoded_header;
             const size_t   size_in_bytes = inData.size() * sizeof(T);
@@ -158,16 +167,12 @@ public:
                 }
                 const auto encoded_header = pass_tags ? detail::message_tag_header(tags, consumed, pmt_wire_format) : detail::EncodedBytes{};
                 if (!encoded_header) {
-                    std::ignore = inData.consume(consumed);
-                    this->emitErrorMessage("processBulk", encoded_header.error());
-                    return gr::work::Status::ERROR;
+                    return fail(encoded_header.error());
                 }
                 const auto& header  = *encoded_header;
                 const auto  encoded = detail::serialize_pmt(pmtObj, pmt_wire_format);
                 if (!encoded) {
-                    std::ignore = inData.consume(consumed);
-                    this->emitErrorMessage("processBulk", encoded.error());
-                    return gr::work::Status::ERROR;
+                    return fail(encoded.error());
                 }
                 const auto&    serialized = *encoded;
                 zmq::message_t zmsg(header.size() + serialized.size());

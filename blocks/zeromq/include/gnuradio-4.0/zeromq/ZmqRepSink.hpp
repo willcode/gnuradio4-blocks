@@ -81,10 +81,10 @@ This block receives stream items and replies to REQ requests using a REP socket.
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::throw_on_error(detail::ZmqSocketTransport::require_nonnegative_timeout(timeout));
         clear_run_state();
         _send_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, true, max_message_size);
+        detail::throw_on_error(_transport.open(endpoint, bind, linger, hwm, true, max_message_size));
     }
 
     void stop() {
@@ -94,8 +94,8 @@ This block receives stream items and replies to REQ requests using a REP socket.
 
     void reset() { stop(); }
 
-    [[nodiscard]] std::string               last_endpoint() const { return _transport.last_endpoint(); }
-    [[nodiscard]] detail::ZmqSendStatistics send_statistics() const noexcept { return _send_counters.snapshot(); }
+    [[nodiscard]] std::expected<std::string, gr::Error> last_endpoint() const { return _transport.last_endpoint(); }
+    [[nodiscard]] detail::ZmqSendStatistics             send_statistics() const noexcept { return _send_counters.snapshot(); }
 
     static std::size_t parse_request_count(const zmq::message_t& request) {
         uint32_t n = 0;
@@ -108,6 +108,12 @@ This block receives stream items and replies to REQ requests using a REP socket.
         const detail::InvocationDeadline deadline{timeout};
         auto                             cancelled = detail::cancellation_check(*this);
         std::size_t                      messages  = 0;
+
+        auto fail = [&](const gr::Error& error) {
+            std::ignore = inData.consume(0);
+            this->emitErrorMessage("processBulk", error);
+            return gr::work::Status::ERROR;
+        };
 
         auto make_reply = [](const detail::EncodedBytes& header, const void* payload, std::size_t payload_size) -> std::expected<zmq::message_t, gr::Error> {
             if (!header) {
@@ -174,13 +180,21 @@ This block receives stream items and replies to REQ requests using a REP socket.
 
         while (messages < detail::kMaxMessagesPerWork) {
             if (_pending_reply.has_value()) {
-                if (!_transport.wait_writable(deadline, true, cancelled)) {
+                const auto writable = _transport.wait_writable(deadline, true, cancelled);
+                if (!writable) {
+                    return fail(writable.error());
+                }
+                if (!*writable) {
                     if (!cancelled()) {
                         _send_counters.record_refused();
                     }
                     break;
                 }
-                if (!_transport.socket().send(*_pending_reply, zmq::send_flags::dontwait)) {
+                auto socket = _transport.socket();
+                if (!socket) {
+                    return fail(socket.error());
+                }
+                if (!socket->get().send(*_pending_reply, zmq::send_flags::dontwait)) {
                     _send_counters.record_refused();
                     break;
                 }
@@ -196,10 +210,22 @@ This block receives stream items and replies to REQ requests using a REP socket.
                 return gr::work::Status::OK;
             }
 
-            if (!_transport.wait_readable(deadline, messages == 0, cancelled)) {
+            const auto readable = _transport.wait_readable(deadline, messages == 0, cancelled);
+            if (!readable) {
+                return fail(readable.error());
+            }
+            if (!*readable) {
                 break;
             }
-            auto request = detail::receive_all_parts(_transport.socket(), 1);
+            auto socket = _transport.socket();
+            if (!socket) {
+                return fail(socket.error());
+            }
+            auto received = detail::receive_all_parts(socket->get(), 1);
+            if (!received) {
+                return fail(received.error());
+            }
+            auto& request = *received;
             if (!request) {
                 break;
             }
@@ -207,9 +233,7 @@ This block receives stream items and replies to REQ requests using a REP socket.
             const bool        malformed = request->has_extra_parts || request->parts.size() != 1 || request->parts.front().size() != sizeof(uint32_t);
             const std::size_t requested = malformed ? 0 : parse_request_count(request->parts.front());
             if (auto staged = stage_reply(requested, malformed); !staged) {
-                std::ignore = inData.consume(0);
-                this->emitErrorMessage("processBulk", staged.error());
-                return gr::work::Status::ERROR;
+                return fail(staged.error());
             }
         }
 

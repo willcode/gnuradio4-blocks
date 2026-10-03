@@ -73,12 +73,9 @@ public:
         return TestEndpoint([&block] {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
             while (std::chrono::steady_clock::now() < deadline) {
-                try {
-                    const auto endpoint = block.last_endpoint();
-                    if (!endpoint.empty() && !endpoint.ends_with(":0")) {
-                        return endpoint;
-                    }
-                } catch (...) {
+                const auto endpoint = block.last_endpoint();
+                if (endpoint && !endpoint->empty() && !endpoint->ends_with(":0")) {
+                    return *endpoint;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds{1});
             }
@@ -1687,28 +1684,86 @@ const suite ZmqBlocksTests = [] {
     };
 
     "ZMQ rejects negative timeouts"_test = [] {
-        bool threw = false;
-        try {
-            zdetail::ZmqSocketTransport::require_nonnegative_timeout(-1);
-        } catch (const std::invalid_argument&) {
-            threw = true;
+        const auto refused = zdetail::ZmqSocketTransport::require_nonnegative_timeout(-1);
+        expect(!refused.has_value() >> fatal);
+        expect(eq(refused.error().message, std::string{"ZMQ timeout must be non-negative"}));
+        expect(zdetail::ZmqSocketTransport::require_nonnegative_timeout(0).has_value());
+        expect(throws<gr::exception>([] { std::ignore = zdetail::InvocationDeadline{-1}; }));
+
+        zdetail::ZmqSocketTransport transport{zmq::socket_type::pull};
+        const auto                  wait = transport.wait_readable(-1);
+        expect(!wait.has_value() >> fatal);
+        expect(eq(wait.error().message, std::string{"ZMQ timeout must be non-negative"}));
+
+        gr::blocks::zeromq::ZmqPushSink<float> push;
+        push.timeout = -1;
+        expect(throws<gr::exception>([&push] { push.start(); }));
+        gr::blocks::zeromq::ZmqPullSource<float> pull;
+        pull.timeout = -1;
+        expect(throws<gr::exception>([&pull] { pull.start(); }));
+    };
+
+    "ZMQ transport returns the error of a closed socket"_test = [] {
+        zdetail::ZmqSocketTransport transport{zmq::socket_type::pull};
+        expect(eq(transport.last_endpoint().error().message, std::string{"ZMQ socket is not open"}));
+        expect(eq(transport.socket().error().message, std::string{"ZMQ socket is not open"}));
+        const auto wait = transport.wait_readable(0);
+        expect(!wait.has_value() >> fatal);
+        expect(eq(wait.error().message, std::string{"ZMQ socket is not open"}));
+
+        expect(transport.open(endpoint_for(66), true, 0, -1, false).has_value());
+        expect(transport.last_endpoint().has_value());
+        auto operation = transport.acquire_operation_guard();
+        auto socket    = transport.socket();
+        expect(socket.has_value() >> fatal);
+        const auto parts = zdetail::receive_all_parts(socket->get(), 0);
+        expect(!parts.has_value() >> fatal);
+        expect(eq(parts.error().message, std::string{"At least one multipart frame must be retained"}));
+        const auto none = zdetail::receive_all_parts(socket->get(), 1);
+        expect(none.has_value() >> fatal);
+        expect(!none->has_value());
+    };
+
+    "ZMQ blocks report a closed socket from processBulk"_test = [] {
+        gr::blocks::zeromq::ZmqPushSink<float> push;
+        gr::PortOut<float>                     writer;
+        expect(writer.connect(push.in).has_value());
+        {
+            auto input = writer.reserve<gr::SpanReleasePolicy::ProcessNone>(1);
+            input[0]   = 1.f;
+            input.publish(1);
         }
-        expect(threw);
+        {
+            auto input = push.in.get<gr::SpanReleasePolicy::ProcessNone>(1);
+            expect(push.processBulk(input) == gr::work::Status::ERROR);
+        }
+        expect(eq(push.in.streamReader().available(), 1UZ));
+
+        gr::blocks::zeromq::ZmqPullSource<float> pull;
+        gr::PortIn<float>                        reader;
+        expect(pull.out.connect(reader).has_value());
+        {
+            auto output = pull.out.reserve<gr::SpanReleasePolicy::ProcessNone>(1);
+            expect(pull.processBulk(output) == gr::work::Status::ERROR);
+        }
+        expect(eq(reader.streamReader().available(), 0UZ));
     };
 
     "ZMQ applies and validates the inbound message-size limit"_test = [] {
-        bool threw = false;
-        try {
-            zdetail::ZmqSocketTransport::require_positive_max_message_size(0);
-        } catch (const std::invalid_argument&) {
-            threw = true;
-        }
-        expect(threw);
+        const auto refused = zdetail::ZmqSocketTransport::require_positive_max_message_size(0);
+        expect(!refused.has_value() >> fatal);
+        expect(eq(refused.error().message, std::string{"ZMQ maximum message size must be positive"}));
+        zdetail::ZmqSocketTransport closed{zmq::socket_type::pull};
+        expect(eq(closed.open(endpoint_for(67), true, 0, -1, false, 0).error().message, refused.error().message));
+        expect(!closed.last_endpoint().has_value());
+        gr::blocks::zeromq::ZmqReqSource<float> req;
+        req.max_message_size = 0;
+        expect(throws<gr::exception>([&req] { req.start(); }));
 
         zdetail::ZmqSocketTransport transport{zmq::socket_type::pull};
-        transport.open(endpoint_for(57), true, 0, -1, false, 4096);
+        expect(transport.open(endpoint_for(57), true, 0, -1, false, 4096).has_value());
         auto operation = transport.acquire_operation_guard();
-        expect(eq(transport.socket().get(zmq::sockopt::maxmsgsize), std::int64_t{4096}));
+        expect(eq(transport.socket()->get().get(zmq::sockopt::maxmsgsize), std::int64_t{4096}));
     };
 
     "PUB drop_on_hwm selects the no-drop socket mode"_test = [] {
@@ -1722,7 +1777,7 @@ const suite ZmqBlocksTests = [] {
             pub.start();
             {
                 auto operation = pub._transport.acquire_operation_guard();
-                expect(pub._transport.socket().get(zmq::sockopt::socket_type) == zmq::socket_type::pub);
+                expect(pub._transport.socket()->get().get(zmq::sockopt::socket_type) == zmq::socket_type::pub);
             }
             pub.stop();
         }
@@ -1730,10 +1785,10 @@ const suite ZmqBlocksTests = [] {
 
     "ZMQ honors timeout beyond poll slice"_test = [] {
         zdetail::ZmqSocketTransport transport{zmq::socket_type::pull};
-        transport.open(endpoint_for(46), true, 0, -1, false);
+        expect(transport.open(endpoint_for(46), true, 0, -1, false).has_value());
 
         const auto started = std::chrono::steady_clock::now();
-        expect(!transport.wait_readable(250));
+        expect(transport.wait_readable(250) == false);
         const auto elapsed = std::chrono::steady_clock::now() - started;
         expect(elapsed >= std::chrono::milliseconds{200});
         expect(elapsed < std::chrono::milliseconds{600});
@@ -2748,8 +2803,8 @@ const suite ZmqBlocksTests = [] {
     "Runtime deadline is shared by REQ writable and readable waits"_test = [] {
         const auto                  endpoint = endpoint_for(65);
         zdetail::ZmqSocketTransport transport{zmq::socket_type::req};
-        transport.open(endpoint, true, 0, -1, false);
-        const auto                        resolved_endpoint = transport.last_endpoint();
+        expect(transport.open(endpoint, true, 0, -1, false).has_value());
+        const auto                        resolved_endpoint = transport.last_endpoint().value();
         auto                              peer              = std::async(std::launch::async, [resolved_endpoint] {
             std::this_thread::sleep_for(100ms);
             zmq::context_t ctx{1};
@@ -2762,12 +2817,12 @@ const suite ZmqBlocksTests = [] {
         auto                              operation         = transport.acquire_operation_guard();
         const auto                        started           = std::chrono::steady_clock::now();
         const zdetail::InvocationDeadline deadline{250};
-        expect(transport.wait_writable(deadline, true, [] { return false; }));
+        expect(transport.wait_writable(deadline, true, [] { return false; }) == true);
         uint32_t       count = 1;
         zmq::message_t request(sizeof(count));
         std::memcpy(request.data(), &count, sizeof(count));
-        expect(transport.socket().send(request, zmq::send_flags::dontwait).has_value());
-        expect(!transport.wait_readable(deadline, true, [] { return false; }));
+        expect(transport.socket()->get().send(request, zmq::send_flags::dontwait).has_value());
+        expect(transport.wait_readable(deadline, true, [] { return false; }) == false);
         const auto elapsed = std::chrono::steady_clock::now() - started;
         expect(elapsed >= 200ms);
         expect(elapsed < 400ms);
@@ -2878,13 +2933,13 @@ const suite ZmqBlocksTests = [] {
             block.bind     = true;
             block.linger   = 0;
             block.start();
-            const auto first_endpoint = block.last_endpoint();
+            const auto first_endpoint = block.last_endpoint().value();
             expect(!first_endpoint.ends_with(":0"));
             block.stop();
             expect(endpoint_can_be_bound(first_endpoint, 1s));
             block.endpoint = endpoint_for(second_offset);
             block.start();
-            const auto second_endpoint = block.last_endpoint();
+            const auto second_endpoint = block.last_endpoint().value();
             expect(!second_endpoint.ends_with(":0"));
             expect(second_endpoint != first_endpoint);
             block.stop();

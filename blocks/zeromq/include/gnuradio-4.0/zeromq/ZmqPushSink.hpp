@@ -47,17 +47,17 @@ public:
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::throw_on_error(detail::ZmqSocketTransport::require_nonnegative_timeout(timeout));
         _send_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, true);
+        detail::throw_on_error(_transport.open(endpoint, bind, linger, hwm, true));
     }
 
     void stop() { _transport.close(); }
 
     void reset() { stop(); }
 
-    [[nodiscard]] std::string               last_endpoint() const { return _transport.last_endpoint(); }
-    [[nodiscard]] detail::ZmqSendStatistics send_statistics() const noexcept { return _send_counters.snapshot(); }
+    [[nodiscard]] std::expected<std::string, gr::Error> last_endpoint() const { return _transport.last_endpoint(); }
+    [[nodiscard]] detail::ZmqSendStatistics             send_statistics() const noexcept { return _send_counters.snapshot(); }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inData) {
         auto                             operation = _transport.acquire_operation_guard();
@@ -68,16 +68,29 @@ public:
             return gr::work::Status::OK;
         }
 
-        if (!_transport.wait_writable(deadline, true, cancelled)) {
+        std::size_t consumed = 0;
+        auto        fail     = [&](const gr::Error& error) {
+            std::ignore = inData.consume(consumed);
+            this->emitErrorMessage("processBulk", error);
+            return gr::work::Status::ERROR;
+        };
+        const auto writable = _transport.wait_writable(deadline, true, cancelled);
+        if (!writable) {
+            return fail(writable.error());
+        }
+        if (!*writable) {
             if (!cancelled()) {
                 _send_counters.record_refused();
             }
             std::ignore = inData.consume(0);
             return gr::work::Status::OK;
         }
+        auto socket = _transport.socket();
+        if (!socket) {
+            return fail(socket.error());
+        }
 
-        std::size_t consumed = 0;
-        const auto  tags     = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
+        const auto tags = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
 
         // for vectors
         // FIXME: replace with cleaner type traits - not sure yet where to put them
@@ -88,9 +101,7 @@ public:
                 }
                 const auto encoded_header = pass_tags ? detail::message_tag_header(tags, consumed, pmt_wire_format) : detail::EncodedBytes{};
                 if (!encoded_header) {
-                    std::ignore = inData.consume(consumed);
-                    this->emitErrorMessage("processBulk", encoded_header.error());
-                    return gr::work::Status::ERROR;
+                    return fail(encoded_header.error());
                 }
                 const auto&  header        = *encoded_header;
                 const size_t size_in_bytes = a.size() * sizeof(typename T::value_type);
@@ -100,7 +111,7 @@ public:
                     std::memcpy(zmsg.data(), header.data(), header.size());
                 }
                 std::memcpy(static_cast<std::uint8_t*>(zmsg.data()) + header.size(), a.data(), size_in_bytes);
-                if (!_transport.socket().send(zmsg, zmq::send_flags::dontwait)) {
+                if (!socket->get().send(zmsg, zmq::send_flags::dontwait)) {
                     _send_counters.record_refused();
                     break;
                 }
@@ -110,9 +121,7 @@ public:
         } else if constexpr (is_arithmetic_or_complex_v<T>) {
             const auto encoded_header = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : detail::EncodedBytes{};
             if (!encoded_header) {
-                std::ignore = inData.consume(consumed);
-                this->emitErrorMessage("processBulk", encoded_header.error());
-                return gr::work::Status::ERROR;
+                return fail(encoded_header.error());
             }
             const auto&    header        = *encoded_header;
             const size_t   size_in_bytes = inData.size() * sizeof(T);
@@ -121,7 +130,7 @@ public:
                 std::memcpy(zmsg.data(), header.data(), header.size());
             }
             std::memcpy(static_cast<std::uint8_t*>(zmsg.data()) + header.size(), inData.data(), size_in_bytes);
-            if (_transport.socket().send(zmsg, zmq::send_flags::dontwait)) {
+            if (socket->get().send(zmsg, zmq::send_flags::dontwait)) {
                 consumed = inData.size();
                 _send_counters.record_accepted(consumed);
             } else {
@@ -136,16 +145,12 @@ public:
                 }
                 const auto encoded_header = pass_tags ? detail::message_tag_header(tags, consumed, pmt_wire_format) : detail::EncodedBytes{};
                 if (!encoded_header) {
-                    std::ignore = inData.consume(consumed);
-                    this->emitErrorMessage("processBulk", encoded_header.error());
-                    return gr::work::Status::ERROR;
+                    return fail(encoded_header.error());
                 }
                 const auto& header  = *encoded_header;
                 const auto  encoded = detail::serialize_pmt(pmtObj, pmt_wire_format);
                 if (!encoded) {
-                    std::ignore = inData.consume(consumed);
-                    this->emitErrorMessage("processBulk", encoded.error());
-                    return gr::work::Status::ERROR;
+                    return fail(encoded.error());
                 }
                 const auto&    serialized = *encoded;
                 zmq::message_t zmsg(header.size() + serialized.size());
@@ -153,7 +158,7 @@ public:
                     std::memcpy(zmsg.data(), header.data(), header.size());
                 }
                 std::memcpy(static_cast<std::uint8_t*>(zmsg.data()) + header.size(), serialized.data(), serialized.size());
-                if (!_transport.socket().send(zmsg, zmq::send_flags::dontwait)) {
+                if (!socket->get().send(zmsg, zmq::send_flags::dontwait)) {
                     _send_counters.record_refused();
                     break;
                 }

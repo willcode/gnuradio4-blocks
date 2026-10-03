@@ -54,10 +54,10 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::throw_on_error(detail::ZmqSocketTransport::require_nonnegative_timeout(timeout));
         clear_run_state();
         _receive_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, false, max_message_size);
+        detail::throw_on_error(_transport.open(endpoint, bind, linger, hwm, false, max_message_size));
     }
 
     void stop() {
@@ -67,8 +67,8 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
 
     void reset() { stop(); }
 
-    [[nodiscard]] std::string                  last_endpoint() const { return _transport.last_endpoint(); }
-    [[nodiscard]] detail::ZmqReceiveStatistics receive_statistics() const noexcept { return _receive_counters.snapshot(); }
+    [[nodiscard]] std::expected<std::string, gr::Error> last_endpoint() const { return _transport.last_endpoint(); }
+    [[nodiscard]] detail::ZmqReceiveStatistics          receive_statistics() const noexcept { return _receive_counters.snapshot(); }
 
     static constexpr std::size_t request_count_for(std::size_t room) {
         if constexpr (std::is_same_v<T, gr::pmt::Value>) {
@@ -85,6 +85,13 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
         const std::size_t                nProcessOut  = outputSpan.size();
         std::size_t                      npublished   = 0;
         std::size_t                      transactions = 0;
+
+        auto fail = [&](const gr::Error& error) {
+            outputSpan.publish(npublished);
+            this->emitErrorMessage("processBulk", error);
+            return gr::work::Status::ERROR;
+        };
+        auto receive = [this](std::size_t max_parts) { return _transport.socket().and_then([max_parts](zmq::socket_t& socket) { return detail::receive_all_parts(socket, max_parts); }); };
 
         auto publish_pending_tags = [&outputSpan](std::size_t base_offset, std::size_t consumed, std::vector<detail::ZmqTagHeaderRecord>& tags) {
             std::vector<detail::ZmqTagHeaderRecord> remaining;
@@ -123,20 +130,32 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
 
         while (transactions < detail::kMaxMessagesPerWork && npublished < nProcessOut) {
             if (!_req_pending) {
-                if (!_transport.wait_writable(deadline, transactions == 0, cancelled)) {
+                const auto writable = _transport.wait_writable(deadline, transactions == 0, cancelled);
+                if (!writable) {
+                    return fail(writable.error());
+                }
+                if (!*writable) {
                     break;
                 }
                 const uint32_t request_size = static_cast<uint32_t>(request_count_for(nProcessOut - npublished));
                 zmq::message_t request(sizeof(request_size));
                 std::memcpy(request.data(), &request_size, sizeof(request_size));
-                if (!_transport.socket().send(request, zmq::send_flags::dontwait)) {
+                auto socket = _transport.socket();
+                if (!socket) {
+                    return fail(socket.error());
+                }
+                if (!socket->get().send(request, zmq::send_flags::dontwait)) {
                     break;
                 }
                 _req_pending       = true;
                 _req_pending_since = std::chrono::steady_clock::now();
             }
 
-            if (!_transport.wait_readable(deadline, transactions == 0, cancelled)) {
+            const auto readable = _transport.wait_readable(deadline, transactions == 0, cancelled);
+            if (!readable) {
+                return fail(readable.error());
+            }
+            if (!*readable) {
                 // Relaxed/correlated REQ mode can retry after a lost reply without recreating the
                 // socket. This is especially important for bound sockets because libzmq may not
                 // release their listening endpoint quickly enough for an immediate rebind.
@@ -151,7 +170,11 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
                 break;
             }
 
-            auto parts = detail::receive_all_parts(_transport.socket(), 1);
+            auto received = receive(1);
+            if (!received) {
+                return fail(received.error());
+            }
+            auto& parts = *received;
             if (!parts) {
                 break;
             }

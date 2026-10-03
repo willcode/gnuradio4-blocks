@@ -1,16 +1,15 @@
 #pragma once
 
-#include "ZmqDecodeError.hpp"
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <expected>
+#include <functional>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -113,7 +112,7 @@ class InvocationDeadline {
 public:
     explicit InvocationDeadline(int timeout_ms) : _end(std::chrono::steady_clock::now() + std::chrono::milliseconds{timeout_ms}) {
         if (timeout_ms < 0) {
-            throw std::invalid_argument("ZMQ timeout must be non-negative");
+            throw gr::exception("ZMQ timeout must be non-negative");
         }
     }
 
@@ -136,10 +135,10 @@ public:
 
     ~ZmqSocketTransport() { close(); }
 
-    void open(const std::string& endpoint, bool bind, int linger, int hwm, bool sink, std::optional<std::int64_t> max_message_size = std::nullopt, std::optional<bool> pub_drop_on_hwm = std::nullopt) {
+    [[nodiscard]] std::expected<void, gr::Error> open(const std::string& endpoint, bool bind, int linger, int hwm, bool sink, std::optional<std::int64_t> max_message_size = std::nullopt, std::optional<bool> pub_drop_on_hwm = std::nullopt) {
         std::lock_guard lock(_operation_mutex);
         _cancel_requested.store(false, std::memory_order_release);
-        open_unlocked(endpoint, bind, linger, hwm, sink, max_message_size, pub_drop_on_hwm);
+        return open_unlocked(endpoint, bind, linger, hwm, sink, max_message_size, pub_drop_on_hwm);
     }
 
     [[nodiscard]] OperationGuard acquire_operation_guard() { return OperationGuard{_operation_mutex}; }
@@ -147,52 +146,51 @@ public:
     void               request_cancel() noexcept { _cancel_requested.store(true, std::memory_order_release); }
     [[nodiscard]] bool cancel_requested() const noexcept { return _cancel_requested.load(std::memory_order_acquire); }
 
+    // The wait functions return whether the socket became ready, or the error of a closed socket.
     template<typename Cancelled>
-    [[nodiscard]] bool wait_readable(const InvocationDeadline& deadline, bool allow_block, Cancelled&& cancelled) {
+    [[nodiscard]] std::expected<bool, gr::Error> wait_readable(const InvocationDeadline& deadline, bool allow_block, Cancelled&& cancelled) {
         return poll_until_ready(ZMQ_POLLIN, deadline, allow_block, std::forward<Cancelled>(cancelled));
     }
 
     template<typename Cancelled>
-    [[nodiscard]] bool wait_writable(const InvocationDeadline& deadline, bool allow_block, Cancelled&& cancelled) {
+    [[nodiscard]] std::expected<bool, gr::Error> wait_writable(const InvocationDeadline& deadline, bool allow_block, Cancelled&& cancelled) {
         return poll_until_ready(ZMQ_POLLOUT, deadline, allow_block, std::forward<Cancelled>(cancelled));
     }
 
     // Retained for focused transport tests and simple callers.
-    [[nodiscard]] bool wait_readable(int timeout_ms) {
-        require_nonnegative_timeout(timeout_ms);
-        InvocationDeadline deadline{timeout_ms};
-        return wait_readable(deadline, true, [] { return false; });
+    [[nodiscard]] std::expected<bool, gr::Error> wait_readable(int timeout_ms) {
+        return require_nonnegative_timeout(timeout_ms).and_then([&] { return wait_readable(InvocationDeadline{timeout_ms}, true, [] { return false; }); });
     }
 
-    [[nodiscard]] bool wait_writable(int timeout_ms) {
-        require_nonnegative_timeout(timeout_ms);
-        InvocationDeadline deadline{timeout_ms};
-        return wait_writable(deadline, true, [] { return false; });
+    [[nodiscard]] std::expected<bool, gr::Error> wait_writable(int timeout_ms) {
+        return require_nonnegative_timeout(timeout_ms).and_then([&] { return wait_writable(InvocationDeadline{timeout_ms}, true, [] { return false; }); });
     }
 
-    static void require_nonnegative_timeout(int timeout_ms) {
+    [[nodiscard]] static std::expected<void, gr::Error> require_nonnegative_timeout(int timeout_ms) {
         if (timeout_ms < 0) {
-            throw std::invalid_argument("ZMQ timeout must be non-negative");
+            return std::unexpected(gr::Error("ZMQ timeout must be non-negative"));
         }
+        return {};
     }
 
-    static void require_positive_max_message_size(std::int64_t max_message_size) {
+    [[nodiscard]] static std::expected<void, gr::Error> require_positive_max_message_size(std::int64_t max_message_size) {
         if (max_message_size <= 0) {
-            throw std::invalid_argument("ZMQ maximum message size must be positive");
+            return std::unexpected(gr::Error("ZMQ maximum message size must be positive"));
         }
+        return {};
     }
 
-    [[nodiscard]] std::string last_endpoint() const {
+    [[nodiscard]] std::expected<std::string, gr::Error> last_endpoint() const {
         std::lock_guard lock(_metadata_mutex);
         if (_last_endpoint.empty()) {
-            throw std::logic_error("ZMQ socket is not open");
+            return std::unexpected(gr::Error("ZMQ socket is not open"));
         }
         return _last_endpoint;
     }
 
     // socket() is for use while the caller owns the operation guard (or during start()).
-    [[nodiscard]] zmq::socket_t&       socket() { return socket_unlocked(); }
-    [[nodiscard]] const zmq::socket_t& socket() const { return socket_unlocked(); }
+    [[nodiscard]] std::expected<std::reference_wrapper<zmq::socket_t>, gr::Error>       socket() { return socket_unlocked(); }
+    [[nodiscard]] std::expected<std::reference_wrapper<const zmq::socket_t>, gr::Error> socket() const { return socket_unlocked(); }
 
     static bool is_multiple_of(std::size_t byte_count, std::size_t item_size) { return item_size != 0 && byte_count % item_size == 0; }
 
@@ -206,7 +204,12 @@ private:
     // Allows deterministic inproc peers in the focused transport tests.
     friend struct ZmqTransportTestAccess;
 
-    void open_unlocked(const std::string& endpoint, bool bind, int linger, int hwm, bool sink, std::optional<std::int64_t> max_message_size, std::optional<bool> pub_drop_on_hwm) {
+    std::expected<void, gr::Error> open_unlocked(const std::string& endpoint, bool bind, int linger, int hwm, bool sink, std::optional<std::int64_t> max_message_size, std::optional<bool> pub_drop_on_hwm) {
+        if (max_message_size.has_value()) {
+            if (auto valid = require_positive_max_message_size(*max_message_size); !valid) {
+                return valid;
+            }
+        }
         close_unlocked();
         // PUB inherits XPUB_NODROP support without exposing subscription notifications.
         _socket.emplace(_context, _type);
@@ -227,7 +230,6 @@ private:
             }
         }
         if (max_message_size.has_value()) {
-            require_positive_max_message_size(*max_message_size);
             _socket->set(zmq::sockopt::maxmsgsize, *max_message_size);
         }
         if (pub_drop_on_hwm.has_value() && !*pub_drop_on_hwm) {
@@ -245,6 +247,7 @@ private:
             std::lock_guard lock(_metadata_mutex);
             _last_endpoint = _socket->get(zmq::sockopt::last_endpoint);
         }
+        return {};
     }
 
     void close_unlocked() noexcept {
@@ -269,27 +272,31 @@ private:
         _last_endpoint.clear();
     }
 
-    [[nodiscard]] zmq::socket_t& socket_unlocked() {
+    [[nodiscard]] std::expected<std::reference_wrapper<zmq::socket_t>, gr::Error> socket_unlocked() {
         if (!_socket.has_value()) {
-            throw std::logic_error("ZMQ socket is not open");
+            return std::unexpected(gr::Error("ZMQ socket is not open"));
         }
-        return *_socket;
+        return std::ref(*_socket);
     }
 
-    [[nodiscard]] const zmq::socket_t& socket_unlocked() const {
+    [[nodiscard]] std::expected<std::reference_wrapper<const zmq::socket_t>, gr::Error> socket_unlocked() const {
         if (!_socket.has_value()) {
-            throw std::logic_error("ZMQ socket is not open");
+            return std::unexpected(gr::Error("ZMQ socket is not open"));
         }
-        return *_socket;
+        return std::cref(*_socket);
     }
 
     template<typename Cancelled>
-    [[nodiscard]] bool poll_until_ready(short event, const InvocationDeadline& deadline, bool allow_block, Cancelled&& cancelled) {
+    [[nodiscard]] std::expected<bool, gr::Error> poll_until_ready(short event, const InvocationDeadline& deadline, bool allow_block, Cancelled&& cancelled) {
         if (cancel_requested() || cancelled()) {
             return false;
         }
 
-        zmq::pollitem_t items[] = {{static_cast<void*>(socket_unlocked()), 0, event, 0}};
+        auto socket = socket_unlocked();
+        if (!socket) {
+            return std::unexpected(socket.error());
+        }
+        zmq::pollitem_t items[] = {{static_cast<void*>(socket->get()), 0, event, 0}};
         // Every wait performs one readiness check, including timeout=0 calls.
         zmq::poll(items, 1, std::chrono::milliseconds{0});
         if ((items[0].revents & event) != 0) {
@@ -330,6 +337,13 @@ private:
     std::atomic<bool>            _cancel_requested{false};
 };
 
+// Throws the error of a start-up step as gr::exception.
+inline void throw_on_error(const std::expected<void, gr::Error>& result) {
+    if (!result) {
+        throw gr::exception(result.error().message, result.error().sourceLocation);
+    }
+}
+
 template<typename Block>
 [[nodiscard]] auto cancellation_check(Block& block) {
     return [&block] { return block._transport.cancel_requested() || gr::lifecycle::isShuttingDown(block.state()); };
@@ -348,9 +362,10 @@ struct ReceivedParts {
     bool                        has_extra_parts = false;
 };
 
-inline std::optional<ReceivedParts> receive_all_parts(zmq::socket_t& socket, std::size_t max_retained_parts) {
+// Returns the parts of one message, no value when none is queued, or the error of a zero part limit.
+inline std::expected<std::optional<ReceivedParts>, gr::Error> receive_all_parts(zmq::socket_t& socket, std::size_t max_retained_parts) {
     if (max_retained_parts == 0) {
-        throw std::invalid_argument("At least one multipart frame must be retained");
+        return std::unexpected(gr::Error("At least one multipart frame must be retained"));
     }
 
     ReceivedParts received;
@@ -358,7 +373,7 @@ inline std::optional<ReceivedParts> receive_all_parts(zmq::socket_t& socket, std
     while (true) {
         zmq::message_t part;
         if (!bool(socket.recv(part, zmq::recv_flags::dontwait))) {
-            return std::nullopt;
+            return std::optional<ReceivedParts>{};
         }
         const bool more = socket.get(zmq::sockopt::rcvmore);
         if (received.parts.size() < max_retained_parts) {
@@ -367,7 +382,7 @@ inline std::optional<ReceivedParts> receive_all_parts(zmq::socket_t& socket, std
             received.has_extra_parts = true;
         }
         if (!more) {
-            return received;
+            return std::optional<ReceivedParts>{std::move(received)};
         }
     }
 }

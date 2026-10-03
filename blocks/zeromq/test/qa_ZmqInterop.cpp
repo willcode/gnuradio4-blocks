@@ -53,12 +53,9 @@ public:
         return TestEndpoint([&block] {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
             while (std::chrono::steady_clock::now() < deadline) {
-                try {
-                    const auto endpoint = block.last_endpoint();
-                    if (!endpoint.empty() && !endpoint.ends_with(":0")) {
-                        return endpoint;
-                    }
-                } catch (...) {
+                const auto endpoint = block.last_endpoint();
+                if (endpoint && !endpoint->empty() && !endpoint->ends_with(":0")) {
+                    return *endpoint;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds{1});
             }
