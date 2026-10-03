@@ -43,7 +43,7 @@ void apply(TBlock& block, gr::property_map settings) {
 template<typename TSample, typename TTap>
 [[nodiscard]] auto run(DesignedFilter<TSample, TTap>& block, const std::vector<TSample>& input, std::size_t chunkOutputs = 0UZ) {
     const std::size_t m = block.decimation;
-    return test::runDecimating<typename DesignedFilter<TSample, TTap>::TOut>(block, std::span<const TSample>(input), chunkOutputs * m, m).samples;
+    return test::runDecimating<typename DesignedFilter<TSample, TTap>::TOut>(block, std::span<const TSample>(input), chunkOutputs * m, m).value().samples;
 }
 
 /// The tap-count law these Hamming-window designs are pinned against: the count grows with the rate and shrinks with
@@ -89,7 +89,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         {
             const int  n     = hammingLaw(240000.0, 2000.0);
             auto       block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 240000.f}, {"cutoff", 17000.0}, {"transition_width", 2000.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
-            const auto want  = gr::filter::fir::design::designLowpass({.sampleRate = 240000.0, .cutoff = 17000.0, .transitionWidth = 2000.0, .window = Type::Hamming, .taps = n});
+            const auto want  = gr::filter::fir::design::designLowpass({.sampleRate = 240000.0, .cutoff = 17000.0, .transitionWidth = 2000.0, .window = Type::Hamming, .taps = n}).value();
             expect(eq(block._designed.size(), want.size()));
             expect(eq(worstDelta(std::span<const float>(block._designed), std::span<const float>(want)), 0.0)) << "same designer, same floats";
             expect(eq(static_cast<std::size_t>(block.designed_taps.value), want.size())) << "the observable states the length";
@@ -98,7 +98,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         {
             const int  n     = hammingLaw(96000.0, 20.0);
             auto       block = make<CF, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", 96000.f}, {"cutoff", 575.0}, {"high_cutoff", 825.0}, {"transition_width", 20.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
-            const auto want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = 96000.0, .cutoff = 575.0, .highCutoff = 825.0, .transitionWidth = 20.0, .window = Type::Hamming, .taps = n});
+            const auto want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = 96000.0, .cutoff = 575.0, .highCutoff = 825.0, .transitionWidth = 20.0, .window = Type::Hamming, .taps = n}).value();
             expect(eq(block._designed.size(), want.size()));
             expect(eq(worstDelta(std::span<const CF>(block._designed), std::span<const CF>(want)), 0.0));
             expect(eq(static_cast<std::size_t>(n), want.size())) << "the CW length is the pinned 11563";
@@ -106,14 +106,14 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         // A root-raised-cosine at the RDS matched-filter shape.
         {
             auto       block = make<float, float>({{"profile", std::string("root_raised_cosine")}, {"sample_rate", 19000.f}, {"symbol_rate", 1187.5}, {"alpha", 1.0}, {"taps", gr::Size_t(151)}});
-            const auto want  = gr::filter::fir::design::designRootRaisedCosine(151, 19000.0, 1187.5, 1.0);
+            const auto want  = gr::filter::fir::design::designRootRaisedCosine(151, 19000.0, 1187.5, 1.0).value();
             expect(eq(block._designed.size(), want.size()));
             expect(eq(worstDelta(std::span<const float>(block._designed), std::span<const float>(want)), 0.0));
         }
         // A transition-estimated length (taps = 0) follows the library's own estimate.
         {
             auto              block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 96000.f}, {"cutoff", 10000.0}, {"transition_width", 2000.0}});
-            const std::size_t want  = gr::filter::fir::design::tapCountOf({.sampleRate = 96000.0, .cutoff = 10000.0, .transitionWidth = 2000.0});
+            const std::size_t want  = gr::filter::fir::design::tapCountOf({.sampleRate = 96000.0, .cutoff = 10000.0, .transitionWidth = 2000.0}).value();
             expect(eq(block._designed.size(), want));
         }
     };
@@ -183,7 +183,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         constexpr double tone  = 19000.0;
         const int        n     = hammingLaw(fs, 100.0);
         auto             block = make<float, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 18800.0}, {"high_cutoff", 19200.0}, {"transition_width", 100.0}, {"gain", 2.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
-        const auto       want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = fs, .cutoff = 18800.0, .highCutoff = 19200.0, .transitionWidth = 100.0, .gain = 2.0, .window = Type::Hamming, .taps = n});
+        const auto       want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = fs, .cutoff = 18800.0, .highCutoff = 19200.0, .transitionWidth = 100.0, .gain = 2.0, .window = Type::Hamming, .taps = n}).value();
         expect(eq(block._designed.size(), want.size()));
         expect(eq(worstDelta(std::span<const CF>(block._designed), std::span<const CF>(want)), 0.0)) << "the taps are the library designer's for a real sample type too";
 
@@ -244,7 +244,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         expect(graph.connect<"out", "in">(source, filter).has_value());
         expect(graph.connect<"out", "in">(filter, sink).has_value());
 
-        const std::size_t at96k = gr::filter::fir::design::tapCountOf({.sampleRate = 96000.0, .cutoff = 10000.0, .transitionWidth = 2000.0});
+        const std::size_t at96k = gr::filter::fir::design::tapCountOf({.sampleRate = 96000.0, .cutoff = 10000.0, .transitionWidth = 2000.0}).value();
 
         gr::scheduler::Simple scheduler;
         expect(scheduler.exchange(std::move(graph)).has_value());
@@ -286,7 +286,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
             std::vector<float> x(240UZ, 0.0f);
             x[at] = 1.0f;
             const std::vector<gr::Tag> tags{gr::Tag{at, tagKey(0)}};
-            const auto                 got  = test::runDecimating<float>(block, std::span<const float>(x), kChunk, m, std::span<const gr::Tag>(tags));
+            const auto                 got  = test::runDecimating<float>(block, std::span<const float>(x), kChunk, m, std::span<const gr::Tag>(tags)).value();
             const std::size_t          want = (at + kDelay) / m;
 
             expect(ge(want, kChunk / m)) << "the delayed output belongs to a later call than the tag's input";
@@ -300,7 +300,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         std::vector<CF> z(240UZ, CF{});
         z[59] = CF{1.0f, 0.0f};
         const std::vector<gr::Tag> bandTags{gr::Tag{59UZ, tagKey(0)}};
-        const auto                 banded = test::runDecimating<CF>(band, std::span<const CF>(z), kChunk, 1UZ, std::span<const gr::Tag>(bandTags));
+        const auto                 banded = test::runDecimating<CF>(band, std::span<const CF>(z), kChunk, 1UZ, std::span<const gr::Tag>(bandTags)).value();
         expect(that % (banded.offsetsOf("tag0") == std::vector<std::size_t>{79UZ}));
         expect(eq(peakIndex(std::span<const CF>(banded.samples)), 79UZ));
 
@@ -311,7 +311,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         std::vector<float> h(240UZ, 0.0f);
         h[59] = 1.0f;
         const std::vector<gr::Tag> hilbertTags{gr::Tag{59UZ, tagKey(0)}};
-        const auto                 shifted = test::runDecimating<float>(hilbert, std::span<const float>(h), kChunk, 1UZ, std::span<const gr::Tag>(hilbertTags));
+        const auto                 shifted = test::runDecimating<float>(hilbert, std::span<const float>(h), kChunk, 1UZ, std::span<const gr::Tag>(hilbertTags)).value();
         expect(that % (shifted.offsetsOf("tag0") == std::vector<std::size_t>{74UZ}));
         expect(eq(shifted.samples[74], 0.0f));
         expect(lt(std::abs(std::abs(shifted.samples[73]) - std::abs(shifted.samples[75])), 1e-6f));
@@ -395,7 +395,7 @@ const boost::ut::suite<"the hilbert profile"> hilbertTests = [] {
         std::vector<double> wellIn;   // taps * lowEdge about 3.15; the 6.35 row is asserted but belongs to neither
         for (const Row& row : kRows) {
             auto         block  = make<float, float>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}, {"taps", row.taps}});
-            const auto   levels = gr::filter::fir::design::scanHilbert(block._designed, row.lowEdge);
+            const auto   levels = gr::filter::fir::design::scanHilbert(block._designed, row.lowEdge).value();
             const double worst  = std::max(levels.maxMag - 1.0, 1.0 - levels.minMag);
             expect(that % (worst <= row.ripple)) << std::format("taps {}, low edge {}: ripple {:.4f} against {:.4f}", row.taps, row.lowEdge, worst, row.ripple);
             const double spent = static_cast<double>(row.taps) * row.lowEdge;
