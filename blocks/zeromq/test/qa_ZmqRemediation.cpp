@@ -33,10 +33,10 @@ T value(int n) {
 
 template<typename T>
 std::vector<std::uint8_t> frame(int n) {
-    auto bytes = zd::serialize_tag_header(10, {{10, gr::pmt::Value{"label"}, gr::pmt::Value{n}, {}}});
+    auto bytes = zd::serialize_tag_header(10, {{10, gr::pmt::Value{"label"}, gr::pmt::Value{n}, {}}}).value();
     auto v     = value<T>(n);
     if constexpr (std::same_as<T, gr::pmt::Value>) {
-        auto payload = zd::serialize_pmt(v, PmtWireFormat::GR4_YAML_V1);
+        auto payload = zd::serialize_pmt(v, PmtWireFormat::GR4_YAML_V1).value();
         bytes.insert(bytes.end(), payload.begin(), payload.end());
     } else if constexpr (std::same_as<T, std::vector<float>>) {
         zd::append_bytes(bytes, v.data(), v.size() * sizeof(float));
@@ -229,6 +229,43 @@ void message_tags_retry(const std::string& key = {}, std::size_t tagged_item = 1
     expect(eq(tag_count, 1UZ));
     expect(eq(sink.in.streamReader().available(), 0UZ));
     expect(sink.send_statistics().refused_messages > 0);
+    sink.stop();
+}
+
+template<template<typename> typename Sink>
+void encode_error() {
+    using T = gr::pmt::Value;
+    Sink<T> sink;
+    sink.endpoint        = "inproc://encode-error";
+    sink.timeout         = 1000;
+    sink.linger          = 0;
+    sink.pmt_wire_format = PmtWireFormat::GR3;
+    sink.start();
+    constexpr bool pub  = std::same_as<Sink<T>, ZmqPubSink<T>>;
+    constexpr bool rep  = std::same_as<Sink<T>, ZmqRepSink<T>>;
+    auto           peer = zd::ZmqTransportTestAccess::peer(sink._transport, rep ? zmq::socket_type::req : pub ? zmq::socket_type::sub : zmq::socket_type::pull);
+    peer.set(zmq::sockopt::linger, 0);
+    if constexpr (pub) {
+        peer.set(zmq::sockopt::subscribe, "");
+    }
+    peer.connect(sink.last_endpoint());
+    if constexpr (rep) {
+        const std::uint32_t count = 1;
+        expect(peer.send(zmq::buffer(&count, sizeof(count))).has_value());
+    }
+    gr::PortOut<T> writer;
+    expect(writer.connect(sink.in).has_value());
+    {
+        auto input = writer.template reserve<none>(1);
+        input[0]   = gr::pmt::Value(std::string(65536, 'x'));
+        input.publish(1);
+    }
+    {
+        auto input = sink.in.template get<none>(1);
+        expect(sink.processBulk(input) == gr::work::Status::ERROR);
+    }
+    expect(eq(sink.in.streamReader().available(), 1UZ));
+    expect(eq(sink.send_statistics().messages, std::uint64_t{0}));
     sink.stop();
 }
 
@@ -433,7 +470,7 @@ void decode_allocation_error() {
     source.start();
     auto peer = zd::ZmqTransportTestAccess::peer(source._transport, zmq::socket_type::push);
     peer.connect(source.last_endpoint());
-    send(peer, zd::serialize_pmt(gr::pmt::Value{"value requiring a map allocation"}, PmtWireFormat::GR4_YAML_V1));
+    send(peer, zd::serialize_pmt(gr::pmt::Value{"value requiring a map allocation"}, PmtWireFormat::GR4_YAML_V1).value());
     gr::PortIn<gr::pmt::Value> reader;
     expect(source.out.connect(reader).has_value());
     bool propagated = false;
@@ -478,7 +515,7 @@ const suite remediation = [] {
     "Decoder allocation failure propagates"_test                  = decode_allocation_error;
     "Peer-controlled lengths are rejected before allocation"_test = [] {
         const std::vector<std::uint8_t> huge_yaml{255, 255, 255, 255};
-        auto                            huge_tags = zd::serialize_tag_header(0, {});
+        auto                            huge_tags = zd::serialize_tag_header(0, {}).value();
         std::fill(huge_tags.begin() + 11, huge_tags.end(), std::uint8_t{255});
         bool            yaml_refused = false, tags_refused = false;
         FailingResource resource;
@@ -512,6 +549,9 @@ const suite remediation = [] {
     "REQ vector refusal recovery"_test                                  = [] { req_refusal_recovery<std::vector<float>>(); };
     "REQ scalar refusal recovery"_test                                  = [] { req_refusal_recovery<float>(); };
     "REP limits inbound requests before allocation"_test                = rep_request_limit;
+    "Push sink reports a value GR3 cannot carry"_test                   = [] { encode_error<ZmqPushSink>(); };
+    "Pub sink reports a value GR3 cannot carry"_test                    = [] { encode_error<ZmqPubSink>(); };
+    "Rep sink reports a value GR3 cannot carry"_test                    = [] { encode_error<ZmqRepSink>(); };
     "Tag maps accept only the documented envelope"_test                 = [] {
         expect(!zd::tag_record_from_property_map(gr::property_map{{"native", 42}}));
         expect(!zd::tag_record_from_property_map(gr::property_map{{"key", "x"}}));

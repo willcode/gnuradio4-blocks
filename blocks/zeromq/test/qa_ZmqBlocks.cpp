@@ -1032,7 +1032,7 @@ const suite ZmqBlocksTests = [] {
         expect(fg.connect<"out", "in">(pull, sink).has_value());
 
         std::vector<float>                     vec{1.0f, 2.0f, 3.0f, 4.0f};
-        auto                                   serialized = zdetail::serialize_pmt(gr::pmt::Value(gr::Tensor<float>(gr::data_from, vec)), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+        auto                                   serialized = zdetail::serialize_pmt(gr::pmt::Value(gr::Tensor<float>(gr::data_from, vec)), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1).value();
         std::vector<std::vector<std::uint8_t>> messages(n_messages, serialized);
         auto                                   sender = spawn_push_sender(TestEndpoint::bound_by(pull), std::move(messages));
 
@@ -1225,7 +1225,7 @@ const suite ZmqBlocksTests = [] {
 
         auto                                                                 sender = spawn_push_sender(TestEndpoint::bound_by(pull), std::vector<std::vector<std::uint8_t>>{
                                                                           {0xFF},
-                                                                          legacy_pmt::serialize_to_legacy(gr::pmt::Value(int32_t{42})),
+                                                                          legacy_pmt::serialize_to_legacy(gr::pmt::Value(int32_t{42})).value(),
                                                                       });
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
@@ -1356,7 +1356,7 @@ const suite ZmqBlocksTests = [] {
         auto                                                                 sender = spawn_pub_sender(TestEndpoint::bound_by(sub), key,
                                                                             std::vector<std::vector<std::uint8_t>>{
                 {0xFF},
-                legacy_pmt::serialize_to_legacy(gr::pmt::Value(int32_t{44})),
+                legacy_pmt::serialize_to_legacy(gr::pmt::Value(int32_t{44})).value(),
             });
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
@@ -1554,7 +1554,7 @@ const suite ZmqBlocksTests = [] {
 
         auto                                                                 responder = spawn_rep_sequence_responder(TestEndpoint::bound_by(source), {
                                                                                           {0xFF},
-                                                                                          legacy_pmt::serialize_to_legacy(gr::pmt::Value(int32_t{46})),
+                                                                                          legacy_pmt::serialize_to_legacy(gr::pmt::Value(int32_t{46})).value(),
                                                                                       });
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
@@ -1618,7 +1618,7 @@ const suite ZmqBlocksTests = [] {
             expect(eq(messages.size(), fixtures.size()));
             if (messages.size() == fixtures.size()) {
                 for (std::size_t i = 0; i < fixtures.size(); ++i) {
-                    expect(messages[i] == legacy_pmt::serialize_to_legacy(fixtures[i]));
+                    expect(messages[i] == legacy_pmt::serialize_to_legacy(fixtures[i]).value());
                 }
             }
         }
@@ -1627,10 +1627,10 @@ const suite ZmqBlocksTests = [] {
     "Pull source receives supported legacy PMT fixtures"_test = [] {
         const auto fixtures = make_pmt_fixtures();
         for (std::size_t i = 0; i < fixtures.size(); ++i) {
-            const auto serialized = legacy_pmt::serialize_to_legacy(fixtures[i]);
+            const auto serialized = legacy_pmt::serialize_to_legacy(fixtures[i]).value();
             const auto roundtrip  = legacy_pmt::deserialize_from_legacy(serialized.data(), serialized.size());
             expect(roundtrip.has_value() >> fatal);
-            expect(legacy_pmt::serialize_to_legacy(*roundtrip) == serialized);
+            expect(legacy_pmt::serialize_to_legacy(*roundtrip).value() == serialized);
         }
     };
 
@@ -1650,7 +1650,7 @@ const suite ZmqBlocksTests = [] {
         const auto fixtures = make_pmt_fixtures();
         for (std::size_t index = 0; index < fixtures.size(); ++index) {
             const auto& value         = fixtures[index];
-            const auto  yaml_v1_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+            const auto  yaml_v1_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1).value();
             const auto  result        = zdetail::deserialize_pmt(yaml_v1_bytes.data(), yaml_v1_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
             expect(result.has_value() >> fatal) << "fixture " << index;
             const auto& decoded = *result;
@@ -1659,15 +1659,15 @@ const suite ZmqBlocksTests = [] {
             if (index < 15UZ) {
                 expect(decoded == value) << "scalar fixture " << index;
             } else if (value.container_type() != gr::pmt::Value::ContainerType::Map) {
-                expect(zdetail::serialize_pmt(decoded, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1) == yaml_v1_bytes) << "container fixture " << index;
+                expect(zdetail::serialize_pmt(decoded, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1).value() == yaml_v1_bytes) << "container fixture " << index;
             }
         }
 
         const auto& value     = fixtures.front();
-        const auto  gr3_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR3);
+        const auto  gr3_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR3).value();
         expect(zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR3) == value);
 
-        const auto gr4_header = zdetail::serialize_tag_header(0, {{0, gr::pmt::Value("key"), value, gr::pmt::Value("src")}});
+        const auto gr4_header = zdetail::serialize_tag_header(0, {{0, gr::pmt::Value("key"), value, gr::pmt::Value("src")}}).value();
         const auto parsed     = zdetail::parse_tag_header(gr4_header.data(), gr4_header.size());
         expect(parsed.has_value() >> fatal);
         const auto& tags = parsed->tags;
@@ -1740,14 +1740,14 @@ const suite ZmqBlocksTests = [] {
     };
 
     "ZMQ codecs reject truncated buffers"_test = [] {
-        const auto tag_header = zdetail::serialize_tag_header(0, {});
+        const auto tag_header = zdetail::serialize_tag_header(0, {}).value();
         for (std::size_t size = 0; size < tag_header.size(); ++size) {
             const auto parsed = zdetail::parse_tag_header(tag_header.data(), size);
             expect(!parsed.has_value() >> fatal) << "size" << size;
             expect(parsed.error() == zdetail::DecodeError::truncated) << "size" << size;
         }
 
-        const auto pmt = legacy_pmt::serialize_to_legacy(gr::pmt::Value(std::uint32_t{0x12345678U}));
+        const auto pmt = legacy_pmt::serialize_to_legacy(gr::pmt::Value(std::uint32_t{0x12345678U})).value();
         for (std::size_t size = 0; size < pmt.size(); ++size) {
             const auto decoded = legacy_pmt::deserialize_from_legacy(pmt.data(), size);
             expect(!decoded.has_value() >> fatal) << "size" << size;
@@ -1759,24 +1759,35 @@ const suite ZmqBlocksTests = [] {
         expect(!huge.has_value() >> fatal);
         expect(huge.error() == zdetail::DecodeError::truncated);
 
-        auto trailing = legacy_pmt::serialize_to_legacy(gr::pmt::Value(true));
+        auto trailing = legacy_pmt::serialize_to_legacy(gr::pmt::Value(true)).value();
         trailing.push_back(0);
         const auto trailing_result = legacy_pmt::deserialize_from_legacy(trailing.data(), trailing.size());
         expect(!trailing_result.has_value() >> fatal);
         expect(trailing_result.error() == zdetail::DecodeError::trailing_bytes);
+    };
 
-        bool long_string_threw = false;
-        try {
-            std::ignore = legacy_pmt::serialize_to_legacy(gr::pmt::Value(std::string(65536, 'x')));
-        } catch (...) {
-            long_string_threw = true;
-        }
-        expect(long_string_threw);
+    "ZMQ encoders return the error for a value the wire format cannot carry"_test = [] {
+        using gr::blocks::zeromq::PmtWireFormat;
+        const gr::pmt::Value long_symbol(std::string(65536, 'x'));
+        const auto           legacy = legacy_pmt::serialize_to_legacy(long_symbol);
+        expect(!legacy.has_value() >> fatal);
+        expect(eq(legacy.error().message, std::string{"Legacy PMT symbol is too long"}));
+        expect(!zdetail::serialize_pmt(long_symbol, PmtWireFormat::GR3).has_value());
+        expect(zdetail::serialize_pmt(long_symbol, PmtWireFormat::GR4_YAML_V1).has_value());
+
+        const std::vector<zdetail::ZmqTagHeaderRecord> tags{{0, long_symbol, gr::pmt::Value(1), gr::pmt::Value{}}};
+        const auto                                     header = zdetail::serialize_tag_header(0, tags, PmtWireFormat::GR3);
+        expect(!header.has_value() >> fatal);
+        expect(eq(header.error().message, std::string{"Legacy PMT symbol is too long"}));
+        expect(!zdetail::message_tag_header(tags, 0, PmtWireFormat::GR3).has_value());
+        const auto untagged_item = zdetail::message_tag_header(tags, 1, PmtWireFormat::GR3);
+        expect(untagged_item.has_value() >> fatal);
+        expect(*untagged_item == zdetail::serialize_tag_header(0, {}, PmtWireFormat::GR3).value());
     };
 
     "ZMQ decoders return the reason a message is refused"_test = [] {
         using zdetail::DecodeError;
-        const auto header    = zdetail::serialize_tag_header(7, {});
+        const auto header    = zdetail::serialize_tag_header(7, {}).value();
         auto       bad_magic = header;
         bad_magic[0] ^= 0xFFU;
         expect(zdetail::parse_tag_header(bad_magic.data(), bad_magic.size()) == std::unexpected(DecodeError::bad_magic));
@@ -1817,13 +1828,7 @@ const suite ZmqBlocksTests = [] {
         std::vector<zdetail::ZmqTagHeaderRecord> pending;
         pending.push_back({0, gr::pmt::Value(std::string(65536, 'x')), gr::pmt::Value(1), gr::pmt::Value{}});
         const auto selected = zdetail::select_pending_tags(pending, 1);
-        bool       threw    = false;
-        try {
-            std::ignore = zdetail::serialize_tag_header(0, selected, gr::blocks::zeromq::PmtWireFormat::GR3);
-        } catch (...) {
-            threw = true;
-        }
-        expect(threw);
+        expect(!zdetail::serialize_tag_header(0, selected, gr::blocks::zeromq::PmtWireFormat::GR3).has_value());
         expect(eq(pending.size(), static_cast<std::size_t>(1)));
         expect(eq(pending[0].offset, 0ULL));
     };
@@ -1986,7 +1991,7 @@ const suite ZmqBlocksTests = [] {
         const auto replies = client.get();
         expect(eq(replies.size(), static_cast<std::size_t>(1)));
         if (replies.size() == 1) {
-            expect(replies[0] == zdetail::serialize_pmt(gr::pmt::Value{}, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1));
+            expect(replies[0] == zdetail::serialize_pmt(gr::pmt::Value{}, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1).value());
         }
     };
 
@@ -2047,7 +2052,7 @@ const suite ZmqBlocksTests = [] {
         expect(eq(replies.size(), fixtures.size()));
         if (replies.size() == fixtures.size()) {
             for (std::size_t i = 0; i < fixtures.size(); ++i) {
-                expect(replies[i] == legacy_pmt::serialize_to_legacy(fixtures[i]));
+                expect(replies[i] == legacy_pmt::serialize_to_legacy(fixtures[i]).value());
             }
         }
     };
@@ -2059,7 +2064,7 @@ const suite ZmqBlocksTests = [] {
         std::vector<std::vector<std::uint8_t>> payloads;
         payloads.reserve(fixtures.size());
         for (const auto& fixture : fixtures) {
-            payloads.push_back(legacy_pmt::serialize_to_legacy(fixture));
+            payloads.push_back(legacy_pmt::serialize_to_legacy(fixture).value());
         }
 
         auto& source = fg.emplaceBlock<gr::blocks::zeromq::ZmqReqSource<gr::pmt::Value>>(make_props({
@@ -2082,7 +2087,7 @@ const suite ZmqBlocksTests = [] {
         expect(eq(sink.received.size(), fixtures.size()));
         if (sink.received.size() == fixtures.size()) {
             for (std::size_t i = 0; i < fixtures.size(); ++i) {
-                expect(legacy_pmt::serialize_to_legacy(sink.received[i]) == legacy_pmt::serialize_to_legacy(fixtures[i]));
+                expect(legacy_pmt::serialize_to_legacy(sink.received[i]).value() == legacy_pmt::serialize_to_legacy(fixtures[i]).value());
             }
         }
 
@@ -2114,7 +2119,7 @@ const suite ZmqBlocksTests = [] {
 
         expect(fg.connect<"out", "in">(source, pub).has_value());
 
-        const auto expected = legacy_pmt::serialize_to_legacy(source.values.front());
+        const auto expected = legacy_pmt::serialize_to_legacy(source.values.front()).value();
 
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
@@ -2148,7 +2153,7 @@ const suite ZmqBlocksTests = [] {
 
         expect(fg.connect<"out", "in">(sub, sink).has_value());
 
-        auto payload = legacy_pmt::serialize_to_legacy(gr::pmt::Value(gr::Tensor<float>(gr::data_from, std::vector<float>{1.f, 2.f, 3.f, 4.f})));
+        auto payload = legacy_pmt::serialize_to_legacy(gr::pmt::Value(gr::Tensor<float>(gr::data_from, std::vector<float>{1.f, 2.f, 3.f, 4.f}))).value();
         auto sender  = spawn_pub_sender(TestEndpoint::bound_by(sub), key, std::move(payload));
 
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
@@ -2276,7 +2281,7 @@ const suite ZmqBlocksTests = [] {
             {0, gr::pmt::Value("alpha"), gr::pmt::Value(int32_t{11}), gr::pmt::Value("src-a")},
             {2, gr::pmt::Value("beta"), gr::pmt::Value(int32_t{22}), gr::pmt::Value("src-b")},
         };
-        auto                      header  = zdetail::serialize_tag_header(0, tags);
+        auto                      header  = zdetail::serialize_tag_header(0, tags).value();
         auto                      payload = to_bytes(std::vector<float>{1.f, 2.f, 3.f, 4.f});
         std::vector<std::uint8_t> message;
         message.reserve(header.size() + payload.size());
@@ -2322,7 +2327,7 @@ const suite ZmqBlocksTests = [] {
             {0, gr::pmt::Value("alpha"), gr::pmt::Value(int32_t{11}), gr::pmt::Value("src-a")},
             {0, gr::pmt::Value("beta"), gr::pmt::Value(int32_t{22}), gr::pmt::Value("src-b")},
         };
-        auto                      header  = zdetail::serialize_tag_header(0, tags);
+        auto                      header  = zdetail::serialize_tag_header(0, tags).value();
         auto                      payload = to_bytes(std::vector<float>{1.f});
         std::vector<std::uint8_t> message;
         message.reserve(header.size() + payload.size());
@@ -2420,7 +2425,7 @@ const suite ZmqBlocksTests = [] {
             {0, gr::pmt::Value("alpha"), gr::pmt::Value(int32_t{11}), gr::pmt::Value("src-a")},
             {3, gr::pmt::Value("beta"), gr::pmt::Value(int32_t{22}), gr::pmt::Value("src-b")},
         };
-        auto                      header  = zdetail::serialize_tag_header(0, tags);
+        auto                      header  = zdetail::serialize_tag_header(0, tags).value();
         auto                      payload = to_bytes(std::vector<float>{1.f, 2.f, 3.f, 4.f});
         std::vector<std::uint8_t> message;
         message.reserve(header.size() + payload.size());
@@ -2510,7 +2515,7 @@ const suite ZmqBlocksTests = [] {
             {0, gr::pmt::Value("alpha"), gr::pmt::Value(int32_t{11}), gr::pmt::Value("src-a")},
             {2, gr::pmt::Value("beta"), gr::pmt::Value(int32_t{22}), gr::pmt::Value("src-b")},
         };
-        auto                      header  = zdetail::serialize_tag_header(0, tags);
+        auto                      header  = zdetail::serialize_tag_header(0, tags).value();
         auto                      payload = to_bytes(std::vector<float>{1.f, 2.f, 3.f, 4.f});
         std::vector<std::uint8_t> message;
         message.reserve(header.size() + payload.size());

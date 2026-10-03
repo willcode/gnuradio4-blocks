@@ -506,7 +506,7 @@ const suite ZmqInteropTests = [] {
         gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return sink.received.size() >= 1; }, std::chrono::milliseconds(5000)));
-        expect(legacy_pmt::serialize_to_legacy(sink.received.front()) == legacy_pmt::serialize_to_legacy(expected));
+        expect(legacy_pmt::serialize_to_legacy(sink.received.front()).value() == legacy_pmt::serialize_to_legacy(expected).value());
         expect(eq(peer.get(), 0));
     };
 

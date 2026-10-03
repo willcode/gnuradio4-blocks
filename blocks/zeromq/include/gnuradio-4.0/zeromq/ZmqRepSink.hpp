@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <expected>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/meta/reflection.hpp>
@@ -108,75 +109,67 @@ This block receives stream items and replies to REQ requests using a REP socket.
         auto                             cancelled = detail::cancellation_check(*this);
         std::size_t                      messages  = 0;
 
-        auto make_empty_reply = [&]() {
-            const auto header = pass_tags ? detail::serialize_tag_header(0, {}, pmt_wire_format) : std::vector<std::uint8_t>{};
+        auto make_reply = [](const detail::EncodedBytes& header, const void* payload, std::size_t payload_size) -> std::expected<zmq::message_t, gr::Error> {
+            if (!header) {
+                return std::unexpected(header.error());
+            }
+            zmq::message_t reply(header->size() + payload_size);
+            if (!header->empty()) {
+                std::memcpy(reply.data(), header->data(), header->size());
+            }
+            if (payload_size != 0) {
+                std::memcpy(static_cast<std::uint8_t*>(reply.data()) + header->size(), payload, payload_size);
+            }
+            return reply;
+        };
+
+        auto tag_header = [&](std::size_t count) -> detail::EncodedBytes {
+            if (!pass_tags) {
+                return {};
+            }
+            const auto all_tags = detail::collect_tag_records(inData);
+            return detail::serialize_tag_header(0, detail::select_pending_tags(all_tags, count), pmt_wire_format);
+        };
+
+        auto make_empty_reply = [&]() -> std::expected<zmq::message_t, gr::Error> {
+            const auto header = pass_tags ? detail::serialize_tag_header(0, {}, pmt_wire_format) : detail::EncodedBytes{};
             if constexpr (std::is_same_v<T, gr::pmt::Value>) {
-                const auto     serialized = detail::serialize_pmt(gr::pmt::Value{}, pmt_wire_format);
-                zmq::message_t reply(header.size() + serialized.size());
-                if (!header.empty()) {
-                    std::memcpy(reply.data(), header.data(), header.size());
+                const auto serialized = detail::serialize_pmt(gr::pmt::Value{}, pmt_wire_format);
+                if (!serialized) {
+                    return std::unexpected(serialized.error());
                 }
-                if (!serialized.empty()) {
-                    std::memcpy(static_cast<std::uint8_t*>(reply.data()) + header.size(), serialized.data(), serialized.size());
-                }
-                return reply;
+                return make_reply(header, serialized->data(), serialized->size());
             } else {
-                zmq::message_t reply(header.size());
-                if (!header.empty()) {
-                    std::memcpy(reply.data(), header.data(), header.size());
-                }
-                return reply;
+                return make_reply(header, nullptr, 0);
             }
         };
 
-        auto stage_reply = [&](std::size_t requested, bool malformed) {
+        auto stage_reply = [&](std::size_t requested, bool malformed) -> std::expected<void, gr::Error> {
+            std::expected<zmq::message_t, gr::Error> reply;
+            std::size_t                              items = 0;
             if (malformed || requested == 0 || inData.empty()) {
-                _pending_reply       = make_empty_reply();
-                _pending_reply_items = 0;
-                return;
-            }
-
-            if constexpr (is_arithmetic_or_complex_v<T>) {
-                const std::size_t nsend    = std::min(requested, inData.size());
-                const auto        all_tags = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto        tags     = pass_tags ? detail::select_pending_tags(all_tags, nsend) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto        header   = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : std::vector<std::uint8_t>{};
-                zmq::message_t    reply(header.size() + nsend * sizeof(T));
-                if (!header.empty()) {
-                    std::memcpy(reply.data(), header.data(), header.size());
-                }
-                std::memcpy(static_cast<std::uint8_t*>(reply.data()) + header.size(), inData.data(), nsend * sizeof(T));
-                _pending_reply       = std::move(reply);
-                _pending_reply_items = nsend;
+                reply = make_empty_reply();
+            } else if constexpr (is_arithmetic_or_complex_v<T>) {
+                items = std::min(requested, inData.size());
+                reply = make_reply(tag_header(items), inData.data(), items * sizeof(T));
             } else if constexpr (is_vector_of_arithmetic_or_complex_v<T>) {
-                const auto&    vec      = inData.front();
-                const auto     all_tags = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     tags     = pass_tags ? detail::select_pending_tags(all_tags, 1) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     header   = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : std::vector<std::uint8_t>{};
-                zmq::message_t reply(header.size() + vec.size() * sizeof(typename T::value_type));
-                if (!header.empty()) {
-                    std::memcpy(reply.data(), header.data(), header.size());
-                }
-                if (!vec.empty()) {
-                    std::memcpy(static_cast<std::uint8_t*>(reply.data()) + header.size(), vec.data(), vec.size() * sizeof(typename T::value_type));
-                }
-                _pending_reply       = std::move(reply);
-                _pending_reply_items = 1;
+                const auto& vec = inData.front();
+                items           = 1;
+                reply           = make_reply(tag_header(items), vec.data(), vec.size() * sizeof(typename T::value_type));
             } else {
-                const auto     all_tags   = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     tags       = pass_tags ? detail::select_pending_tags(all_tags, 1) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     header     = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : std::vector<std::uint8_t>{};
-                const auto     serialized = detail::serialize_pmt(inData.front(), pmt_wire_format);
-                zmq::message_t reply(header.size() + serialized.size());
-                if (!header.empty()) {
-                    std::memcpy(reply.data(), header.data(), header.size());
+                const auto serialized = detail::serialize_pmt(inData.front(), pmt_wire_format);
+                if (!serialized) {
+                    return std::unexpected(serialized.error());
                 }
-                if (!serialized.empty()) {
-                    std::memcpy(static_cast<std::uint8_t*>(reply.data()) + header.size(), serialized.data(), serialized.size());
-                }
-                _pending_reply       = std::move(reply);
-                _pending_reply_items = 1;
+                items = 1;
+                reply = make_reply(tag_header(items), serialized->data(), serialized->size());
             }
+            if (!reply) {
+                return std::unexpected(reply.error());
+            }
+            _pending_reply       = std::move(*reply);
+            _pending_reply_items = items;
+            return {};
         };
 
         while (messages < detail::kMaxMessagesPerWork) {
@@ -213,7 +206,11 @@ This block receives stream items and replies to REQ requests using a REP socket.
 
             const bool        malformed = request->has_extra_parts || request->parts.size() != 1 || request->parts.front().size() != sizeof(uint32_t);
             const std::size_t requested = malformed ? 0 : parse_request_count(request->parts.front());
-            stage_reply(requested, malformed);
+            if (auto staged = stage_reply(requested, malformed); !staged) {
+                std::ignore = inData.consume(0);
+                this->emitErrorMessage("processBulk", staged.error());
+                return gr::work::Status::ERROR;
+            }
         }
 
         std::ignore = inData.consume(0);

@@ -10,7 +10,6 @@
 #include <expected>
 #include <limits>
 #include <memory_resource>
-#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -22,12 +21,12 @@ namespace detail {
 
 inline constexpr std::size_t kGr4YamlV1PmtLengthSize = sizeof(std::uint32_t);
 
-inline std::vector<std::uint8_t> serialize_gr4_yaml_v1_pmt(const gr::pmt::Value& value) {
+inline std::expected<std::vector<std::uint8_t>, gr::Error> serialize_gr4_yaml_v1_pmt(const gr::pmt::Value& value) {
     gr::pmt::Value::Map envelope{std::pmr::get_default_resource()};
     envelope.emplace("value", value);
     const auto yaml = gr::pmt::yaml::serialize(envelope);
     if (yaml.size() > std::numeric_limits<std::uint32_t>::max()) {
-        throw std::length_error("GR4 YAML v1 PMT payload exceeds the 32-bit frame length");
+        return std::unexpected(gr::Error("GR4 YAML v1 PMT payload exceeds the 32-bit frame length"));
     }
 
     const auto                length = static_cast<std::uint32_t>(yaml.size());
@@ -65,12 +64,12 @@ inline std::expected<gr::pmt::Value, DecodeError> deserialize_gr4_yaml_v1_pmt(co
     return std::move(value->second);
 }
 
-inline std::vector<std::uint8_t> serialize_pmt(const gr::pmt::Value& value, PmtWireFormat format) {
+inline std::expected<std::vector<std::uint8_t>, gr::Error> serialize_pmt(const gr::pmt::Value& value, PmtWireFormat format) {
     switch (format) {
     case PmtWireFormat::GR4_YAML_V1: return serialize_gr4_yaml_v1_pmt(value);
     case PmtWireFormat::GR3: return legacy_pmt::serialize_to_legacy(value);
     }
-    throw std::invalid_argument("Unknown PMT wire format");
+    return std::unexpected(gr::Error("Unknown PMT wire format"));
 }
 
 inline std::expected<gr::pmt::Value, DecodeError> deserialize_pmt(const std::uint8_t* data, std::size_t size, PmtWireFormat format) {

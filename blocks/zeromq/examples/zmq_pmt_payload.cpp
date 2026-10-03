@@ -13,7 +13,11 @@ struct PmtPrintingSink : gr::Block<PmtPrintingSink> {
 
     void processOne(const gr::pmt::Value& value) {
         const auto bytes = legacy_pmt::serialize_to_legacy(value);
-        std::cout << "pmt[" << count << "] legacy_size=" << bytes.size() << '\n';
+        if (bytes) {
+            std::cout << "pmt[" << count << "] legacy_size=" << bytes->size() << '\n';
+        } else {
+            std::cout << "pmt[" << count << "] " << bytes.error().message << '\n';
+        }
         ++count;
         if (n_items_max > 0 && count >= n_items_max) {
             this->requestStop();

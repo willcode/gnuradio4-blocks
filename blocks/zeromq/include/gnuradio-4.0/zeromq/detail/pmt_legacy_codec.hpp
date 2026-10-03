@@ -2,6 +2,7 @@
 
 #include "ZmqDecodeError.hpp"
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Value.hpp>
 
 #include <algorithm>
@@ -13,7 +14,6 @@
 #include <expected>
 #include <limits>
 #include <memory_resource>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -24,7 +24,9 @@ namespace legacy_pmt {
 using gr::Tensor;
 using gr::pmt::Value;
 
-inline std::vector<uint8_t> serialize_to_legacy(const Value& obj);
+using Encoded = std::expected<std::vector<uint8_t>, gr::Error>;
+
+inline Encoded serialize_to_legacy(const Value& obj);
 
 enum class legacy_tag : uint8_t { LEGACY_PMT_TRUE = 0x00, LEGACY_PMT_FALSE = 0x01, LEGACY_PMT_SYMBOL = 0x02, LEGACY_PMT_INT32 = 0x03, LEGACY_PMT_DOUBLE = 0x04, LEGACY_PMT_COMPLEX = 0x05, LEGACY_PMT_NULL = 0x06, LEGACY_PMT_PAIR = 0x07, LEGACY_PMT_VECTOR = 0x08, LEGACY_PMT_DICT = 0x09, LEGACY_PMT_UNIFORM_VECTOR = 0x0A, LEGACY_PMT_UINT64 = 0x0B, LEGACY_PMT_TUPLE = 0x0C, LEGACY_PMT_INT64 = 0x0D };
 
@@ -209,9 +211,11 @@ std::vector<uint8_t> serialize_uniform_vector(const std::vector<T>& vec) {
     return out;
 }
 
-static std::vector<uint8_t> serialize_string(std::string_view str) {
+static void append_encoded(std::vector<uint8_t>& out, const std::vector<uint8_t>& bytes) { out.insert(out.end(), bytes.begin(), bytes.end()); }
+
+static Encoded serialize_string(std::string_view str) {
     if (str.size() > std::numeric_limits<uint16_t>::max()) {
-        throw std::runtime_error("Legacy PMT symbol is too long");
+        return std::unexpected(gr::Error("Legacy PMT symbol is too long"));
     }
     std::vector<uint8_t> out;
     write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_SYMBOL));
@@ -220,10 +224,10 @@ static std::vector<uint8_t> serialize_string(std::string_view str) {
     return out;
 }
 
-static std::vector<uint8_t> serialize_pair(const Tensor<Value>& tensor);
-static std::vector<uint8_t> serialize_tuple(const Tensor<Value>& tensor);
+static Encoded serialize_pair(const Tensor<Value>& tensor);
+static Encoded serialize_tuple(const Tensor<Value>& tensor);
 
-static std::vector<uint8_t> serialize_dict(const Value::Map& map) {
+static Encoded serialize_dict(const Value::Map& map) {
     std::vector<std::string> keys;
     keys.reserve(map.size());
     for (const auto& [k, _] : map) {
@@ -232,61 +236,57 @@ static std::vector<uint8_t> serialize_dict(const Value::Map& map) {
     std::sort(keys.begin(), keys.end());
 
     std::vector<uint8_t> out;
-    if (keys.empty()) {
-        write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_NULL));
-        return out;
-    }
-
-    auto write_tail = [&](auto&& self, std::size_t idx) -> void {
-        if (idx >= keys.size()) {
-            write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_NULL));
-            return;
-        }
+    for (const auto& key : keys) {
         write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_DICT));
         write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_PAIR));
-        const auto& key       = keys[idx];
-        auto        key_bytes = serialize_string(key);
-        out.insert(out.end(), key_bytes.begin(), key_bytes.end());
+        const auto key_bytes = serialize_string(key);
+        if (!key_bytes) {
+            return key_bytes;
+        }
+        append_encoded(out, *key_bytes);
         std::pmr::string key_pmr(key, std::pmr::get_default_resource());
         auto             it = map.find(key_pmr);
         if (it == map.end()) {
-            throw std::runtime_error("Legacy PMT dict missing key");
+            return std::unexpected(gr::Error("Legacy PMT dict missing key"));
         }
-        const auto& val       = it->second;
-        auto        val_bytes = serialize_to_legacy(val);
-        out.insert(out.end(), val_bytes.begin(), val_bytes.end());
-        self(self, idx + 1);
-    };
-
-    write_tail(write_tail, 0);
+        const auto val_bytes = serialize_to_legacy(it->second);
+        if (!val_bytes) {
+            return val_bytes;
+        }
+        append_encoded(out, *val_bytes);
+    }
+    write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_NULL));
     return out;
 }
 
-static std::vector<uint8_t> serialize_tuple(const Tensor<Value>& tensor) {
+static Encoded serialize_tuple(const Tensor<Value>& tensor) {
     std::vector<uint8_t> out;
     write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_TUPLE));
     write_u32(out, static_cast<uint32_t>(tensor.size()));
     for (const auto& v : tensor) {
-        auto bytes = serialize_to_legacy(v);
-        out.insert(out.end(), bytes.begin(), bytes.end());
+        const auto bytes = serialize_to_legacy(v);
+        if (!bytes) {
+            return bytes;
+        }
+        append_encoded(out, *bytes);
     }
     return out;
 }
 
-static std::vector<uint8_t> serialize_pair(const Tensor<Value>& tensor) {
+static Encoded serialize_pair(const Tensor<Value>& tensor) {
     if (tensor.size() != 2) {
-        throw std::runtime_error("Legacy PMT pair serialization requires a 2-element tensor");
+        return std::unexpected(gr::Error("Legacy PMT pair serialization requires a 2-element tensor"));
     }
 
     std::vector<uint8_t> out;
     write_u8(out, static_cast<uint8_t>(legacy_tag::LEGACY_PMT_PAIR));
-
-    auto car_bytes = serialize_to_legacy(tensor[0]);
-    out.insert(out.end(), car_bytes.begin(), car_bytes.end());
-
-    auto cdr_bytes = serialize_to_legacy(tensor[1]);
-    out.insert(out.end(), cdr_bytes.begin(), cdr_bytes.end());
-
+    for (const auto& element : tensor) {
+        const auto bytes = serialize_to_legacy(element);
+        if (!bytes) {
+            return bytes;
+        }
+        append_encoded(out, *bytes);
+    }
     return out;
 }
 
@@ -298,67 +298,55 @@ static std::vector<uint8_t> serialize_complex(std::complex<double> value) {
     return out;
 }
 
-static bool try_serialize_tensor(const Value& obj, std::vector<uint8_t>& out) {
-    if (auto t = obj.get_if<Tensor<uint8_t>>()) {
-        out = serialize_uniform_vector(std::vector<uint8_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<int8_t>>()) {
-        out = serialize_uniform_vector(std::vector<int8_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<uint16_t>>()) {
-        out = serialize_uniform_vector(std::vector<uint16_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<int16_t>>()) {
-        out = serialize_uniform_vector(std::vector<int16_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<uint32_t>>()) {
-        out = serialize_uniform_vector(std::vector<uint32_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<int32_t>>()) {
-        out = serialize_uniform_vector(std::vector<int32_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<uint64_t>>()) {
-        out = serialize_uniform_vector(std::vector<uint64_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<int64_t>>()) {
-        out = serialize_uniform_vector(std::vector<int64_t>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<float>>()) {
-        out = serialize_uniform_vector(std::vector<float>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<double>>()) {
-        out = serialize_uniform_vector(std::vector<double>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<std::complex<float>>>()) {
-        out = serialize_uniform_vector(std::vector<std::complex<float>>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<std::complex<double>>>()) {
-        out = serialize_uniform_vector(std::vector<std::complex<double>>(t->begin(), t->end()));
-        return true;
-    }
-    if (auto t = obj.get_if<Tensor<Value>>()) {
-        if (t->size() == 2) {
-            out = serialize_pair(*t);
-            return true;
-        }
-        out = serialize_tuple(*t);
-        return true;
-    }
-    return false;
+template<typename T>
+static std::vector<uint8_t> serialize_tensor_elements(const Tensor<T>& tensor) {
+    return serialize_uniform_vector(std::vector<T>(tensor.begin(), tensor.end()));
 }
 
-inline std::vector<uint8_t> serialize_to_legacy(const Value& obj) {
+static Encoded serialize_tensor(const Value& obj) {
+    if (auto t = obj.get_if<Tensor<uint8_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<int8_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<uint16_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<int16_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<uint32_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<int32_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<uint64_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<int64_t>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<float>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<double>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<std::complex<float>>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<std::complex<double>>>()) {
+        return serialize_tensor_elements(*t);
+    }
+    if (auto t = obj.get_if<Tensor<Value>>()) {
+        return t->size() == 2 ? serialize_pair(*t) : serialize_tuple(*t);
+    }
+    return std::unexpected(gr::Error("Unsupported tensor type for legacy PMT serialization"));
+}
+
+inline Encoded serialize_to_legacy(const Value& obj) {
     std::vector<uint8_t> out;
 
     if (obj.is_monostate()) {
@@ -435,20 +423,17 @@ inline std::vector<uint8_t> serialize_to_legacy(const Value& obj) {
     }
 
     if (obj.is_tensor()) {
-        if (try_serialize_tensor(obj, out)) {
-            return out;
-        }
-        throw std::runtime_error("Unsupported tensor type for legacy PMT serialization");
+        return serialize_tensor(obj);
     }
 
     if (obj.is_map()) {
         if (auto map = obj.get_if<Value::Map>()) {
             return serialize_dict(*map);
         }
-        throw std::runtime_error("Unsupported map type for legacy PMT serialization");
+        return std::unexpected(gr::Error("Unsupported map type for legacy PMT serialization"));
     }
 
-    throw std::runtime_error("Unsupported PMT type for legacy serialization");
+    return std::unexpected(gr::Error("Unsupported PMT type for legacy serialization"));
 }
 
 template<typename T>

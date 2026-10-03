@@ -6,7 +6,6 @@
 #include <cstring>
 #include <expected>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -46,7 +45,9 @@ inline std::expected<T, DecodeError> read_native(const std::uint8_t*& ptr, const
     return value;
 }
 
-inline std::vector<std::uint8_t> serialize_tag_header(std::uint64_t offset, const std::vector<ZmqTagHeaderRecord>& tags, PmtWireFormat format = PmtWireFormat::GR4_YAML_V1) {
+using EncodedBytes = std::expected<std::vector<std::uint8_t>, gr::Error>;
+
+inline EncodedBytes serialize_tag_header(std::uint64_t offset, const std::vector<ZmqTagHeaderRecord>& tags, PmtWireFormat format = PmtWireFormat::GR4_YAML_V1) {
     std::vector<std::uint8_t> out;
     append_native(out, kTagHeaderMagic);
     append_native(out, kTagHeaderVersion);
@@ -56,12 +57,13 @@ inline std::vector<std::uint8_t> serialize_tag_header(std::uint64_t offset, cons
 
     for (const auto& tag : tags) {
         append_native(out, tag.offset);
-        const auto key_bytes = serialize_pmt(tag.key, format);
-        append_bytes(out, key_bytes.data(), key_bytes.size());
-        const auto value_bytes = serialize_pmt(tag.value, format);
-        append_bytes(out, value_bytes.data(), value_bytes.size());
-        const auto srcid_bytes = serialize_pmt(tag.srcid, format);
-        append_bytes(out, srcid_bytes.data(), srcid_bytes.size());
+        for (const gr::pmt::Value* field : {&tag.key, &tag.value, &tag.srcid}) {
+            const auto bytes = serialize_pmt(*field, format);
+            if (!bytes) {
+                return bytes;
+            }
+            append_bytes(out, bytes->data(), bytes->size());
+        }
     }
 
     return out;
@@ -161,7 +163,7 @@ inline std::vector<ZmqTagHeaderRecord> collect_tag_records(InputSpanLikeT& inDat
     return tags;
 }
 
-inline std::vector<std::uint8_t> message_tag_header(const std::vector<ZmqTagHeaderRecord>& tags, std::size_t item, PmtWireFormat format) {
+inline EncodedBytes message_tag_header(const std::vector<ZmqTagHeaderRecord>& tags, std::size_t item, PmtWireFormat format) {
     std::vector<ZmqTagHeaderRecord> selected;
     for (const auto& tag : tags) {
         if (tag.offset == item) {
