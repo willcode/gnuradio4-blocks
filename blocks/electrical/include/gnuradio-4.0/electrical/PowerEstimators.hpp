@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <optional>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -66,15 +67,17 @@ applies low-pass filters to calculate average values, and outputs decimated resu
         using namespace gr::filter;
         using ValueType = meta::fundamental_base_value_type_t<T>;
 
-        const auto hp_filter_init = [&](auto) { //
-            if (high_pass > 0.f) {
-                return FilterImpl(iir::designFilter<ValueType>(Type::HIGHPASS,                                                       //
-                    FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(high_pass), .fs = static_cast<double>(sample_rate)}, //
-                    iir::Design::BUTTERWORTH));
+        const auto designed = [](Type response, const FilterParameters& parameters) {
+            auto coefficients = iir::designFilter<ValueType>(response, parameters, iir::Design::BUTTERWORTH);
+            if (!coefficients) {
+                throw gr::exception(coefficients.error().message, coefficients.error().sourceLocation);
             }
-            return FilterImpl();
+            return std::move(*coefficients);
         };
-        constexpr auto indices = std::views::iota(0UZ, nPhases);
+
+        const auto     highPass       = high_pass > 0.f ? std::optional(designed(Type::HIGHPASS, FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(high_pass), .fs = static_cast<double>(sample_rate)})) : std::nullopt;
+        const auto     hp_filter_init = [&highPass](auto) { return highPass ? FilterImpl(*highPass) : FilterImpl(); };
+        constexpr auto indices        = std::views::iota(0UZ, nPhases);
         std::ranges::transform(indices, _hpVoltage.begin(), hp_filter_init);
         std::ranges::transform(indices, _hpCurrent.begin(), hp_filter_init);
 
@@ -83,11 +86,8 @@ applies low-pass filters to calculate average values, and outputs decimated resu
         }
 
         const double cutoff_frequency = std::min(0.5 * (static_cast<double>(sample_rate) / static_cast<double>(decimate)), static_cast<double>(low_pass.value));
-        const auto   lp_filter_init   = [&, cutoff_frequency](auto) {                                                 //
-            return FilterImpl(iir::designFilter<ValueType>(Type::LOWPASS,                                         //
-                    FilterParameters{.order = 2UZ, .fLow = cutoff_frequency, .fs = static_cast<double>(sample_rate)}, //
-                    iir::Design::BUTTERWORTH));
-        };
+        const auto   lowPass          = designed(Type::LOWPASS, FilterParameters{.order = 2UZ, .fLow = cutoff_frequency, .fs = static_cast<double>(sample_rate)});
+        const auto   lp_filter_init   = [&lowPass](auto) { return FilterImpl(lowPass); };
 
         std::ranges::transform(indices, _lpVoltageSquared.begin(), lp_filter_init);
         std::ranges::transform(indices, _lpCurrentSquared.begin(), lp_filter_init);

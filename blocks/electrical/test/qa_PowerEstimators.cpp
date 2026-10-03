@@ -1,7 +1,9 @@
 #include <boost/ut.hpp>
 
 #include <cmath>
+#include <limits>
 #include <random>
+#include <string>
 
 #include <format>
 
@@ -255,6 +257,20 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
         const std::size_t lastIdx = nOut - 1UZ;
         expect(approx(spanRmsU[0][lastIdx], V_rms, 1.0f)) << std::format("without the high-pass the DC input must reach U_rms, got {}", spanRmsU[0][lastIdx]);
         expect(approx(spanRmsI[0][lastIdx], I_rms, 1.0f)) << std::format("without the high-pass the DC input must reach I_rms, got {}", spanRmsI[0][lastIdx]);
+    };
+
+    "PowerMetrics refuses a sample rate the filter design refuses, with the design's message"_test = [] {
+        gr::Graph graph;
+        auto&     block   = graph.emplaceBlock<PowerMetrics<float, 1UZ>>();
+        block.sample_rate = std::numeric_limits<float>::quiet_NaN();
+
+        std::string refusal;
+        try {
+            block.start();
+        } catch (const gr::exception& e) {
+            refusal = e.message;
+        }
+        expect(refusal.contains("FilterParameters::")) << std::format("the refusal carries the IIR design's message, got '{}'", refusal);
     };
 
     "PowerFactor"_test = []<typename TestParam>() {
