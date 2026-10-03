@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <span>
 #include <string>
@@ -198,7 +199,11 @@ window, `out` passes branch 0 through unchanged and `ortho` carries branch 1 unc
         const std::size_t take      = std::min({offer, outSpan.size(), orthoRoom, roomFor(measurementsSpan, made)});
 
         countDroppedTags(in0Span, in1Span, take);
-        combine(std::span<const std::complex<float>>(in0Span).first(take), std::span<const std::complex<float>>(in1Span).first(take), std::span<std::complex<float>>(outSpan).first(take), std::span<std::complex<float>>(orthoSpan.data(), wantOrtho ? take : 0UZ), measurementsSpan.isConnected);
+        if (const auto combined = combine(std::span<const std::complex<float>>(in0Span).first(take), std::span<const std::complex<float>>(in1Span).first(take), std::span<std::complex<float>>(outSpan).first(take), std::span<std::complex<float>>(orthoSpan.data(), wantOrtho ? take : 0UZ), measurementsSpan.isConnected); !combined) {
+            std::ignore = in0Span.consume(0UZ);
+            std::ignore = in1Span.consume(0UZ);
+            return refuse(outSpan, orthoSpan, measurementsSpan, made, combined.error());
+        }
         made += drain(measurementsSpan, made);
 
         outSpan.publish(take);
@@ -214,11 +219,15 @@ window, `out` passes branch 0 through unchanged and `ortho` carries branch 1 unc
         const bool        wantOrtho = emit_orthogonal.value && orthoSpan.isConnected;
         const std::size_t take      = std::min({in0Span.size(), in1Span.size(), outSpan.size(), wantOrtho ? orthoSpan.size() : std::numeric_limits<std::size_t>::max()});
         countDroppedTags(in0Span, in1Span, take);
-        combine(std::span<const std::complex<float>>(in0Span).first(take), std::span<const std::complex<float>>(in1Span).first(take), std::span<std::complex<float>>(outSpan).first(take), std::span<std::complex<float>>(orthoSpan.data(), wantOrtho ? take : 0UZ), measurementsSpan.isConnected);
+        if (const auto combined = combine(std::span<const std::complex<float>>(in0Span).first(take), std::span<const std::complex<float>>(in1Span).first(take), std::span<std::complex<float>>(outSpan).first(take), std::span<std::complex<float>>(orthoSpan.data(), wantOrtho ? take : 0UZ), measurementsSpan.isConnected); !combined) {
+            return refuse(outSpan, orthoSpan, measurementsSpan, 0UZ, combined.error());
+        }
 
         std::size_t made = drain(measurementsSpan, 0UZ);
         if (!_flushed && _covCount > 0UZ) {
-            closeWindow(measurementsSpan.isConnected, false);
+            if (const auto closed = closeWindow(measurementsSpan.isConnected, false); !closed) {
+                return refuse(outSpan, orthoSpan, measurementsSpan, made, closed.error());
+            }
             made += drain(measurementsSpan, made);
             _flushed = true;
         }
@@ -229,6 +238,15 @@ window, `out` passes branch 0 through unchanged and `ortho` carries branch 1 unc
     }
 
 private:
+    /// @brief Publishes the @p made records already drained and no samples, and reports @p error as the call's result.
+    [[nodiscard]] work::Status refuse(OutputSpanLike auto& outSpan, OutputSpanLike auto& orthoSpan, OutputSpanLike auto& measurementsSpan, std::size_t made, const gr::Error& error) {
+        outSpan.publish(0UZ);
+        orthoSpan.publish(0UZ);
+        measurementsSpan.publish(made);
+        this->emitErrorMessage("processBulk", error);
+        return work::Status::ERROR;
+    }
+
     /// @brief Counts the `n_dropped_samples` tags on the @p count samples this call takes, on either branch. The bound
     /// keeps a tag of a later call from being counted twice.
     void countDroppedTags(InputSpanLike auto& in0Span, InputSpanLike auto& in1Span, std::size_t count) {
@@ -249,27 +267,38 @@ private:
         onSpan(in1Span);
     }
 
-    void combine(std::span<const std::complex<float>> branch0, std::span<const std::complex<float>> branch1, std::span<std::complex<float>> combined, std::span<std::complex<float>> orthogonal, bool wantRecords) {
+    [[nodiscard]] std::expected<void, gr::Error> combine(std::span<const std::complex<float>> branch0, std::span<const std::complex<float>> branch1, std::span<std::complex<float>> combined, std::span<std::complex<float>> orthogonal, bool wantRecords) {
         std::size_t at = 0UZ;
         while (at < branch0.size()) {
             const std::size_t remaining = static_cast<std::size_t>(window.value) - _covCount;
             const std::size_t chunk     = std::min(remaining, branch0.size() - at);
 
-            gr::measurement::polarizationCombine(branch0.subspan(at, chunk), branch1.subspan(at, chunk), _estimate, combined.subspan(at, chunk), orthogonal.empty() ? std::span<std::complex<float>>{} : orthogonal.subspan(at, chunk));
-            _covariance.add(branch0.subspan(at, chunk), branch1.subspan(at, chunk));
+            if (auto mixed = gr::measurement::polarizationCombine(branch0.subspan(at, chunk), branch1.subspan(at, chunk), _estimate, combined.subspan(at, chunk), orthogonal.empty() ? std::span<std::complex<float>>{} : orthogonal.subspan(at, chunk)); !mixed) {
+                return mixed;
+            }
+            if (auto added = _covariance.add(branch0.subspan(at, chunk), branch1.subspan(at, chunk)); !added) {
+                return added;
+            }
 
             _covCount += chunk;
             _streamAt += chunk;
             at += chunk;
             if (_covCount == static_cast<std::size_t>(window.value)) {
-                closeWindow(wantRecords, true);
+                if (auto closed = closeWindow(wantRecords, true); !closed) {
+                    return closed;
+                }
             }
         }
+        return {};
     }
 
-    void closeWindow(bool wantRecords, bool full) {
-        const std::span<const double>         noisePowers(noise_powers.value);
-        gr::measurement::PolarizationEstimate solved = _covariance.solve(_mode, _normalize, noisePowers);
+    [[nodiscard]] std::expected<void, gr::Error> closeWindow(bool wantRecords, bool full) {
+        const std::span<const double> noisePowers(noise_powers.value);
+        const auto                    solution = _covariance.solve(_mode, _normalize, noisePowers);
+        if (!solution) {
+            return std::unexpected(solution.error());
+        }
+        const gr::measurement::PolarizationEstimate& solved = *solution;
 
         if (solved.saturatedSnr) {
             _nSaturatedFigures.fetch_add(1ULL, std::memory_order_relaxed);
@@ -307,6 +336,7 @@ private:
         _covariance.reset();
         _covCount      = 0UZ;
         _windowStartAt = _streamAt;
+        return {};
     }
 
     /**

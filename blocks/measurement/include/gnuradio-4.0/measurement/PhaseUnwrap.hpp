@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -169,10 +170,19 @@ Nyquist. The count is an observability hook and not a detector. `reset_on_discon
         std::span<std::int64_t>              cyclesOut(cyclesSpan.data(), n);
         std::span<float>                     phaseOut(phaseSpan.data(), n);
 
-        std::size_t at = 0UZ;
+        std::size_t at   = 0UZ;
+        const auto  fail = [&](const gr::Error& error) {
+            cyclesSpan.publish(0UZ);
+            phaseSpan.publish(0UZ);
+            std::ignore = inSpan.consume(0UZ);
+            this->emitErrorMessage("processBulk", error);
+            return work::Status::ERROR;
+        };
         for (const std::size_t offset : resetOffsets) {
             if (offset > at) {
-                processSlice(input.subspan(at, offset - at), cyclesOut.subspan(at, offset - at), phaseOut.subspan(at, offset - at), base + at);
+                if (const auto done = processSlice(input.subspan(at, offset - at), cyclesOut.subspan(at, offset - at), phaseOut.subspan(at, offset - at), base + at); !done) {
+                    return fail(done.error());
+                }
                 at = offset;
             }
             _unwrapper.markDiscontinuity();
@@ -180,7 +190,9 @@ Nyquist. The count is an observability hook and not a detector. `reset_on_discon
             _havePrev = false;
         }
         if (at < n) {
-            processSlice(input.subspan(at), cyclesOut.subspan(at), phaseOut.subspan(at), base + at);
+            if (const auto done = processSlice(input.subspan(at), cyclesOut.subspan(at), phaseOut.subspan(at), base + at); !done) {
+                return fail(done.error());
+            }
         }
 
         _streamAt += n;
@@ -191,8 +203,10 @@ Nyquist. The count is an observability hook and not a detector. `reset_on_discon
     }
 
 private:
-    void processSlice(std::span<const std::complex<float>> input, std::span<std::int64_t> cyclesOut, std::span<float> phaseOut, std::uint64_t baseIndex) {
-        _unwrapper.process(input, cyclesOut, phaseOut);
+    [[nodiscard]] std::expected<void, gr::Error> processSlice(std::span<const std::complex<float>> input, std::span<std::int64_t> cyclesOut, std::span<float> phaseOut, std::uint64_t baseIndex) {
+        if (auto unwrapped = _unwrapper.process(input, cyclesOut, phaseOut); !unwrapped) {
+            return unwrapped;
+        }
 
         const double threshold = max_step_fraction.value * kPi;
         for (std::size_t k = 0UZ; k < input.size(); ++k) {
@@ -209,6 +223,7 @@ private:
             _prevCycles = curCycles;
             _prevPhase  = curPhase;
         }
+        return {};
     }
 };
 

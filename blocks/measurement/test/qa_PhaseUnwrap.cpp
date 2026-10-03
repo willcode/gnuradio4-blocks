@@ -412,7 +412,7 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
             const double p = 0.9 + 2. * std::numbers::pi * 0.1 * static_cast<double>(k);
             in[k]          = CF(static_cast<float>(std::cos(p)), static_cast<float>(std::sin(p)));
         }
-        block._unwrapper.process(in, cycles, phase);
+        expect(block._unwrapper.process(in, cycles, phase).has_value());
         std::println("origin change: cycles before the change {}, nResets() {}", block._unwrapper.cycles(), block.nResets());
         expect(block._unwrapper.cycles() > std::int64_t{400LL}) << "about 500 turns have accumulated by then";
         expect(eq(block.nResets(), std::uint64_t{0ULL}));

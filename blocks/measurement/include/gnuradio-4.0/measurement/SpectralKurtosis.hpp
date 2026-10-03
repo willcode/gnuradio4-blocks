@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <span>
 #include <string>
@@ -148,9 +149,15 @@ independent.
         std::size_t made     = 0UZ;
         std::size_t consumed = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
-            std::optional<DataSet<float>> record = fold(inSpan[consumed]);
-            if (record.has_value()) {
-                outSpan[made] = std::move(*record);
+            auto record = fold(inSpan[consumed]);
+            if (!record) {
+                outSpan.publish(made);
+                std::ignore = inSpan.consume(consumed);
+                this->emitErrorMessage("processBulk", record.error());
+                return work::Status::ERROR;
+            }
+            if (record->has_value()) {
+                outSpan[made] = std::move(**record);
                 ++made;
             }
         }
@@ -161,8 +168,8 @@ independent.
 
 private:
     /// @brief Folds one input record in, or refuses it with the reason when it cannot be used. Returns the emitted
-    /// record when this input completed the accumulation.
-    [[nodiscard]] std::optional<DataSet<float>> fold(const DataSet<float>& record) {
+    /// record when this input completed the accumulation, or the error of an evaluation the accumulator refused.
+    [[nodiscard]] std::expected<std::optional<DataSet<float>>, gr::Error> fold(const DataSet<float>& record) {
         if (record.signal_values.empty() || record.axis_values.empty()) {
             refuse();
             return std::nullopt;
@@ -237,20 +244,26 @@ private:
         if (filled < static_cast<std::uint64_t>(n_spectra.value)) {
             return std::nullopt;
         }
-        DataSet<float> record_ = evaluate();
+        auto evaluated = evaluate();
+        if (!evaluated) {
+            return std::unexpected(evaluated.error());
+        }
         if (!emit_records.value) {
             return std::nullopt;
         }
-        return record_;
+        return std::move(*evaluated);
     }
 
     void refuse() { _nRefusedRecords.fetch_add(1ULL, std::memory_order_relaxed); }
 
-    [[nodiscard]] DataSet<float> evaluate() {
+    [[nodiscard]] std::expected<DataSet<float>, gr::Error> evaluate() {
         const std::size_t bins = _acc.bins();
         _skValues.assign(bins, 0.);
-        const std::size_t degenerate = _acc.evaluate(_cycleShape, std::span<double>(_skValues));
-        _nDegenerateBins.fetch_add(static_cast<std::uint64_t>(degenerate), std::memory_order_relaxed);
+        const auto degenerate = _acc.evaluate(_cycleShape, std::span<double>(_skValues));
+        if (!degenerate) {
+            return std::unexpected(degenerate.error());
+        }
+        _nDegenerateBins.fetch_add(static_cast<std::uint64_t>(*degenerate), std::memory_order_relaxed);
 
         std::size_t worst      = 0UZ;
         double      worstDelta = -1.;
@@ -290,7 +303,7 @@ private:
             {std::pmr::string("shape"), pmt::Value(_cycleShape)},
             {std::pmr::string("sk_expectation"), pmt::Value(gr::measurement::spectralKurtosisExpectation())},
             {std::pmr::string("sk_std"), pmt::Value(gr::measurement::spectralKurtosisSpread(m, _cycleShape))},
-            {std::pmr::string("valid"), pmt::Value(degenerate < bins)},
+            {std::pmr::string("valid"), pmt::Value(*degenerate < bins)},
         };
         if (std::isfinite(_cycleSampleRate)) {
             extra.insert_or_assign(std::pmr::string("sample_rate"), pmt::Value(_cycleSampleRate));
