@@ -7,6 +7,7 @@
 #include <gnuradio-4.0/YamlPmt.hpp>
 
 #include <cstdint>
+#include <expected>
 #include <limits>
 #include <memory_resource>
 #include <stdexcept>
@@ -40,26 +41,26 @@ inline std::vector<std::uint8_t> serialize_gr4_yaml_v1_pmt(const gr::pmt::Value&
     return result;
 }
 
-inline gr::pmt::Value deserialize_gr4_yaml_v1_pmt(const std::uint8_t*& data, const std::uint8_t* end) {
+inline std::expected<gr::pmt::Value, DecodeError> deserialize_gr4_yaml_v1_pmt(const std::uint8_t*& data, const std::uint8_t* end) {
     if (data == nullptr || end == nullptr || end < data || static_cast<std::size_t>(end - data) < kGr4YamlV1PmtLengthSize) {
-        throw DecodeError("truncated GR4 YAML v1 PMT length");
+        return std::unexpected(DecodeError::truncated);
     }
 
     const auto length = (static_cast<std::uint32_t>(data[0]) << 24U) | (static_cast<std::uint32_t>(data[1]) << 16U) | (static_cast<std::uint32_t>(data[2]) << 8U) | static_cast<std::uint32_t>(data[3]);
     data += kGr4YamlV1PmtLengthSize;
     if (static_cast<std::size_t>(end - data) < length) {
-        throw DecodeError("truncated GR4 YAML v1 PMT payload");
+        return std::unexpected(DecodeError::truncated);
     }
 
     const std::string_view yaml(reinterpret_cast<const char*>(data), length);
     data += length;
     auto decoded = gr::pmt::yaml::deserialize(yaml);
     if (!decoded.has_value()) {
-        throw DecodeError("invalid GR4 YAML v1 PMT payload");
+        return std::unexpected(DecodeError::malformed);
     }
     auto value = decoded->find("value");
     if (value == decoded->end() || decoded->size() != 1UZ) {
-        throw DecodeError("invalid GR4 YAML v1 PMT envelope");
+        return std::unexpected(DecodeError::malformed);
     }
     return std::move(value->second);
 }
@@ -72,31 +73,31 @@ inline std::vector<std::uint8_t> serialize_pmt(const gr::pmt::Value& value, PmtW
     throw std::invalid_argument("Unknown PMT wire format");
 }
 
-inline gr::pmt::Value deserialize_pmt(const std::uint8_t* data, std::size_t size, PmtWireFormat format) {
+inline std::expected<gr::pmt::Value, DecodeError> deserialize_pmt(const std::uint8_t* data, std::size_t size, PmtWireFormat format) {
     switch (format) {
     case PmtWireFormat::GR4_YAML_V1: {
         if (data == nullptr || size < kGr4YamlV1PmtLengthSize) {
-            throw DecodeError("truncated GR4 YAML v1 PMT payload");
+            return std::unexpected(DecodeError::truncated);
         }
         const auto* cursor = data;
         const auto* end    = data + size;
         auto        value  = deserialize_gr4_yaml_v1_pmt(cursor, end);
-        if (cursor != end) {
-            throw DecodeError("trailing bytes after GR4 YAML v1 PMT payload");
+        if (value && cursor != end) {
+            return std::unexpected(DecodeError::trailing_bytes);
         }
         return value;
     }
     case PmtWireFormat::GR3: return legacy_pmt::deserialize_from_legacy(data, size);
     }
-    throw std::invalid_argument("Unknown PMT wire format");
+    return std::unexpected(DecodeError::unsupported_type);
 }
 
-inline gr::pmt::Value deserialize_pmt(const std::uint8_t*& data, const std::uint8_t* end, PmtWireFormat format) {
+inline std::expected<gr::pmt::Value, DecodeError> deserialize_pmt(const std::uint8_t*& data, const std::uint8_t* end, PmtWireFormat format) {
     switch (format) {
     case PmtWireFormat::GR4_YAML_V1: return deserialize_gr4_yaml_v1_pmt(data, end);
     case PmtWireFormat::GR3: return legacy_pmt::deserialize_from_legacy(data, end);
     }
-    throw std::invalid_argument("Unknown PMT wire format");
+    return std::unexpected(DecodeError::unsupported_type);
 }
 
 } // namespace detail

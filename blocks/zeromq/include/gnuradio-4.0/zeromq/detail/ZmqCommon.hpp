@@ -196,15 +196,6 @@ public:
 
     static bool is_multiple_of(std::size_t byte_count, std::size_t item_size) { return item_size != 0 && byte_count % item_size == 0; }
 
-    static void require_multiple_of(std::size_t byte_count, std::size_t item_size, const char* kind) {
-        if (item_size == 0) {
-            throw std::logic_error(std::string(kind) + ": invalid item size");
-        }
-        if (byte_count % item_size != 0) {
-            throw DecodeError(std::string(kind) + ": incoming message size is not a multiple of the item size");
-        }
-    }
-
     void close() noexcept {
         request_cancel();
         std::lock_guard lock(_operation_mutex);

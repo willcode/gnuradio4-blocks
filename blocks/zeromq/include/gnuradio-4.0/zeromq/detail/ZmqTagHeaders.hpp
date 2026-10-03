@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -35,9 +36,9 @@ inline void append_native(std::vector<std::uint8_t>& out, T value) {
 }
 
 template<typename T>
-inline T read_native(const std::uint8_t*& ptr, const std::uint8_t* end) {
+inline std::expected<T, DecodeError> read_native(const std::uint8_t*& ptr, const std::uint8_t* end) {
     if (ptr > end || static_cast<std::size_t>(end - ptr) < sizeof(T)) {
-        throw DecodeError("Truncated GR tag header");
+        return std::unexpected(DecodeError::truncated);
     }
     T value{};
     std::memcpy(&value, ptr, sizeof(T));
@@ -66,41 +67,57 @@ inline std::vector<std::uint8_t> serialize_tag_header(std::uint64_t offset, cons
     return out;
 }
 
-inline std::size_t parse_tag_header(const std::uint8_t* data, std::size_t size, std::uint64_t& offset_out, std::vector<ZmqTagHeaderRecord>& tags_out, PmtWireFormat format = PmtWireFormat::GR4_YAML_V1) {
+struct ParsedTagHeader {
+    std::size_t                     consumed = 0; // header bytes ahead of the payload
+    std::uint64_t                   offset   = 0; // the sender's item offset of the message
+    std::vector<ZmqTagHeaderRecord> tags;
+};
+
+inline std::expected<ParsedTagHeader, DecodeError> parse_tag_header(const std::uint8_t* data, std::size_t size, PmtWireFormat format = PmtWireFormat::GR4_YAML_V1) {
     if (size < sizeof(std::uint16_t) + sizeof(std::uint8_t) + sizeof(std::uint64_t) + sizeof(std::uint64_t)) {
-        throw DecodeError("incoming zmq msg too small to hold gr tag header!");
+        return std::unexpected(DecodeError::truncated);
     }
 
+    // The size check above covers the four fixed fields read without a check.
     const std::uint8_t* ptr            = data;
     const std::uint8_t* end            = data + size;
-    const auto          header_magic   = read_native<std::uint16_t>(ptr, end);
-    const auto          header_version = read_native<std::uint8_t>(ptr, end);
+    const auto          header_magic   = *read_native<std::uint16_t>(ptr, end);
+    const auto          header_version = *read_native<std::uint8_t>(ptr, end);
     if (header_magic != kTagHeaderMagic) {
-        throw DecodeError("gr header magic does not match!");
+        return std::unexpected(DecodeError::bad_magic);
     }
     if (header_version != kTagHeaderVersion) {
-        throw DecodeError("gr header version too high!");
+        return std::unexpected(DecodeError::bad_version);
     }
 
-    offset_out                            = read_native<std::uint64_t>(ptr, end);
-    const auto            ntags           = read_native<std::uint64_t>(ptr, end);
+    ParsedTagHeader parsed;
+    parsed.offset                         = *read_native<std::uint64_t>(ptr, end);
+    const auto            ntags           = *read_native<std::uint64_t>(ptr, end);
     constexpr std::size_t min_record_size = sizeof(std::uint64_t) + 3;
     if (ptr > end || ntags > static_cast<std::uint64_t>(end - ptr) / min_record_size) {
-        throw DecodeError("Malformed GR tag header tag count");
+        return std::unexpected(DecodeError::malformed);
     }
-    tags_out.clear();
-    tags_out.reserve(static_cast<std::size_t>(ntags));
+    parsed.tags.reserve(static_cast<std::size_t>(ntags));
 
     for (std::uint64_t i = 0; i < ntags; ++i) {
         ZmqTagHeaderRecord tag;
-        tag.offset = read_native<std::uint64_t>(ptr, end);
-        tag.key    = deserialize_pmt(ptr, end, format);
-        tag.value  = deserialize_pmt(ptr, end, format);
-        tag.srcid  = deserialize_pmt(ptr, end, format);
-        tags_out.push_back(std::move(tag));
+        const auto         offset = read_native<std::uint64_t>(ptr, end);
+        if (!offset) {
+            return std::unexpected(offset.error());
+        }
+        tag.offset = *offset;
+        for (gr::pmt::Value* field : {&tag.key, &tag.value, &tag.srcid}) {
+            auto decoded = deserialize_pmt(ptr, end, format);
+            if (!decoded) {
+                return std::unexpected(decoded.error());
+            }
+            *field = std::move(*decoded);
+        }
+        parsed.tags.push_back(std::move(tag));
     }
 
-    return static_cast<std::size_t>(ptr - data);
+    parsed.consumed = static_cast<std::size_t>(ptr - data);
+    return parsed;
 }
 
 inline std::optional<ZmqTagHeaderRecord> tag_record_from_property_map(const gr::property_map& map) {

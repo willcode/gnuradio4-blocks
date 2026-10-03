@@ -203,9 +203,10 @@ void message_tags_retry(const std::string& key = {}, std::size_t tagged_item = 1
                 expect(std::string_view(static_cast<const char*>(msg.data()), msg.size()) == key);
                 expect(peer.recv(msg).has_value() >> fatal);
             }
-            std::uint64_t                       offset = 0;
-            std::vector<zd::ZmqTagHeaderRecord> tags;
-            const auto                          consumed_bytes = zd::parse_tag_header(static_cast<const std::uint8_t*>(msg.data()), msg.size(), offset, tags);
+            const auto parsed = zd::parse_tag_header(static_cast<const std::uint8_t*>(msg.data()), msg.size());
+            expect(parsed.has_value() >> fatal);
+            const auto  consumed_bytes = parsed->consumed;
+            const auto& tags           = parsed->tags;
             // Decode payload independently of the receiving blocks.
             if constexpr (std::same_as<T, gr::pmt::Value>) {
                 expect(zd::deserialize_pmt(static_cast<const std::uint8_t*>(msg.data()) + consumed_bytes, msg.size() - consumed_bytes, PmtWireFormat::GR4_YAML_V1) == value<T>(static_cast<int>(received + 1)));
@@ -483,18 +484,8 @@ const suite remediation = [] {
         FailingResource resource;
         {
             DefaultResourceGuard guard{&resource};
-            try {
-                std::ignore = zd::deserialize_pmt(huge_yaml.data(), huge_yaml.size(), PmtWireFormat::GR4_YAML_V1);
-            } catch (const std::runtime_error&) {
-                yaml_refused = true;
-            }
-            std::uint64_t                       offset = 0;
-            std::vector<zd::ZmqTagHeaderRecord> tags;
-            try {
-                std::ignore = zd::parse_tag_header(huge_tags.data(), huge_tags.size(), offset, tags);
-            } catch (const std::runtime_error&) {
-                tags_refused = true;
-            }
+            yaml_refused = zd::deserialize_pmt(huge_yaml.data(), huge_yaml.size(), PmtWireFormat::GR4_YAML_V1) == std::unexpected(zd::DecodeError::truncated);
+            tags_refused = zd::parse_tag_header(huge_tags.data(), huge_tags.size()) == std::unexpected(zd::DecodeError::malformed);
         }
         expect(yaml_refused);
         expect(tags_refused);

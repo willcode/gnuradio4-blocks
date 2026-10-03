@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <expected>
 #include <limits>
 #include <memory_resource>
 #include <stdexcept>
@@ -55,44 +56,50 @@ static void write_double(std::vector<uint8_t>& out, double d) {
     write_u64(out, bits);
 }
 
-static void require_remaining(const uint8_t* data, const uint8_t* end, std::size_t needed, const char* what) {
+using gr::blocks::zeromq::detail::DecodeError;
+
+template<typename T>
+using Decoded = std::expected<T, DecodeError>;
+
+static Decoded<void> require_remaining(const uint8_t* data, const uint8_t* end, std::size_t needed) {
     if (data > end || static_cast<std::size_t>(end - data) < needed) {
-        throw gr::blocks::zeromq::detail::DecodeError(what);
+        return std::unexpected(DecodeError::truncated);
     }
+    return {};
 }
 
-static uint16_t read_u16(const uint8_t*& data, const uint8_t* end) {
-    require_remaining(data, end, 2, "Truncated legacy PMT buffer (u16)");
-    const auto result = static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]));
-    data += 2;
-    return result;
+static Decoded<uint16_t> read_u16(const uint8_t*& data, const uint8_t* end) {
+    return require_remaining(data, end, 2).transform([&] {
+        const auto result = static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]));
+        data += 2;
+        return result;
+    });
 }
 
-static uint64_t read_u32(const uint8_t*& data, const uint8_t* end) {
-    require_remaining(data, end, 4, "Truncated legacy PMT buffer (u32)");
-    uint64_t result = 0;
-    for (int i = 0; i < 4; ++i) {
-        result = (result << 8) | data[i];
-    }
-    data += 4;
-    return result;
+static Decoded<uint64_t> read_u32(const uint8_t*& data, const uint8_t* end) {
+    return require_remaining(data, end, 4).transform([&] {
+        uint64_t result = 0;
+        for (int i = 0; i < 4; ++i) {
+            result = (result << 8) | data[i];
+        }
+        data += 4;
+        return result;
+    });
 }
 
-static uint64_t read_u64(const uint8_t*& data, const uint8_t* end) {
-    require_remaining(data, end, 8, "Truncated legacy PMT buffer (u64)");
-    uint64_t result = 0;
-    for (int i = 0; i < 8; ++i) {
-        result = (result << 8) | data[i];
-    }
-    data += 8;
-    return result;
+static Decoded<uint64_t> read_u64(const uint8_t*& data, const uint8_t* end) {
+    return require_remaining(data, end, 8).transform([&] {
+        uint64_t result = 0;
+        for (int i = 0; i < 8; ++i) {
+            result = (result << 8) | data[i];
+        }
+        data += 8;
+        return result;
+    });
 }
 
-static double read_double(const uint8_t*& data, const uint8_t* end) {
-    uint64_t bits = read_u64(data, end);
-    double   d;
-    std::memcpy(&d, &bits, sizeof(double));
-    return d;
+static Decoded<double> read_double(const uint8_t*& data, const uint8_t* end) {
+    return read_u64(data, end).transform([](uint64_t bits) { return std::bit_cast<double>(bits); });
 }
 
 template<typename T>
@@ -469,10 +476,10 @@ T from_big_endian_integral_to_native(T value) {
     return value;
 }
 
+// The caller checks that sizeof(T) bytes remain.
 template<typename T>
 requires std::is_trivially_copyable_v<T>
-T deserialize_from_big_endian(const uint8_t*& ptr, const uint8_t* end) {
-    require_remaining(ptr, end, sizeof(T), "Truncated legacy PMT buffer");
+T read_big_endian(const uint8_t*& ptr) {
     T result;
 
     if constexpr (std::is_integral_v<T> && !std::is_same_v<T, bool>) {
@@ -498,12 +505,12 @@ T deserialize_from_big_endian(const uint8_t*& ptr, const uint8_t* end) {
             ptr += sizeof(T);
         }
     } else if constexpr (std::is_same_v<T, std::complex<float>>) {
-        float real_part = deserialize_from_big_endian<float>(ptr, end);
-        float imag_part = deserialize_from_big_endian<float>(ptr, end);
+        float real_part = read_big_endian<float>(ptr);
+        float imag_part = read_big_endian<float>(ptr);
         result          = std::complex<float>(real_part, imag_part);
     } else if constexpr (std::is_same_v<T, std::complex<double>>) {
-        double real_part = deserialize_from_big_endian<double>(ptr, end);
-        double imag_part = deserialize_from_big_endian<double>(ptr, end);
+        double real_part = read_big_endian<double>(ptr);
+        double imag_part = read_big_endian<double>(ptr);
         result           = std::complex<double>(real_part, imag_part);
     } else {
         std::memcpy(&result, ptr, sizeof(T));
@@ -513,76 +520,92 @@ T deserialize_from_big_endian(const uint8_t*& ptr, const uint8_t* end) {
 }
 
 template<typename VTYPE>
-std::vector<VTYPE> create_vector_from_big_endian(const uint8_t*& ptr, const uint8_t* end, std::size_t num_elements) {
+Decoded<std::vector<VTYPE>> create_vector_from_big_endian(const uint8_t*& ptr, const uint8_t* end, std::size_t num_elements) {
     if (ptr > end || num_elements > static_cast<std::size_t>(end - ptr) / sizeof(VTYPE)) {
-        throw gr::blocks::zeromq::detail::DecodeError("Truncated legacy PMT uniform vector");
+        return std::unexpected(DecodeError::truncated);
     }
     std::vector<VTYPE> vec;
     vec.reserve(num_elements);
 
     for (std::size_t i = 0; i < num_elements; ++i) {
-        vec.push_back(deserialize_from_big_endian<VTYPE>(ptr, end));
+        vec.push_back(read_big_endian<VTYPE>(ptr));
     }
     return vec;
 }
 
-static Value deserialize_value(const uint8_t*& ptr, const uint8_t* end);
+template<typename VTYPE>
+Decoded<Value> uniform_vector_value(const uint8_t*& ptr, const uint8_t* end, std::size_t num_elements) {
+    return create_vector_from_big_endian<VTYPE>(ptr, end, num_elements).transform([](std::vector<VTYPE> vec) { return Value(Tensor<VTYPE>(gr::data_from, vec)); });
+}
 
-static Value deserialize_pair(const uint8_t*& ptr, const uint8_t* end) {
-    Value              car = deserialize_value(ptr, end);
-    Value              cdr = deserialize_value(ptr, end);
+static Decoded<Value> deserialize_value(const uint8_t*& ptr, const uint8_t* end);
+
+static Decoded<Value> deserialize_pair(const uint8_t*& ptr, const uint8_t* end) {
+    auto car = deserialize_value(ptr, end);
+    if (!car) {
+        return car;
+    }
+    auto cdr = deserialize_value(ptr, end);
+    if (!cdr) {
+        return cdr;
+    }
     std::vector<Value> values;
     values.reserve(2);
-    values.push_back(std::move(car));
-    values.push_back(std::move(cdr));
+    values.push_back(std::move(*car));
+    values.push_back(std::move(*cdr));
     return Value(Tensor<Value>(std::move(values)));
 }
 
-static Value deserialize_dict(const uint8_t*& ptr, const uint8_t* end) {
+static Decoded<Value> deserialize_dict(const uint8_t*& ptr, const uint8_t* end) {
     if (ptr >= end) {
-        throw gr::blocks::zeromq::detail::DecodeError("Truncated legacy PMT buffer (dict)");
+        return std::unexpected(DecodeError::truncated);
     }
 
     Value::Map map{std::pmr::get_default_resource()};
-
-    if (ptr >= end) {
-        return Value(std::move(map));
-    }
 
     auto pair_tag = static_cast<legacy_tag>(*ptr++);
     if (pair_tag == legacy_tag::LEGACY_PMT_NULL) {
         return Value(std::move(map));
     }
     if (pair_tag != legacy_tag::LEGACY_PMT_PAIR) {
-        throw gr::blocks::zeromq::detail::DecodeError("Malformed legacy PMT dict (missing pair tag)");
+        return std::unexpected(DecodeError::malformed);
     }
 
-    Value key = deserialize_value(ptr, end);
-    Value val = deserialize_value(ptr, end);
-
-    if (!key.is_string()) {
-        throw gr::blocks::zeromq::detail::DecodeError("Legacy PMT dict key is not a string");
+    auto key = deserialize_value(ptr, end);
+    if (!key) {
+        return key;
     }
-    std::string key_str = std::string(key.value_or(std::string_view{}));
-    map.emplace(std::pmr::string(key_str, std::pmr::get_default_resource()), std::move(val));
+    auto val = deserialize_value(ptr, end);
+    if (!val) {
+        return val;
+    }
 
-    Value tail = deserialize_value(ptr, end);
-    if (tail.is_map()) {
-        if (auto tail_map = tail.get_if<Value::Map>()) {
+    if (!key->is_string()) {
+        return std::unexpected(DecodeError::malformed);
+    }
+    std::string key_str = std::string(key->value_or(std::string_view{}));
+    map.emplace(std::pmr::string(key_str, std::pmr::get_default_resource()), std::move(*val));
+
+    auto tail = deserialize_value(ptr, end);
+    if (!tail) {
+        return tail;
+    }
+    if (tail->is_map()) {
+        if (auto tail_map = tail->get_if<Value::Map>()) {
             for (auto& [k, v] : *tail_map) {
                 map.emplace(std::pmr::string(k, std::pmr::get_default_resource()), std::move(v));
             }
         }
-    } else if (!tail.is_monostate()) {
-        throw gr::blocks::zeromq::detail::DecodeError("Malformed legacy PMT dict tail");
+    } else if (!tail->is_monostate()) {
+        return std::unexpected(DecodeError::malformed);
     }
 
     return Value(std::move(map));
 }
 
-static Value deserialize_value(const uint8_t*& ptr, const uint8_t* end) {
+static Decoded<Value> deserialize_value(const uint8_t*& ptr, const uint8_t* end) {
     if (ptr >= end) {
-        throw gr::blocks::zeromq::detail::DecodeError("Empty legacy PMT buffer");
+        return std::unexpected(DecodeError::truncated);
     }
 
     auto tag = static_cast<legacy_tag>(*ptr++);
@@ -590,96 +613,80 @@ static Value deserialize_value(const uint8_t*& ptr, const uint8_t* end) {
     case legacy_tag::LEGACY_PMT_NULL: return Value{};
     case legacy_tag::LEGACY_PMT_TRUE: return Value(true);
     case legacy_tag::LEGACY_PMT_FALSE: return Value(false);
-    case legacy_tag::LEGACY_PMT_INT32: return Value(static_cast<int32_t>(read_u32(ptr, end)));
-    case legacy_tag::LEGACY_PMT_INT64: return Value(static_cast<int64_t>(read_u64(ptr, end)));
-    case legacy_tag::LEGACY_PMT_UINT64: return Value(read_u64(ptr, end));
-    case legacy_tag::LEGACY_PMT_DOUBLE: return Value(read_double(ptr, end));
+    case legacy_tag::LEGACY_PMT_INT32: return read_u32(ptr, end).transform([](uint64_t v) { return Value(static_cast<int32_t>(v)); });
+    case legacy_tag::LEGACY_PMT_INT64: return read_u64(ptr, end).transform([](uint64_t v) { return Value(static_cast<int64_t>(v)); });
+    case legacy_tag::LEGACY_PMT_UINT64: return read_u64(ptr, end).transform([](uint64_t v) { return Value(v); });
+    case legacy_tag::LEGACY_PMT_DOUBLE: return read_double(ptr, end).transform([](double v) { return Value(v); });
     case legacy_tag::LEGACY_PMT_COMPLEX: {
-        double real = read_double(ptr, end);
-        double imag = read_double(ptr, end);
-        return Value(std::complex<double>(real, imag));
+        const auto real = read_double(ptr, end);
+        if (!real) {
+            return std::unexpected(real.error());
+        }
+        return read_double(ptr, end).transform([&real](double imag) { return Value(std::complex<double>(*real, imag)); });
     }
     case legacy_tag::LEGACY_PMT_SYMBOL: {
-        uint16_t len = read_u16(ptr, end);
-        require_remaining(ptr, end, len, "Truncated legacy PMT symbol");
-        std::string sym(reinterpret_cast<const char*>(ptr), len);
-        ptr += len;
-        return Value(std::move(sym));
+        const auto len = read_u16(ptr, end);
+        if (!len) {
+            return std::unexpected(len.error());
+        }
+        return require_remaining(ptr, end, *len).transform([&] {
+            std::string sym(reinterpret_cast<const char*>(ptr), *len);
+            ptr += *len;
+            return Value(std::move(sym));
+        });
     }
     case legacy_tag::LEGACY_PMT_UNIFORM_VECTOR: {
         if (ptr >= end) {
-            throw gr::blocks::zeromq::detail::DecodeError("Truncated legacy PMT uniform vector");
+            return std::unexpected(DecodeError::truncated);
         }
         legacy_uniform_type dtype = static_cast<legacy_uniform_type>(*ptr++);
-        uint32_t            len   = static_cast<uint32_t>(read_u32(ptr, end));
+        const auto          len   = read_u32(ptr, end);
+        if (!len) {
+            return std::unexpected(len.error());
+        }
         if (ptr >= end) {
-            throw gr::blocks::zeromq::detail::DecodeError("Truncated legacy PMT uniform vector padding");
+            return std::unexpected(DecodeError::truncated);
         }
         uint8_t npad = *ptr++;
-        require_remaining(ptr, end, npad, "Truncated legacy PMT uniform vector padding");
+        if (auto padding = require_remaining(ptr, end, npad); !padding) {
+            return std::unexpected(padding.error());
+        }
         ptr += npad;
 
+        const auto count = static_cast<std::size_t>(static_cast<uint32_t>(*len));
         switch (dtype) {
-        case legacy_uniform_type::U8: {
-            auto vec = create_vector_from_big_endian<uint8_t>(ptr, end, len);
-            return Value(Tensor<uint8_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::S8: {
-            auto vec = create_vector_from_big_endian<int8_t>(ptr, end, len);
-            return Value(Tensor<int8_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::U16: {
-            auto vec = create_vector_from_big_endian<uint16_t>(ptr, end, len);
-            return Value(Tensor<uint16_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::S16: {
-            auto vec = create_vector_from_big_endian<int16_t>(ptr, end, len);
-            return Value(Tensor<int16_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::U32: {
-            auto vec = create_vector_from_big_endian<uint32_t>(ptr, end, len);
-            return Value(Tensor<uint32_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::S32: {
-            auto vec = create_vector_from_big_endian<int32_t>(ptr, end, len);
-            return Value(Tensor<int32_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::U64: {
-            auto vec = create_vector_from_big_endian<uint64_t>(ptr, end, len);
-            return Value(Tensor<uint64_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::S64: {
-            auto vec = create_vector_from_big_endian<int64_t>(ptr, end, len);
-            return Value(Tensor<int64_t>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::F32: {
-            auto vec = create_vector_from_big_endian<float>(ptr, end, len);
-            return Value(Tensor<float>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::F64: {
-            auto vec = create_vector_from_big_endian<double>(ptr, end, len);
-            return Value(Tensor<double>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::C32: {
-            auto vec = create_vector_from_big_endian<std::complex<float>>(ptr, end, len);
-            return Value(Tensor<std::complex<float>>(gr::data_from, vec));
-        }
-        case legacy_uniform_type::C64: {
-            auto vec = create_vector_from_big_endian<std::complex<double>>(ptr, end, len);
-            return Value(Tensor<std::complex<double>>(gr::data_from, vec));
-        }
-        default: throw gr::blocks::zeromq::detail::DecodeError("Unsupported or unknown legacy PMT uniform vector tag");
+        case legacy_uniform_type::U8: return uniform_vector_value<uint8_t>(ptr, end, count);
+        case legacy_uniform_type::S8: return uniform_vector_value<int8_t>(ptr, end, count);
+        case legacy_uniform_type::U16: return uniform_vector_value<uint16_t>(ptr, end, count);
+        case legacy_uniform_type::S16: return uniform_vector_value<int16_t>(ptr, end, count);
+        case legacy_uniform_type::U32: return uniform_vector_value<uint32_t>(ptr, end, count);
+        case legacy_uniform_type::S32: return uniform_vector_value<int32_t>(ptr, end, count);
+        case legacy_uniform_type::U64: return uniform_vector_value<uint64_t>(ptr, end, count);
+        case legacy_uniform_type::S64: return uniform_vector_value<int64_t>(ptr, end, count);
+        case legacy_uniform_type::F32: return uniform_vector_value<float>(ptr, end, count);
+        case legacy_uniform_type::F64: return uniform_vector_value<double>(ptr, end, count);
+        case legacy_uniform_type::C32: return uniform_vector_value<std::complex<float>>(ptr, end, count);
+        case legacy_uniform_type::C64: return uniform_vector_value<std::complex<double>>(ptr, end, count);
+        default: return std::unexpected(DecodeError::unsupported_type);
         }
     }
     case legacy_tag::LEGACY_PMT_TUPLE: {
-        uint32_t len = static_cast<uint32_t>(read_u32(ptr, end));
-        if (ptr > end || static_cast<std::size_t>(len) > static_cast<std::size_t>(end - ptr)) {
-            throw gr::blocks::zeromq::detail::DecodeError("Truncated legacy PMT tuple");
+        const auto len = read_u32(ptr, end);
+        if (!len) {
+            return std::unexpected(len.error());
+        }
+        const auto count = static_cast<uint32_t>(*len);
+        if (ptr > end || static_cast<std::size_t>(count) > static_cast<std::size_t>(end - ptr)) {
+            return std::unexpected(DecodeError::truncated);
         }
         std::vector<Value> values;
-        values.reserve(len);
-        for (uint32_t i = 0; i < len; ++i) {
-            values.push_back(deserialize_value(ptr, end));
+        values.reserve(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            auto value = deserialize_value(ptr, end);
+            if (!value) {
+                return value;
+            }
+            values.push_back(std::move(*value));
         }
         return Value(Tensor<Value>(values));
     }
@@ -688,23 +695,23 @@ static Value deserialize_value(const uint8_t*& ptr, const uint8_t* end) {
     }
     case legacy_tag::LEGACY_PMT_DICT: return deserialize_dict(ptr, end);
     case legacy_tag::LEGACY_PMT_VECTOR:
-    default: throw gr::blocks::zeromq::detail::DecodeError("Unsupported or unknown legacy PMT tag");
+    default: return std::unexpected(DecodeError::unsupported_type);
     }
 }
 
-inline gr::pmt::Value deserialize_from_legacy(const uint8_t* data, std::size_t size) {
+inline Decoded<gr::pmt::Value> deserialize_from_legacy(const uint8_t* data, std::size_t size) {
     if (!data || size == 0) {
-        throw gr::blocks::zeromq::detail::DecodeError("Empty legacy PMT buffer");
+        return std::unexpected(DecodeError::truncated);
     }
     const uint8_t* ptr    = data;
     const uint8_t* end    = data + size;
     auto           result = deserialize_value(ptr, end);
-    if (ptr != end) {
-        throw gr::blocks::zeromq::detail::DecodeError("Trailing bytes in legacy PMT buffer");
+    if (result && ptr != end) {
+        return std::unexpected(DecodeError::trailing_bytes);
     }
     return result;
 }
 
-inline gr::pmt::Value deserialize_from_legacy(const uint8_t*& data, const uint8_t* end) { return deserialize_value(data, end); }
+inline Decoded<gr::pmt::Value> deserialize_from_legacy(const uint8_t*& data, const uint8_t* end) { return deserialize_value(data, end); }
 
 } // namespace legacy_pmt

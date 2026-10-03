@@ -34,6 +34,7 @@
 #include <gnuradio-4.0/zeromq/ZmqReqSource.hpp>
 #include <gnuradio-4.0/zeromq/ZmqSubSource.hpp>
 #include <gnuradio-4.0/zeromq/detail/ZmqPmtCodec.hpp>
+#include <gnuradio-4.0/zeromq/detail/ZmqReceive.hpp>
 #include <gnuradio-4.0/zeromq/detail/ZmqTagHeaders.hpp>
 #include <gnuradio-4.0/zeromq/detail/pmt_legacy_codec.hpp>
 #include <zmq.hpp>
@@ -1628,19 +1629,16 @@ const suite ZmqBlocksTests = [] {
         for (std::size_t i = 0; i < fixtures.size(); ++i) {
             const auto serialized = legacy_pmt::serialize_to_legacy(fixtures[i]);
             const auto roundtrip  = legacy_pmt::deserialize_from_legacy(serialized.data(), serialized.size());
-            expect(legacy_pmt::serialize_to_legacy(roundtrip) == serialized);
+            expect(roundtrip.has_value() >> fatal);
+            expect(legacy_pmt::serialize_to_legacy(*roundtrip) == serialized);
         }
     };
 
     "Pull source rejects invalid legacy PMT payload"_test = [] {
         const std::vector<std::uint8_t> invalid{0xFF};
-        bool                            threw = false;
-        try {
-            std::ignore = legacy_pmt::deserialize_from_legacy(invalid.data(), invalid.size());
-        } catch (...) {
-            threw = true;
-        }
-        expect(threw);
+        const auto                      decoded = legacy_pmt::deserialize_from_legacy(invalid.data(), invalid.size());
+        expect(!decoded.has_value() >> fatal);
+        expect(decoded.error() == zdetail::DecodeError::unsupported_type);
     };
 
     "PMT wire format defaults to GR4 YAML v1"_test = [] {
@@ -1653,7 +1651,9 @@ const suite ZmqBlocksTests = [] {
         for (std::size_t index = 0; index < fixtures.size(); ++index) {
             const auto& value         = fixtures[index];
             const auto  yaml_v1_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
-            const auto  decoded       = zdetail::deserialize_pmt(yaml_v1_bytes.data(), yaml_v1_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+            const auto  result        = zdetail::deserialize_pmt(yaml_v1_bytes.data(), yaml_v1_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+            expect(result.has_value() >> fatal) << "fixture " << index;
+            const auto& decoded = *result;
             expect(decoded.value_type() == value.value_type()) << "fixture " << index;
             expect(decoded.container_type() == value.container_type()) << "fixture " << index;
             if (index < 15UZ) {
@@ -1667,10 +1667,10 @@ const suite ZmqBlocksTests = [] {
         const auto  gr3_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR3);
         expect(zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR3) == value);
 
-        const auto                               gr4_header = zdetail::serialize_tag_header(0, {{0, gr::pmt::Value("key"), value, gr::pmt::Value("src")}});
-        std::uint64_t                            offset     = 0;
-        std::vector<zdetail::ZmqTagHeaderRecord> tags;
-        std::ignore = zdetail::parse_tag_header(gr4_header.data(), gr4_header.size(), offset, tags);
+        const auto gr4_header = zdetail::serialize_tag_header(0, {{0, gr::pmt::Value("key"), value, gr::pmt::Value("src")}});
+        const auto parsed     = zdetail::parse_tag_header(gr4_header.data(), gr4_header.size());
+        expect(parsed.has_value() >> fatal);
+        const auto& tags = parsed->tags;
         expect(eq(tags.size(), static_cast<std::size_t>(1)));
         if (tags.size() == 1) {
             expect(eq(tags.front().key.value_or(std::string_view{}), std::string_view{"key"}));
@@ -1678,22 +1678,12 @@ const suite ZmqBlocksTests = [] {
             expect(eq(tags.front().srcid.value_or(std::string_view{}), std::string_view{"src"}));
         }
 
-        bool truncated_threw = false;
-        try {
-            const std::vector<std::uint8_t> truncated{0, 0, 0, 4, 'x'};
-            std::ignore = zdetail::deserialize_pmt(truncated.data(), truncated.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
-        } catch (const std::runtime_error& error) {
-            truncated_threw = std::string_view(error.what()).find("truncated") != std::string_view::npos;
-        }
-        expect(truncated_threw);
+        const std::vector<std::uint8_t> truncated{0, 0, 0, 4, 'x'};
+        const auto                      truncated_result = zdetail::deserialize_pmt(truncated.data(), truncated.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+        expect(!truncated_result.has_value() >> fatal);
+        expect(truncated_result.error() == zdetail::DecodeError::truncated);
 
-        bool wrong_format_threw = false;
-        try {
-            std::ignore = zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
-        } catch (const std::runtime_error& error) {
-            wrong_format_threw = !std::string_view(error.what()).empty();
-        }
-        expect(wrong_format_threw);
+        expect(!zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1).has_value());
     };
 
     "ZMQ rejects negative timeouts"_test = [] {
@@ -1752,46 +1742,28 @@ const suite ZmqBlocksTests = [] {
     "ZMQ codecs reject truncated buffers"_test = [] {
         const auto tag_header = zdetail::serialize_tag_header(0, {});
         for (std::size_t size = 0; size < tag_header.size(); ++size) {
-            std::uint64_t                            offset = 0;
-            std::vector<zdetail::ZmqTagHeaderRecord> tags;
-            bool                                     threw = false;
-            try {
-                std::ignore = zdetail::parse_tag_header(tag_header.data(), size, offset, tags);
-            } catch (...) {
-                threw = true;
-            }
-            expect(threw);
+            const auto parsed = zdetail::parse_tag_header(tag_header.data(), size);
+            expect(!parsed.has_value() >> fatal) << "size" << size;
+            expect(parsed.error() == zdetail::DecodeError::truncated) << "size" << size;
         }
 
         const auto pmt = legacy_pmt::serialize_to_legacy(gr::pmt::Value(std::uint32_t{0x12345678U}));
         for (std::size_t size = 0; size < pmt.size(); ++size) {
-            bool threw = false;
-            try {
-                std::ignore = legacy_pmt::deserialize_from_legacy(pmt.data(), size);
-            } catch (...) {
-                threw = true;
-            }
-            expect(threw);
+            const auto decoded = legacy_pmt::deserialize_from_legacy(pmt.data(), size);
+            expect(!decoded.has_value() >> fatal) << "size" << size;
+            expect(decoded.error() == zdetail::DecodeError::truncated) << "size" << size;
         }
 
         const std::vector<std::uint8_t> huge_vector{0x0A, 0x04, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00};
-        bool                            huge_threw = false;
-        try {
-            std::ignore = legacy_pmt::deserialize_from_legacy(huge_vector.data(), huge_vector.size());
-        } catch (...) {
-            huge_threw = true;
-        }
-        expect(huge_threw);
+        const auto                      huge = legacy_pmt::deserialize_from_legacy(huge_vector.data(), huge_vector.size());
+        expect(!huge.has_value() >> fatal);
+        expect(huge.error() == zdetail::DecodeError::truncated);
 
         auto trailing = legacy_pmt::serialize_to_legacy(gr::pmt::Value(true));
         trailing.push_back(0);
-        bool trailing_threw = false;
-        try {
-            std::ignore = legacy_pmt::deserialize_from_legacy(trailing.data(), trailing.size());
-        } catch (...) {
-            trailing_threw = true;
-        }
-        expect(trailing_threw);
+        const auto trailing_result = legacy_pmt::deserialize_from_legacy(trailing.data(), trailing.size());
+        expect(!trailing_result.has_value() >> fatal);
+        expect(trailing_result.error() == zdetail::DecodeError::trailing_bytes);
 
         bool long_string_threw = false;
         try {
@@ -1800,6 +1772,45 @@ const suite ZmqBlocksTests = [] {
             long_string_threw = true;
         }
         expect(long_string_threw);
+    };
+
+    "ZMQ decoders return the reason a message is refused"_test = [] {
+        using zdetail::DecodeError;
+        const auto header    = zdetail::serialize_tag_header(7, {});
+        auto       bad_magic = header;
+        bad_magic[0] ^= 0xFFU;
+        expect(zdetail::parse_tag_header(bad_magic.data(), bad_magic.size()) == std::unexpected(DecodeError::bad_magic));
+        auto bad_version = header;
+        bad_version[2]   = static_cast<std::uint8_t>(zdetail::kTagHeaderVersion + 1U);
+        expect(zdetail::parse_tag_header(bad_version.data(), bad_version.size()) == std::unexpected(DecodeError::bad_version));
+        auto bad_count = header;
+        bad_count[11]  = 1; // one tag announced, none present
+        expect(zdetail::parse_tag_header(bad_count.data(), bad_count.size()) == std::unexpected(DecodeError::malformed));
+        const auto parsed = zdetail::parse_tag_header(header.data(), header.size());
+        expect(parsed.has_value() >> fatal);
+        expect(eq(parsed->offset, std::uint64_t{7}));
+        expect(eq(parsed->consumed, header.size()));
+
+        const std::vector<std::uint8_t> wrong_envelope{0, 0, 0, 4, 'x', ':', ' ', '1'};
+        const std::uint8_t*             cursor = wrong_envelope.data();
+        expect(zdetail::deserialize_gr4_yaml_v1_pmt(cursor, wrong_envelope.data() + wrong_envelope.size()) == std::unexpected(DecodeError::malformed));
+
+        const std::vector<std::uint8_t> short_symbol{0x02, 0x00, 0x05, 'a'};
+        cursor = short_symbol.data();
+        expect(zdetail::deserialize_pmt(cursor, short_symbol.data() + short_symbol.size(), gr::blocks::zeromq::PmtWireFormat::GR3) == std::unexpected(DecodeError::truncated));
+        cursor = short_symbol.data();
+        expect(legacy_pmt::deserialize_from_legacy(cursor, cursor) == std::unexpected(DecodeError::truncated));
+
+        const std::vector<std::uint8_t> dict_without_pair{0x09, 0x05};
+        expect(legacy_pmt::deserialize_from_legacy(dict_without_pair.data(), dict_without_pair.size()) == std::unexpected(DecodeError::malformed));
+
+        zdetail::ZmqReceiveCounters counters;
+        const zmq::message_t        odd(3);
+        expect(zdetail::decode_frame<float>(odd, false, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1, counters) == std::unexpected(DecodeError::item_size_mismatch));
+        expect(eq(counters.snapshot().refused_messages, std::uint64_t{1}));
+        const zmq::message_t whole(2 * sizeof(float));
+        expect(zdetail::decode_frame<float>(whole, false, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1, counters).has_value());
+        expect(eq(counters.snapshot().refused_messages, std::uint64_t{1}));
     };
 
     "REP tag selection does not commit on header failure"_test = [] {
@@ -1915,9 +1926,11 @@ const suite ZmqBlocksTests = [] {
         expect(eq(replies.size(), static_cast<std::size_t>(2)));
         if (replies.size() == 2) {
             for (std::size_t i = 0; i < replies.size(); ++i) {
-                std::uint64_t                            header_offset = 0;
-                std::vector<zdetail::ZmqTagHeaderRecord> tags;
-                const auto                               consumed = zdetail::parse_tag_header(replies[i].data(), replies[i].size(), header_offset, tags);
+                const auto parsed = zdetail::parse_tag_header(replies[i].data(), replies[i].size());
+                expect(parsed.has_value() >> fatal);
+                const auto  header_offset = parsed->offset;
+                const auto& tags          = parsed->tags;
+                const auto  consumed      = parsed->consumed;
                 expect(eq(header_offset, 0ULL));
                 expect(tags.empty());
                 expect(eq(replies[i].size() - consumed, i == 0 ? static_cast<std::size_t>(0) : sizeof(T)));
@@ -2175,9 +2188,11 @@ const suite ZmqBlocksTests = [] {
         auto messages = receiver.get();
         expect(eq(messages.size(), static_cast<std::size_t>(1)));
         if (messages.size() == 1) {
-            std::uint64_t                            header_offset = 0;
-            std::vector<zdetail::ZmqTagHeaderRecord> tags;
-            const auto                               consumed = zdetail::parse_tag_header(messages[0].data(), messages[0].size(), header_offset, tags);
+            const auto parsed = zdetail::parse_tag_header(messages[0].data(), messages[0].size());
+            expect(parsed.has_value() >> fatal);
+            const auto  header_offset = parsed->offset;
+            const auto& tags          = parsed->tags;
+            const auto  consumed      = parsed->consumed;
             expect(eq(header_offset, 0ULL));
             expect(eq(tags.size(), static_cast<std::size_t>(1)));
             if (tags.size() == 1) {
@@ -2222,9 +2237,11 @@ const suite ZmqBlocksTests = [] {
         auto messages = receiver.get();
         expect(eq(messages.size(), static_cast<std::size_t>(1)));
         if (messages.size() == 1) {
-            std::uint64_t                            header_offset = 0;
-            std::vector<zdetail::ZmqTagHeaderRecord> tags;
-            const auto                               consumed = zdetail::parse_tag_header(messages[0].data(), messages[0].size(), header_offset, tags);
+            const auto parsed = zdetail::parse_tag_header(messages[0].data(), messages[0].size());
+            expect(parsed.has_value() >> fatal);
+            const auto  header_offset = parsed->offset;
+            const auto& tags          = parsed->tags;
+            const auto  consumed      = parsed->consumed;
             expect(eq(header_offset, 0ULL));
             expect(eq(tags.size(), static_cast<std::size_t>(2)));
             if (tags.size() == 2) {
@@ -2363,9 +2380,11 @@ const suite ZmqBlocksTests = [] {
             expect(eq(frames.size(), static_cast<std::size_t>(2)));
             if (frames.size() == 2) {
                 expect(eq(std::string_view(reinterpret_cast<const char*>(frames[0].data()), frames[0].size()), key));
-                std::uint64_t                            header_offset = 0;
-                std::vector<zdetail::ZmqTagHeaderRecord> tags;
-                const auto                               consumed = zdetail::parse_tag_header(frames[1].data(), frames[1].size(), header_offset, tags);
+                const auto parsed = zdetail::parse_tag_header(frames[1].data(), frames[1].size());
+                expect(parsed.has_value() >> fatal);
+                const auto  header_offset = parsed->offset;
+                const auto& tags          = parsed->tags;
+                const auto  consumed      = parsed->consumed;
                 expect(eq(header_offset, 0ULL));
                 expect(eq(tags.size(), static_cast<std::size_t>(1)));
                 if (tags.size() == 1) {
@@ -2455,9 +2474,11 @@ const suite ZmqBlocksTests = [] {
         auto replies = client.get();
         expect(eq(replies.size(), static_cast<std::size_t>(1)));
         if (replies.size() == 1) {
-            std::uint64_t                            header_offset = 0;
-            std::vector<zdetail::ZmqTagHeaderRecord> tags;
-            const auto                               consumed = zdetail::parse_tag_header(replies[0].data(), replies[0].size(), header_offset, tags);
+            const auto parsed = zdetail::parse_tag_header(replies[0].data(), replies[0].size());
+            expect(parsed.has_value() >> fatal);
+            const auto  header_offset = parsed->offset;
+            const auto& tags          = parsed->tags;
+            const auto  consumed      = parsed->consumed;
             expect(eq(header_offset, 0ULL));
             expect(eq(tags.size(), static_cast<std::size_t>(1)));
             if (tags.size() == 1) {
