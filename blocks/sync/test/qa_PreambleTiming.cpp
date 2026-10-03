@@ -87,7 +87,7 @@ struct Rng {
     spec.sampleRate      = static_cast<double>(kSampleRate);
     spec.cutoff          = cutoffSymbolRates * static_cast<double>(kSymbolRate);
     spec.transitionWidth = 0.5 * cutoffSymbolRates * static_cast<double>(kSymbolRate);
-    return gr::filter::fir::design::designLowpass(spec);
+    return gr::filter::fir::design::designLowpass(spec).value();
 }
 
 template<typename T>
