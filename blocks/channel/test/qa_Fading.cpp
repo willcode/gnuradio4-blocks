@@ -309,7 +309,7 @@ const boost::ut::suite<"fading channel"> fadingTests = [] {
         // 0 us and 5 us at 1 MS/s land on samples 0 and 5
         const std::vector<double> delays{0.0, 5.0e-6};
         const std::vector<double> powers{0.0, -6.0};
-        const auto                taps = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6);
+        const auto                taps = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6).value();
 
         expect(eq(taps.size(), 6UZ)) << "the span reaches the longest delay";
         expect(gt(std::abs(taps[0]), 0.f));
@@ -332,7 +332,7 @@ const boost::ut::suite<"fading channel"> fadingTests = [] {
         // two equal paths 0.1 us apart at 1 MS/s both round to sample 0
         const std::vector<double> delays{0.0, 1.0e-7};
         const std::vector<double> powers{0.0, 0.0};
-        const auto                taps = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6, false);
+        const auto                taps = tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), 1.0e6, false).value();
         expect(eq(taps.size(), 1UZ));
         expect(lt(std::abs(static_cast<double>(std::norm(taps[0])) - 2.0), 1e-6)) << "two unit-power paths on one sample carry two units";
     };
@@ -341,9 +341,12 @@ const boost::ut::suite<"fading channel"> fadingTests = [] {
         const std::vector<double> two{0.0, 1.0e-6};
         const std::vector<double> one{0.0};
         const std::vector<double> negative{-1.0e-6};
-        expect(throws([&] { std::ignore = tapsFromProfile(std::span<const double>(two), std::span<const double>(one), 1.0e6); }));
-        expect(throws([&] { std::ignore = tapsFromProfile(std::span<const double>(negative), std::span<const double>(one), 1.0e6); }));
-        expect(throws([&] { std::ignore = tapsFromProfile(std::span<const double>(one), std::span<const double>(one), 0.0); }));
+        const auto                mismatched = tapsFromProfile(std::span<const double>(two), std::span<const double>(one), 1.0e6);
+        const auto                backwards  = tapsFromProfile(std::span<const double>(negative), std::span<const double>(one), 1.0e6);
+        const auto                noRate     = tapsFromProfile(std::span<const double>(one), std::span<const double>(one), 0.0);
+        expect(!mismatched.has_value() && mismatched.error().message.contains("the same length")) << "tables of different lengths";
+        expect(!backwards.has_value() && backwards.error().message.contains("must not be negative")) << "a negative delay";
+        expect(!noRate.has_value() && noRate.error().message.contains("must be positive")) << "a zero sample rate";
     };
 
     "the channel drops the carrier and timing estimate keys and forwards an unrelated key"_test = [] {
