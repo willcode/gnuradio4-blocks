@@ -276,8 +276,8 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         const double      expected    = period * rate; // 107.79 samples
         const auto        near        = static_cast<std::size_t>(std::llround(expected));
 
-        const std::vector<float> narrow = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 100000., .transitionWidth = 40000., .attenuationDb = 60.});
-        const std::vector<float> wide   = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 200000., .transitionWidth = 40000., .attenuationDb = 60.});
+        const std::vector<float> narrow = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 100000., .transitionWidth = 40000., .attenuationDb = 60.}).value();
+        const std::vector<float> wide   = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 200000., .transitionWidth = 40000., .attenuationDb = 60.}).value();
 
         for (const std::string_view name : {kFmFirst, kFmSecond}) {
             const std::vector<CF> raw = readCf32(capturePath(name), windows * length + 1024UZ); // room for the channel filter's own group delay
@@ -363,7 +363,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
         const Estimate fullSpan = estimate<CF>(config, std::span<const CF>(samples));
         std::println("LTE: the whole 25 MHz span, N={} K={}, scatter {:.6f}: |R(1666)|/R(0) = {:.4f}, |R(1667)|/R(0) = {:.4f}", length, fullSpan.windows, fullSpan.scatter, fullSpan.magnitude[1666UZ], fullSpan.magnitude[1667UZ]);
 
-        const std::vector<float>  channel = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 4.5e6, .transitionWidth = 1.0e6, .attenuationDb = 60.});
+        const std::vector<float>  channel = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 4.5e6, .transitionWidth = 1.0e6, .attenuationDb = 60.}).value();
         const std::size_t         need    = tunedK * length + channel.size();
         const std::span<const CF> head(samples.data(), std::min(samples.size(), need));
 
@@ -514,7 +514,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
                 }
             };
             scanner.seek(workStart);
-            const std::size_t used = scanner.consume(std::span<const float>(work), sink);
+            const std::size_t used = scanner.consume(std::span<const float>(work), sink).value();
             work.erase(work.begin(), work.begin() + static_cast<std::ptrdiff_t>(used));
             workStart += used;
         });
@@ -602,7 +602,7 @@ const suite<"autocorrelation recording legs"> _acfRecording = [] {
             }
         }
 
-        const std::vector<float> channel = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 6250., .transitionWidth = 3000., .attenuationDb = 60.});
+        const std::vector<float> channel = gr::filter::fir::design::designLowpass({.sampleRate = rate, .cutoff = 6250., .transitionWidth = 3000., .attenuationDb = 60.}).value();
         const std::vector<CF>    block   = readCf32(capturePath(kP25), blockSize + channel.size(), bestBlock * blockSize);
         expect(fatal(ge(block.size(), blockSize))) << "the loudest block is readable";
         std::println("P25: the loudest 0.8 s block starts at sample {} with mean power {:.4g}; the symbol period is {:.3f} samples at {} S/s", bestBlock * blockSize, bestPower, symbol, static_cast<std::size_t>(rate));
