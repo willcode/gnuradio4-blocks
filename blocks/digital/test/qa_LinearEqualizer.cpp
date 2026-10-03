@@ -636,6 +636,15 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         expect(throws([] { construct<LinearEqualizer<float>>({{"step_size", 0.0}}); }));
         expect(throws([] { construct<LinearEqualizer<float>>({{"step_size", 1.0}}); })) << "the step size is open at both ends of (0, 1)";
         expect(throws([] { construct<LinearEqualizer<float>>({{"algorithm", std::string("rls")}}); }));
+        {
+            std::string refusal;
+            try {
+                construct<LinearEqualizer<float>>({{"algorithm", std::string("rls")}});
+            } catch (const gr::exception& error) {
+                refusal = error.message;
+            }
+            expect(refusal.contains("unknown algorithm 'rls'")) << "the library's reason reaches the caller: " + refusal;
+        }
         expect(throws([] { construct<LinearEqualizer<float>>({{"reference", std::string("blind")}}); }));
         expect(throws([] { construct<LinearEqualizer<float>>({{"reference", std::string("training")}}); })) << "a training reference needs a sequence to adapt against";
         expect(throws([] { construct<LinearEqualizer<float>>({{"reference", std::string("training")}, {"training_sequence", std::vector<float>{1.0f, 0.0f, 1.0f}}}); })) << "the sequence is interleaved re,im and needs an even count";

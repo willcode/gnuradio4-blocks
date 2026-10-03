@@ -134,8 +134,16 @@ observations, on the measurement conventions, is what will make them readable ou
         }
         _constellation = detail::build<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization);
 
-        const auto rule = gr::digital::adaptiveAlgorithmFrom(algorithm);
-        _filter.configure(static_cast<std::size_t>(num_taps.value), rule, step_size, gr::digital::modulusReference<F>(_constellation.points()), divergence_bound);
+        const auto parsedRule = gr::digital::adaptiveAlgorithmFrom(algorithm);
+        if (!parsedRule) {
+            throw gr::exception(parsedRule.error().message, parsedRule.error().sourceLocation);
+        }
+        const gr::digital::AdaptiveAlgorithm rule    = *parsedRule;
+        const auto                           modulus = gr::digital::modulusReference<F>(_constellation.points());
+        if (!modulus) {
+            throw gr::exception(modulus.error().message, modulus.error().sourceLocation);
+        }
+        _filter.configure(static_cast<std::size_t>(num_taps.value), rule, step_size, *modulus, divergence_bound);
 
         _training.resize(training_sequence.value.size() / 2UZ);
         for (std::size_t i = 0UZ; i < _training.size(); ++i) {
