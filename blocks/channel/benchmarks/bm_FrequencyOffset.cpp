@@ -58,7 +58,7 @@ int main() {
         increments[k] = twoPi * (kOffsetHz + kDriftHzPerS * ((static_cast<double>(k) + 0.5) / fs)) / fs;
     }
     gr::signal::Phasor<float> modulated;
-    modulated.configure(twoPi * kOffsetHz / fs, 0.);
+    modulated.configure(twoPi * kOffsetHz / fs, 0.).value();
 
     std::vector<gr::blocks::testing::bench::Arm> arms{
         {"FrequencyOffset, no drift (plain mix)",
