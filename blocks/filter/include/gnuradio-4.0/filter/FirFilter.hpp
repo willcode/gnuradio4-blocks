@@ -92,7 +92,9 @@ struct FirFilterCore {
         std::vector<TSample> replay(pad + _history.size(), TSample{});
         std::copy(_history.begin(), _history.end(), replay.begin() + static_cast<std::ptrdiff_t>(pad));
         std::vector<TOut> discarded(replay.size() / _decimation);
-        std::ignore = _fir->process(replay, discarded);
+        if (const auto replayed = _fir->process(replay, discarded); !replayed) {
+            throw gr::exception(replayed.error().message, replayed.error().sourceLocation);
+        }
     }
 
     void coreStart(std::span<const TTap> taps, gr::Size_t decimation) {
@@ -180,7 +182,9 @@ struct FirFilterCore {
         }
         const std::size_t outputs = std::min(input.size() / _decimation, output.size());
         if (outputs > 0UZ) {
-            std::ignore = processBulk(std::span<const TSample>(input.data(), outputs * _decimation), std::span<TOut>(output.data(), outputs));
+            if (const work::Status status = processBulk(std::span<const TSample>(input.data(), outputs * _decimation), std::span<TOut>(output.data(), outputs)); status != work::Status::OK) {
+                return status;
+            }
         }
         _tags.release(output, outputs, true);
         output.publish(outputs);
@@ -188,9 +192,13 @@ struct FirFilterCore {
     }
 
     [[nodiscard]] work::Status processBulk(std::span<const TSample> input, std::span<TOut> output) {
-        const std::size_t made = _fir->process(input, output);
-        if (made != output.size()) {
-            throw gr::exception(std::format("{} input samples yield {} outputs, not the {} reserved", input.size(), made, output.size()));
+        const auto made = _fir->process(input, output);
+        if (!made) {
+            self().emitErrorMessage("processBulk", made.error());
+            return work::Status::ERROR;
+        }
+        if (*made != output.size()) {
+            throw gr::exception(std::format("{} input samples yield {} outputs, not the {} reserved", input.size(), *made, output.size()));
         }
         rememberHistory(input);
         return work::Status::OK;
