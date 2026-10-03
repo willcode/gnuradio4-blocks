@@ -3,6 +3,7 @@
 
 #include "gnuradio-4.0/BlockRegistry.hpp"
 #include <algorithm>
+#include <expected>
 #include <mutex>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -155,7 +156,9 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
         } // end lifetime of '_drawMutex' write lock-guard
 
         if constexpr (!drawAsynchronously) {
-            draw();
+            if (draw() == work::Status::ERROR) {
+                return work::Status::ERROR;
+            }
         }
 
         return work::Status::OK;
@@ -175,7 +178,10 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
         const bool shouldResetView = config.contains("reset_view");
         if (plot_graph) {
-            plotGraph(shouldResetView);
+            if (auto plotted = plotGraph(shouldResetView); !plotted) {
+                this->emitErrorMessage("draw", plotted.error());
+                return lifecycle::isShuttingDown(this->state()) ? work::Status::DONE : work::Status::ERROR;
+            }
         }
         if (plot_timing) {
             plotTiming();
@@ -184,12 +190,13 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
         return lifecycle::isShuttingDown(this->state()) ? work::Status::DONE : work::Status::OK;
     }
 
-    void plotGraph(bool shouldResetView) {
+    /// @brief Draws the history. A DataSet the chart refuses is returned as the error.
+    std::expected<void, gr::Error> plotGraph(bool shouldResetView) {
         if constexpr (std::is_arithmetic_v<T>) {
             const auto [xMin, xMax] = std::ranges::minmax_element(_historyBufferX);
             const auto [yMin, yMax] = std::ranges::minmax_element(_historyBufferY);
             if (_historyBufferX.empty() || *xMin == *xMax || *yMin == *yMax) {
-                return; // buffer or axes' ranges are empty -> skip drawing
+                return {}; // buffer or axes' ranges are empty -> skip drawing
             }
 
             if (shouldResetView) {
@@ -210,7 +217,7 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             chart.draw();
         } else if constexpr (isDataSetLike) {
             if (_historyBufferY.empty()) {
-                return;
+                return {};
             }
 
             const auto& latestDataSet   = _historyBufferY[0];
@@ -222,7 +229,9 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
 
                 if (hasMultiSignals) {
                     // multi-signal DataSet: use signals as traces (replace on each update)
-                    gr::dataset::drawMountainRange(latestDataSet, mrConfig, _location);
+                    if (auto drawn = gr::dataset::drawMountainRange(latestDataSet, mrConfig, _location); !drawn) {
+                        return std::unexpected(drawn.error());
+                    }
                 } else {
                     // single-signal DataSets: accumulate in history as traces
                     std::vector<T> dataSetsVec;
@@ -235,9 +244,12 @@ struct ImChartMonitor : Block<ImChartMonitor<T, drawAsynchronously>, std::condit
             } else {
                 // regular single-plot mode
                 std::size_t signalIdx = signal_index < 0 ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(signal_index);
-                gr::dataset::draw(latestDataSet, {.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .reset_view = shouldResetView ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, signalIdx, _location);
+                if (auto drawn = gr::dataset::draw(latestDataSet, {.chart_width = static_cast<std::size_t>(chart_width), .chart_height = static_cast<std::size_t>(chart_height), .reset_view = shouldResetView ? graphs::ResetChartView::RESET : graphs::ResetChartView::KEEP}, signalIdx, _location); !drawn) {
+                    return std::unexpected(drawn.error());
+                }
             }
         }
+        return {};
     }
 
     void plotTiming() {

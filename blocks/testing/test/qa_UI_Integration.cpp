@@ -117,6 +117,22 @@ const boost::ut::suite TagTests = [] {
         }
         expect(sched.runAndWait().has_value());
     };
+
+    "ImChartMonitor reports a DataSet the chart refuses as an error"_test = [] {
+        testing::ImChartMonitor<gr::DataSet<float>> monitor;
+        monitor.timeout_ms = 0ULL;
+
+        gr::DataSet<float> unlabeled; // axis values without an axis name are inconsistent
+        unlabeled.axis_values   = {{0.f, 1.f, 2.f}};
+        unlabeled.extents       = {3};
+        unlabeled.signal_values = {1.f, 2.f, 3.f};
+        unlabeled.signal_ranges = {gr::Range<float>{1.f, 3.f}};
+        monitor._historyBufferY.push_back(unlabeled);
+        expect(monitor.draw() == work::Status::ERROR);
+
+        monitor._historyBufferY.reset();
+        expect(monitor.draw() == work::Status::OK) << "an empty history draws nothing and is no error";
+    };
 };
 
 int main() { /* not needed for UT */ }
