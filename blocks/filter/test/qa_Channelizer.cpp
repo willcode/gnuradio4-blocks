@@ -326,7 +326,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         // A bank asked for nothing but its width runs the root-Nyquist design, which is the family that also reconstructs.
         {
             const auto bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}});
-            const auto designed = gr::filter::fir::design::rootRaisedCosine(static_cast<int>(16U * channels) - 1, static_cast<double>(channels), 0.5, 1.0);
+            const auto designed = gr::filter::fir::design::rootRaisedCosine(static_cast<int>(16U * channels) - 1, static_cast<double>(channels), 0.5, 1.0).value();
 
             expect(eq(bank->prototype.value, std::string("root_nyquist"))) << "the default family";
             expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(16U * channels))) << "a span of sixteen spacings over four branches runs sixty-four taps";
@@ -340,7 +340,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
         // Asked for the lowpass family, the observable holds the searched Kaiser the library designs.
         {
-            const auto  design   = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(channels), "lowpass", 80.0, 0.2, 16UZ, 1UZ);
+            const auto  design   = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(channels), "lowpass", 80.0, 0.2, 16UZ, 1UZ).value();
             const auto  bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"attenuation_db", 80.0}, {"transition", 0.2}});
             const auto  expected = ((design.taps.size() + channels - 1UZ) / channels) * channels;
             const auto& running  = bank->designed_taps.value;
@@ -404,7 +404,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             constexpr gr::Size_t span = 16U;
 
             const auto  bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("root_nyquist")}, {"span", span}, {"transition", 0.5}});
-            const auto  designed = gr::filter::fir::design::rootRaisedCosine(static_cast<int>(span * channels) - 1, static_cast<double>(channels), 0.5, 1.0);
+            const auto  designed = gr::filter::fir::design::rootRaisedCosine(static_cast<int>(span * channels) - 1, static_cast<double>(channels), 0.5, 1.0).value();
             const auto& running  = bank->designed_taps.value;
 
             expect(eq(running.size(), static_cast<std::size_t>(span * channels))) << "a span of sixteen spacings over four branches runs sixty-four taps";
@@ -428,7 +428,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
             // A supplied prototype is measured on the same terms as a designed one. It has no target. The two figures
             // are the response of the supplied vector at the alias edge the stride implies.
-            const auto measured = gr::filter::measureChannelizerPrototype(supplied, static_cast<std::size_t>(channels), 0.5, 1UZ);
+            const auto measured = gr::filter::measureChannelizerPrototype(supplied, static_cast<std::size_t>(channels), 0.5, 1UZ).value();
             expect(bank->design_ok.value) << "a supplied prototype is not reported as missing a target it never had";
             expect(eq(bank->stopband_db.value, measured.stopbandDb)) << "the block reports what the library measured of the taps it was handed";
             expect(eq(bank->ripple_db.value, measured.rippleDb));
