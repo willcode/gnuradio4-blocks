@@ -52,7 +52,7 @@ auto driveFll(FllBandEdge& block, std::span<const CF> input, std::size_t chunk =
 
 /// @brief Root-raised-cosine QPSK at `sps` samples per symbol, scaled to a mean power of `power` and offset in frequency.
 [[nodiscard]] std::vector<CF> shapedQpsk(std::size_t nSamples, int sps, double rolloff, double power, double offset, std::uint32_t seed) {
-    const std::vector<float> taps     = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(8 * sps + 1), static_cast<double>(sps), rolloff);
+    const std::vector<float> taps     = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(8 * sps + 1), static_cast<double>(sps), rolloff).value();
     const std::size_t        nSymbols = nSamples / static_cast<std::size_t>(sps) + taps.size() / static_cast<std::size_t>(sps) + 4UZ;
 
     std::mt19937                       rng(seed);
