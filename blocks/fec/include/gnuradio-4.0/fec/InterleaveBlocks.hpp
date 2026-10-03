@@ -10,7 +10,6 @@
 #include <format>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -79,30 +78,33 @@ template<typename T>
     if (fillValue > 0xFFU) {
         throw gr::exception(std::format("fill_value is one item of the byte carrier and must be 0 to 255, got {}", fillValue));
     }
-    const T fill = static_cast<T>(fillValue);
+    const T    fill  = static_cast<T>(fillValue);
+    const auto named = [&kind](auto&& build) {
+        try {
+            return build();
+        } catch (const gr::exception& refusal) {
+            throw gr::exception(std::format("kind '{}': {}", kind, refusal.message), refusal.sourceLocation);
+        }
+    };
 
-    try {
-        if (kind == "block") {
-            const std::size_t frame  = static_cast<std::size_t>(rows) * static_cast<std::size_t>(cols);
-            const std::size_t length = (windowLength == 0U) ? frame : static_cast<std::size_t>(windowLength);
-            return gr::fec::Interleaver<T>::block(rows, cols, windowOffset, length, fill);
+    if (kind == "block") {
+        const std::size_t frame  = static_cast<std::size_t>(rows) * static_cast<std::size_t>(cols);
+        const std::size_t length = (windowLength == 0U) ? frame : static_cast<std::size_t>(windowLength);
+        return named([&] { return gr::fec::Interleaver<T>::block(rows, cols, windowOffset, length, fill); });
+    }
+    if (kind == "convolutional") {
+        if constexpr (!std::same_as<T, std::uint8_t>) {
+            throw gr::exception("kind 'convolutional' carries bytes only: its fill and its across-record state have no float semantics, and no consumer asks");
+        } else {
+            return named([&] { return gr::fec::Interleaver<T>::convolutional(branches, unitDelay, fill); });
         }
-        if (kind == "convolutional") {
-            if constexpr (!std::same_as<T, std::uint8_t>) {
-                throw gr::exception("kind 'convolutional' carries bytes only: its fill and its across-record state have no float semantics, and no consumer asks");
-            } else {
-                return gr::fec::Interleaver<T>::convolutional(branches, unitDelay, fill);
-            }
+    }
+    if (kind == "permutation") {
+        if (table.empty()) {
+            throw gr::exception("table is required for kind 'permutation' and has no default: a published table is an interoperability constant, and a default table would be an interoperability assumption nobody made");
         }
-        if (kind == "permutation") {
-            if (table.empty()) {
-                throw gr::exception("table is required for kind 'permutation' and has no default: a published table is an interoperability constant, and a default table would be an interoperability assumption nobody made");
-            }
-            std::vector<std::size_t> indices(table.begin(), table.end());
-            return gr::fec::Interleaver<T>::permutation(std::span<const std::size_t>(indices));
-        }
-    } catch (const std::invalid_argument& refusal) {
-        throw gr::exception(std::format("kind '{}': {}", kind, refusal.what()));
+        std::vector<std::size_t> indices(table.begin(), table.end());
+        return named([&] { return gr::fec::Interleaver<T>::permutation(std::span<const std::size_t>(indices)); });
     }
     throw gr::exception(std::format("kind must be 'block', 'convolutional' or 'permutation', got '{}'", kind));
 }

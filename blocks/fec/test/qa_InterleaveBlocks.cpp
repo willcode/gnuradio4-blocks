@@ -301,6 +301,15 @@ int main() {
         expect(throws([] { std::ignore = make<Interleave>(blockKind(0U, 8U)); })) << "a rectangle needs a row";
         expect(throws([] { std::ignore = make<Deinterleave>(blockKind(8U, 0U)); })) << "a rectangle needs a column";
         expect(throws([] { std::ignore = make<Interleave>(convolutionalKind(1U, 1U)); })) << "below two branches there is nothing to interleave";
+        {
+            std::string refusal;
+            try {
+                std::ignore = make<Interleave>(convolutionalKind(1U, 1U));
+            } catch (const gr::exception& error) {
+                refusal = error.message;
+            }
+            expect(refusal.starts_with("kind 'convolutional': gr::fec::Interleaver: branches is 1")) << "the kernel's refusal carries the kind: " + refusal;
+        }
         expect(throws([] { std::ignore = make<Interleave>(convolutionalKind(4U, 0U)); })) << "a branch step of no cells is no delay";
         expect(throws([] { std::ignore = make<Interleave>({{"kind", std::string("permutation")}}); })) << "the permutation kind has no default table";
         expect(throws([] { std::ignore = make<Deinterleave>({{"kind", std::string("permutation")}, {"table", std::vector<gr::Size_t>{0U, 2U, 2U}}}); })) << "a repeated index is not a permutation";
