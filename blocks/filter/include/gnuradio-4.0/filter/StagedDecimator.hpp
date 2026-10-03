@@ -121,7 +121,11 @@ tag whose output lies past the stream's last output leaves at the end-of-stream 
             throw gr::exception(std::format("passband_width ({}) is a fraction of the output rate and must lie in (0, 1)", passband_width.value));
         }
 
-        _design = gr::filter::designStagedDecimator(static_cast<std::size_t>(decimation), static_cast<double>(passband_width), static_cast<double>(attenuation_db), static_cast<double>(ripple_db), factor_odd, static_cast<std::size_t>(max_odd_factor));
+        auto designed = gr::filter::designStagedDecimator(static_cast<std::size_t>(decimation), static_cast<double>(passband_width), static_cast<double>(attenuation_db), static_cast<double>(ripple_db), factor_odd, static_cast<std::size_t>(max_odd_factor));
+        if (!designed) {
+            throw gr::exception(designed.error().message, designed.error().sourceLocation);
+        }
+        _design = std::move(*designed);
         if (!_design.ok) {
             throw gr::exception(std::format("no ladder under the tap cap meets {} dB stopband and {} dB total ripple at a decimation of {} and a passband width of {}", attenuation_db.value, ripple_db.value, decimation.value, passband_width.value));
         }
@@ -245,7 +249,9 @@ tag whose output lies past the stream's last output leaves at the end-of-stream 
         }
         const std::size_t outputs = std::min(input.size() / static_cast<std::size_t>(_decimation), output.size());
         if (outputs > 0UZ) {
-            std::ignore = processBulk(std::span<const T>(input.data(), outputs * static_cast<std::size_t>(_decimation)), std::span<T>(output.data(), outputs));
+            if (const work::Status status = processBulk(std::span<const T>(input.data(), outputs * static_cast<std::size_t>(_decimation)), std::span<T>(output.data(), outputs)); status != work::Status::OK) {
+                return status;
+            }
         }
         _tags.release(output, outputs, true);
         output.publish(outputs);
@@ -266,11 +272,17 @@ tag whose output lies past the stream's last output leaves at the end-of-stream 
         for (std::size_t i = 0UZ; i < _tail.size(); ++i) {
             const std::size_t made = _tail[i].outputsFor(stream.size());
             if (i + 1UZ == _tail.size() && made == output.size()) {
-                std::ignore = _tail[i].process(stream, output);
+                if (const auto ran = _tail[i].process(stream, output); !ran) {
+                    this->emitErrorMessage("processBulk", ran.error());
+                    return work::Status::ERROR;
+                }
                 return work::Status::OK;
             }
             _back.resize(made);
-            std::ignore = _tail[i].process(stream, std::span<T>(_back));
+            if (const auto ran = _tail[i].process(stream, std::span<T>(_back)); !ran) {
+                this->emitErrorMessage("processBulk", ran.error());
+                return work::Status::ERROR;
+            }
             _front.swap(_back);
             stream = std::span<const T>(_front);
         }
