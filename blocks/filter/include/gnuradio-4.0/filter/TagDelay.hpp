@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -269,9 +270,9 @@ template<typename TBlock, typename TOutput>
  *
  * `TDerived` has the input port `in` and provides three functions. `tagDecimation()` returns the input samples per
  * output. `twiceTagDelay()` returns the delay in half input samples, or no value when the framework places the tags.
- * `filterSamples(input, output)` filters whole input chunks into their outputs. A tag on input `i` leaves on output
- * `round((i + d) / M)`, and a half rounds up. The tag keeps that output through any later delay or decimation change. A
- * `sample_rate` key is divided by `M` when the tag is taken in.
+ * `filterSamples(input, output)` filters whole input chunks into their outputs and returns nothing or a `work::Status`.
+ * A tag on input `i` leaves on output `round((i + d) / M)`, and a half rounds up. The tag keeps that output through any
+ * later delay or decimation change. A `sample_rate` key is divided by `M` when the tag is taken in.
  */
 template<typename TDerived, typename TIn, typename TOut>
 struct DelayedTagFilter {
@@ -388,7 +389,9 @@ struct DelayedTagFilter {
         if (self().twiceTagDelay().has_value()) {
             outputs = std::min(input.size() / self().tagDecimation(), output.size());
             if (outputs > 0UZ) {
-                std::ignore = processBulk(std::span<const TIn>(input.data(), outputs * self().tagDecimation()), std::span<TOut>(output.data(), outputs));
+                if (const work::Status status = processBulk(std::span<const TIn>(input.data(), outputs * self().tagDecimation()), std::span<TOut>(output.data(), outputs)); status != work::Status::OK) {
+                    return status;
+                }
             }
         } else {
             if (input.size() < self().tagDecimation()) {
@@ -406,8 +409,12 @@ struct DelayedTagFilter {
 
     /// @brief Filter @p input, whole chunks of `tagDecimation()` samples, into one output per chunk.
     [[nodiscard]] work::Status processBulk(std::span<const TIn> input, std::span<TOut> output) {
-        self().filterSamples(input, output);
-        return work::Status::OK;
+        if constexpr (std::same_as<decltype(self().filterSamples(input, output)), work::Status>) {
+            return self().filterSamples(input, output);
+        } else {
+            self().filterSamples(input, output);
+            return work::Status::OK;
+        }
     }
 };
 

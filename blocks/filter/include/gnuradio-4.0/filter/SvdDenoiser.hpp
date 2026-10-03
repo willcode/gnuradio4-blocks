@@ -112,10 +112,17 @@ public:
         return 2ULL * (window - 1ULL - first);
     }
 
-    void filterSamples(std::span<const T> input, std::span<T> output) {
+    /// @brief A decomposition that does not converge is emitted as an error and returns `work::Status::ERROR`.
+    [[nodiscard]] work::Status filterSamples(std::span<const T> input, std::span<T> output) {
         for (std::size_t i = 0UZ; i < input.size(); ++i) {
-            output[i] = _state.processOne(input[i]);
+            const auto denoised = _state.processOne(input[i]);
+            if (!denoised) {
+                this->emitErrorMessage("processBulk", denoised.error());
+                return work::Status::ERROR;
+            }
+            output[i] = *denoised;
         }
+        return work::Status::OK;
     }
 };
 
