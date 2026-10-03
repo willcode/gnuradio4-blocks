@@ -119,7 +119,7 @@ template<typename TBlock>
     constexpr double          rate = static_cast<double>(kFft);
     const std::vector<double> delays{0., 2. / rate, 5. / rate, 9. / rate};
     const std::vector<double> powers{0., -3., -6., -9.};
-    return gr::channel::tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), rate, true);
+    return gr::channel::tapsFromProfile(std::span<const double>(delays), std::span<const double>(powers), rate, true).value();
 }
 
 /// @brief Everything from bits to the transmitted stream, with no trigger tag. A receiver finds its own frames.
