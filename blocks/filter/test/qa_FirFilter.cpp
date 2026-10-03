@@ -44,7 +44,7 @@ template<typename TSample, typename TTap>
 template<typename TSample, typename TTap>
 [[nodiscard]] auto run(FirFilter<TSample, TTap>& block, const std::vector<TSample>& input, std::size_t chunkOutputs = 0UZ) {
     const std::size_t m = block.decimation;
-    return test::runDecimating<typename FirFilter<TSample, TTap>::TOut>(block, std::span<const TSample>(input), chunkOutputs * m, m);
+    return test::runDecimating<typename FirFilter<TSample, TTap>::TOut>(block, std::span<const TSample>(input), chunkOutputs * m, m).value();
 }
 
 [[nodiscard]] constexpr CD wide(float v) noexcept { return {static_cast<double>(v), 0.0}; }
@@ -350,7 +350,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
 
         // input 15 maps to output 2, and arrives in the call that publishes output 1 — so it has to be held
         const std::vector<gr::Tag> tags{gr::Tag{15UZ, tagKey(0)}, gr::Tag{16UZ, tagKey(1)}};
-        const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), kM, kM, std::span<const gr::Tag>(tags));
+        const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), kM, kM, std::span<const gr::Tag>(tags)).value();
 
         expect(eq(got.samples.size(), 10UZ));
         expect(eq(got.tags.size(), 2UZ)) << "held, not dropped";
@@ -379,13 +379,13 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
             constexpr std::size_t    kSeam  = 200UZ;
 
             FirFilter<float, float> block = makeFir<float, float>({{"taps", before}, {"decimation", 1U}});
-            const auto              head  = test::runDecimating<float>(block, std::span<const float>(x).first(kSeam), 0UZ, 1UZ);
+            const auto              head  = test::runDecimating<float>(block, std::span<const float>(x).first(kSeam), 0UZ, 1UZ).value();
             expect(eq(head.samples.size(), kSeam));
 
             std::ignore = block.settings().setStaged({{"taps", after}});
             std::ignore = block.settings().applyStagedParameters();
 
-            const auto tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(kSeam), 0UZ, 1UZ);
+            const auto tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(kSeam), 0UZ, 1UZ).value();
             expect(eq(tail.samples.size(), x.size() - kSeam)) << "the output count is unchanged by the tap change, and the first call after it produces";
 
             // past the point where the retained history covers the new window, the output is exactly the definition over the
@@ -418,7 +418,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
         const std::vector<float> x(400UZ, 0.5f);
 
         const std::vector<gr::Tag> early{gr::Tag{5UZ, tagKey(0)}, gr::Tag{15UZ, tagKey(1)}};
-        const auto                 head = test::runDecimating<float>(block, std::span<const float>(x).first(200UZ), 100UZ, 10UZ, std::span<const gr::Tag>(early));
+        const auto                 head = test::runDecimating<float>(block, std::span<const float>(x).first(200UZ), 100UZ, 10UZ, std::span<const gr::Tag>(early)).value();
         expect(eq(head.samples.size(), 20UZ));
         expect(that % (head.offsetsOf("tag0") == std::vector<std::size_t>{1UZ}));
         expect(that % (head.offsetsOf("tag1") == std::vector<std::size_t>{2UZ}));
@@ -428,7 +428,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
 
         // the new origin is input 200 / output 20, so input 208 is two outputs past it
         const std::vector<gr::Tag> late{gr::Tag{208UZ, tagKey(2)}};
-        const auto                 tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(200UZ), 100UZ, 4UZ, std::span<const gr::Tag>(late), 200UZ, 20UZ);
+        const auto                 tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(200UZ), 100UZ, 4UZ, std::span<const gr::Tag>(late), 200UZ, 20UZ).value();
         expect(eq(tail.samples.size(), 50UZ)) << "200 further inputs at M = 4";
         expect(that % (tail.offsetsOf("tag2") == std::vector<std::size_t>{22UZ})) << "mapped from the new origin, not rescaled from zero";
     };
@@ -447,7 +447,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
             retune.insert_or_assign(gr::property_map::key_type{"frequency"}, 1.0e8);
             const std::vector<gr::Tag> tags{gr::Tag{0UZ, opening}, gr::Tag{100UZ, retune}};
             const std::vector<float>   x(256UZ, 0.0f);
-            const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), 64UZ, m, std::span<const gr::Tag>(tags));
+            const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), 64UZ, m, std::span<const gr::Tag>(tags)).value();
 
             const std::size_t first  = (2UZ * kDelay + m) / (2UZ * m);
             const bool        oneTag = std::ranges::any_of(got.tags, [](const gr::Tag& t) { return t.map.contains(gr::property_map::key_type{"sample_rate"}) && t.map.contains(gr::property_map::key_type{"trigger_time"}); });
@@ -476,7 +476,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
             std::vector<float> x(256UZ, 0.0f);
             x[at] = 1.0f;
             const std::vector<gr::Tag> tags{gr::Tag{at, tagKey(0)}};
-            const auto                 got  = test::runDecimating<float>(block, std::span<const float>(x), kChunk, m, std::span<const gr::Tag>(tags));
+            const auto                 got  = test::runDecimating<float>(block, std::span<const float>(x), kChunk, m, std::span<const gr::Tag>(tags)).value();
             const std::size_t          want = (at + kDelay) / m;
 
             expect(that % (got.offsetsOf("tag0") == std::vector<std::size_t>{want})) << std::format("M = {}: input {} leaves on output {} and on no other", m, at, want);
@@ -496,7 +496,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
         std::vector<float> x(128UZ, 0.0f);
         x[63] = 1.0f;
         const std::vector<gr::Tag> tags{gr::Tag{63UZ, tagKey(0)}};
-        const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), 64UZ, 1UZ, std::span<const gr::Tag>(tags));
+        const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), 64UZ, 1UZ, std::span<const gr::Tag>(tags)).value();
 
         expect(eq(got.samples[64], got.samples[65])) << "the energy is split evenly between outputs 64 and 65";
         expect(that % (got.offsetsOf("tag0") == std::vector<std::size_t>{65UZ}));
@@ -517,7 +517,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
             std::vector<float> x(128UZ, 0.0f);
             x[62] = 1.0f;
             const std::vector<gr::Tag> tags{gr::Tag{62UZ, tagKey(0)}};
-            const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), 64UZ, 1UZ, std::span<const gr::Tag>(tags));
+            const auto                 got = test::runDecimating<float>(block, std::span<const float>(x), 64UZ, 1UZ, std::span<const gr::Tag>(tags)).value();
 
             expect(eq(peakIndex(std::span<const float>(got.samples)), 62UZ + row.delay));
             expect(that % (got.offsetsOf("tag0") == std::vector<std::size_t>{62UZ + row.delay})) << row.taps.size() << " taps";
@@ -598,7 +598,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
 
         FirFilter<float, float>    block = makeFir<float, float>({{"taps", longer}, {"decimation", 1U}});
         const std::vector<gr::Tag> early{gr::Tag{195UZ, tagKey(0)}};
-        const auto                 head = test::runDecimating<float>(block, std::span<const float>(x).first(200UZ), 50UZ, 1UZ, std::span<const gr::Tag>(early));
+        const auto                 head = test::runDecimating<float>(block, std::span<const float>(x).first(200UZ), 50UZ, 1UZ, std::span<const gr::Tag>(early)).value();
         expect(that % head.offsetsOf("tag0").empty()) << "input 195 leaves on output 210, which the first 200 inputs do not produce";
 
         std::ignore = block.settings().setStaged({{"taps", shorter}});
@@ -607,7 +607,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
 
         // Under the new delay input 201 maps to 203, ahead of the held tag. Input 250 maps to 252.
         const std::vector<gr::Tag> late{gr::Tag{201UZ, tagKey(1)}, gr::Tag{250UZ, tagKey(2)}};
-        const auto                 tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(200UZ), 50UZ, 1UZ, std::span<const gr::Tag>(late), 200UZ, 200UZ);
+        const auto                 tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(200UZ), 50UZ, 1UZ, std::span<const gr::Tag>(late), 200UZ, 200UZ).value();
         expect(that % (tail.offsetsOf("tag0") == std::vector<std::size_t>{210UZ})) << "held across the change, at the output it crossed with";
         expect(that % (tail.offsetsOf("tag1") == std::vector<std::size_t>{210UZ})) << "placed with the held tag, never ahead of it";
         expect(that % (tail.offsetsOf("tag2") == std::vector<std::size_t>{252UZ})) << "and past it, by the new delay";
@@ -697,7 +697,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
         FirFilter<CF, float>       through = makeFir<CF, float>({{"taps", std::vector<float>{1.0f}}, {"decimation", 1U}});
         const std::vector<CF>      x       = noise<CF>(500UZ, 0x3C79AC492BA7B653ULL);
         const std::vector<gr::Tag> tags{gr::Tag{7UZ, tagKey(0)}, gr::Tag{300UZ, tagKey(1)}};
-        const auto                 got = test::runDecimating<CF>(through, std::span<const CF>(x), 100UZ, 1UZ, std::span<const gr::Tag>(tags));
+        const auto                 got = test::runDecimating<CF>(through, std::span<const CF>(x), 100UZ, 1UZ, std::span<const gr::Tag>(tags)).value();
         expect(that % (got.samples == x)) << "bit for bit";
         expect(that % (got.offsetsOf("tag0") == std::vector<std::size_t>{7UZ}));
         expect(that % (got.offsetsOf("tag1") == std::vector<std::size_t>{300UZ}));
