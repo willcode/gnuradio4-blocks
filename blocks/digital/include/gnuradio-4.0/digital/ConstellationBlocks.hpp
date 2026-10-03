@@ -65,7 +65,10 @@ The block is one symbol in, one symbol out, so every input tag key passes throug
 
     [[nodiscard]] work::Status processBulk(std::span<const std::complex<F>> input, std::span<std::uint8_t> output) {
         const std::size_t nSamples = std::min(input.size(), output.size());
-        _constellation.hardDecisions(input.first(nSamples), output.first(nSamples));
+        if (const auto decided = _constellation.hardDecisions(input.first(nSamples), output.first(nSamples)); !decided) {
+            this->emitErrorMessage("processBulk", decided.error());
+            return work::Status::ERROR;
+        }
         return work::Status::OK;
     }
 };
@@ -189,7 +192,10 @@ precondition. `max_log` is the default and needs no transcendental; it is exact 
 
     [[nodiscard]] work::Status processBulk(std::span<const std::complex<F>> input, std::span<F> output) {
         const std::size_t nSymbols = std::min(input.size(), output.size() / _bits);
-        _constellation.softDecisions(input.first(nSymbols), noise_power, output.first(nSymbols * _bits), _algorithm);
+        if (const auto decided = _constellation.softDecisions(input.first(nSymbols), noise_power, output.first(nSymbols * _bits), _algorithm); !decided) {
+            this->emitErrorMessage("processBulk", decided.error());
+            return work::Status::ERROR;
+        }
         return work::Status::OK;
     }
 };

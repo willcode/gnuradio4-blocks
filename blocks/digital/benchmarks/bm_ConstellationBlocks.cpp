@@ -128,7 +128,9 @@ int main() {
         const std::size_t bits = kRows[which].bits;
         arms.push_back({std::format("  the same, full M-point form, {}-{}", kRows[which].name, kRows[which].arity), [&, which, bits] {
                             for (std::size_t i = 0UZ; i < kSymbolsPerCall; ++i) {
-                                kernels[which].softDecisionsExhaustive(input[i], 1.0f, std::span<float>(softOut.data() + i * bits, bits));
+                                if (!kernels[which].softDecisionsExhaustive(input[i], 1.0f, std::span<float>(softOut.data() + i * bits, bits))) {
+                                    return -1.0;
+                                }
                             }
                             return static_cast<double>(softOut[kSymbolsPerCall / 2UZ]);
                         }});
