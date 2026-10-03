@@ -326,6 +326,7 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         refuses({{"max_payload_items", 256U}, {"length_bits", 16U}}, "length_bits", "a width belongs to the length formats");
         refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}}, "count_covers", "and count_covers has no default");
         refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("payload")}}, "13", "a Golay header carries twelve information bits");
+        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("payload")}}, "gr::digital::LengthGolay24Header: length_bits must be in [1, 12], got 13", "the kernel's refusal reaches the caller as the kernel wrote it");
         refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("payload")}, {"payload_pack_bits", 9U}}, "9", "an item unpacks into at most eight bits");
 
         expect(nothrow([] { std::ignore = make<LengthHeaderFramer>({{"max_payload_items", 256U}}); })) << "and the realizations in use need none of them";

@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <format>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -80,8 +79,7 @@ struct HeaderLayoutSettings {
  * says so rather than quietly ignoring half of what it was given.
  *
  * The kernel's own constructors do the range checking -- the field widths, the little-endian whole-byte rule and the
- * count parameters -- and their `std::invalid_argument` is rewrapped rather than a second set of bounds being written
- * beside them.
+ * count parameters -- and their `gr::exception` reaches the caller as the kernel wrote it.
  */
 [[nodiscard]] inline gr::digital::HeaderFormat headerLayoutFrom(const HeaderLayoutSettings& wanted) {
     const std::string_view format(wanted.format);
@@ -141,14 +139,10 @@ struct HeaderLayoutSettings {
     count.checkItems       = static_cast<std::size_t>(wanted.checkItems);
     count.framePrefixItems = static_cast<std::size_t>(wanted.framePrefixItems);
 
-    try {
-        if (format == "length_plain") {
-            return gr::digital::LengthPlainHeader{static_cast<std::size_t>(wanted.lengthBits), headerByteOrderFromName(wanted.byteOrder), count};
-        }
-        return gr::digital::LengthGolay24Header{static_cast<std::size_t>(wanted.lengthBits), flagsPositionFromName(wanted.flagsPosition), count};
-    } catch (const std::invalid_argument& reason) {
-        throw gr::exception(std::string(reason.what()));
+    if (format == "length_plain") {
+        return gr::digital::LengthPlainHeader{static_cast<std::size_t>(wanted.lengthBits), headerByteOrderFromName(wanted.byteOrder), count};
     }
+    return gr::digital::LengthGolay24Header{static_cast<std::size_t>(wanted.lengthBits), flagsPositionFromName(wanted.flagsPosition), count};
 }
 
 } // namespace gr::blocks::digital::detail
