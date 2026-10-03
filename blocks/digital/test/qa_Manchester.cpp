@@ -561,7 +561,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         auto chips = rng.items(8192UZ, 1U); // arbitrary chips, violations and all
         for (const std::string_view convention : kConventions) {
             const auto seen = decoded(decoderSettings(convention, 1U), std::span<const std::uint8_t>(chips));
-            const auto k    = static_cast<unsigned>(gr::digital::conventionXor(gr::digital::conventionFromName(convention)));
+            const auto k    = static_cast<unsigned>(gr::digital::conventionXor(gr::digital::conventionFromName(convention).value()));
             expect(that % (rebuiltChips(seen.bits, seen.flags, k) == chips)) << std::format("{}: the chip stream comes back exactly", convention);
         }
     };

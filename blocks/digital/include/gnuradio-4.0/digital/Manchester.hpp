@@ -43,7 +43,7 @@ namespace detail {
  *
  * Everything is checked before the kernel is touched, so a rejected setting leaves the previous
  * configuration whole and the block keeps running on it. The kernel's own rejections are the same two
- * bounds and would throw `std::invalid_argument`; they are unreachable from here.
+ * bounds and throw `gr::exception`; they are unreachable from here.
  */
 inline void configureManchester(gr::digital::ManchesterConfig& cfg, std::string_view convention, gr::Size_t bitsPerItem, gr::digital::BitOrder order, gr::Size_t chipPhase) {
     const gr::digital::ManchesterConvention mode = manchesterConvention(convention);
