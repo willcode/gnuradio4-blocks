@@ -4,14 +4,15 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <expected>
 #include <functional>
 #include <span>
-#include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
 // Minimal ReaderSpanLike/WriterSpanLike pair, so a processBulk — or a forwardTags override — can be driven at an exact
@@ -359,7 +360,7 @@ inline constexpr std::size_t kOutFollowsIn = static_cast<std::size_t>(-1);
  * @brief Drive a decimating block over @p input in chunks of @p chunkSize inputs, which the framework hands whole.
  *
  * @p chunkSize is truncated to a multiple of @p decimation, because `input_chunk_size` is what the framework chunks by;
- * a non-zero @p chunkSize below @p decimation truncates to nothing and is rejected rather than looping forever. A
+ * a non-zero @p chunkSize below @p decimation truncates to nothing and returns an error rather than looping forever. A
  * trailing chunk shorter than @p chunkSize is delivered as a final shorter call, truncated to a whole number of
  * outputs, so only a remainder too short to produce one output goes unprocessed.
  * @p startOffset puts the run at an absolute stream position, which is what the tag-offset tests need and what no
@@ -367,13 +368,13 @@ inline constexpr std::size_t kOutFollowsIn = static_cast<std::size_t>(-1);
  * after a mid-stream `decimation` change the outputs already produced are not `startOffset / decimation`.
  */
 template<typename TOut, typename TBlock, typename TIn>
-[[nodiscard]] Capture<TOut> runDecimating(TBlock& block, std::span<const TIn> input, std::size_t chunkSize, std::size_t decimation, std::span<const gr::Tag> tags = {}, std::size_t startOffset = 0UZ, std::size_t startOutOffset = kOutFollowsIn) {
+[[nodiscard]] std::expected<Capture<TOut>, gr::Error> runDecimating(TBlock& block, std::span<const TIn> input, std::size_t chunkSize, std::size_t decimation, std::span<const gr::Tag> tags = {}, std::size_t startOffset = 0UZ, std::size_t startOutOffset = kOutFollowsIn) {
     if (decimation == 0UZ) {
-        throw std::invalid_argument("runDecimating: decimation must be non-zero");
+        return std::unexpected(gr::Error("runDecimating: decimation must be non-zero"));
     }
     const std::size_t stride = ((chunkSize == 0UZ ? input.size() : chunkSize) / decimation) * decimation;
     if (stride == 0UZ) {
-        throw std::invalid_argument("runDecimating: chunkSize must be zero or at least decimation");
+        return std::unexpected(gr::Error("runDecimating: chunkSize must be zero or at least decimation"));
     }
 
     Capture<TOut>     result;

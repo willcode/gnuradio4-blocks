@@ -5,6 +5,7 @@
 #include <numeric>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -62,6 +63,18 @@ struct TagRecorder {
         }
         out.publish(made);
         std::ignore = in.consume(taken);
+        return gr::work::Status::OK;
+    }
+};
+
+/// @brief Keeps the first sample of every `decimation`, over the plain spans `runDecimating` hands a block.
+struct KeepFirst {
+    std::size_t decimation = 2UZ;
+
+    gr::work::Status processBulk(std::span<const int> in, std::span<int> out) const {
+        for (std::size_t k = 0UZ; k < out.size(); ++k) {
+            out[k] = in[k * decimation];
+        }
         return gr::work::Status::OK;
     }
 };
@@ -126,6 +139,28 @@ const boost::ut::suite TestSpanTagCursorTests = [] {
         expect(eq(view[0UZ].first, std::ptrdiff_t{-3}));
         expect(eq(view[1UZ].first, std::ptrdiff_t{-1}));
         expect(eq(byWholeWindow.window(4UZ, 4UZ).size(), 0UZ));
+    };
+
+    "runDecimating returns a decimation or chunk size it cannot drive as an error"_test = [] {
+        std::vector<int> input(8UZ);
+        std::iota(input.begin(), input.end(), 0);
+        KeepFirst block;
+
+        const auto kept = runDecimating<int>(block, std::span<const int>(input), 4UZ, 2UZ);
+        expect(fatal(kept.has_value()));
+        expect(kept->samples == std::vector<int>{0, 2, 4, 6});
+        expect(eq(kept->consumed, input.size()));
+
+        const auto noDecimation = runDecimating<int>(block, std::span<const int>(input), 4UZ, 0UZ);
+        expect(!noDecimation.has_value());
+        if (!noDecimation) {
+            expect(eq(noDecimation.error().message, std::string("runDecimating: decimation must be non-zero")));
+        }
+        const auto shortChunk = runDecimating<int>(block, std::span<const int>(input), 1UZ, 2UZ);
+        expect(!shortChunk.has_value());
+        if (!shortChunk) {
+            expect(eq(shortChunk.error().message, std::string("runDecimating: chunkSize must be zero or at least decimation")));
+        }
     };
 
     "the driver and a port agree span for span"_test = [] {
