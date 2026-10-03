@@ -55,7 +55,7 @@ template<typename T>
 template<typename T>
 [[nodiscard]] auto run(StagedDecimator<T>& block, const std::vector<T>& input, std::size_t chunkOutputs = 0UZ, std::span<const gr::Tag> tags = {}) {
     const std::size_t d = static_cast<std::size_t>(block.decimation);
-    return test::runDecimating<T>(block, std::span<const T>(input), chunkOutputs * d, d, tags);
+    return test::runDecimating<T>(block, std::span<const T>(input), chunkOutputs * d, d, tags).value();
 }
 
 /// @brief A deterministic stand-in for randomness: the same numbers on every machine and every run.
@@ -632,7 +632,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
 
         // The new origin is input 1600 / output 200, so input 1632 is two outputs past it before the delay.
         const std::vector<gr::Tag> late{gr::Tag{1632UZ, tagKey(1)}};
-        const auto                 tail = test::runDecimating<CF>(block, std::span<const CF>(x), 16UZ * 25UZ, 16UZ, std::span<const gr::Tag>(late), 1600UZ, 200UZ);
+        const auto                 tail = test::runDecimating<CF>(block, std::span<const CF>(x), 16UZ * 25UZ, 16UZ, std::span<const gr::Tag>(late), 1600UZ, 200UZ).value();
         expect(eq(tail.samples.size(), 100UZ)) << "1600 further inputs at D = 16, from the first call after the rebuild";
         expect(that % (tail.offsetsOf("tag1") == std::vector<std::size_t>{200UZ + narrowIndex<std::size_t>(mapResampledOffset(32ULL + pathDelay(block), 1ULL, 16ULL))})) << "mapped from the new origin, not rescaled from zero";
     };
@@ -644,7 +644,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
 
         // input 995 maps past output 99, the last output of the run that carries it
         const std::vector<gr::Tag> tags{gr::Tag{995UZ, tagKey(0)}};
-        const auto                 head   = test::runDecimating<CF>(block, std::span<const CF>(x).first(1000UZ), kD, kD, std::span<const gr::Tag>(tags));
+        const auto                 head   = test::runDecimating<CF>(block, std::span<const CF>(x).first(1000UZ), kD, kD, std::span<const gr::Tag>(tags)).value();
         const std::size_t          placed = narrowIndex<std::size_t>(mapResampledOffset(995ULL + pathDelay(block), 1ULL, kD));
         expect(eq(head.samples.size(), 100UZ));
         expect(that % (head.offsetsOf("tag0") == std::vector<std::size_t>{})) << "its output is not produced yet, so it is held";
@@ -654,7 +654,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
         std::ignore              = block.settings().applyStagedParameters();
         expect(eq(block.stages(), stages));
 
-        const auto tail = test::runDecimating<CF>(block, std::span<const CF>(x).subspan(1000UZ), kD, kD, {}, 1000UZ, 100UZ);
+        const auto tail = test::runDecimating<CF>(block, std::span<const CF>(x).subspan(1000UZ), kD, kD, {}, 1000UZ, 100UZ).value();
         expect(eq(tail.samples.size(), 100UZ));
         expect(that % (tail.offsetsOf("tag0") == std::vector<std::size_t>{placed})) << "a design change that moves no tag keeps the held one, at the offset it already had";
     };
@@ -816,7 +816,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
             StagedDecimator<CF> staged = makeBlock<CF>({{"decimation", arm.decimation}, {"passband_width", 0.90f}, {"factor_odd", arm.factorOdd}});
 
             const std::size_t                       single = arm.decimation;
-            const gr::filter::StagedDecimatorDesign one    = gr::filter::designDecimatorLadder(std::span<const std::size_t>(&single, 1UZ), d, 0.90);
+            const gr::filter::StagedDecimatorDesign one    = gr::filter::designDecimatorLadder(std::span<const std::size_t>(&single, 1UZ), d, 0.90).value();
             FirFilter<CF, float>                    flat(gr::property_map{{"taps", one.stages[0UZ].taps}, {"decimation", arm.decimation}});
             flat.settings().init();
             std::ignore = flat.settings().applyStagedParameters();
