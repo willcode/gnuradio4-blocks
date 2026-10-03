@@ -1,5 +1,7 @@
 #include <boost/ut.hpp>
 
+#include <array>
+
 #include <gnuradio-4.0/math/ExpressionBlocks.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
@@ -20,6 +22,19 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
     using namespace gr;
     using namespace gr::blocks::math;
     using testing::ProcessFunction::USE_PROCESS_ONE;
+
+    "computeVectorInfo returns a refused access as an error"_test = [] {
+        std::array<float, 4UZ> vector{};
+        const auto             info = gr::blocks::math::detail::computeVectorInfo(vector.data(), vector.data() + vector.size(), sizeof(float), vector.data() + 3);
+        expect(info.has_value() && info->size == 4UZ && info->index == 3);
+
+        const auto reversed = gr::blocks::math::detail::computeVectorInfo(vector.data() + vector.size(), vector.data(), sizeof(float), vector.data());
+        expect(!reversed.has_value()) << "an end before the base";
+        if (!reversed) {
+            expect(reversed.error().message.starts_with("invalid vector boundaries")) << reversed.error().message;
+        }
+        expect(!gr::blocks::math::detail::computeVectorInfo(nullptr, vector.data(), sizeof(float), vector.data()).has_value()) << "a null base";
+    };
 
     "ExpressionSISO"_test = []<typename T>(const T&) {
         Graph graph;

@@ -2,6 +2,7 @@
 #define EXPRESSIONBLOCKS_HPP
 
 #include <algorithm>
+#include <expected>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/math/NamespaceCompatibility.hpp>
@@ -30,9 +31,9 @@ struct VectorInfo {
     ssize_t     index;
 };
 
-inline VectorInfo computeVectorInfo(void* base_ptr, void* end_ptr, std::size_t elementSize, void* access_ptr) {
+inline std::expected<VectorInfo, gr::Error> computeVectorInfo(void* base_ptr, void* end_ptr, std::size_t elementSize, void* access_ptr) {
     if (!base_ptr || !end_ptr || !access_ptr) {
-        throw std::invalid_argument("null pointer(s) provided.");
+        return std::unexpected(gr::Error("null pointer(s) provided."));
     }
 
     auto base   = static_cast<std::byte*>(base_ptr);
@@ -40,10 +41,10 @@ inline VectorInfo computeVectorInfo(void* base_ptr, void* end_ptr, std::size_t e
     auto access = static_cast<std::byte*>(access_ptr);
 
     if (end < base) {
-        throw std::out_of_range(std::format("invalid vector boundaries [{}, {}]", base_ptr, end_ptr));
+        return std::unexpected(gr::Error(std::format("invalid vector boundaries [{}, {}]", base_ptr, end_ptr)));
     }
 
-    return {static_cast<std::size_t>(end - base) / elementSize, (access - base) / static_cast<ssize_t>(elementSize)};
+    return VectorInfo{static_cast<std::size_t>(end - base) / elementSize, (access - base) / static_cast<ssize_t>(elementSize)};
 }
 
 struct vector_access_rtc : public exprtk::vector_access_runtime_check {
@@ -53,8 +54,12 @@ struct vector_access_rtc : public exprtk::vector_access_runtime_check {
         auto               itr         = vector_map.find(static_cast<void*>(context.base_ptr));
         const std::string& vector_name = (itr != vector_map.end()) ? itr->second : "Unknown";
 
-        const auto typeSize      = static_cast<std::size_t>(context.type_size);
-        auto [vecSize, vecIndex] = computeVectorInfo(context.base_ptr, context.end_ptr, typeSize, context.access_ptr);
+        const auto                                 typeSize = static_cast<std::size_t>(context.type_size);
+        const std::expected<VectorInfo, gr::Error> info     = computeVectorInfo(context.base_ptr, context.end_ptr, typeSize, context.access_ptr);
+        if (!info) {
+            throw gr::exception(std::format("vector access to '{}' failed its check: {}", vector_name, info.error().message));
+        }
+        const auto [vecSize, vecIndex] = *info;
         throw gr::exception(std::format("vector access '{}[{}]' outside of [0, {}[ (typesize: {})", vector_name, vecIndex, vecSize, typeSize));
         return false; // should never reach here
     }
