@@ -125,8 +125,12 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
 
         std::vector<float> prototype = taps;
         if (prototype.empty()) {
-            _designedFor                             = designTarget();
-            const gr::filter::ResamplerDesign design = gr::filter::designArbitraryResampler(_bankSize, _designedFor, static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            _designedFor        = designTarget();
+            const auto designed = gr::filter::designArbitraryResampler(_bankSize, _designedFor, static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            if (!designed) {
+                throw gr::exception(designed.error().message, designed.error().sourceLocation);
+            }
+            const gr::filter::ResamplerDesign& design = *designed;
             if (!design.ok) {
                 throw gr::exception(std::format("no prototype under the tap cap meets {} dB stopband and {} dB ripple for a bank of {} at rates down to {}", attenuation_db.value, max_ripple_db.value, _bankSize, _designedFor));
             }
@@ -154,7 +158,11 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
         }
         const double wanted = designTarget();
         if (taps.value.empty() && wanted < _designedFor) {
-            const gr::filter::ResamplerDesign design = gr::filter::designArbitraryResampler(_bankSize, wanted, static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            const auto designed = gr::filter::designArbitraryResampler(_bankSize, wanted, static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            if (!designed) {
+                throw gr::exception(designed.error().message, designed.error().sourceLocation);
+            }
+            const gr::filter::ResamplerDesign& design = *designed;
             if (!design.ok) {
                 throw gr::exception(std::format("no prototype under the tap cap meets {} dB stopband for a bank of {} at rates down to {}", attenuation_db.value, _bankSize, wanted));
             }
@@ -190,7 +198,12 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
         const auto [nIn, made] = fitToRoom(inSpan.size(), outSpan.size());
 
         mapTags(inSpan, nIn);
-        std::ignore = _resampler->process(std::span<const T>(inSpan.data(), nIn), std::span<T>(outSpan.data(), made));
+        if (const auto ran = _resampler->process(std::span<const T>(inSpan.data(), nIn), std::span<T>(outSpan.data(), made)); !ran) {
+            this->emitErrorMessage("processBulk", ran.error());
+            std::ignore = inSpan.consume(0UZ);
+            outSpan.publish(0UZ);
+            return work::Status::ERROR;
+        }
         _tags.release(outSpan, made, false);
 
         std::ignore = inSpan.consume(nIn);
@@ -215,7 +228,12 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
         const auto [nIn, made] = fitToRoom(inSpan.size(), outSpan.size());
 
         mapTags(inSpan, nIn);
-        std::ignore = _resampler->process(std::span<const T>(inSpan.data(), nIn), std::span<T>(outSpan.data(), made));
+        if (const auto ran = _resampler->process(std::span<const T>(inSpan.data(), nIn), std::span<T>(outSpan.data(), made)); !ran) {
+            this->emitErrorMessage("processBulk", ran.error());
+            std::ignore = inSpan.consume(0UZ);
+            outSpan.publish(0UZ);
+            return work::Status::ERROR;
+        }
         _tags.takeRemainder(in, static_cast<std::uint64_t>(inSpan.streamIndex) + static_cast<std::uint64_t>(nIn), [this](property_map& tag) { scaleSampleRate(tag); });
         _tags.release(outSpan, made, true);
 
