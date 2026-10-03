@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -73,15 +72,15 @@ Turning bits into that grid is an affine map on two levels and a Gray map above 
     void start() {
         design();
         _pulse.reset();
-        _phasor.setPhase(0.);
+        std::ignore = _phasor.setPhase(0.);
     }
 
     void design() {
-        try {
-            _pulse.configure(gr::digital::cpmPulseShapeFrom(pulse), static_cast<std::size_t>(pulse_length.value), static_cast<std::size_t>(samples_per_symbol.value), modulation_index, bt);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(error.what()); // a graph reports a bad setting as a gr::exception, the kernel as an argument error
+        const auto shape = gr::digital::cpmPulseShapeFrom(pulse);
+        if (!shape) {
+            throw gr::exception(shape.error().message, shape.error().sourceLocation);
         }
+        _pulse.configure(*shape, static_cast<std::size_t>(pulse_length.value), static_cast<std::size_t>(samples_per_symbol.value), modulation_index, bt);
 
         this->input_chunk_size  = 1U;
         this->output_chunk_size = samples_per_symbol;

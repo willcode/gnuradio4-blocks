@@ -102,7 +102,7 @@ struct Rng {
  */
 [[nodiscard]] std::vector<CF> phaseOracle(std::span<const float> symbols, std::size_t sps, std::string_view shape, std::size_t symbolSpan, double h, double bt) {
     gr::digital::CpmPulse<float> pulse{};
-    pulse.configure(gr::digital::cpmPulseShapeFrom(shape), symbolSpan, sps, h, bt);
+    pulse.configure(gr::digital::cpmPulseShapeFrom(shape).value(), symbolSpan, sps, h, bt);
 
     std::vector<double> increments(symbols.size() * sps);
     pulse.incrementsFor(symbols, std::span<double>(increments));
@@ -366,6 +366,15 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"modulation_index", 0.0}}); })) << "a zero index turns the carrier nowhere";
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"modulation_index", 5.0}}); })) << "four rotations per symbol is the ceiling";
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse", std::string("gmsk")}}); })) << "the pulse names three families";
+        {
+            std::string refusal;
+            try {
+                std::ignore = make<CpmModulate<float>>({{"pulse", std::string("gmsk")}});
+            } catch (const gr::exception& error) {
+                refusal = error.message;
+            }
+            expect(refusal.contains("unknown pulse 'gmsk'")) << "the library's reason reaches the caller: " + refusal;
+        }
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse", std::string("gaussian")}, {"bt", 0.0}}); })) << "the gaussian pulse reads bt and needs it positive";
 
         // The refusals leave nothing behind: a block built afterwards runs.
