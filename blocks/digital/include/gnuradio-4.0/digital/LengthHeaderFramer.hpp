@@ -8,7 +8,6 @@
 #include <iterator>
 #include <print>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -118,11 +117,7 @@ record gains `header_items`, the count the header occupied, so a loopback chain 
         }
         gr::digital::BitRepack unpack;
         if (packBits != 0U) {
-            try {
-                gr::digital::configureRepack(unpack, packBits, 1U, payload_bit_order, gr::digital::BitOrder::MsbFirst);
-            } catch (const std::invalid_argument& reason) {
-                throw gr::exception(std::string(reason.what()));
-            }
+            gr::digital::configureRepack(unpack, packBits, 1U, payload_bit_order, gr::digital::BitOrder::MsbFirst);
         }
 
         // built last, because it is the setting group most likely to be rejected and nothing above it has been written
