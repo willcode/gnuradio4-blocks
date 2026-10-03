@@ -304,9 +304,11 @@ int main() {
         constexpr std::size_t kSamples = 2048UZ;
 
         for (const Arm& arm : arms) {
-            const gr::filter::ResamplerDesign design = gr::filter::designFractionalDelay(arm.bank, kRoll);
-            const double                      interp = gr::filter::arbitraryInterpolationError(arm.bank, kRoll, arm.order);
-            const double                      bound  = interp + rippleFloor(design.rippleDb) + stopbandFloor(design.stopbandDb);
+            const auto designed = gr::filter::designFractionalDelay(arm.bank, kRoll);
+            expect(designed.has_value() >> fatal);
+            const gr::filter::ResamplerDesign& design = *designed;
+            const double                       interp = gr::filter::arbitraryInterpolationError(arm.bank, kRoll, arm.order);
+            const double                       bound  = interp + rippleFloor(design.rippleDb) + stopbandFloor(design.stopbandDb);
 
             double worstAll = 0.;
             for (std::size_t step = 0UZ; step < 33UZ; ++step) { // 33 fractional delays across one arm spacing and beyond
@@ -415,12 +417,23 @@ int main() {
 
         const std::string backwards = refusalOf<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 2'000'000'000LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3, 1e-3}}, {"sample_rate", 1.e6f}});
         expect(!backwards.empty() && backwards.contains("knot 2")) << std::format("times that do not increase name the knot that turned back: {}", backwards);
+        expect(backwards.contains("'schedule_times_ns'/'schedule_delays_s'")) << std::format("the schedule's refusal names the two settings: {}", backwards);
 
         const std::string unpaired = refusalOf<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3, 1e-3}}, {"sample_rate", 1.e6f}});
         expect(!unpaired.empty() && unpaired.contains("must be paired")) << std::format("a table with more delays than times is refused: {}", unpaired);
 
         const std::string both = refusalOf<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}});
         expect(!both.empty() && both.contains("two spellings")) << std::format("a file beside the vectors is two answers to one question: {}", both);
+
+        const std::string missing = refusalOf<RangeDelay<float>>({{"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}});
+        expect(missing.contains("RangeDelay: 'schedule_file': ") && missing.contains("/nonexistent.gr4traj")) << std::format("a file the loader refuses names the setting and the path: {}", missing);
+        const std::string missingShift = refusalOf<DopplerShift<C>>({{"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}});
+        expect(missingShift.contains("DopplerShift: 'schedule_file': ") && missingShift.contains("/nonexistent.gr4traj")) << std::format("the shift names the setting and the path too: {}", missingShift);
+
+        const std::string offAxis = refusalOf<RangeDelay<float>>({{"sample_rate", 1.e30f}});
+        expect(offAxis.contains("RangeDelay: 'sample_rate': ")) << std::format("a rate off the exact time axis names the setting: {}", offAxis);
+        const std::string offAxisShift = refusalOf<DopplerShift<C>>({{"sample_rate", 1.e30f}});
+        expect(offAxisShift.contains("DopplerShift: 'sample_rate': ")) << std::format("the shift names it too: {}", offAxisShift);
 
         // and the settings that carry their own arithmetic
         expect(!refusalOf<RangeDelay<float>>([&] {

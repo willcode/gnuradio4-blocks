@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <memory>
 #include <optional>
@@ -186,10 +187,13 @@ leaves the tuning as it is.
         }
         _direction = detail::parseDopplerDirection(direction, "DopplerShift");
         _anchor    = gr::timing::ScheduleAnchor(detail::parseAnchorSource(anchor_source.value, "DopplerShift"), anchor_index.value, anchor_ns.value, honor_trigger_offset.value);
+        // The rate is validated even while the anchor waits for its trigger.
+        const auto clock = _anchor.armed() ? clockAt(_anchor.anchorIndex(), _anchor.anchorNs()) : clockAt(0ULL, 0LL);
+        if (!clock) {
+            throw gr::exception(clock.error().message, clock.error().sourceLocation);
+        }
         if (_anchor.armed()) {
-            _clock = clockAt(_anchor.anchorIndex(), _anchor.anchorNs());
-        } else {
-            std::ignore = clockAt(0ULL, 0LL); // the rate is validated even while the anchor waits for its trigger
+            _clock = *clock;
         }
 
         const std::vector<std::int64_t>& times   = schedule_times_ns.value;
@@ -199,12 +203,11 @@ leaves the tuning as it is.
         }
 
         if (!schedule_file.value.empty()) {
-            gr::timing::Trajectory trajectory;
-            try {
-                trajectory = gr::timing::loadTrajectoryFile(schedule_file.value);
-            } catch (const std::invalid_argument& refusal) {
-                throw gr::exception(std::format("DopplerShift: 'schedule_file': {}", refusal.what()));
+            const auto loaded = gr::timing::loadTrajectoryFile(schedule_file.value);
+            if (!loaded) {
+                throw gr::exception(std::format("DopplerShift: 'schedule_file': {}", loaded.error().message));
             }
+            const gr::timing::Trajectory& trajectory = *loaded;
             if (!trajectory.frequency.has_value()) {
                 throw gr::exception(std::format("DopplerShift: '{}' carries no frequency — its columns name neither offset_hz nor range_rate_m_s, and a delay table cannot be differentiated into one", schedule_file.value));
             }
@@ -221,8 +224,8 @@ leaves the tuning as it is.
     }
 
     void start() {
-        _position = 0ULL;
-        _phasor.setPhase(0.);
+        _position   = 0ULL;
+        std::ignore = _phasor.setPhase(0.);
         _anchor.reset(); // a new stream carries no history of the last one's triggers, and a trigger anchor waits again
         publishMeasurements();
     }
@@ -290,8 +293,15 @@ leaves the tuning as it is.
 
             const gr::timing::ScheduleAnchor::Response response = read.readable ? _anchor.onTrigger(_position, read.timeNs, read.offsetSeconds) : _anchor.onUnreadableTrigger();
             if (response == gr::timing::ScheduleAnchor::Response::armed || response == gr::timing::ScheduleAnchor::Response::reanchored) {
-                _clock = clockAt(_anchor.anchorIndex(), _anchor.anchorNs());
-                _phasor.setPhase(0.); // the schedule time jumped, and a continued phase would put a step in the signal
+                const auto clock = clockAt(_anchor.anchorIndex(), _anchor.anchorNs());
+                if (!clock) {
+                    std::ignore = inSpan.consume(done);
+                    outSpan.publish(done);
+                    this->emitErrorMessage("processBulk", clock.error());
+                    return work::Status::ERROR;
+                }
+                _clock      = *clock;
+                std::ignore = _phasor.setPhase(0.); // the schedule time jumped, and a continued phase would put a step in the signal
             }
         }
         if (done < nSamples) {
@@ -306,12 +316,8 @@ leaves the tuning as it is.
 
 private:
     /// The schedule's exact time axis at this block's rate, anchored where the anchor machinery says.
-    [[nodiscard]] gr::timing::SampleClock clockAt(std::uint64_t index, std::int64_t timeNs) const {
-        try {
-            return gr::timing::clockForRateHz(static_cast<double>(sample_rate.value), index, timeNs);
-        } catch (const std::invalid_argument& refusal) {
-            throw gr::exception(std::format("DopplerShift: 'sample_rate': {}", refusal.what()));
-        }
+    [[nodiscard]] std::expected<gr::timing::SampleClock, gr::Error> clockAt(std::uint64_t index, std::int64_t timeNs) const {
+        return gr::timing::clockForRateHz(static_cast<double>(sample_rate.value), index, timeNs).transform_error([](const gr::Error& refusal) { return gr::Error(std::format("DopplerShift: 'sample_rate': {}", refusal.message), refusal.sourceLocation); });
     }
 
     void stageSchedule(std::span<const std::int64_t> times, std::span<const double> offsets) {

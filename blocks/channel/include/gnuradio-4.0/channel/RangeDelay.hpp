@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <optional>
@@ -158,17 +159,23 @@ vocabulary moves with the sample it marks.
         // passed. A refused change leaves the running schedule, bank and history in place.
         const detail::DopplerDirection   seat = detail::parseDopplerDirection(direction.value, "RangeDelay");
         const gr::timing::ScheduleAnchor anchor(detail::parseAnchorSource(anchor_source.value, "RangeDelay"), anchor_index.value, anchor_ns.value, honor_trigger_offset.value);
-        const gr::timing::SampleClock    clock  = clockAt(anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
-        const std::size_t                bank   = resolveBankSize();
-        Staged                           staged = stage(seat);
+        const auto                       clock = clockAt(anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
+        if (!clock) {
+            throw gr::exception(clock.error().message, clock.error().sourceLocation);
+        }
+        const std::size_t bank   = resolveBankSize();
+        Staged            staged = stage(seat);
 
         const bool held    = _line.has_value();
         const bool cutBank = !held || bank != _builtBank || order.value != _builtOrder || rolloff.value != _builtRolloff || attenuation_db.value != _builtAttenuationDb;
         if (cutBank) {
             // The window length follows the prototype. The samples in the old line would not line up with the new
             // taps. A new bank is the only change that drops the history, and the count records each one.
-            const gr::filter::ResamplerDesign  design = gr::filter::designFractionalDelay(bank, rolloff.value, attenuation_db.value);
-            gr::filter::FractionalDelayLine<T> built(bank, order.value, std::span<const float>(design.taps), staged.wholeDelaySamples);
+            const auto design = gr::filter::designFractionalDelay(bank, rolloff.value, attenuation_db.value);
+            if (!design) {
+                throw gr::exception(std::format("RangeDelay: {}", design.error().message), design.error().sourceLocation);
+            }
+            gr::filter::FractionalDelayLine<T> built(bank, order.value, std::span<const float>(design->taps), staged.wholeDelaySamples);
             _line               = std::move(built);
             _builtBank          = bank;
             _builtOrder         = order.value;
@@ -185,7 +192,7 @@ vocabulary moves with the sample it marks.
         _bias       = staged.bias;
         _direction  = seat;
         _anchor     = anchor;
-        _clock      = clock;
+        _clock      = *clock;
         _latencyQ32 = static_cast<std::int64_t>(std::llround(_line->latencySamples() * static_cast<double>(gr::filter::kArbitraryOne)));
         publishMeasurements();
     }
@@ -238,8 +245,12 @@ vocabulary moves with the sample it marks.
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) {
         const std::size_t nSamples = std::min(input.size(), output.size());
         reserve(nSamples);
-        std::ignore = runSegment(input.first(nSamples), output.first(nSamples), 0UZ);
+        const auto filtered = runSegment(input.first(nSamples), output.first(nSamples), 0UZ);
         publishMeasurements();
+        if (!filtered) {
+            this->emitErrorMessage("processBulk", filtered.error());
+            return work::Status::ERROR;
+        }
         return work::Status::OK;
     }
 
@@ -276,18 +287,27 @@ vocabulary moves with the sample it marks.
                 continue;
             }
             const std::size_t at = static_cast<std::size_t>(relIndex);
-            advance(inSpan, outSpan, done, at); // the call splits at the trigger, and the samples before it keep their anchor
+            // The call splits at the trigger, and the samples before it keep their anchor.
+            if (const auto advanced = advance(inSpan, outSpan, done, at); !advanced) {
+                return refuse(inSpan, outSpan, done, advanced.error());
+            }
             done = at;
 
             const gr::timing::ScheduleAnchor::Response response = read.readable ? _anchor.onTrigger(_position, read.timeNs, read.offsetSeconds) : _anchor.onUnreadableTrigger();
             if (response == gr::timing::ScheduleAnchor::Response::armed || response == gr::timing::ScheduleAnchor::Response::reanchored) {
-                _clock = clockAt(_anchor.anchorIndex(), _anchor.anchorNs());
+                const auto clock = clockAt(_anchor.anchorIndex(), _anchor.anchorNs());
+                if (!clock) {
+                    return refuse(inSpan, outSpan, done, clock.error());
+                }
+                _clock = *clock;
                 if (response == gr::timing::ScheduleAnchor::Response::reanchored && _line) {
                     _line->reset(); // the schedule's time jumped, so what the line holds does not describe the stream that follows
                 }
             }
         }
-        advance(inSpan, outSpan, done, nSamples);
+        if (const auto advanced = advance(inSpan, outSpan, done, nSamples); !advanced) {
+            return refuse(inSpan, outSpan, done, advanced.error());
+        }
 
         std::ignore = inSpan.consume(nSamples);
         outSpan.publish(nSamples);
@@ -303,12 +323,17 @@ private:
         std::uint64_t                            wholeDelaySamples{0ULL};
     };
 
-    [[nodiscard]] gr::timing::SampleClock clockAt(std::uint64_t index, std::int64_t timeNs) const {
-        try {
-            return gr::timing::clockForRateHz(static_cast<double>(sample_rate.value), index, timeNs);
-        } catch (const std::invalid_argument& refusal) {
-            throw gr::exception(std::format("RangeDelay: 'sample_rate': {}", refusal.what()));
-        }
+    [[nodiscard]] std::expected<gr::timing::SampleClock, gr::Error> clockAt(std::uint64_t index, std::int64_t timeNs) const {
+        return gr::timing::clockForRateHz(static_cast<double>(sample_rate.value), index, timeNs).transform_error([](const gr::Error& refusal) { return gr::Error(std::format("RangeDelay: 'sample_rate': {}", refusal.message), refusal.sourceLocation); });
+    }
+
+    /// Publishes the samples before @p done and reports @p error as the call's result.
+    [[nodiscard]] work::Status refuse(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, std::size_t done, const gr::Error& error) {
+        std::ignore = inSpan.consume(done);
+        outSpan.publish(done);
+        publishMeasurements();
+        this->emitErrorMessage("processBulk", error);
+        return work::Status::ERROR;
     }
 
     [[nodiscard]] std::size_t resolveBankSize() const {
@@ -338,12 +363,11 @@ private:
         }
 
         if (!schedule_file.value.empty()) {
-            gr::timing::Trajectory trajectory;
-            try {
-                trajectory = gr::timing::loadTrajectoryFile(schedule_file.value);
-            } catch (const std::invalid_argument& refusal) {
-                throw gr::exception(std::format("RangeDelay: 'schedule_file': {}", refusal.what()));
+            auto loaded = gr::timing::loadTrajectoryFile(schedule_file.value);
+            if (!loaded) {
+                throw gr::exception(std::format("RangeDelay: 'schedule_file': {}", loaded.error().message));
             }
+            gr::timing::Trajectory& trajectory = *loaded;
             if (!trajectory.delay.has_value()) {
                 throw gr::exception(std::format("RangeDelay: '{}' carries no delay — its columns name no range, and a frequency table cannot be integrated into one", schedule_file.value));
             }
@@ -367,8 +391,8 @@ private:
         gr::timing::DelaySchedule schedule = [&] {
             try {
                 return gr::timing::DelaySchedule(std::span<const std::int64_t>(times), std::span<const double>(delays));
-            } catch (const std::invalid_argument& refusal) {
-                throw gr::exception(std::format("RangeDelay: 'schedule_times_ns'/'schedule_delays_s': {}", refusal.what()));
+            } catch (const gr::exception& refusal) {
+                throw gr::exception(std::format("RangeDelay: 'schedule_times_ns'/'schedule_delays_s': {}", refusal.message));
             }
         }();
         return adopt(std::move(schedule), seat);
@@ -439,8 +463,9 @@ private:
         }
     }
 
-    /// @brief Fills `[at, at + input.size())` of the call's delays and runs the line over @p input. True where it filtered.
-    [[nodiscard]] bool runSegment(std::span<const T> input, std::span<T> output, std::size_t at) {
+    /// @brief Fills `[at, at + input.size())` of the call's delays and runs the line over @p input.
+    /// True where it filtered, or the line's error for a delay or span it refused.
+    [[nodiscard]] std::expected<bool, gr::Error> runSegment(std::span<const T> input, std::span<T> output, std::size_t at) {
         const std::size_t nSamples = input.size();
         if (nSamples == 0UZ) {
             return false;
@@ -463,21 +488,29 @@ private:
         } else {
             std::ranges::fill(delays, _bias); // no table is a constant bias, which may be zero
         }
-        gr::filter::fractionalDelayQ32(std::span<const double>(delays), static_cast<double>(sample_rate.value), delaysQ32);
-        _line->process(input, std::span<const std::uint64_t>(delaysQ32), output);
+        if (const auto converted = gr::filter::fractionalDelayQ32(std::span<const double>(delays), static_cast<double>(sample_rate.value), delaysQ32); !converted) {
+            return std::unexpected(converted.error());
+        }
+        if (const auto ran = _line->process(input, std::span<const std::uint64_t>(delaysQ32), output); !ran) {
+            return std::unexpected(ran.error());
+        }
 
         _position += nSamples;
         return true;
     }
 
     /// @brief Runs `[from, to)` of the call and attaches its tags to the output samples that carry their samples.
-    void advance(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, std::size_t from, std::size_t to) {
+    [[nodiscard]] std::expected<void, gr::Error> advance(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, std::size_t from, std::size_t to) {
         if (to <= from) {
-            return;
+            return {};
         }
         const std::uint64_t firstIndex = _position;
-        const bool          filtered   = runSegment(std::span<const T>(inSpan.data() + from, to - from), std::span<T>(outSpan.data() + from, to - from), from);
-        placeTags(outSpan, firstIndex, from, to - from, filtered);
+        const auto          filtered   = runSegment(std::span<const T>(inSpan.data() + from, to - from), std::span<T>(outSpan.data() + from, to - from), from);
+        if (!filtered) {
+            return std::unexpected(filtered.error());
+        }
+        placeTags(outSpan, firstIndex, from, to - from, *filtered);
+        return {};
     }
 
     /**

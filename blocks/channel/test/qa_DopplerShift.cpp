@@ -394,7 +394,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
                 } else {
                     std::ignore = noise->processBulk(std::span<const C>(symbols.data(), n), std::span<C>(scratch.data(), n));
                 }
-                constellation.hardDecisions(std::span<const C>(scratch.data(), n), std::span<std::uint8_t>(got.data(), n));
+                expect(constellation.hardDecisions(std::span<const C>(scratch.data(), n), std::span<std::uint8_t>(got.data(), n)).has_value());
                 for (std::size_t k = 0UZ; k < n; ++k) {
                     errors += (got[k] != sent[k]) ? 1ULL : 0ULL;
                 }

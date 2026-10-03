@@ -60,7 +60,7 @@ int main() {
     // The schedule walk and the conversion of its seconds to fixed-point samples, without interpolation. This is
     // the share of the per-sample cost outside the bank.
     const gr::timing::DelaySchedule schedule{std::span<const std::int64_t>(kTimes), std::span<const double>(kDelays)};
-    const gr::timing::SampleClock   clock = gr::timing::clockForRateHz(static_cast<double>(kSampleRate), 0ULL, 0LL);
+    const gr::timing::SampleClock   clock = gr::timing::clockForRateHz(static_cast<double>(kSampleRate), 0ULL, 0LL).value();
     std::vector<double>             seconds(kSamplesPerCall);
     std::vector<std::uint64_t>      fixed(kSamplesPerCall);
     std::uint64_t                   walkAt = 0ULL;
@@ -89,7 +89,7 @@ int main() {
         {"the schedule walk and the Q32 conversion alone",
             [&] {
                 schedule.valuesFor(clock, walkAt, std::span<double>(seconds));
-                gr::filter::fractionalDelayQ32(std::span<const double>(seconds), static_cast<double>(kSampleRate), std::span<std::uint64_t>(fixed));
+                std::ignore = gr::filter::fractionalDelayQ32(std::span<const double>(seconds), static_cast<double>(kSampleRate), std::span<std::uint64_t>(fixed));
                 walkAt += kSamplesPerCall;
                 return static_cast<double>(fixed[kSamplesPerCall / 2UZ]);
             }},
