@@ -82,17 +82,19 @@ template<typename TBlock>
 
 /// A whole space packet of exactly @p octets octets, its payload a pattern that depends on both length and index.
 [[nodiscard]] std::vector<std::uint8_t> packetOf(std::size_t octets, std::uint16_t apid, std::uint16_t sequence) {
-    gr::ccsds::SpacePacketHeader header{};
-    boost::ut::expect(gr::ccsds::headerForPayload(apid, false, false, 3U, sequence, octets - gr::ccsds::kSpacePacketHeaderSize, header) == gr::ccsds::WriteStatus::ok);
+    const auto header = gr::ccsds::headerForPayload(apid, false, false, 3U, sequence, octets - gr::ccsds::kSpacePacketHeaderSize);
+    boost::ut::expect(header.has_value());
     std::vector<std::uint8_t> packet(octets, 0U);
-    std::ignore = gr::ccsds::writeSpacePacketHeader(header, packet);
+    if (header.has_value()) {
+        std::ranges::copy(gr::ccsds::writeSpacePacketHeader(*header).value(), packet.begin());
+    }
     for (std::size_t i = gr::ccsds::kSpacePacketHeaderSize; i < octets; ++i) {
         packet[i] = static_cast<std::uint8_t>((i * 31UZ + octets + sequence) & 0xFFUZ);
     }
     return packet;
 }
 
-/// The ten extraction counters plus the three admission counters, so a scene can assert all thirteen at once.
+/// The eleven extraction counters plus the three admission counters, so a scene can assert all fourteen at once.
 struct Tally {
     std::uint64_t packets           = 0ULL;
     std::uint64_t idle_packets      = 0ULL;
@@ -107,13 +109,14 @@ struct Tally {
     std::uint64_t wrong_channel     = 0ULL;
     std::uint64_t missing_key       = 0ULL;
     std::uint64_t sync_flag_set     = 0ULL;
+    std::uint64_t bad_version       = 0ULL;
 
     [[nodiscard]] bool operator==(const Tally&) const noexcept = default;
 };
 
 [[nodiscard]] Tally tallyOf(const gr::blocks::ccsds::SpacePacketExtract& block) {
     return Tally{block.packets, block.idle_packets, block.idle_frames, block.frames_lost, block.duplicate_frames, block.fragments_dropped, //
-        block.pointer_mismatch, block.bad_pointer, block.orphan_octets, block.oversize_dropped, block.nWrongChannel, block.nMissingKey, block.nSyncFlagSet};
+        block.pointer_mismatch, block.bad_pointer, block.orphan_octets, block.oversize_dropped, block.nWrongChannel, block.nMissingKey, block.nSyncFlagSet, block.bad_version};
 }
 
 /// One hand-built zone as extractor input, with the pointer, frame count and channel it would have arrived with.
@@ -332,9 +335,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             }
             std::size_t at = 0UZ;
             while (at + kSpacePacketHeaderSize <= buffer.size()) {
-                SpacePacketHeader header{};
-                std::ignore             = parseSpacePacketHeader(std::span<const std::uint8_t>(buffer).subspan(at, kSpacePacketHeaderSize), header);
-                const std::size_t total = totalPacketOctets(header);
+                // reads the data length field of octets 4 and 5 and ignores the version
+                const std::size_t total = kSpacePacketHeaderSize + ((std::size_t{buffer[at + 4UZ]} << 8U) | std::size_t{buffer[at + 5UZ]}) + 1UZ;
                 if (at + total > buffer.size()) {
                     break;
                 }
@@ -386,7 +388,8 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
                 expect(that % (out[0].signal_values != wrongPacket()));
             }
             expect(eq(extract.packets, std::uint64_t{1}));
-            expect(!extract._extractor.fragment().empty()) << "the rest of the zone is a fragment against a length read out of a payload";
+            expect(eq(extract.bad_version, std::uint64_t{1})) << "the next header, read from the second packet's octet 1 (0x64), has version '011'";
+            expect(extract._extractor.fragment().empty()) << "that header gives no trusted length, and the walk abandons the rest of the zone";
         }
         { // the same scene with the convention right, three packets in and three packets out, byte for byte
             std::vector<std::uint8_t> zone;
@@ -451,11 +454,13 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
             expect(eq(zones.size(), 1UZ));
             if (zones.size() == 1UZ) {
                 expect(eq(metaSize(zones[0], "ccsds_first_header_pointer"), gr::Size_t{0})) << "an idle packet is a packet, and it starts at the zone's first octet";
-                SpacePacketHeader header{};
-                expect(parseSpacePacketHeader(zones[0].signal_values, header) == ParseStatus::ok);
-                expect(eq(header.apid, std::uint16_t{1234})) << "idle_apid is the APID written";
-                expect(!header.secondary_header) << "4.1.3.3.3.4";
-                expect(eq(totalPacketOctets(header), std::size_t{20})) << "the packet fills the zone exactly";
+                const auto header = parseSpacePacketHeader(zones[0].signal_values);
+                expect(header.has_value());
+                if (header.has_value()) {
+                    expect(eq(header->apid, std::uint16_t{1234})) << "idle_apid is the APID written";
+                    expect(!header->secondary_header) << "4.1.3.3.3.4";
+                    expect(eq(totalPacketOctets(*header), std::size_t{20})) << "the packet fills the zone exactly";
+                }
             }
             expect(eq(segment.nRefusedHeader, std::uint64_t{0}));
         }
@@ -686,11 +691,13 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         expect(eq(out.size(), 5UZ));
         const std::vector<std::pair<std::uint16_t, std::uint16_t>> expected{{10U, 0U}, {20U, 0U}, {10U, 1U}, {20U, 1U}, {30U, 0U}};
         for (std::size_t i = 0UZ; i < out.size() && i < expected.size(); ++i) {
-            SpacePacketHeader header{};
-            expect(parseSpacePacketHeader(out[i].signal_values, header) == ParseStatus::ok);
-            expect(eq(header.apid, expected[i].first)) << "record " << i;
-            expect(eq(header.sequence_count, expected[i].second)) << "each APID counts its own packets, record " << i;
-            expect(eq(totalPacketOctets(header), std::size_t{10}));
+            const auto header = parseSpacePacketHeader(out[i].signal_values);
+            expect(header.has_value()) << "record " << i;
+            if (header.has_value()) {
+                expect(eq(header->apid, expected[i].first)) << "record " << i;
+                expect(eq(header->sequence_count, expected[i].second)) << "each APID counts its own packets, record " << i;
+                expect(eq(totalPacketOctets(*header), std::size_t{10}));
+            }
         }
 
         encode._sequenceCounters[10] = 16383U; // 4.1.3.4.3.4's modulus, reached without emitting 16383 packets
@@ -698,12 +705,13 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         const std::vector<Record> wrapped = drive1(encode, wrapIn);
         expect(eq(wrapped.size(), 2UZ));
         if (wrapped.size() == 2UZ) {
-            SpacePacketHeader last{};
-            SpacePacketHeader next{};
-            expect(parseSpacePacketHeader(wrapped[0].signal_values, last) == ParseStatus::ok);
-            expect(parseSpacePacketHeader(wrapped[1].signal_values, next) == ParseStatus::ok);
-            expect(eq(last.sequence_count, std::uint16_t{16383}));
-            expect(eq(next.sequence_count, std::uint16_t{0})) << "continuous modulo 16384";
+            const auto last = parseSpacePacketHeader(wrapped[0].signal_values);
+            const auto next = parseSpacePacketHeader(wrapped[1].signal_values);
+            expect(last.has_value() && next.has_value());
+            if (last.has_value() && next.has_value()) {
+                expect(eq(last->sequence_count, std::uint16_t{16383}));
+                expect(eq(next->sequence_count, std::uint16_t{0})) << "continuous modulo 16384";
+            }
         }
 
         encode.reset();
@@ -723,10 +731,12 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         const std::vector<Record> after = drive1(encode, afterIn);
         expect(eq(after.size(), 1UZ));
         if (after.size() == 1UZ) {
-            SpacePacketHeader header{};
-            expect(parseSpacePacketHeader(after[0].signal_values, header) == ParseStatus::ok);
-            expect(eq(header.sequence_count, std::uint16_t{2})) << "the count is the application's, and it did not restart";
-            expect(header.type) << "the new label took effect";
+            const auto header = parseSpacePacketHeader(after[0].signal_values);
+            expect(header.has_value());
+            if (header.has_value()) {
+                expect(eq(header->sequence_count, std::uint16_t{2})) << "the count is the application's, and it did not restart";
+                expect(header->type) << "the new label took effect";
+            }
         }
     };
 
@@ -747,10 +757,35 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         expect(eq(encode.nRefusedHeader, std::uint64_t{0}));
         expect(eq(out.size(), 1UZ)) << "the record behind four refusals is encoded";
         if (out.size() == 1UZ) {
-            SpacePacketHeader header{};
-            expect(parseSpacePacketHeader(out[0].signal_values, header) == ParseStatus::ok);
-            expect(eq(header.sequence_count, std::uint16_t{0})) << "a refused record spends no sequence number";
+            const auto header = parseSpacePacketHeader(out[0].signal_values);
+            expect(header.has_value());
+            if (header.has_value()) {
+                expect(eq(header->sequence_count, std::uint16_t{0})) << "a refused record spends no sequence number";
+            }
         }
+    };
+
+    "SpacePacketEncode: a header the kernel refuses is counted, and spends no sequence number"_test = [] {
+        auto encode                 = make<SpacePacketEncode>({{"apid", gr::Size_t{10}}});
+        encode.sequence_flags.value = 4U; // set past the settings check; the header build refuses a flag above three
+
+        const std::vector<Record> refusedIn{recordOf(std::vector<std::uint8_t>(4UZ, 1U))};
+        expect(eq(drive1(encode, refusedIn).size(), 0UZ)) << "no packet with an unwritten header is emitted";
+        expect(eq(encode.nRefusedHeader, std::uint64_t{1}));
+        expect(eq(encode.nPackets, std::uint64_t{0}));
+
+        encode.sequence_flags.value = 3U;
+        const std::vector<Record> goodIn{recordOf(std::vector<std::uint8_t>(4UZ, 2U))};
+        const std::vector<Record> out = drive1(encode, goodIn);
+        expect(eq(out.size(), 1UZ));
+        if (out.size() == 1UZ) {
+            const auto header = parseSpacePacketHeader(out[0].signal_values);
+            expect(header.has_value());
+            if (header.has_value()) {
+                expect(eq(header->sequence_count, std::uint16_t{0})) << "the refused record spent no sequence number";
+            }
+        }
+        expect(eq(encode.nRefusedHeader, std::uint64_t{1}));
     };
 
     "SpacePacketExtract: the three admission counters and the three refusals"_test = [] {
@@ -778,6 +813,34 @@ const boost::ut::suite<"CcsdsPackets"> ccsdsPacketTests = [] {
         if (out.size() == 1UZ) {
             expect(that % (out[0].signal_values == packet));
         }
+    };
+
+    "SpacePacketExtract: a packet of another version is counted in bad_version, and the next pointer recovers"_test = [] {
+        auto extract = make<SpacePacketExtract>({{"virtual_channel", gr::Size_t{0}}});
+
+        const std::vector<std::uint8_t> first = packetOf(20UZ, 70U, 0U);
+        std::vector<std::uint8_t>       other = packetOf(20UZ, 70U, 1U);
+        other[0]                              = static_cast<std::uint8_t>(other[0] | 0x20U); // version '001', 4.1.3.2.2 says '000'
+        const std::vector<std::uint8_t> after = packetOf(20UZ, 70U, 2U);
+        const std::vector<std::uint8_t> next  = packetOf(20UZ, 70U, 3U);
+
+        std::vector<std::uint8_t> zone0 = first;
+        zone0.insert(zone0.end(), other.begin(), other.end());
+        zone0.insert(zone0.end(), after.begin(), after.end());
+
+        const std::vector<Record> in{zoneRecord(zone0, 0U, 0U), zoneRecord(next, 0U, 1U)};
+        const std::vector<Record> out = drive1(extract, in);
+
+        expect(eq(extract.bad_version, std::uint64_t{1})) << "the foreign header is counted, its length not trusted";
+        expect(eq(out.size(), 2UZ)) << "the packet before it and the one at the next pointer";
+        if (out.size() == 2UZ) {
+            expect(that % (out[0].signal_values == first));
+            expect(that % (out[1].signal_values == next)) << "the rest of the zone is abandoned, the next zone's pointer recovers";
+        }
+        Tally expected{};
+        expected.packets     = 2U;
+        expected.bad_version = 1U;
+        expect(that % (tallyOf(extract) == expected)) << "no other counter moves";
     };
 
     "SpacePacketExtract: what is held at the end of the stream is counted"_test = [] {

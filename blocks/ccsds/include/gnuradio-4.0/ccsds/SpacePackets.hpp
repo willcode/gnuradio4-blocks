@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <format>
 #include <optional>
 #include <print>
@@ -47,6 +48,7 @@ inline void accumulate(gr::ccsds::PacketExtractor::Counters& total, const gr::cc
     total.bad_pointer += add.bad_pointer;
     total.orphan_octets += add.orphan_octets;
     total.oversize_dropped += add.oversize_dropped;
+    total.bad_version += add.bad_version;
 }
 
 } // namespace packets_detail
@@ -83,6 +85,7 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
     std::uint64_t bad_pointer       = 0ULL;
     std::uint64_t orphan_octets     = 0ULL;
     std::uint64_t oversize_dropped  = 0ULL;
+    std::uint64_t bad_version       = 0ULL; //!< packet headers of a version other than '000', their length not trusted
     std::uint64_t nWrongChannel     = 0ULL;
     std::uint64_t nMissingKey       = 0ULL;
     std::uint64_t nSyncFlagSet      = 0ULL;
@@ -136,6 +139,7 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
         bad_pointer       = total.bad_pointer;
         orphan_octets     = total.orphan_octets;
         oversize_dropped  = total.oversize_dropped;
+        bad_version       = total.bad_version;
     }
 
     void stop() {
@@ -144,7 +148,7 @@ struct SpacePacketExtract : Block<SpacePacketExtract> {
         }
         nUndelivered += _pending.size();
         syncCounters();
-        detail::reportCounters(*this, "SpacePacketExtract", {{"packets", packets}, {"idle packets", idle_packets}, {"idle frames", idle_frames}, {"frames lost", frames_lost}, {"duplicate frames", duplicate_frames}, {"fragments dropped", fragments_dropped}, {"pointer mismatch", pointer_mismatch}, {"bad pointer", bad_pointer}, {"orphan octets", orphan_octets}, {"oversize dropped", oversize_dropped}, {"wrong channel", nWrongChannel}, {"missing key", nMissingKey}, {"sync flag set", nSyncFlagSet}, {"undelivered packets", nUndelivered}, {"pending packets discarded", nDiscardedPending}});
+        detail::reportCounters(*this, "SpacePacketExtract", {{"packets", packets}, {"idle packets", idle_packets}, {"idle frames", idle_frames}, {"frames lost", frames_lost}, {"duplicate frames", duplicate_frames}, {"fragments dropped", fragments_dropped}, {"pointer mismatch", pointer_mismatch}, {"bad pointer", bad_pointer}, {"orphan octets", orphan_octets}, {"oversize dropped", oversize_dropped}, {"bad version", bad_version}, {"wrong channel", nWrongChannel}, {"missing key", nMissingKey}, {"sync flag set", nSyncFlagSet}, {"undelivered packets", nUndelivered}, {"pending packets discarded", nDiscardedPending}});
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
@@ -273,13 +277,13 @@ struct SpacePacketDecode : Block<SpacePacketDecode> {
                 ++nRefusedShort;
                 continue;
             }
-            gr::ccsds::SpacePacketHeader header{};
-            const gr::ccsds::ParseStatus status = gr::ccsds::parseSpacePacketHeader(bytes, header);
-            if (status == gr::ccsds::ParseStatus::bad_version) {
-                ++nWrongVersion;
+            const auto parsed = gr::ccsds::parseSpacePacketHeader(bytes);
+            if (!parsed.has_value()) {
+                ++(parsed.error() == gr::ccsds::ParseStatus::bad_version ? nWrongVersion : nRefusedShort);
                 continue;
             }
-            const std::size_t total = gr::ccsds::totalPacketOctets(header);
+            const gr::ccsds::SpacePacketHeader& header = *parsed;
+            const std::size_t                   total  = gr::ccsds::totalPacketOctets(header);
             if (total != bytes.size()) {
                 ++nLengthMismatch;
                 continue;
@@ -432,18 +436,16 @@ struct SpacePacketEncode : Block<SpacePacketEncode> {
 
             const std::uint16_t seqCount = _sequenceCounters[resolvedApid];
 
-            gr::ccsds::SpacePacketHeader header{};
-            gr::ccsds::WriteStatus       status = gr::ccsds::headerForPayload(static_cast<std::uint16_t>(resolvedApid), resolvedType, resolvedSecHdr, static_cast<std::uint8_t>(resolvedSeqFlags), seqCount, payloadOctets, header);
-
-            DataSet<std::uint8_t> packet;
-            packet.signal_values.resize(gr::ccsds::kSpacePacketHeaderSize + payloadOctets);
-            if (status == gr::ccsds::WriteStatus::ok) {
-                status = gr::ccsds::writeSpacePacketHeader(header, std::span<std::uint8_t>(packet.signal_values));
-            }
-            if (status != gr::ccsds::WriteStatus::ok) { // an all-zero header would describe a packet that was never built
+            const auto header = gr::ccsds::headerForPayload(static_cast<std::uint16_t>(resolvedApid), resolvedType, resolvedSecHdr, static_cast<std::uint8_t>(resolvedSeqFlags), seqCount, payloadOctets);
+            const auto octets = header.and_then([](const gr::ccsds::SpacePacketHeader& h) { return gr::ccsds::writeSpacePacketHeader(h); });
+            if (!octets.has_value()) { // an all-zero header would describe a packet that was never built
                 ++nRefusedHeader;
                 continue;
             }
+
+            DataSet<std::uint8_t> packet;
+            packet.signal_values.resize(gr::ccsds::kSpacePacketHeaderSize + payloadOctets);
+            std::ranges::copy(*octets, packet.signal_values.begin());
             // the count advances per packet emitted, so a refused record leaves the next one's number unchanged
             _sequenceCounters[resolvedApid] = static_cast<std::uint16_t>((seqCount + 1U) % 16384U);
             std::ranges::copy(record.signal_values, packet.signal_values.begin() + static_cast<std::ptrdiff_t>(gr::ccsds::kSpacePacketHeaderSize));
@@ -671,13 +673,11 @@ private:
 
         bool filledWithIdlePacket = false;
         if (wasEmpty && fill.value == "idle_packet" && zone_length.value >= gr::ccsds::kSpacePacketHeaderSize) {
-            gr::ccsds::SpacePacketHeader header{};
-            std::vector<std::uint8_t>    idlePacket(zone_length.value, std::uint8_t{0U});
-            gr::ccsds::WriteStatus       status = gr::ccsds::headerForPayload(static_cast<std::uint16_t>(idle_apid.value), false, false, 3U, 0U, zone_length.value - gr::ccsds::kSpacePacketHeaderSize, header);
-            if (status == gr::ccsds::WriteStatus::ok) {
-                status = gr::ccsds::writeSpacePacketHeader(header, std::span<std::uint8_t>(idlePacket));
-            }
-            if (status == gr::ccsds::WriteStatus::ok) {
+            const auto header = gr::ccsds::headerForPayload(static_cast<std::uint16_t>(idle_apid.value), false, false, 3U, 0U, zone_length.value - gr::ccsds::kSpacePacketHeaderSize);
+            const auto octets = header.and_then([](const gr::ccsds::SpacePacketHeader& h) { return gr::ccsds::writeSpacePacketHeader(h); });
+            if (octets.has_value()) {
+                std::vector<std::uint8_t> idlePacket(zone_length.value, std::uint8_t{0U});
+                std::ranges::copy(*octets, idlePacket.begin());
                 _buffer.insert(_buffer.end(), idlePacket.begin(), idlePacket.end());
                 filledWithIdlePacket = true;
             } else { // a zone too short to hold a packet takes the sequence instead of an unwritten header

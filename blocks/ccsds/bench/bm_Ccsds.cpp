@@ -111,10 +111,9 @@ constexpr std::size_t kFramesPerCall = 256UZ;
     zone.reserve(2046UZ);
     std::uint16_t seq = 0U;
     while (zone.size() + kPacketOctets <= 2046UZ) {
-        gr::ccsds::SpacePacketHeader header{};
-        std::ignore = gr::ccsds::headerForPayload(7U, false, false, 3U, seq++, kPacketOctets - gr::ccsds::kSpacePacketHeaderSize, header);
-        std::vector<std::uint8_t> packet(kPacketOctets, static_cast<std::uint8_t>(seq));
-        std::ignore = gr::ccsds::writeSpacePacketHeader(header, packet);
+        const gr::ccsds::SpacePacketHeader header = gr::ccsds::headerForPayload(7U, false, false, 3U, seq++, kPacketOctets - gr::ccsds::kSpacePacketHeaderSize).value();
+        std::vector<std::uint8_t>          packet(kPacketOctets, static_cast<std::uint8_t>(seq));
+        std::ignore = put(gr::ccsds::writeSpacePacketHeader(header), packet);
         zone.insert(zone.end(), packet.begin(), packet.end());
     }
     return zone;

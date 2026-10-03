@@ -224,25 +224,22 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         {
             SpacePacketHeader         header{.version = 0, .type = false, .secondary_header = false, .apid = 100, .sequence_flags = 3, .sequence_count = 5, .data_length = 0};
             std::vector<std::uint8_t> written(6UZ, 0U);
-            expect(writeSpacePacketHeader(header, written) == WriteStatus::ok);
+            expect(put(writeSpacePacketHeader(header), written));
             expect(that % (written == std::vector<std::uint8_t>{0x00, 0x64, 0xC0, 0x05, 0x00, 0x00}));
             expect(eq(totalPacketOctets(header), std::size_t{7}));
         }
     };
 
     "the minus-one, in numbers"_test = [] {
-        SpacePacketHeader h1{};
-        expect(headerForPayload(1, false, false, 3, 0, 1UZ, h1) == WriteStatus::ok);
+        const SpacePacketHeader h1 = headerForPayload(1, false, false, 3, 0, 1UZ).value();
         expect(eq(h1.data_length, std::uint16_t{0}));
         expect(eq(totalPacketOctets(h1), std::size_t{7}));
 
-        SpacePacketHeader h256{};
-        expect(headerForPayload(1, false, false, 3, 0, 256UZ, h256) == WriteStatus::ok);
+        const SpacePacketHeader h256 = headerForPayload(1, false, false, 3, 0, 256UZ).value();
         expect(eq(h256.data_length, std::uint16_t{255}));
         expect(eq(totalPacketOctets(h256), std::size_t{262}));
 
-        SpacePacketHeader hMax{};
-        expect(headerForPayload(1, false, false, 3, 0, 65536UZ, hMax) == WriteStatus::ok);
+        const SpacePacketHeader hMax = headerForPayload(1, false, false, 3, 0, 65536UZ).value();
         expect(eq(hMax.data_length, std::uint16_t{65535}));
         expect(eq(totalPacketOctets(hMax), std::size_t{65542}));
 
@@ -854,18 +851,16 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         extractor.reset();
         emitted.clear();
         std::vector<std::uint8_t> zone;
-        SpacePacketHeader         real{};
         for (int i = 0; i < 3; ++i) {
-            expect(headerForPayload(10U, false, false, 3U, static_cast<std::uint16_t>(i), 4UZ, real) == WriteStatus::ok);
+            const SpacePacketHeader   real = headerForPayload(10U, false, false, 3U, static_cast<std::uint16_t>(i), 4UZ).value();
             std::vector<std::uint8_t> packet(10UZ, 0U);
-            std::ignore = writeSpacePacketHeader(real, packet);
+            expect(put(writeSpacePacketHeader(real), packet));
             zone.insert(zone.end(), packet.begin(), packet.end());
         }
-        SpacePacketHeader idle{};
         for (int i = 0; i < 2; ++i) {
-            expect(headerForPayload(kIdleApid, false, false, 3U, 0U, 4UZ, idle) == WriteStatus::ok);
+            const SpacePacketHeader   idle = headerForPayload(kIdleApid, false, false, 3U, 0U, 4UZ).value();
             std::vector<std::uint8_t> packet(10UZ, 0U);
-            std::ignore = writeSpacePacketHeader(idle, packet);
+            expect(put(writeSpacePacketHeader(idle), packet));
             zone.insert(zone.end(), packet.begin(), packet.end());
         }
         extractor.feed(zone, 0U, 0U, emit);
@@ -875,18 +870,16 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
 
     "the lost frame between two spanning fragments"_test = [] {
         // build a packet spanning three 50-octet zones, and a second packet immediately behind it
-        SpacePacketHeader big{};
-        expect(headerForPayload(11U, false, false, 3U, 0U, 130UZ, big) == WriteStatus::ok); // 136 octets total, spans 3 zones of 50
+        const SpacePacketHeader   big = headerForPayload(11U, false, false, 3U, 0U, 130UZ).value(); // 136 octets total, spans 3 zones of 50
         std::vector<std::uint8_t> firstPacket(6UZ, 0U);
-        std::ignore = writeSpacePacketHeader(big, firstPacket);
+        expect(put(writeSpacePacketHeader(big), firstPacket));
         firstPacket.resize(136UZ);
         for (std::size_t i = 6UZ; i < firstPacket.size(); ++i) {
             firstPacket[i] = static_cast<std::uint8_t>(i);
         }
-        SpacePacketHeader small{};
-        expect(headerForPayload(12U, false, false, 3U, 0U, 20UZ, small) == WriteStatus::ok);
+        const SpacePacketHeader   small = headerForPayload(12U, false, false, 3U, 0U, 20UZ).value();
         std::vector<std::uint8_t> secondPacket(26UZ, 0U);
-        std::ignore = writeSpacePacketHeader(small, secondPacket);
+        expect(put(writeSpacePacketHeader(small), secondPacket));
         for (std::size_t i = 6UZ; i < secondPacket.size(); ++i) {
             secondPacket[i] = static_cast<std::uint8_t>(0x80U + i);
         }
@@ -941,10 +934,9 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
     };
 
     "split headers reassemble exactly"_test = [] {
-        SpacePacketHeader header{};
-        expect(headerForPayload(5U, false, false, 3U, 0U, 20UZ, header) == WriteStatus::ok);
+        const SpacePacketHeader   header = headerForPayload(5U, false, false, 3U, 0U, 20UZ).value();
         std::vector<std::uint8_t> packet(26UZ, 0U);
-        std::ignore = writeSpacePacketHeader(header, packet);
+        expect(put(writeSpacePacketHeader(header), packet));
         for (std::size_t i = 6UZ; i < packet.size(); ++i) {
             packet[i] = static_cast<std::uint8_t>(i);
         }
@@ -975,13 +967,12 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             expect(eq(emitted.size(), 0UZ));
         }
         {
-            PacketExtractor     extractor;
-            std::vector<Record> emitted;
-            const auto          emit = [&emitted](std::span<const std::uint8_t> p) { emitted.push_back(recordOf(std::vector<std::uint8_t>(p.begin(), p.end()))); };
-            SpacePacketHeader   header{};
-            expect(headerForPayload(9U, false, false, 3U, 0U, 4UZ, header) == WriteStatus::ok);
+            PacketExtractor           extractor;
+            std::vector<Record>       emitted;
+            const auto                emit   = [&emitted](std::span<const std::uint8_t> p) { emitted.push_back(recordOf(std::vector<std::uint8_t>(p.begin(), p.end()))); };
+            const SpacePacketHeader   header = headerForPayload(9U, false, false, 3U, 0U, 4UZ).value();
             std::vector<std::uint8_t> packet(10UZ, 0U);
-            std::ignore = writeSpacePacketHeader(header, packet);
+            expect(put(writeSpacePacketHeader(header), packet));
             std::vector<std::uint8_t> withOrphan;
             withOrphan.reserve(5UZ + packet.size());
             withOrphan.assign(5UZ, 0xAAU);
@@ -999,7 +990,7 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
         header.sequence_flags = 3U;
         header.data_length    = 0xFFFF;
         std::vector<std::uint8_t> zone(6UZ, 0U);
-        std::ignore = writeSpacePacketHeader(header, zone);
+        expect(put(writeSpacePacketHeader(header), zone));
         zone.resize(kMaxPacketOctets, 0U);
 
         {
@@ -1033,10 +1024,9 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             std::vector<Record> packets;
             std::uint16_t       seq = 0U;
             for (const std::size_t length : {7UZ, 8UZ, 100UZ, 1000UZ}) {
-                SpacePacketHeader header{};
-                expect(headerForPayload(3U, false, false, 3U, seq++, length - 6UZ, header) == WriteStatus::ok);
+                const SpacePacketHeader   header = headerForPayload(3U, false, false, 3U, seq++, length - 6UZ).value();
                 std::vector<std::uint8_t> packet(length, 0U);
-                std::ignore = writeSpacePacketHeader(header, packet);
+                expect(put(writeSpacePacketHeader(header), packet));
                 for (std::size_t i = 6UZ; i < length; ++i) {
                     packet[i] = static_cast<std::uint8_t>((i * 7UZ + length) & 0xFFUZ);
                 }
@@ -1045,9 +1035,8 @@ const boost::ut::suite<"CcsdsFrames"> ccsdsFramesTests = [] {
             // enough trailing filler so every real packet is forced through a whole zone without needing a flush
             for (int i = 0; i < 8; ++i) {
                 std::vector<std::uint8_t> filler(1000UZ, static_cast<std::uint8_t>(i));
-                SpacePacketHeader         header{};
-                expect(headerForPayload(3U, false, false, 3U, seq++, filler.size() - 6UZ, header) == WriteStatus::ok);
-                std::ignore = writeSpacePacketHeader(header, filler);
+                const SpacePacketHeader   header = headerForPayload(3U, false, false, 3U, seq++, filler.size() - 6UZ).value();
+                expect(put(writeSpacePacketHeader(header), filler));
                 packets.push_back(recordOf(filler));
             }
 
