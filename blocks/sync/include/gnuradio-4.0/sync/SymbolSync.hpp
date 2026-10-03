@@ -8,10 +8,12 @@
 #include <concepts>
 #include <cstdint>
 #include <cstdio>
+#include <expected>
 #include <format>
 #include <numbers>
 #include <numeric>
 #include <optional>
+#include <source_location>
 #include <span>
 #include <string>
 #include <string_view>
@@ -39,8 +41,8 @@ inline constexpr std::string_view kTimeEstKey = "time_est";
 /// @brief Stream tag: a two-element real tensor `{offset, period}` — `time_est`, plus the average period in input samples per symbol.
 inline constexpr std::string_view kClockEstKey = "clock_est";
 
-/// @brief The polyphase partition this bank runs, under the name the timing machinery knows it by.
-[[nodiscard]] inline std::vector<float> partitionBranchMajor(std::span<const float> prototype, std::size_t arms) { return gr::filter::fir::design::polyphasePartition(prototype, arms); }
+/// @brief The polyphase partition this bank runs, under the name the timing machinery knows it by, or the partition's refusal.
+[[nodiscard]] inline std::expected<std::vector<float>, gr::Error> partitionBranchMajor(std::span<const float> prototype, std::size_t arms, std::source_location location = std::source_location::current()) { return gr::filter::fir::design::polyphasePartition(prototype, arms, location); }
 
 namespace detail {
 
@@ -539,11 +541,19 @@ private:
             // matched-filter residue is well inside the timing error the loop already carries at any usable rolloff.
             std::size_t branch = static_cast<std::size_t>(std::ceil(11.0 * samples_per_symbol));
             branch += branch % 2UZ;
-            prototype = gr::filter::fir::design::rootRaisedCosine(branch * arms - 1UZ, static_cast<double>(arms) * samples_per_symbol, rolloff, static_cast<double>(arms));
+            auto designed = gr::filter::fir::design::rootRaisedCosine(branch * arms - 1UZ, static_cast<double>(arms) * samples_per_symbol, rolloff, static_cast<double>(arms));
+            if (!designed) {
+                throw gr::exception(designed.error().message, designed.error().sourceLocation);
+            }
+            prototype = std::move(*designed);
         }
 
+        auto partitioned = partitionBranchMajor(prototype, arms);
+        if (!partitioned) {
+            throw gr::exception(partitioned.error().message, partitioned.error().sourceLocation);
+        }
         _arms         = arms;
-        _branches     = partitionBranchMajor(prototype, arms);
+        _branches     = std::move(*partitioned);
         _windowLength = _branches.size() / arms;
         _anchorDelay  = _windowLength / 2UZ - 1UZ;
     }

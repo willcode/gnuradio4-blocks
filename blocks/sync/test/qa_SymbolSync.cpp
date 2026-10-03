@@ -248,8 +248,8 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         constexpr std::size_t kArms   = 16UZ;
         constexpr std::size_t kBranch = 12UZ;
 
-        const std::vector<float> prototype = gr::filter::fir::design::rootRaisedCosine(kArms * kBranch - 1UZ, static_cast<double>(kArms) * 3.0, 0.35, static_cast<double>(kArms));
-        const std::vector<float> branches  = gr::blocks::sync::partitionBranchMajor(prototype, kArms);
+        const std::vector<float> prototype = gr::filter::fir::design::rootRaisedCosine(kArms * kBranch - 1UZ, static_cast<double>(kArms) * 3.0, 0.35, static_cast<double>(kArms)).value();
+        const std::vector<float> branches  = gr::blocks::sync::partitionBranchMajor(prototype, kArms).value();
         expect(eq(branches.size(), kArms * kBranch));
 
         std::mt19937                          rng(11U);
@@ -291,7 +291,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         std::vector<float> prototype(kArms * kBranch, 0.f);
         prototype[(kBranch / 2UZ) * kArms] = static_cast<float>(kArms);
 
-        const std::vector<float> branches = gr::blocks::sync::partitionBranchMajor(prototype, kArms);
+        const std::vector<float> branches = gr::blocks::sync::partitionBranchMajor(prototype, kArms).value();
         for (std::size_t m = 0UZ; m < kBranch; ++m) {
             const float expected = m == kBranch / 2UZ - 1UZ ? static_cast<float>(kArms) : 0.f;
             expect(eq(branches[m], expected)) << "branch 0 tap " << m;
@@ -764,7 +764,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
     "the polyphase path matched-filters and still tracks"_test = [] {
         constexpr std::size_t    kSymbols = 4000UZ;
         constexpr int            kSps     = 4;
-        const std::vector<float> shaping  = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(12 * kSps + 1), static_cast<double>(kSps), 0.35);
+        const std::vector<float> shaping  = gr::filter::fir::design::rootRaisedCosine(static_cast<std::size_t>(12 * kSps + 1), static_cast<double>(kSps), 0.35).value();
 
         std::mt19937                       rng(26U);
         std::uniform_int_distribution<int> pick(0, 3);
