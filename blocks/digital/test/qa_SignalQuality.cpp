@@ -138,7 +138,7 @@ void feed(TBlock& block, std::span<const CF> stream, std::span<const std::size_t
 
 /// @brief A noisy QPSK stream at a stated signal-to-noise ratio, for the record-port cases below.
 [[nodiscard]] std::vector<CF> noisyStream(double snrDb, std::size_t count) {
-    const Constellation<float> qpsk    = gr::digital::constellationFromName<float>("qpsk", 4UZ, 0.f, 0U, {}, "power");
+    const Constellation<float> qpsk    = gr::digital::constellationFromName<float>("qpsk", 4UZ, 0.f, 0U, {}, "power").value();
     const auto                 symbols = symbolStream(qpsk, count, 20260901ULL);
     return throughAwgn(std::span<const CF>(symbols), noisePowerAt(snrDb), 4242ULL);
 }
@@ -535,6 +535,16 @@ const boost::ut::suite<"signal quality"> signalQualityTests = [] {
             EvmMeter<float> rejected({{"constellation", std::string("dqpsk")}});
             init(rejected);
         }));
+        {
+            std::string refusal;
+            try {
+                EvmMeter<float> rejected({{"constellation", std::string("dqpsk")}});
+                init(rejected);
+            } catch (const gr::exception& error) {
+                refusal = error.message;
+            }
+            expect(refusal.contains("name must be 'bpsk', 'qpsk', 'psk8', 'psk', 'qam' or 'custom', got 'dqpsk'")) << "the library's reason reaches the caller: " + refusal;
+        }
 
         expect(throws([] {
             SnrEstimator<float> rejected({{"method", std::string("m2m6")}});

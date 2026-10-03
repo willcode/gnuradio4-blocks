@@ -4,8 +4,8 @@
 #include <concepts>
 #include <cstdint>
 #include <span>
-#include <stdexcept>
 #include <string_view>
+#include <utility>
 
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -19,17 +19,17 @@ namespace gr::blocks::digital::detail {
  *
  * Each block owns its own value, built once per settings change from `constellation`, `arity`, `phase_offset`,
  * `label_xor`, `points` and `normalization`, so there is nothing to share between blocks and nothing to reallocate
- * while `work()` is reading it. The naming itself lives beside the kernel in the library; what this adds is the
- * settings types the blocks carry and the failure a block reports, since a graph reports a bad setting as a
- * `gr::exception` rather than as the library's own argument error.
+ * while `work()` is reading it. The naming itself lives beside the kernel in the library. This header adds the
+ * settings types the blocks carry, and `build` throws the library's refusal as the `gr::exception` a settings
+ * application reports.
  */
 template<std::floating_point F>
 [[nodiscard]] gr::digital::Constellation<F> build(std::string_view name, gr::Size_t arity, F phaseOffset, gr::Size_t labelXor, std::span<const F> interleavedPoints, std::string_view normalizationName) {
-    try {
-        return gr::digital::constellationFromName<F>(name, static_cast<std::size_t>(arity), phaseOffset, static_cast<std::uint8_t>(labelXor), interleavedPoints, normalizationName);
-    } catch (const std::invalid_argument& error) {
-        throw gr::exception(error.what());
+    auto named = gr::digital::constellationFromName<F>(name, static_cast<std::size_t>(arity), phaseOffset, static_cast<std::uint8_t>(labelXor), interleavedPoints, normalizationName);
+    if (!named) {
+        throw gr::exception(named.error().message, named.error().sourceLocation);
     }
+    return std::move(*named);
 }
 
 /// @brief The shared documentation of the six settings that name a constellation, quoted by each block that carries them.
