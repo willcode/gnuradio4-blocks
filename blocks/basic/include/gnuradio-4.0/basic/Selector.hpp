@@ -116,7 +116,7 @@ you can set the `backPressure` property to false.
         _internalMappingOutIn.clear();
 
         if (map_in.value.size() != map_out.value.size()) {
-            throw std::invalid_argument("Input and output map need to have the same number of elements");
+            throw gr::exception("Input and output map need to have the same number of elements");
         }
 
         std::set<std::pair<gr::Size_t, gr::Size_t>> duplicateSet{};
@@ -128,14 +128,14 @@ you can set the `backPressure` property to false.
             _internalMappingOutIn[outIdx].push_back(inIdx);
 
             if (!duplicateSet.insert({inIdx, outIdx}).second) { // check for duplicates
-                throw std::invalid_argument(std::format("Duplicate pair (in:{}, out:{}) at i={}", inIdx, outIdx, i));
+                throw gr::exception(std::format("Duplicate pair (in:{}, out:{}) at i={}", inIdx, outIdx, i));
             }
 
             if (inIdx >= n_inputs) { // range checks
-                throw std::invalid_argument(std::format("map_in[{}] = {} is >= n_inputs ({})", i, inIdx, n_inputs));
+                throw gr::exception(std::format("map_in[{}] = {} is >= n_inputs ({})", i, inIdx, n_inputs));
             }
             if (outIdx >= n_outputs) {
-                throw std::invalid_argument(std::format("map_out[{}] = {} is >= n_outputs ({})", i, outIdx, n_outputs));
+                throw gr::exception(std::format("map_out[{}] = {} is >= n_outputs ({})", i, outIdx, n_outputs));
             }
         }
     }

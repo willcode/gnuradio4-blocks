@@ -181,6 +181,15 @@ const boost::ut::suite SelectorTest = [] {
         expect(block._internalMappingInOut == internal_mapping_t{{0U, {outputMap[0]}}, {1U, {outputMap[1]}}});
     };
 
+    "Selector<T> refuses a map entry beyond its port count"_test = [] {
+        Selector<double> block({{"n_inputs", 2U}, {"n_outputs", 2U}, {"map_in", std::vector<gr::Size_t>{0U}}, {"map_out", std::vector<gr::Size_t>{1U}}});
+        block.init(block.progress);
+        expect(eq(block._internalMappingInOut.size(), 1UZ));
+
+        expect(block.settings().setStaged({{"map_in", std::vector<gr::Size_t>{2U}}}).empty());
+        expect(throws<gr::exception>([&block] { std::ignore = block.settings().applyStagedParameters(); })) << "input index 2 with two inputs";
+    };
+
     gr::Tag tag1{1, {{"key1", "value1"}}};
     gr::Tag tag2{2, {{"key2", "value2"}}};
     gr::Tag tag3{3, {{"key3", "value3"}}};
