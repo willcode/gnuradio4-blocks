@@ -96,12 +96,12 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         }
 
         // check for matching test frequency peak
-        ValueType peak = gr::dataset::estimators::getLocationMaximumGaussInterpolated(dataSet);
+        ValueType peak = gr::dataset::estimators::getLocationMaximumGaussInterpolated(dataSet).value();
         expect(approx(peak, ValueType(testFrequency), ValueType(1) / ValueType(N_mag))) << "detected test frequency mismatch";
 
         // plot magnitude spectrum
         std::println("\nplot magnitude spectrum for case: {}->{}", gr::meta::type_name<InType>(), gr::meta::type_name<OutType>());
-        gr::dataset::draw(dataSet, {.chart_width = 130UZ, .chart_height = 28UZ}, 0UZ);
+        expect(gr::dataset::draw(dataSet, {.chart_width = 130UZ, .chart_height = 28UZ}, 0UZ).has_value()) << "the spectrum DataSet draws";
     } | AllTypesToTest{};
 
     "FFT block types tests"_test = [] {
@@ -145,6 +145,20 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
         expect(eq(source1._nSamplesProduced, source1.n_samples_max));
     };
 
+    "a window the FFT size cannot build is refused with the window's message"_test = [] {
+        FFT<float, gr::DataSet<float>> fftBlock{};
+        expect(fftBlock.settings().set({{"fftSize", gr::Size_t{1}}, {"window", std::string("Kaiser")}}).empty());
+        expect(fftBlock.settings().activateContext() != std::nullopt);
+
+        std::string refusal;
+        try {
+            std::ignore = fftBlock.settings().applyStagedParameters();
+        } catch (const gr::exception& e) {
+            refusal = e.message;
+        }
+        expect(refusal.contains("Kaiser window: n must be larger than one")) << std::format("got '{}'", refusal);
+    };
+
     "window function tests"_test = []<typename T>() {
         using InType  = T::InType;
         using OutType = T::OutType;
@@ -177,7 +191,7 @@ const boost::ut::suite<"Fourier Transforms"> fftTests = [] {
             expect(eq(fftBlock._window.size(), N)) << std::format("<{}> equal window vector size", type_name<T>());
             expect(eq(fftBlock.window.value, magic_enum::enum_name(window))) << std::format("<{}> equal window function", type_name<T>());
 
-            std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(window, N);
+            std::vector<value_type> windowFunc = gr::algorithm::window::create<value_type>(window, N).value();
             for (std::size_t i = 0; i < N; i++) {
                 if constexpr (gr::meta::complex_like<InType>) {
                     const auto expValue = static_cast<value_type>(signal[i].real()) * windowFunc[i];

@@ -114,7 +114,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
     FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl{};
     gr::algorithm::window::Type                               _windowType = gr::algorithm::window::Type::Hann;
-    std::vector<value_type>                                   _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
+    std::vector<value_type>                                   _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U).value();
 
     // settings
     const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
@@ -142,7 +142,7 @@ On the choice of window (mathematically aka. apodisation) functions
     U    _dataSetSkeleton{};
     bool _dataSetSkeletonDirty{true};
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& newSettings) noexcept {
+    void settingsChanged(const property_map& /*old_settings*/, const property_map& newSettings) {
         _dataSetSkeletonDirty = true;
 
         if (!newSettings.contains("fftSize") && !newSettings.contains("window")) {
@@ -157,7 +157,9 @@ On the choice of window (mathematically aka. apodisation) functions
         _window.resize(newSize, 0);
 
         _windowType = magic_enum::enum_cast<gr::algorithm::window::Type>(window, magic_enum::case_insensitive).value_or(_windowType);
-        gr::algorithm::window::create(_window, _windowType);
+        if (auto created = gr::algorithm::window::create(_window, _windowType); !created) {
+            throw gr::exception(created.error().message, created.error().sourceLocation);
+        }
 
         // N.B. this should become part of the Fourier transform implementation
         _inData.resize(fftSize, 0);
@@ -185,8 +187,18 @@ On the choice of window (mathematically aka. apodisation) functions
 
         _fftImpl.compute(_inData, std::span<OutDataType>(_outData));
 
-        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, std::move(_magnitudeSpectrum), algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = outputInDb, .shiftSpectrum = true});
-        _phaseSpectrum     = gr::algorithm::fft::computePhaseSpectrum(_outData, std::move(_phaseSpectrum), algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase, .shiftSpectrum = true});
+        auto magnitude = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, std::move(_magnitudeSpectrum), algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = outputInDb, .shiftSpectrum = true});
+        if (!magnitude) {
+            this->emitErrorMessage("processBulk", magnitude.error());
+            return work::Status::ERROR;
+        }
+        _magnitudeSpectrum = std::move(*magnitude);
+        auto phase         = gr::algorithm::fft::computePhaseSpectrum(_outData, std::move(_phaseSpectrum), algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase, .shiftSpectrum = true});
+        if (!phase) {
+            this->emitErrorMessage("processBulk", phase.error());
+            return work::Status::ERROR;
+        }
+        _phaseSpectrum = std::move(*phase);
 
         createDataset(output[0]);
 
