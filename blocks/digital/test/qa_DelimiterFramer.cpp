@@ -529,6 +529,24 @@ const boost::ut::suite<"delimiter framer"> delimiterFramerTests = [] {
         expect(eq(metaSize(run.framed.back(), "stuffing_inserted"), gr::Size_t{1})) << "the insertion after the payload's last item is the one the closing delimiter depends on";
     };
 
+    "an unknown mode name is refused with the parser's message"_test = [] {
+        const auto refusal = [](gr::property_map settings) -> std::string {
+            try {
+                std::ignore = make<DelimiterFramer>(std::move(settings));
+            } catch (const gr::exception& error) {
+                return error.message;
+            }
+            return {};
+        };
+        gr::property_map badOpen    = slipFraming(256U);
+        badOpen["frame_open"]       = std::string("whenever");
+        gr::property_map badStuffer = slipFraming(256U);
+        badStuffer["transparency"]  = std::string("magic");
+
+        expect(refusal(badOpen).contains("frame_open must be 'delimiter', 'start' or 'immediate', got 'whenever'")) << refusal(badOpen);
+        expect(refusal(badStuffer).contains("transparency must be 'none', 'bit_stuffing' or 'byte_escape', got 'magic'")) << refusal(badStuffer);
+    };
+
     "the framer refuses what only an encoder can prove, and counts what it drops"_test = [] {
         const auto staged = [](gr::property_map settings) { std::ignore = make<DelimiterFramer>(std::move(settings)); };
 

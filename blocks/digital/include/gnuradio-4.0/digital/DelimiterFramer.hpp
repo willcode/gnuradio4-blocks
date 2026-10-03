@@ -106,15 +106,19 @@ so a loopback chain can be read frame by frame.
 
     /// @brief Rebuilds the encoder from the settings, refusing everything the framing cannot be.
     void rebuild() {
-        gr::digital::DelimiterConfig cfg;
-        try {
-            cfg.frameOpen    = gr::digital::frameOpenFromName(frame_open.value);
-            cfg.transparency = gr::digital::transparencyFromName(transparency.value);
-            cfg.bitOrder     = bit_order;
-            cfg.packOrder    = payload_bit_order;
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::string(error.what()));
+        const auto frameOpen = gr::digital::frameOpenFromName(frame_open.value);
+        if (!frameOpen) {
+            throw gr::exception(frameOpen.error().message, frameOpen.error().sourceLocation);
         }
+        const auto transparencyMode = gr::digital::transparencyFromName(transparency.value);
+        if (!transparencyMode) {
+            throw gr::exception(transparencyMode.error().message, transparencyMode.error().sourceLocation);
+        }
+        gr::digital::DelimiterConfig cfg;
+        cfg.frameOpen    = *frameOpen;
+        cfg.transparency = *transparencyMode;
+        cfg.bitOrder     = bit_order;
+        cfg.packOrder    = payload_bit_order;
 
         if (cfg.transparency != gr::digital::Transparency::BitStuffing && (stuff_after_ones.value != 5U || abort_ones.value != 7U)) {
             throw gr::exception(std::format("stuff_after_ones and abort_ones belong to 'bit_stuffing' and transparency is '{}', so a value away from the default is a settings error rather than a harmless extra", transparency.value));
@@ -150,11 +154,7 @@ so a loopback chain can be read frame by frame.
             cfg.escapeMap.emplace_back(static_cast<std::uint8_t>(escape_map.value[i]), static_cast<std::uint8_t>(escape_map.value[i + 1UZ]));
         }
 
-        try {
-            gr::digital::framerConfigure(cfg);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::string(error.what()));
-        }
+        gr::digital::framerConfigure(cfg);
 
         _encoder.prepare(std::move(cfg));
         _framed.clear();
