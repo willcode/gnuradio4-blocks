@@ -428,7 +428,7 @@ struct Agreement {
 
 /// @brief Root-raised-cosine shaped BPSK at complex baseband, with a residual carrier offset the receiver must find.
 [[nodiscard]] std::vector<std::complex<float>> bpskBaseband(std::span<const int> symbols, std::size_t samplesPerSymbol, double rolloff, double offsetCyclesPerSample, double phase0) {
-    const auto shape = gr::filter::fir::design::designRootRaisedCosine(8UZ * samplesPerSymbol + 1UZ, static_cast<double>(samplesPerSymbol), 1.0, rolloff, 1.0);
+    const auto shape = gr::filter::fir::design::designRootRaisedCosine(8UZ * samplesPerSymbol + 1UZ, static_cast<double>(samplesPerSymbol), 1.0, rolloff, 1.0).value();
 
     std::vector<float> impulses(symbols.size() * samplesPerSymbol, 0.f);
     for (std::size_t k = 0UZ; k < symbols.size(); ++k) {
@@ -1360,7 +1360,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
 
             // The randomizer, byte for byte. XORing the sequence's bytes MSB first XORs its bits in order.
             gr::digital::ScramblerConfig randomizer{};
-            gr::digital::configureScrambler(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
+            gr::digital::configureScrambler(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U).value(), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
             std::vector<std::uint8_t> randomized(codeblock.size());
             gr::digital::scramble(randomizer, std::span<const std::uint8_t>(codeblock), std::span<std::uint8_t>(randomized));
 
@@ -1447,7 +1447,7 @@ const boost::ut::suite<"recipes"> RecipeTests = [] {
         std::copy_n(frame.begin(), 223UZ, block.begin());
         gr::fec::ReedSolomonCcsds255_223::encode(block, 0UZ);
         gr::digital::ScramblerConfig randomizer{};
-        gr::digital::configureScrambler(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
+        gr::digital::configureScrambler(randomizer, gr::digital::standard::ccsds131, gr::digital::seedFromBitString("11111111", 8U).value(), gr::digital::ScramblerMode::Additive, 8U, gr::digital::BitOrder::MsbFirst);
         std::vector<std::uint8_t> randomized(wireBytes);
         gr::digital::scramble(randomizer, std::span<const std::uint8_t>(block.data(), wireBytes), std::span<std::uint8_t>(randomized));
 
