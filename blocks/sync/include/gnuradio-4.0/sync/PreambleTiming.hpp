@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <expected>
 #include <format>
 #include <span>
 #include <string>
@@ -220,7 +221,13 @@ on the real discriminator stream, and an alternating preamble on a complex strea
                 break;
             }
             for (std::size_t k = 0UZ; k < step; ++k) {
-                observe(static_cast<double>(inSpan[taken + k]));
+                if (const auto observed = observe(static_cast<double>(inSpan[taken + k])); !observed) {
+                    this->emitErrorMessage("processBulk", observed.error());
+                    std::ignore = inSpan.consume(taken + k + 1UZ);
+                    outSpan.publish(made);
+                    statisticSpan.publish(wantStatistic ? made : 0UZ);
+                    return work::Status::ERROR;
+                }
             }
             taken += step;
         }
@@ -245,8 +252,9 @@ private:
 
     [[nodiscard]] std::size_t slotOf(std::uint64_t offset) const noexcept { return offset % _retained; }
 
-    /// @brief One sample into the sliding statistic, and the detector's state machine over what it returns.
-    void observe(double sample) {
+    /// @brief One sample into the sliding statistic, and the detector's state machine over what it returns. A refused
+    /// fit is returned as the error.
+    [[nodiscard]] std::expected<void, gr::Error> observe(double sample) {
         const double        value = _estimator.push(sample);
         const std::uint64_t at    = _pushed;
 
@@ -255,7 +263,7 @@ private:
         ++_pushed;
 
         if (!_estimator.filled()) {
-            return;
+            return {};
         }
         const bool above = value > threshold;
         const bool rose  = above && !_above;
@@ -267,21 +275,22 @@ private:
                 _bestEnd       = at;
             }
             if (at >= _armEnd) {
-                fire();
+                return fire();
             }
-            return;
+            return {};
         }
         if (!rose) {
-            return;
+            return {};
         }
         if (at < _suppressUntil) { // an alternating run inside the payload the last burst carried is not a second burst
             ++nSuppressed;
-            return;
+            return {};
         }
         _arming        = true;
         _bestStatistic = value;
         _bestEnd       = at;
         _armEnd        = at + _estimator.windowLength();
+        return {};
     }
 
     /**
@@ -296,7 +305,7 @@ private:
      * symbol on the old phase, and a differential decoder downstream reads that symbol together with the first of
      * the frame.
      */
-    void fire() {
+    [[nodiscard]] std::expected<void, gr::Error> fire() {
         _arming = false;
 
         const std::size_t   length = _estimator.windowLength();
@@ -306,10 +315,14 @@ private:
             window[k] = _history[slotOf(first + k)];
         }
 
-        const gr::sync::PreambleToneFit fit      = _estimator.fit(std::span<const float>(window));
-        const double                    instant  = static_cast<double>(first) + _estimator.instantAfter(fit.phase, static_cast<double>(length - 1ULL) - _samplesPerSymbol);
-        const auto                      offset   = static_cast<std::uint64_t>(std::llround(instant));
-        const auto                      fraction = static_cast<float>(instant - static_cast<double>(offset));
+        const auto fitted = _estimator.fit(std::span<const float>(window));
+        if (!fitted) {
+            return std::unexpected(fitted.error());
+        }
+        const gr::sync::PreambleToneFit& fit      = *fitted;
+        const double                     instant  = static_cast<double>(first) + _estimator.instantAfter(fit.phase, static_cast<double>(length - 1ULL) - _samplesPerSymbol);
+        const auto                       offset   = static_cast<std::uint64_t>(std::llround(instant));
+        const auto                       fraction = static_cast<float>(instant - static_cast<double>(offset));
 
         // The timing payload alone is inert to everything but a symbol synchronizer. The reserved trigger pair says
         // "a burst starts here", which a framer downstream resynchronizes on, so it is written only where a graph
@@ -328,6 +341,7 @@ private:
 
         ++nDetections;
         _suppressUntil = offset + _holdOff;
+        return {};
     }
 
     /// @brief Publishes every queued tag the sample now being written has reached, at that sample's own output offset.
