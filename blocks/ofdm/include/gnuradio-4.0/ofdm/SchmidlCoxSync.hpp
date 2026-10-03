@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <numbers>
 #include <optional>
@@ -202,7 +203,7 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
         _short    = 0ULL;
         _lastCfo  = 0.;
         _pending.clear();
-        _phasor.configure(0., 0.);
+        std::ignore = _phasor.configure(0., 0.);
     }
 
     /// @brief Take in the arriving input tags at the output index their sample reaches, which is `delaySamples()` later.
@@ -278,7 +279,12 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
         _window.insert(_window.end(), inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(nSamples)));
 
         detect(base, nSamples);
-        emit(base, nSamples, outSpan);
+        if (const auto emitted = emit(base, nSamples, outSpan); !emitted) {
+            this->emitErrorMessage("processBulk", emitted.error());
+            std::ignore = inSpan.consume(0UZ);
+            outSpan.publish(0UZ);
+            return work::Status::ERROR;
+        }
 
         _history.assign(_window.end() - static_cast<std::ptrdiff_t>(_delay), _window.end());
         std::ignore = inSpan.consume(nSamples);
@@ -400,9 +406,10 @@ private:
      * @brief Writes the delayed stream out, splitting it at every tag this call reaches.
      *
      * The forwarded input tags and the block's own detections form one ordered sequence on the port. They are merged
-     * here and not published as each arises. The derotation is re-tuned at exactly the sample its trigger marks.
+     * here and not published as each arises. The derotation is re-tuned at exactly the sample its trigger marks. A
+     * correction the derotator refuses is returned as the error.
      */
-    void emit(std::uint64_t base, std::size_t nSamples, OutputSpanLike auto& outSpan) {
+    [[nodiscard]] std::expected<void, gr::Error> emit(std::uint64_t base, std::size_t nSamples, OutputSpanLike auto& outSpan) {
         std::ranges::stable_sort(_pending, std::ranges::less{}, &PendingTag::at);
 
         const Complex* source   = _window.data();
@@ -429,11 +436,14 @@ private:
             }
             outSpan.publishTag(_pending[k].map, produced);
             if (_pending[k].increment.has_value()) {
-                _phasor.setIncrement(*_pending[k].increment);
+                if (const auto retuned = _phasor.setIncrement(*_pending[k].increment); !retuned) {
+                    return std::unexpected(retuned.error());
+                }
             }
             ++k;
         }
         _pending.erase(_pending.begin(), _pending.begin() + static_cast<std::ptrdiff_t>(k));
+        return {};
     }
 
     void write(const Complex* source, std::size_t count, std::size_t at, OutputSpanLike auto& outSpan) {
