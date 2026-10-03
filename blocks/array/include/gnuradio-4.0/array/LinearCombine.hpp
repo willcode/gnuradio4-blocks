@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <complex>
 #include <cstddef>
+#include <expected>
 #include <format>
 #include <limits>
 #include <optional>
@@ -122,7 +123,10 @@ The block forms the outputs of a span with one matrix product, the span's sample
 
         std::size_t done = 0UZ;
         for (const auto& [at, tensor] : changes) {
-            combine(inputs, outputs, done, at);
+            if (auto combined = combine(inputs, outputs, done, at); !combined) {
+                this->emitErrorMessage("processBulk", combined.error());
+                return work::Status::ERROR;
+            }
             done     = at;
             _refusal = tensor == nullptr ? std::optional<std::string>(std::format("the weights tag at index {} holds no tensor of the block's sample type", inputs[0].streamIndex + at)) : install(*tensor);
             if (_refusal.has_value()) {
@@ -130,7 +134,10 @@ The block forms the outputs of a span with one matrix product, the span's sample
             }
         }
         if (!_refusal.has_value()) {
-            combine(inputs, outputs, done, n);
+            if (auto combined = combine(inputs, outputs, done, n); !combined) {
+                this->emitErrorMessage("processBulk", combined.error());
+                return work::Status::ERROR;
+            }
             done = n;
         }
 
@@ -164,11 +171,11 @@ The block forms the outputs of a span with one matrix product, the span's sample
         return std::nullopt;
     }
 
-    /// Writes outputs [from, to) of every output port from the same input samples.
+    /// Writes outputs [from, to) of every output port from the same input samples, or returns the matrix product's error.
     template<typename TInSpan, typename TOutSpan>
-    void combine(std::span<TInSpan>& inputs, std::span<TOutSpan>& outputs, std::size_t from, std::size_t to) {
+    [[nodiscard]] std::expected<void, gr::Error> combine(std::span<TInSpan>& inputs, std::span<TOutSpan>& outputs, std::size_t from, std::size_t to) {
         if (to <= from) {
-            return;
+            return {};
         }
         const std::size_t length  = to - from;
         const std::size_t nInputs = inputs.size();
@@ -181,13 +188,16 @@ The block forms the outputs of a span with one matrix product, the span's sample
         }
         const std::size_t nOutputs = outputs.size();
         _combined.resize({length, nOutputs});
-        gr::math::gemm(_combined, _samples, _transposed);
+        if (auto product = gr::math::gemm(_combined, _samples, _transposed); !product) {
+            return std::unexpected(product.error());
+        }
         for (std::size_t m = 0UZ; m < nOutputs; ++m) {
             auto& output = outputs[m];
             for (std::size_t l = 0UZ; l < length; ++l) {
                 output[from + l] = _combined[l, m];
             }
         }
+        return {};
     }
 };
 
