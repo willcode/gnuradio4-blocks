@@ -11,6 +11,8 @@
 #include <gnuradio-4.0/algorithm/signal/SignalGeneratorCore.hpp>
 #include <gnuradio-4.0/algorithm/signal/ToneGenerator.hpp>
 
+#include <expected>
+
 #include <magic_enum.hpp>
 #include <magic_enum_utility.hpp>
 
@@ -58,10 +60,10 @@ requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, Parame
 
 template<typename T>
 requires std::is_same_v<T, SignalType> || std::is_same_v<T, ParameterType>
-constexpr T parse(std::string_view name) {
+[[nodiscard]] std::expected<T, gr::Error> parse(std::string_view name) {
     auto type = magic_enum::enum_cast<T>(name, magic_enum::case_insensitive);
     if (!type.has_value()) {
-        throw std::invalid_argument(std::format("parser error, unknown function_generator::{} - '{}'", meta::type_name<T>(), name));
+        return std::unexpected(gr::Error(std::format("parser error, unknown function_generator::{} - '{}'", meta::type_name<T>(), name)));
     }
     return type.value();
 }

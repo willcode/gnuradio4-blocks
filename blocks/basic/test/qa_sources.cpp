@@ -196,6 +196,16 @@ const boost::ut::suite TagTests = [] {
         expect(eq(n_samples, static_cast<std::uint32_t>(sink._nSamplesProduced))) << "Number of samples does not match";
     };
 
+    "function_generator::parse returns an unknown name as an error"_test = [] {
+        using namespace function_generator;
+        expect(parse<SignalType>("linearramp").value_or(Const) == LinearRamp) << "the match ignores case";
+        const std::expected<SignalType, gr::Error> unknown = parse<SignalType>("Square");
+        expect(!unknown.has_value());
+        if (!unknown) {
+            expect(unknown.error().message.ends_with("- 'Square'")) << unknown.error().message;
+        }
+    };
+
     "FunctionGenerator ImChart test"_test = [] {
         using namespace function_generator;
         const std::size_t         N          = 128; // test points
