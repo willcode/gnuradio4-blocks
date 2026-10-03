@@ -34,6 +34,7 @@ if(GR4_NETWORK_HAVE_LIBZMQ)
     PRIVATE gnuradio-core
             gnuradio4::gr-basic
             gnuradio4::GrBasicBlocksShared
+            gnuradio4::GrMathBlocksShared
             gnuradio4::GrNetworkBlocksShared)
   target_compile_definitions(qa_StreamPacketGraphs
                              PRIVATE EXAMPLE_GRAPHS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../examples")
