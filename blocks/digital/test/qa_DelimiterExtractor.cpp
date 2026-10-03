@@ -686,6 +686,24 @@ const boost::ut::suite<"delimiter extractor"> delimiterExtractorTests = [] {
         }
     };
 
+    "an unknown mode name is refused with the parser's message"_test = [] {
+        const auto refusal = [](gr::property_map settings) -> std::string {
+            try {
+                std::ignore = make<DelimiterExtractor<std::uint8_t>>(std::move(settings));
+            } catch (const gr::exception& error) {
+                return error.message;
+            }
+            return {};
+        };
+        gr::property_map badOpen    = byteFraming(16U);
+        badOpen["frame_open"]       = std::string("whenever");
+        gr::property_map badStuffer = byteFraming(16U);
+        badStuffer["transparency"]  = std::string("magic");
+
+        expect(refusal(badOpen).contains("frame_open must be 'delimiter', 'start' or 'immediate', got 'whenever'")) << refusal(badOpen);
+        expect(refusal(badStuffer).contains("transparency must be 'none', 'bit_stuffing' or 'byte_escape', got 'magic'")) << refusal(badStuffer);
+    };
+
     "the settings table is refused row by row"_test = [] {
         using Block       = DelimiterExtractor<std::uint8_t>;
         const auto staged = [](gr::property_map settings) { std::ignore = make<Block>(std::move(settings)); };
