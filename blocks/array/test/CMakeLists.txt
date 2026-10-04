@@ -4,6 +4,7 @@ foreach(
   linear-combine-identity
   linear-combine-subtract
   linear-combine-rotate
+  linear-combine-mixing
   linear-combine-weights-tag
   linear-combine-bad-extents
   covariance-identical

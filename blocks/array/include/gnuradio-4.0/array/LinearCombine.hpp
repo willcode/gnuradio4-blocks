@@ -32,8 +32,8 @@ template<typename T>
     return text.empty() ? std::string("none") : text;
 }
 
-/// The rows x columns matrix a tensor holds: an M x N tensor, or a flat list of M*N entries read row by row.
-/// The error names the tensor's extents and the expected ones.
+/// Writes the rows x columns matrix a tensor holds into `matrix`: an M x N tensor, or a flat list of M*N entries read
+/// row by row. The error names the tensor's extents and the expected ones and leaves `matrix` unchanged.
 template<typename T>
 [[nodiscard]] std::optional<std::string> toMatrix(const gr::Tensor<T>& tensor, std::size_t rows, std::size_t columns, std::string_view name, gr::Tensor<T>& matrix) {
     const bool square = tensor.rank() == 2UZ && tensor.extent(0) == rows && tensor.extent(1) == columns;
@@ -72,9 +72,9 @@ The block forms the outputs of a span with one matrix product, the span's sample
     GR_MAKE_REFLECTABLE(LinearCombine, in, out, n_inputs, n_outputs, weights);
 
     bool                       _running = false;
-    gr::Tensor<T>              _transposed{}; ///< N x M, the transpose of the weights in force
-    gr::Tensor<T>              _samples{};    ///< L x N, one row per sample index of a span
-    gr::Tensor<T>              _combined{};   ///< L x M, one row per sample index of a span
+    gr::Tensor<T>              _weights{};  ///< M x N, the weights in force
+    gr::Tensor<T>              _samples{};  ///< L x N, one row per sample index of a span
+    gr::Tensor<T>              _combined{}; ///< L x M, one row per sample index of a span
     std::optional<std::string> _refusal{};
 
     void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
@@ -155,21 +155,7 @@ The block forms the outputs of a span with one matrix product, the span's sample
     }
 
     /// Takes `tensor` as the weights in force, or returns the error that refuses it and keeps the weights.
-    [[nodiscard]] std::optional<std::string> install(const gr::Tensor<T>& tensor) {
-        const std::size_t nOutputs = out.size();
-        const std::size_t nInputs  = in.size();
-        gr::Tensor<T>     matrix;
-        if (auto refusal = detail::toMatrix(tensor, nOutputs, nInputs, "weights", matrix); refusal.has_value()) {
-            return refusal;
-        }
-        _transposed.resize({nInputs, nOutputs});
-        for (std::size_t m = 0UZ; m < nOutputs; ++m) {
-            for (std::size_t n = 0UZ; n < nInputs; ++n) {
-                _transposed[n, m] = matrix[m, n];
-            }
-        }
-        return std::nullopt;
-    }
+    [[nodiscard]] std::optional<std::string> install(const gr::Tensor<T>& tensor) { return detail::toMatrix(tensor, out.size(), in.size(), "weights", _weights); }
 
     /// Writes outputs [from, to) of every output port from the same input samples, or returns the matrix product's error.
     template<typename TInSpan, typename TOutSpan>
@@ -188,7 +174,7 @@ The block forms the outputs of a span with one matrix product, the span's sample
         }
         const std::size_t nOutputs = outputs.size();
         _combined.resize({length, nOutputs});
-        if (auto product = gr::math::gemm(_combined, _samples, _transposed); !product) {
+        if (auto product = gr::math::gemm<gr::math::TransposeOp::NoTrans, gr::math::TransposeOp::Trans>(_combined, _samples, _weights); !product) {
             return std::unexpected(product.error());
         }
         for (std::size_t m = 0UZ; m < nOutputs; ++m) {

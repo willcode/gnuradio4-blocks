@@ -1,0 +1,60 @@
+# Three inputs into two outputs through complex weights, flat row by row:
+#   row 0 (1, j, 0) gives in0 + j*in1, row 1 (2, 0, -j) gives 2*in0 - j*in2.
+#   index 0: in (1, 2, j)       out0 1 + 2j = (1,2)          out1 2 + 1 = (3,0)
+#   index 1: in (j, 1+j, 3)     out0 j + j - 1 = (-1,2)      out1 2j - 3j = (0,-1)
+#   index 2: in (-1, -2j, 1+j)  out0 -1 + 2 = (1,0)          out1 -2 - j + 1 = (-1,-1)
+# The same entries read column by column, or conjugated, give other outputs.
+blocks:
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_0
+      values: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 1.0)
+        - (-1.0, 0.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_1
+      values: !!complex32
+        - (2.0, 0.0)
+        - (1.0, 1.0)
+        - (0.0, -2.0)
+  - id: gr::blocks::testing::VectorSource<complex<float32>>
+    parameters:
+      name: input_2
+      values: !!complex32
+        - (0.0, 1.0)
+        - (3.0, 0.0)
+        - (1.0, 1.0)
+  - id: gr::blocks::array::LinearCombine<complex<float32>>
+    parameters:
+      name: combine
+      n_inputs: !!uint32 3
+      n_outputs: !!uint32 2
+      weights: !!complex32
+        - (1.0, 0.0)
+        - (0.0, 1.0)
+        - (0.0, 0.0)
+        - (2.0, 0.0)
+        - (0.0, 0.0)
+        - (0.0, -1.0)
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: output_0
+      expected: !!complex32
+        - (1.0, 2.0)
+        - (-1.0, 2.0)
+        - (1.0, 0.0)
+  - id: gr::blocks::testing::ExpectSink<complex<float32>>
+    parameters:
+      name: output_1
+      expected: !!complex32
+        - (3.0, 0.0)
+        - (0.0, -1.0)
+        - (-1.0, -1.0)
+connections:
+  - [input_0, out, combine, "in#0"]
+  - [input_1, out, combine, "in#1"]
+  - [input_2, out, combine, "in#2"]
+  - [combine, "out#0", output_0, in]
+  - [combine, "out#1", output_1, in]
