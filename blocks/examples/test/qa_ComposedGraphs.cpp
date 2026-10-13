@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
@@ -55,6 +56,15 @@
 #include <gnuradio-4.0/recipes/FskDemodAudio.hpp>
 #include <gnuradio-4.0/recipes/KissFileRead.hpp>
 #include <gnuradio-4.0/recipes/KissFileWrite.hpp>
+
+#include <gnuradio-4.0/GrAnalogBlocks.hpp>
+#include <gnuradio-4.0/GrAx25Blocks.hpp>
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrDigitalBlocks.hpp>
+#include <gnuradio-4.0/GrFileIoBlocks.hpp>
+#include <gnuradio-4.0/GrFilterBlocks.hpp>
+#include <gnuradio-4.0/GrMathBlocks.hpp>
+#include <gnuradio-4.0/GrSyncBlocks.hpp>
 
 /*
  * The tests run composed graphs end to end. One graph is a packet-radio APRS link closed through the KISS file sink and
@@ -1404,12 +1414,33 @@ enum class PassChannel { none, noiseOnly, passOnly, corrected, uncorrected };
         bits.coded);
 }
 
+/// @brief Enters the blocks of the families the recipes name into the global registry.
+///
+/// A recipe names its blocks by id, and the loader finds them in the registry. Each block library registers its blocks
+/// when it is loaded. An as-needed link leaves out a shared library that supplies no symbol the binary uses. A static
+/// link leaves out an archive member that supplies none. The blocks of a library left out are never registered. The
+/// call to each library's init function takes a symbol from it and registers its blocks. A block registered twice keeps
+/// one entry.
+void registerRecipeFamilies() {
+    gr::BlockRegistry& registry = gr::globalBlockRegistry();
+    gr::blocklib::initGrAnalogBlocks(registry);
+    gr::blocklib::initGrAx25Blocks(registry);
+    gr::blocklib::initGrBasicBlocks(registry);
+    gr::blocklib::initGrDigitalBlocks(registry);
+    gr::blocklib::initGrFileIoBlocks(registry);
+    gr::blocklib::initGrFilterBlocks(registry);
+    gr::blocklib::initGrMathBlocks(registry);
+    gr::blocklib::initGrSyncBlocks(registry);
+}
+
 } // namespace qa_composed_graphs
 
 using namespace qa_composed_graphs;
 
 const boost::ut::suite<"ComposedGraphs"> composedGraphs = [] {
     using namespace boost::ut;
+
+    registerRecipeFamilies();
 
     // A hundred APRS frames out through the tone pair and back in, closed at the KISS file
     "the APRS graph returns every frame at 20 dB, and the KISS file holds what was sent"_test = [] {
