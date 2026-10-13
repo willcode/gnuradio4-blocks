@@ -6,11 +6,9 @@ foreach(
   linear-combine-rotate
   linear-combine-mixing
   linear-combine-weights-tag
-  linear-combine-bad-extents
   covariance-identical
   covariance-quadrature
   covariance-exponential
-  covariance-conjugate-mismatch
   calibration-gain-delay)
   string(
     REPLACE "-"
@@ -23,10 +21,21 @@ foreach(
     PLUGIN_DIRS
     $<TARGET_FILE_DIR:GrArrayBlocksShared>)
 endforeach()
-set_tests_properties(graph_array_linear_combine_bad_extents
-                     PROPERTIES PASS_REGULAR_EXPRESSION "weights of extents 3 disagree with 1 outputs by 2 inputs")
-set_tests_properties(graph_array_covariance_conjugate_mismatch
-                     PROPERTIES PASS_REGULAR_EXPRESSION "value 1 of DataSet 0 is \\(0-1i\\), expected \\(0\\+1i\\)")
+# these two graphs end with an error; each case passes when the output holds the error's text
+gr_add_graph_test(
+  graph_array_linear_combine_bad_extents
+  graphs/linear-combine-bad-extents.yaml
+  PASS_REGULAR_EXPRESSION
+  "weights of extents 3 disagree with 1 outputs by 2 inputs"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrArrayBlocksShared>)
+gr_add_graph_test(
+  graph_array_covariance_conjugate_mismatch
+  graphs/covariance-conjugate-mismatch.yaml
+  PASS_REGULAR_EXPRESSION
+  "value 1 of DataSet 0 is \\(0-1i\\), expected \\(0\\+1i\\)"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrArrayBlocksShared>)
 
 # ArraySource steered and nulled by LinearCombine, its magnitude taken by the math family
 gr_add_graph_test(

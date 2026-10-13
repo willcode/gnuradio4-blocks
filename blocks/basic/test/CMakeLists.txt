@@ -75,15 +75,6 @@ gr_add_graph_test(
   $<TARGET_FILE_DIR:GrFileIoBlocksShared>
   SET
   "player.file_name=${_interleaveRecording}")
-set_tests_properties(graph_basic_deinterleave_sigmf_read PROPERTIES DEPENDS graph_basic_interleave_sigmf_write)
-add_test(NAME graph_basic_interleave_sigmf_meta COMMAND grep -Eq "\"core:num_channels\": *2([^0-9]|$)"
-                                                        "${_interleaveRecording}.sigmf-meta")
-set_tests_properties(
-  graph_basic_interleave_sigmf_meta
-  PROPERTIES DEPENDS
-             graph_basic_interleave_sigmf_write
-             LABELS
-             graph)
 gr_add_graph_test(
   graph_basic_deinterleave_tag
   graphs/deinterleave-tag.yaml
@@ -92,17 +83,27 @@ gr_add_graph_test(
 gr_add_graph_test(
   graph_basic_deinterleave_count_mismatch
   graphs/deinterleave-count-mismatch.yaml
+  PASS_REGULAR_EXPRESSION
+  "the stream carries 2 channels and the block has 3 outputs"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrBasicBlocksShared>
   $<TARGET_FILE_DIR:GrFileIoBlocksShared>
   SET
   "player.file_name=${_interleaveRecording}")
-set_tests_properties(
-  graph_basic_deinterleave_count_mismatch
-  PROPERTIES DEPENDS
-             graph_basic_interleave_sigmf_write
-             PASS_REGULAR_EXPRESSION
-             "the stream carries 2 channels and the block has 3 outputs")
+# The two reading cases and the metadata check read the recording the write case makes. gr_add_graph_test registers the
+# write case only where it finds rungraph.
+if(TEST graph_basic_interleave_sigmf_write)
+  set_tests_properties(graph_basic_deinterleave_sigmf_read graph_basic_deinterleave_count_mismatch
+                       PROPERTIES DEPENDS graph_basic_interleave_sigmf_write)
+  add_test(NAME graph_basic_interleave_sigmf_meta COMMAND grep -Eq "\"core:num_channels\": *2([^0-9]|$)"
+                                                          "${_interleaveRecording}.sigmf-meta")
+  set_tests_properties(
+    graph_basic_interleave_sigmf_meta
+    PROPERTIES DEPENDS
+               graph_basic_interleave_sigmf_write
+               LABELS
+               graph)
+endif()
 
 # SampleDelay forwards the tags it holds past its last output at the end-of-stream index
 gr_add_graph_test(

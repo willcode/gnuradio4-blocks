@@ -76,9 +76,7 @@ foreach(
   stream-differentiate
   stream-multiply-by-matrix
   stream-dot-product
-  stream-tags
-  stream-matrix-bad-extents
-  stream-dot-product-empty)
+  stream-tags)
   string(
     REPLACE "-"
             "_"
@@ -90,10 +88,21 @@ foreach(
     PLUGIN_DIRS
     $<TARGET_FILE_DIR:GrMathBlocksShared>)
 endforeach()
-set_tests_properties(graph_math_stream_matrix_bad_extents PROPERTIES PASS_REGULAR_EXPRESSION
-                                                                     "matrix of extents 6 does not divide into rows 4")
-set_tests_properties(graph_math_stream_dot_product_empty
-                     PROPERTIES PASS_REGULAR_EXPRESSION "vector of extents 0 is not 1-D with at least one entry")
+# these two graphs end with an error; each case passes when the output holds the error's text
+gr_add_graph_test(
+  graph_math_stream_matrix_bad_extents
+  graphs/stream-matrix-bad-extents.yaml
+  PASS_REGULAR_EXPRESSION
+  "matrix of extents 6 does not divide into rows 4"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrMathBlocksShared>)
+gr_add_graph_test(
+  graph_math_stream_dot_product_empty
+  graphs/stream-dot-product-empty.yaml
+  PASS_REGULAR_EXPRESSION
+  "vector of extents 0 is not 1-D with at least one entry"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrMathBlocksShared>)
 
 # the bit packers forward the tags past their last input at the end-of-stream index
 gr_add_graph_test(
