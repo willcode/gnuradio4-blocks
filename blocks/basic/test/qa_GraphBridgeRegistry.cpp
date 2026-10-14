@@ -15,12 +15,16 @@
 #include <tuple>
 #include <vector>
 
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph_yaml_importer.hpp>
 #include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
 #include <gnuradio-4.0/basic/GraphBridge.hpp>
+
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrMathBlocks.hpp>
 
 // The two halves of one flow graph, in two files and two schedulers. The bridge name both files carry is their only
 // link. The halves arrive through the YAML importer as `gr::Graph`, and neither is reachable here as a typed block.
@@ -101,11 +105,26 @@ struct Runner {
     ~Runner() { stop(); }
 };
 
+/// @brief Enters the blocks of the basic and math families into the global registry.
+///
+/// A graph names its blocks by id, and the loader finds them in the registry. Each block library registers its blocks
+/// when it is loaded. An as-needed link leaves out a shared library that supplies no symbol the binary uses. A static
+/// link leaves out an archive member that supplies none. The blocks of a library left out are never registered. The
+/// call to each library's init function takes a symbol from it and registers its blocks. A block registered twice keeps
+/// one entry.
+void registerGraphFamilies() {
+    gr::BlockRegistry& registry = gr::globalBlockRegistry();
+    gr::blocklib::initGrBasicBlocks(registry);
+    gr::blocklib::initGrMathBlocks(registry);
+}
+
 } // namespace
 
 const boost::ut::suite<"graph bridge registry"> bridgeRegistryTests = [] {
     using namespace boost::ut;
     using namespace gr::blocks::basic;
+
+    registerGraphFamilies();
 
     "two loaded graphs joined only by the bridge name carry the stream across"_test = [] {
         constexpr std::string_view kBridge = "qa_bridge_stream";

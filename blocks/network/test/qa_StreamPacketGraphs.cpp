@@ -25,6 +25,10 @@
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
 
+#include <gnuradio-4.0/GrBasicBlocks.hpp>
+#include <gnuradio-4.0/GrMathBlocks.hpp>
+#include <gnuradio-4.0/GrNetworkBlocks.hpp>
+
 // The module's example graphs, run as what they describe: two halves of one flowgraph, in two schedulers, talking
 // over a socket. They are loaded through the tree's own YAML importer, which is the route a graph editor and a host
 // application take, so an example that no longer loads fails here rather than in front of a new user.
@@ -93,11 +97,27 @@ struct Runner {
     ~Runner() { stop(); }
 };
 
+/// @brief Enters the blocks of the basic, math and network families into the global registry.
+///
+/// A graph names its blocks by id, and the loader finds them in the registry. Each block library registers its blocks
+/// when it is loaded. An as-needed link leaves out a shared library that supplies no symbol the binary uses. A static
+/// link leaves out an archive member that supplies none. The blocks of a library left out are never registered. The
+/// call to each library's init function takes a symbol from it and registers its blocks. A block registered twice keeps
+/// one entry.
+void registerGraphFamilies() {
+    gr::BlockRegistry& registry = gr::globalBlockRegistry();
+    gr::blocklib::initGrBasicBlocks(registry);
+    gr::blocklib::initGrMathBlocks(registry);
+    gr::blocklib::initGrNetworkBlocks(registry);
+}
+
 } // namespace
 
 const boost::ut::suite<"stream link example graphs"> streamLinkExampleTests = [] {
     using namespace boost::ut;
     using namespace gr::blocks::basic;
+
+    registerGraphFamilies();
 
     // Both halves carry the message pair beside the stream pair, so this also gates the case a unit test cannot
     // reach: two blocks whose only ports are the framework's message ports, inside a running graph.
