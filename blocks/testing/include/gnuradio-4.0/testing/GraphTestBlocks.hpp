@@ -258,8 +258,8 @@ struct ExpectDataSetSink : Block<ExpectDataSetSink<T>> {
 `expected` holds the signal values of every expected DataSet, one after the other. Each DataSet must have the
 extents `extents`, and its values must match the next slice of `expected` within
 `tolerance + relative_tolerance * |expected|`. The first DataSet of other extents and the first value that does
-not match end the run with an error. A stream that ends with a DataSet count other than the length of `expected`
-over the size of one DataSet is the same error.
+not match end the run with an error. A stream with fewer DataSets than `expected` holds ends with an error that
+names both counts. A DataSet past the end of `expected` ends the run with an error that names its index.
 )"">;
 
     PortIn<DataSet<T>, Async> in;
