@@ -18,8 +18,8 @@ files.
 
 Each graph runs with no hardware, no sound device and no display. The
 source is a `SignalGenerator` and the sink a `DataSink` or a `DataSetSink`.
-The header comment of each file names the radio and audio blocks that
-replace them.
+The header comment of `fm_radio_mono.yaml` names the radio and audio blocks
+that replace them.
 
 To listen to a station, copy `fm_radio_mono.yaml` and change its
 `rf_source` entry to a `gr::blocks::sdr::SoapySource<complex<float32>>`
