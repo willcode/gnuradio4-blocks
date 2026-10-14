@@ -61,27 +61,38 @@ set_tests_properties(qa_ExampleGraphs PROPERTIES TIMEOUT 60)
 
 # The composed-graph test uses blocks from most families and instantiates recipes through the generated recipe headers.
 # The shared library of each family a graph names must be loaded. The ids inside a recipe then resolve in the global
-# registry.
-add_ut_test(qa_ComposedGraphs)
-target_link_libraries(
-  qa_ComposedGraphs
-  PRIVATE gnuradio-core
-          gnuradio4::gr-testing
-          gnuradio4::GrAnalogBlocksShared
-          gnuradio4::GrAx25BlocksShared
-          gnuradio4::GrBasicBlocksShared
-          gnuradio4::GrChannelBlocksShared
-          gnuradio4::GrDigitalBlocksShared
-          gnuradio4::GrFecBlocksShared
-          gnuradio4::GrFileIoBlocksShared
-          gnuradio4::GrFilterBlocksShared
-          gnuradio4::GrMathBlocksShared
-          gnuradio4::GrSyncBlocksShared)
-target_include_directories(qa_ComposedGraphs PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../recipes/include")
-# The off-air captures are local to a machine. Their path reaches the test through its environment and not through a
-# graph file. An empty path means the machine has none, and the recording legs report a skip.
-set_property(
-  TEST qa_ComposedGraphs
-  APPEND
-  PROPERTY ENVIRONMENT_MODIFICATION "GR4_SATELLITE_RECORDINGS_DIR=set:${GR4_SATELLITE_RECORDINGS_DIR}")
-set_property(TEST qa_ComposedGraphs PROPERTY SKIP_RETURN_CODE 77)
+# registry. The test is added where the shared library of every family it links exists.
+if(TARGET gnuradio4::GrAnalogBlocksShared
+   AND TARGET gnuradio4::GrAx25BlocksShared
+   AND TARGET gnuradio4::GrBasicBlocksShared
+   AND TARGET gnuradio4::GrChannelBlocksShared
+   AND TARGET gnuradio4::GrDigitalBlocksShared
+   AND TARGET gnuradio4::GrFecBlocksShared
+   AND TARGET gnuradio4::GrFileIoBlocksShared
+   AND TARGET gnuradio4::GrFilterBlocksShared
+   AND TARGET gnuradio4::GrMathBlocksShared
+   AND TARGET gnuradio4::GrSyncBlocksShared)
+  add_ut_test(qa_ComposedGraphs)
+  target_link_libraries(
+    qa_ComposedGraphs
+    PRIVATE gnuradio-core
+            gnuradio4::gr-testing
+            gnuradio4::GrAnalogBlocksShared
+            gnuradio4::GrAx25BlocksShared
+            gnuradio4::GrBasicBlocksShared
+            gnuradio4::GrChannelBlocksShared
+            gnuradio4::GrDigitalBlocksShared
+            gnuradio4::GrFecBlocksShared
+            gnuradio4::GrFileIoBlocksShared
+            gnuradio4::GrFilterBlocksShared
+            gnuradio4::GrMathBlocksShared
+            gnuradio4::GrSyncBlocksShared)
+  target_include_directories(qa_ComposedGraphs PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../recipes/include")
+  # The off-air captures are local to a machine. Their path reaches the test through its environment and not through a
+  # graph file. An empty path means the machine has none, and the recording legs report a skip.
+  set_property(
+    TEST qa_ComposedGraphs
+    APPEND
+    PROPERTY ENVIRONMENT_MODIFICATION "GR4_SATELLITE_RECORDINGS_DIR=set:${GR4_SATELLITE_RECORDINGS_DIR}")
+  set_property(TEST qa_ComposedGraphs PROPERTY SKIP_RETURN_CODE 77)
+endif()
