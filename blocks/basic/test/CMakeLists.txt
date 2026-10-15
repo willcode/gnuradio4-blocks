@@ -8,6 +8,12 @@ add_basic_test(qa_Converter)
 add_basic_test(qa_Selector)
 add_basic_test(qa_sources)
 add_basic_test(qa_DataSink)
+# the registry case looks up sinks whose type the shared block library compiles. Emscripten builds that library as a
+# static archive.
+if(NOT EMSCRIPTEN)
+  add_basic_test(qa_DataSinkRegistry)
+  target_link_libraries(qa_DataSinkRegistry PRIVATE gnuradio4::GrBasicBlocksShared)
+endif()
 add_basic_test(qa_SampleDelay)
 add_basic_test(qa_TriggerBlocks)
 add_basic_test(qa_Throttle)
