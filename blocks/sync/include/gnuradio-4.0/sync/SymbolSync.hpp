@@ -118,8 +118,9 @@ range, one carrying another producer's name, and one whose instant the position 
 and counted, and leave the block in the state it would have been in with no tag at all.
 
 A NaN or infinite timing error, which a NaN or infinite input sample produces, leaves the loop's frequency and phase
-unchanged; `non_finite_errors` counts each such symbol. A period above twice the clamp's upper bound is reset to
-`samples_per_symbol` and counted in `period_resets`.
+unchanged; `non_finite_errors` counts each such symbol. A finite timing error beyond plus or minus 16 is clipped to that
+limit and counted in `clipped_errors`; a clean signal at unit power never reaches it. A period above twice the clamp's
+upper bound is reset to `samples_per_symbol` and counted in `period_resets`.
 )"">;
 
     PortIn<T>                in;
@@ -146,8 +147,9 @@ unchanged; `non_finite_errors` counts each such symbol. A period above twice the
 
     Annotated<gr::Size_t, "non_finite_errors", Doc<"Read-only: symbols whose timing error was NaN or infinite">>   non_finite_errors = 0U;
     Annotated<gr::Size_t, "period_resets", Doc<"Read-only: symbols whose period was reset to samples_per_symbol">> period_resets     = 0U;
+    Annotated<gr::Size_t, "clipped_errors", Doc<"Read-only: symbols whose timing error was clipped to +/-16">>     clipped_errors    = 0U;
 
-    GR_MAKE_REFLECTABLE(SymbolSync, in, out, error, instant_period, average_period, samples_per_symbol, max_deviation, outputs_per_symbol, detector, constellation, arity, detector_gain, noise_bandwidth, damping, interpolator, polyphase_arms, matched_filter_taps, rolloff, trigger, trigger_presets, non_finite_errors, period_resets);
+    GR_MAKE_REFLECTABLE(SymbolSync, in, out, error, instant_period, average_period, samples_per_symbol, max_deviation, outputs_per_symbol, detector, constellation, arity, detector_gain, noise_bandwidth, damping, interpolator, polyphase_arms, matched_filter_taps, rolloff, trigger, trigger_presets, non_finite_errors, period_resets, clipped_errors);
 
     detail::TimingLoop _loop{0.01, 1.0, 1.0, 1.0, 8.0};
     // Tap count follows `interpolator` (mmse6/8/12); the 128 phase steps and the 0.25 design band are
@@ -291,6 +293,7 @@ unchanged; `non_finite_errors` counts each such symbol. A period above twice the
 
         non_finite_errors = 0U;
         period_resets     = 0U;
+        clipped_errors    = 0U;
     }
 
     /// @brief The decision shape a constellation name selects, empty for a name this slicer cannot carry.
@@ -383,11 +386,24 @@ private:
     }
 
     /**
+     * @brief The largest timing error magnitude the loop steps on, in error units.
+     *
+     * The modified M&M and the two slope forms clip at 1 themselves. Each other detector multiplies a difference of two
+     * samples or decisions by a third sample. At unit average symbol power, the outer 4-PAM level, 3/sqrt(5), is the
+     * largest constellation magnitude. A raised-cosine pulse with rolloff 0.2 or more raises a sample to at most 2.08
+     * times that level, the sum of the pulse's magnitudes at half-symbol offsets. A noiseless unit-power signal thus
+     * gives an error of at most 2 * 9/5 * 2.08^2, about 15.6, at any timing offset, and at most about 8.7 for BPSK and
+     * QPSK. The limit of 16 lies just above the 4-PAM bound and at 1.8 times the BPSK and QPSK bound.
+     */
+    static constexpr float kErrorLimit = 16.f;
+
+    /**
      * @brief Steps the loop on `_error` and returns the symbol's period in input samples.
      *
      * The loop's frequency is always finite. A NaN or infinite error does not step the loop: the loop keeps its
      * frequency and phase, the error port carries 0, and `non_finite_errors` counts the symbol. One NaN input sample
-     * makes the error non-finite for each symbol whose window or history holds it.
+     * makes the error non-finite for each symbol whose window or history holds it. A finite error beyond `kErrorLimit`
+     * is clipped to it, and `clipped_errors` counts the symbol.
      *
      * The returned period is finite, positive and bounded. It becomes a sample advance by an integer conversion, and
      * that conversion is undefined for a NaN or for a value past the integer's range. A period above twice the clamp's
@@ -396,6 +412,10 @@ private:
     [[nodiscard]] double nextPeriod() noexcept {
         double instant = _loop.frequency();
         if (std::isfinite(_error)) [[likely]] {
+            if (std::abs(_error) > kErrorLimit) [[unlikely]] {
+                _error         = std::copysign(kErrorLimit, _error);
+                clipped_errors = clipped_errors + 1U;
+            }
             instant = _loop.step(static_cast<double>(_error));
         } else {
             _error            = 0.f;
