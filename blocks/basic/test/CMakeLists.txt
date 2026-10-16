@@ -32,3 +32,5 @@ if(PYTHON_AVAILABLE)
   # the block library compiles PythonBlock<int32_t> and PythonBlock<float> in two units, and a case runs both
   target_link_libraries(qa_PythonBlock PRIVATE Python3::Python Python3::NumPy gnuradio4::GrBasicBlocksShared)
 endif()
+
+gr_add_graph_test(graph_basic_null_head_expect graphs/null-head-expect.yaml)
