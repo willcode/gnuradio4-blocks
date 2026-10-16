@@ -61,6 +61,11 @@ function(set_project_warnings target_name)
     message(STATUS "Setting compiler warning as errors: ${WARNINGS_AS_ERRORS}")
   endif()
 
+  # GCC 14 reports a false out-of-bounds copy in libstdc++'s inlined string code when a unit reads the shared test
+  # precompiled header. It reports the copy under -Warray-bounds and, with that off, under -Wstringop-overflow. The same
+  # unit compiles clean from the plain headers and under GCC 15 and later.
+  set(GCC14_SHARED_PCH "$<AND:$<BOOL:$<TARGET_PROPERTY:GR_QA_SHARED_PCH>>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,15>>")
+
   set(GCC_EXTRA_WARNINGS
       -Wno-dangling-reference # TODO: remove this once the fmt dangling reference bug is fixed
       -Wmisleading-indentation # warn if indentation implies blocks where blocks do not exist
@@ -72,6 +77,8 @@ function(set_project_warnings target_name)
       -Wno-maybe-uninitialized # false positives if asan is enabled:
                                # https://gcc.gnu.org/bugzilla//show_bug.cgi?id=1056h6
       -Wno-tautological-compare # fmt has always true comparisons
+      $<${GCC14_SHARED_PCH}:-Wno-array-bounds>
+      $<${GCC14_SHARED_PCH}:-Wno-stringop-overflow>
       -fconcepts-diagnostics-depth=3
       -Wno-missing-field-initializers # confusing warning which is not what most users expect:
                                       # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96868#c3

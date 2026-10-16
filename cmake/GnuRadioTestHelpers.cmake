@@ -4,6 +4,10 @@
 # shares a single header instead, held by an anchor target that carries the compile options add_ut_test gives its tests.
 option(GR_QA_PCH "Share one precompiled header across the test executables" ON)
 
+# The compile option add_ut_test gives a test target for GR_QA_OPTIMIZATION_LEVEL. gr_pin_test_optimization removes this
+# exact item to leave a target at the build type's own level.
+set(GR_QA_OPTIMIZATION_OPTION "$<$<NOT:$<CONFIG:Debug>>:${GR_QA_OPTIMIZATION_LEVEL}>")
+
 # Builds the anchor target that owns the shared precompiled header. It compiles one trivial translation unit, so the
 # header is its only real output. Its options mirror what add_ut_test gives a test target, because GCC refuses a
 # precompiled header built under different settings -- the optimization level among them -- and CMake pairs the header
@@ -24,8 +28,9 @@ function(gr_qa_add_pch_anchor ANCHOR)
   add_executable(${ANCHOR} EXCLUDE_FROM_ALL "${_stub}")
   if(GR_QA_OPTIMIZATION_LEVEL)
     set_target_properties(${ANCHOR} PROPERTIES GR_QA_REDUCED_OPTIMIZATION ON)
-    target_compile_options(${ANCHOR} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${GR_QA_OPTIMIZATION_LEVEL}>)
+    target_compile_options(${ANCHOR} PRIVATE ${GR_QA_OPTIMIZATION_OPTION})
   endif()
+  set_target_properties(${ANCHOR} PROPERTIES GR_QA_SHARED_PCH ON)
   if(CMAKE_GENERATOR MATCHES "Ninja")
     set_property(TARGET ${ANCHOR} PROPERTY JOB_POOL_COMPILE gr4_heavy_compile)
   endif()
@@ -53,7 +58,8 @@ set(GR_QA_PCH_ONLY_OPTIONS -fpch-instantiate-templates)
 # to be deferred to the end of the directory to see them; gr_pin_test_optimization is one such caller and a bare
 # target_compile_options is another. The check is worth making rather than leaving to the compiler, because CMake passes
 # -Winvalid-pch and this project builds -Werror, so a mismatch stops the build instead of merely compiling slower.
-# Options a target inherits from a linked library are not visible here, and would still reach the compiler.
+# Options a target inherits from a linked library are not visible here, and would still reach the compiler. The anchor
+# and each test given the header carry the GR_QA_SHARED_PCH property, which the warning battery reads.
 function(gr_qa_attach_shared_pch)
   get_target_property(_anchorOptions gr_qa_pch COMPILE_OPTIONS)
   list(REMOVE_ITEM _anchorOptions ${GR_QA_PCH_ONLY_OPTIONS})
@@ -65,7 +71,7 @@ function(gr_qa_attach_shared_pch)
     get_target_property(_testOptions ${_test} COMPILE_OPTIONS)
     list(REMOVE_ITEM _testOptions ${GR_QA_PCH_ONLY_OPTIONS})
     if("${_testOptions}" STREQUAL "${_anchorOptions}")
-      set_target_properties(${_test} PROPERTIES PRECOMPILE_HEADERS_REUSE_FROM gr_qa_pch)
+      set_target_properties(${_test} PROPERTIES PRECOMPILE_HEADERS_REUSE_FROM gr_qa_pch GR_QA_SHARED_PCH ON)
     endif()
   endforeach()
 endfunction()
@@ -92,7 +98,7 @@ function(add_ut_test TEST_NAME)
     # GCC's null-dereference analysis false-positives in libstdc++'s inlined string code below -O2; the warning battery
     # reads this property.
     set_target_properties(${TEST_NAME} PROPERTIES GR_QA_REDUCED_OPTIMIZATION ON)
-    target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${GR_QA_OPTIMIZATION_LEVEL}>)
+    target_compile_options(${TEST_NAME} PRIVATE ${GR_QA_OPTIMIZATION_OPTION})
   endif()
   if(CMAKE_GENERATOR MATCHES "Ninja")
     # Test TUs instantiate whole graphs per file and are the build's memory-heavy class; the width-limited pool keeps
@@ -123,8 +129,21 @@ endfunction()
 # target. Pinning also takes the target off the shared precompiled header, which was built at GR_QA_OPTIMIZATION_LEVEL:
 # gr_qa_attach_shared_pch sees the changed options and leaves the target parsing the headers, which is cheaper than a
 # header of its own for the few tests that pin a level.
+#
+# LEVEL is a compiler option such as -O2, or BUILD_TYPE for the build type's own level: the target drops
+# GR_QA_OPTIMIZATION_LEVEL and adds no level of its own. A cost test of a header-only algorithm pins BUILD_TYPE, so the
+# figure it prints describes the algorithm as the build type compiles it; its bound is loose enough to hold at any
+# level. A Debug build leaves every pinned test unoptimized.
 function(gr_pin_test_optimization TEST_NAME LEVEL)
-  target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${LEVEL}>)
+  if(LEVEL STREQUAL "BUILD_TYPE")
+    get_target_property(_options ${TEST_NAME} COMPILE_OPTIONS)
+    if(_options)
+      list(REMOVE_ITEM _options "${GR_QA_OPTIMIZATION_OPTION}")
+      set_target_properties(${TEST_NAME} PROPERTIES COMPILE_OPTIONS "${_options}")
+    endif()
+  else()
+    target_compile_options(${TEST_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:${LEVEL}>)
+  endif()
   set_target_properties(${TEST_NAME} PROPERTIES GR_QA_REDUCED_OPTIMIZATION OFF)
 endfunction()
 
