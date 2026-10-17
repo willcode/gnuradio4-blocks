@@ -1,0 +1,614 @@
+#ifndef GNURADIO_OFDM_SCHMIDL_COX_SYNC_HPP
+#define GNURADIO_OFDM_SCHMIDL_COX_SYNC_HPP
+
+#include <algorithm>
+#include <bit>
+#include <cmath>
+#include <complex>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <format>
+#include <initializer_list>
+#include <limits>
+#include <numbers>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
+#include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Tag.hpp>
+#include <gnuradio-4.0/annotated.hpp>
+
+#include <gnuradio-4.0/algorithm/signal/Phasor.hpp>
+
+#include <gnuradio-4.0/ofdm/Numerology.hpp>
+
+namespace gr::blocks::ofdm {
+
+GR_REGISTER_BLOCK(gr::blocks::ofdm::SchmidlCoxSync)
+
+namespace detail {
+
+/// @brief The validator of `threshold`: true strictly between 0 and 1.
+inline constexpr auto kThresholdInRange = [](float value) { return value > 0.f && value < 1.f; };
+
+/// @brief The validator of `r_floor`: true above 0.
+inline constexpr auto kRFloorPositive = [](float value) { return value > 0.f; };
+
+} // namespace detail
+
+/**
+ * @brief Estimates coarse frame timing and fractional carrier frequency offset from a repeated-half preamble.
+ *
+ * With `L = fft_len/2`, the block runs two sums over the stream.
+ *
+ *     P(d) = sum_{m=0..L-1} conj(r[d+m]) * r[d+m+L]      R(d) = sum_{m=0..L-1} |r[d+m+L]|^2
+ *
+ * Both are sliding updates. `P(d+1) = P(d) + conj(r[d+L])*r[d+2L] - conj(r[d])*r[d+L]`, and `R` has the matching
+ * update. Each sample costs one complex multiply and one squared magnitude, whatever `fft_len` is. The stream before
+ * its first sample counts as silence. The recurrence is then exact from the first sample and needs no warm-up.
+ *
+ * The block tests `M(d) = |P(d)|^2 / R(d)^2` as `|P(d)|^2 > threshold * R(d)^2`, the same comparison without the
+ * division. `M` forms a plateau at a preamble. The correlation is exact for every `d` from the preamble's first prefix
+ * sample to `cp_len` samples later, and the plateau is `cp_len + 1` samples wide. The block takes the midpoint of the
+ * threshold crossings as the timing instant.
+ *
+ * The trigger goes on the frame's first sample, the first sample of the preamble's own cyclic prefix. It lies
+ * `cp_len/2` before the plateau midpoint. A window `d` holds a pair of repeated samples only for `d` from `L - 1`
+ * samples before the frame's first sample to `cp_len + L - 1` samples after it. A crossing wider than those
+ * `cp_len + fft_len - 1` positions is refused and counted in `nWidePlateaus()`. The sample that ends an accepted
+ * crossing arrives at most `3*fft_len/2 + cp_len - 1` samples after the trigger's sample. `out` lags `in` by that many
+ * samples, and every accepted trigger lands on a sample not yet output, at any chunk size. A detection whose sample
+ * has already been published is dropped and counted in `nLate()`. Placing it later would misalign the frame.
+ *
+ * The output carries each input sample `delaySamples()` samples later. The last `delaySamples()` inputs of a stream
+ * never reach the output, and a tag on one of them leaves at the end-of-stream index. The block drops the trigger keys
+ * of an input tag whose `trigger_name` equals `trigger_label`. Its own detections carry that label. It forwards the
+ * other keys of that tag.
+ *
+ * The tag's `trigger_meta_info` carries `cfo_fractional`, in subcarrier spacings.
+ *
+ *     eps_frac = angle(P(d_opt)) / pi
+ *
+ * `P` correlates samples `L = fft_len/2` apart. A carrier offset of `eps` spacings turns them by
+ * `2*pi*eps*L/fft_len = pi*eps`. The estimate covers `|eps| < 1`. A larger offset aliases into that range.
+ *
+ * `correct_cfo` derotates the output from the trigger onward. At each trigger the phasor takes the new increment and
+ * keeps its phase. The correction is therefore phase-continuous across a re-estimate. A constant phase remains after
+ * the correction.
+ *
+ * `r_floor` is the received energy a trigger needs. `M` is a ratio and reads high where both sums are near zero.
+ * `min_gap` symbols of dead time after a trigger keep a frame from being detected twice. A NaN or infinite sample adds
+ * nothing to either sum. The windows that hold it lose its terms, and later windows are exact.
+ *
+ * Settings may change while the block runs. A change of `fft_len` or `cp_len` sets a new lag and restarts both sums.
+ * The delay line keeps its newest inputs. A longer lag puts zeros ahead of them, and a shorter lag drops the oldest.
+ * Each held tag stays on its sample. A held input tag whose sample is dropped leaves on the next output, and a held
+ * detection whose sample is dropped counts in `nLate()`. A change of `threshold`, `min_gap` or `r_floor` keeps the
+ * delay line, the sums and the held tags. The counters run from `start()` across every change.
+ *
+ * `fft_len` declares its range as `Limits`, a power of two from 8 to 65536. `threshold` declares the open range from 0
+ * to 1, and `r_floor` a positive value. The framework refuses a value outside them before the block sees it, and the
+ * member and `settings().get()` keep the value they held. A NaN is outside every limit and never reaches the member.
+ * The other settings of that application apply. On a tag the refusal is a plain message, and the run goes on. On a
+ * staged change or a Set message it is an error message, which ends a run whose messages nothing reads.
+ * `settings().set()` throws for it at the call and stores none of the call's values.
+ *
+ * The block computes on the settings it last accepted, starting at the defaults, and keeps them apart from its members.
+ * It runs every other check when it applies the settings. An application checks only the settings it changes, against
+ * the accepted values of the others. The block checks `cp_len` against `fft_len`, and an application that changes both
+ * sends them together. An application that fails this check throws and changes nothing the block computes. The block
+ * compares the lag it will compute with the accepted one to decide whether the sums restart. A refused value stays in
+ * its member, and `settings().get()` returns it. The block ignores that member until an application changes it again.
+ * The framework drops a staged value equal to its member before the block sees it. A refused value sent again alone
+ * therefore passes with no refusal and changes nothing. It takes effect only when an application sends it after another
+ * value of its key.
+ *
+ * A reset to defaults restores the values the block had at initialization. In the default context it moves only the
+ * members whose key the constructor or `settings().set()` named and that differ from their defaults. A value staged or
+ * tagged on another key stays, and a reset that moves one of two settings the block checks against each other is
+ * refused when the pair fails the check. A member that holds a refused value equal to its default does not move, and
+ * the block keeps its accepted value.
+ *
+ * A reset to defaults that the block accepts restarts the delay line, the sums and the dead time. The output then
+ * carries `delaySamples()` zeros in place of the inputs the delay line held. A held input tag leaves on the next
+ * output, and a held detection counts in `nLate()`, as when a change of the lag drops their samples. The derotation
+ * stops until the next trigger.
+ */
+struct SchmidlCoxSync : Block<SchmidlCoxSync> {
+    using Description = Doc<"Estimates Schmidl-Cox coarse timing and fractional carrier frequency offset. The block passes the complex stream through one to one, delayed by 3*fft_len/2 + cp_len - 1 samples. The output ends that many samples before the input does, and a tag on one of the last delaySamples() inputs leaves at the end-of-stream index. It tags each frame's first sample with trigger_name and with cfo_fractional in subcarrier spacings, and it can derotate the stream by that estimate. It drops the trigger keys of an input tag whose trigger_name equals its trigger_label. Both sliding sums cost O(1) per sample. The timing instant is the midpoint of the threshold crossings">;
+
+    PortIn<Complex>  in;
+    PortOut<Complex> out;
+
+    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length, a power of two">, detail::FftLengthLimits>                                             fft_len       = 64U;
+    Annotated<gr::Size_t, "cp_len", Visible, Doc<"prefix length of the preamble symbol">>                                                                   cp_len        = 16U;
+    Annotated<float, "threshold", Visible, Doc<"metric level that opens a plateau, in (0, 1)">, Limits<0.f, 1.f, detail::kThresholdInRange>>                threshold     = 0.6f;
+    Annotated<gr::Size_t, "min_gap", Visible, Unit<"symbols">, Doc<"dead time after a trigger, in cp_len + fft_len sample symbols">>                        min_gap       = 1U;
+    Annotated<bool, "correct_cfo", Visible, Doc<"derotate the output by the estimate from the trigger onward">>                                             correct_cfo   = true;
+    Annotated<float, "r_floor", Doc<"least received energy a trigger needs">, Limits<0.f, std::numeric_limits<float>::infinity(), detail::kRFloorPositive>> r_floor       = 1e-9f;
+    Annotated<std::string, "trigger_label", Doc<"the label written under the trigger_name key of the emitted tags">>                                        trigger_label = std::string("ofdm_frame");
+
+    GR_MAKE_REFLECTABLE(SchmidlCoxSync, in, out, fft_len, cp_len, threshold, min_gap, correct_cfo, r_floor, trigger_label);
+
+    /// A tag held until the output reaches its sample. On the block's own detections, `increment` re-tunes the
+    /// derotation at the trigger's sample.
+    struct PendingTag {
+        std::size_t           at{0UZ}; ///< absolute output index
+        property_map          map{};
+        std::optional<double> increment{};
+        bool                  ownDetection{false};
+    };
+
+    /// The settings the block computes on.
+    struct Accepted {
+        gr::Size_t  fftLength  = 0U;
+        gr::Size_t  cpLength   = 0U;
+        float       threshold  = 0.f;
+        gr::Size_t  minGap     = 0U;
+        bool        correctCfo = false;
+        float       rFloor     = 0.f;
+        std::string label{};
+    };
+
+    Accepted                  _accepted = settingsAfter(Accepted{}, [](std::string_view) { return true; });
+    gr::signal::Phasor<float> _phasor{};
+
+    std::vector<Complex>    _history{}; ///< the last `delaySamples()` inputs, which form the delay line
+    std::vector<Complex>    _window{};  ///< `_history` followed by this call's input
+    std::vector<Complex>    _pRing{};   ///< P(d) for recent d; the falling edge reads the midpoint's value here
+    std::vector<PendingTag> _pending{};
+
+    /// The last `L` per-sample terms of each sum. `conj(r[n-L]) * r[n]` is the term P(d) gains at sample `n` and loses
+    /// `L` samples later. `|r[n]|^2` has the same relation to R(d). Keeping the terms halves the multiplies of the
+    /// sliding update. `L` is a power of two, and the index is a mask.
+    std::vector<double> _termRe{};
+    std::vector<double> _termIm{};
+    std::vector<double> _termNorm{};
+
+    double        _pRe      = 0.; ///< the running correlation, held as two scalars
+    double        _pIm      = 0.;
+    double        _r        = 0.;  ///< the running energy of the later half
+    std::size_t   _half     = 0UZ; ///< L = fft_len/2
+    std::size_t   _delay    = 0UZ; ///< 3*fft_len/2 + cp_len - 1
+    std::size_t   _ring     = 0UZ; ///< retained P history, a power of two
+    std::size_t   _mask     = 0UZ;
+    std::size_t   _deadTime = 0UZ; ///< min_gap symbols, in samples
+    std::int64_t  _midShift = 0;   ///< cp_len/2, from the plateau midpoint back to the frame's first sample
+    bool          _above    = false;
+    std::size_t   _riseAt   = 0UZ;
+    std::size_t   _resumeAt = 0UZ; ///< absolute sample index where the dead time ends
+    std::uint64_t _triggers = 0ULL;
+    std::uint64_t _late     = 0ULL;
+    std::uint64_t _short    = 0ULL; ///< crossings too narrow to be a preamble's plateau
+    std::uint64_t _wide     = 0ULL; ///< crossings wider than any preamble's plateau
+    std::size_t   _minWidth = 1UZ;
+    std::size_t   _maxWidth = 1UZ; ///< cp_len + fft_len - 1
+    double        _lastCfo  = 0.;
+    double        _level    = 0.; ///< the accepted `threshold`
+    double        _floor    = 0.; ///< the accepted `r_floor`
+
+    /// @brief The number of samples the output lags the input.
+    [[nodiscard]] std::size_t delaySamples() const noexcept { return _delay; }
+    /// @brief Frames detected over the run.
+    [[nodiscard]] std::uint64_t nTriggers() const noexcept { return _triggers; }
+    /// @brief Detections not placed: the frame began before the stream, or its sample left the delay line first.
+    [[nodiscard]] std::uint64_t nLate() const noexcept { return _late; }
+    /// @brief Threshold crossings too narrow to be a preamble's plateau.
+    [[nodiscard]] std::uint64_t nShortPlateaus() const noexcept { return _short; }
+    /// @brief Threshold crossings wider than any preamble's plateau.
+    [[nodiscard]] std::uint64_t nWidePlateaus() const noexcept { return _wide; }
+    /// @brief The fractional offset of the most recent trigger, in subcarrier spacings.
+    [[nodiscard]] double lastCfoFractional() const noexcept { return _lastCfo; }
+
+    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+        take(settingsAfter(_accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); }));
+    }
+
+    /// @brief Resets the estimator, drops the held tags and restarts the counters. `settingsChanged()` builds the
+    /// estimator when a setting takes a value other than its default. For a block left at its defaults, `start()` builds
+    /// it.
+    void start() {
+        if (_history.empty()) {
+            take(_accepted);
+        }
+        _pending.clear();
+        _triggers = 0ULL;
+        _late     = 0ULL;
+        _short    = 0ULL;
+        _wide     = 0ULL;
+        _lastCfo  = 0.;
+        reset();
+    }
+
+    /// @brief Restarts the delay line, the sums, the dead time and the derotation. Each held input tag leaves on the
+    /// next output, and each held detection counts in `nLate()`.
+    void reset() {
+        std::ranges::fill(_history, Complex{});
+        std::ranges::fill(_termRe, 0.);
+        std::ranges::fill(_termIm, 0.);
+        std::ranges::fill(_termNorm, 0.);
+        _pRe      = 0.;
+        _pIm      = 0.;
+        _r        = 0.;
+        _above    = false;
+        _riseAt   = 0UZ;
+        _resumeAt = 0UZ;
+        // Every held tag sits on a sample of the delay line. At index 0 an input tag leaves on the next output.
+        _late += static_cast<std::uint64_t>(std::ranges::count_if(_pending, &PendingTag::ownDetection));
+        std::erase_if(_pending, [](const PendingTag& tag) { return tag.ownDetection; });
+        for (PendingTag& tag : _pending) {
+            tag.at = 0UZ;
+        }
+        _phasor.configure(0., 0.);
+    }
+
+    /// @brief Holds each arriving input tag for the output index of its sample, `delaySamples()` later.
+    template<typename TInputSpans, typename TOutputSpans>
+    void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
+        if (processedIn == 0UZ) {
+            releaseAtEndOfStream(inputSpans, outputSpans);
+            return;
+        }
+        gr::for_each_reader_span(
+            [this, processedIn](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const auto& [relIndex, tagMap] : span.tags(processedIn)) {
+                    if (relIndex < 0) { // a tag from before this window is one this block has already placed
+                        continue;
+                    }
+                    property_map map = tagMap.get();
+                    dropOwnTrigger(map);
+                    if (!map.empty()) {
+                        _pending.emplace_back(span.streamIndex + static_cast<std::size_t>(relIndex) + _delay, std::move(map), std::nullopt, false);
+                    }
+                }
+            },
+            inputSpans);
+    }
+
+    /**
+     * @brief Publishes every held input tag, and every tag left on the input, at the end-of-stream index.
+     *
+     * The framework's end-of-stream call passes `processedIn` 0 and empty output spans, where offset 0 is the
+     * end-of-stream index. The tags leave in the order of their input samples. The block drops the `end_of_stream` key,
+     * which the framework publishes itself. It drops a held detection, whose frame start is never output.
+     */
+    template<typename TInputSpans, typename TOutputSpans>
+    void releaseAtEndOfStream(TInputSpans& inputSpans, TOutputSpans& outputSpans) {
+        const std::pmr::string endOfStream = static_cast<std::pmr::string>(gr::tag::END_OF_STREAM);
+        gr::for_each_reader_span(
+            [this, &endOfStream](auto& span) {
+                if (!span.isSync || !span.isConnected) {
+                    return;
+                }
+                for (const gr::Tag& tag : span.rawTags) {
+                    if (tag.index < span.streamIndex) { // placed by an earlier call
+                        continue;
+                    }
+                    property_map map = tag.map;
+                    map.erase(endOfStream);
+                    dropOwnTrigger(map);
+                    if (!map.empty()) {
+                        _pending.emplace_back(tag.index + _delay, std::move(map), std::nullopt, false);
+                    }
+                }
+            },
+            inputSpans);
+        std::ranges::stable_sort(_pending, std::ranges::less{}, &PendingTag::at);
+        for (const PendingTag& tag : _pending) {
+            if (!tag.ownDetection) {
+                gr::for_each_writer_span([&tag](auto& span) { span.publishTag(tag.map, 0UZ); }, outputSpans);
+            }
+        }
+        _pending.clear();
+    }
+
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
+        const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
+        if (nSamples == 0UZ) {
+            std::ignore = inSpan.consume(0UZ);
+            outSpan.publish(0UZ);
+            return work::Status::INSUFFICIENT_INPUT_ITEMS;
+        }
+        const std::size_t base = inSpan.streamIndex;
+
+        _window.assign(_history.begin(), _history.end());
+        _window.insert(_window.end(), inSpan.begin(), std::next(inSpan.begin(), static_cast<std::ptrdiff_t>(nSamples)));
+
+        detect(base, nSamples);
+        if (const auto emitted = emit(base, nSamples, outSpan); !emitted) {
+            this->emitErrorMessage("processBulk", emitted.error());
+            std::ignore = inSpan.consume(0UZ);
+            outSpan.publish(0UZ);
+            return work::Status::ERROR;
+        }
+
+        _history.assign(_window.end() - static_cast<std::ptrdiff_t>(_delay), _window.end());
+        std::ignore = inSpan.consume(nSamples);
+        outSpan.publish(nSamples);
+        return work::Status::OK;
+    }
+
+private:
+    /// @brief Removes the trigger keys of an input tag whose `trigger_name` equals `trigger_label`.
+    void dropOwnTrigger(property_map& map) const {
+        const auto  entry = map.find(std::pmr::string(gr::tag::TRIGGER_NAME.shortKey()));
+        const auto* label = entry == map.end() ? nullptr : entry->second.get_if<std::pmr::string>();
+        if (label == nullptr || std::string_view(label->data(), label->size()) != std::string_view(_accepted.label)) {
+            return;
+        }
+        for (const char* key : {gr::tag::TRIGGER_NAME.shortKey(), gr::tag::TRIGGER_TIME.shortKey(), gr::tag::TRIGGER_OFFSET.shortKey(), gr::tag::TRIGGER_META_INFO.shortKey()}) {
+            map.erase(std::pmr::string(key));
+        }
+    }
+
+    /**
+     * @brief Returns @p next with each setting `moved` names taken from its member.
+     *
+     * Every other setting keeps its value in @p next, and the block ignores its member. Throws for a `cp_len` longer than
+     * `fft_len`.
+     */
+    template<typename Moved>
+    [[nodiscard]] Accepted settingsAfter(Accepted next, Moved moved) const {
+        if (moved("fft_len")) {
+            next.fftLength = fft_len.value;
+        }
+        if (moved("cp_len")) {
+            next.cpLength = cp_len.value;
+        }
+        if (moved("threshold")) {
+            next.threshold = threshold.value;
+        }
+        if (moved("min_gap")) {
+            next.minGap = min_gap.value;
+        }
+        if (moved("correct_cfo")) {
+            next.correctCfo = correct_cfo.value;
+        }
+        if (moved("r_floor")) {
+            next.rFloor = r_floor.value;
+        }
+        if (moved("trigger_label")) {
+            next.label = trigger_label.value;
+        }
+        if (next.cpLength > next.fftLength) {
+            throw gr::exception(std::format("cp_len is {} and fft_len is {}: a prefix is a copy of the symbol's own tail and cannot be longer than the symbol", next.cpLength, next.fftLength));
+        }
+        return next;
+    }
+
+    /// @brief Takes @p next as the settings the block computes on. Derives the estimator's values from them and resizes
+    /// the delay line when the lag changes.
+    void take(Accepted next) {
+        _accepted                       = std::move(next);
+        const std::size_t previousDelay = _delay;
+        derive();
+        if (_history.size() != _delay || _termRe.size() != _half) {
+            resize(previousDelay);
+        }
+    }
+
+    /// @brief Derives the lag, the dead time, the ring, the width bounds and the levels from the accepted settings.
+    void derive() noexcept {
+        const auto        fft      = static_cast<std::size_t>(_accepted.fftLength);
+        const auto        cp       = static_cast<std::size_t>(_accepted.cpLength);
+        const std::size_t maxWidth = cp + fft - 1UZ;
+        _half                      = fft / 2UZ;
+        _delay                     = 3UZ * _half + cp - 1UZ;
+        _deadTime                  = std::max(std::size_t{1}, static_cast<std::size_t>(_accepted.minGap) * (cp + fft));
+        _midShift                  = static_cast<std::int64_t>(cp / 2UZ);
+        _level                     = static_cast<double>(_accepted.threshold);
+        _floor                     = static_cast<double>(_accepted.rFloor);
+        // The falling edge reads P at the crossing's midpoint, at most half the widest accepted crossing back. The ring
+        // holds that many values. A power-of-two size turns the per-sample index into a mask.
+        _ring = std::bit_ceil(maxWidth / 2UZ + 1UZ);
+        _mask = _ring - 1UZ;
+        // A repeated-half preamble holds M above any threshold below 1 across its whole prefix. A much narrower
+        // crossing comes from the ratio at the end of a burst, where one sample divided by itself reads as a perfect
+        // correlation. A crossing shorter than half the prefix is refused and counted in nShortPlateaus().
+        _minWidth = cp / 2UZ + 1UZ;
+        _maxWidth = maxWidth;
+    }
+
+    /**
+     * @brief Sizes the delay line and the rings for the derived lag and restarts both sums.
+     *
+     * The delay line keeps its newest inputs, and each held tag moves with its sample. A tag whose sample is dropped
+     * keeps an index below the next output, and `emit()` publishes it on that output. The counters, the dead time and
+     * the derotation continue.
+     */
+    void resize(std::size_t previousDelay) {
+        std::vector<Complex> history(_delay, Complex{});
+        const std::size_t    kept = std::min(previousDelay, _delay);
+        std::copy(_history.end() - static_cast<std::ptrdiff_t>(kept), _history.end(), history.end() - static_cast<std::ptrdiff_t>(kept));
+        _history = std::move(history);
+        for (PendingTag& tag : _pending) {
+            tag.at = tag.at - previousDelay + _delay; // `at` is the sample's index plus the lag, never below the lag
+        }
+        _pRing.assign(_ring, Complex{});
+        _termRe.assign(_half, 0.);
+        _termIm.assign(_half, 0.);
+        _termNorm.assign(_half, 0.);
+        _pRe    = 0.;
+        _pIm    = 0.;
+        _r      = 0.;
+        _above  = false;
+        _riseAt = 0UZ;
+    }
+
+    /// @brief Slides `P` and `R` over the call's samples and turns each plateau into one trigger.
+    void detect(std::size_t base, std::size_t nSamples) {
+        const std::size_t half    = _half;
+        const std::size_t offset  = _delay; // `_window[offset + j]` is input `base + j`
+        const double      floorSq = _floor;
+        const double      level   = _level;
+        const Complex*    window  = _window.data();
+
+        double            pRe      = _pRe;
+        double            pIm      = _pIm;
+        double            r        = _r;
+        const std::size_t termMask = half - 1UZ;
+        double*           termRe   = _termRe.data();
+        double*           termIm   = _termIm.data();
+        double*           termNorm = _termNorm.data();
+
+        for (std::size_t j = 0UZ; j < nSamples; ++j) {
+            // The arriving sample completes the window that starts at `d`. The zeroed history and term rings hold
+            // silence before the stream. The arithmetic is written out in scalars: a `std::complex` multiply calls a
+            // library helper that handles infinities.
+            const double newRe = static_cast<double>(window[offset + j].real());
+            const double newIm = static_cast<double>(window[offset + j].imag());
+            const double midRe = static_cast<double>(window[offset + j - half].real());
+            const double midIm = static_cast<double>(window[offset + j - half].imag());
+
+            double gainRe   = midRe * newRe + midIm * newIm;
+            double gainIm   = midRe * newIm - midIm * newRe;
+            double gainNorm = newRe * newRe + newIm * newIm;
+            if (!std::isfinite(gainRe + gainIm + gainNorm)) {
+                gainRe   = 0.;
+                gainIm   = 0.;
+                gainNorm = 0.;
+            }
+
+            const std::size_t slot = (base + j) & termMask;
+            pRe += gainRe - termRe[slot];
+            pIm += gainIm - termIm[slot];
+            r += gainNorm - termNorm[slot];
+            termRe[slot]   = gainRe;
+            termIm[slot]   = gainIm;
+            termNorm[slot] = gainNorm;
+
+            const std::int64_t d = static_cast<std::int64_t>(base + j) - static_cast<std::int64_t>(2UZ * half) + 1;
+            if (d < 0) {
+                continue;
+            }
+            const auto at    = static_cast<std::size_t>(d);
+            const bool above = r > floorSq && (pRe * pRe + pIm * pIm) > level * r * r;
+            if (above) {
+                if (!_above) {
+                    _above  = true;
+                    _riseAt = at;
+                }
+                // P is stored only inside a plateau, the one place it is read back. Off a plateau the loop makes no
+                // store that could alias its loads.
+                _pRing[at & _mask] = Complex(static_cast<float>(pRe), static_cast<float>(pIm));
+                continue;
+            }
+            if (!_above) {
+                continue;
+            }
+            _pRe   = pRe;
+            _pIm   = pIm;
+            _r     = r;
+            _above = false;
+            close(at, _riseAt);
+        }
+
+        _pRe = pRe;
+        _pIm = pIm;
+        _r   = r;
+    }
+
+    /// @brief Places the trigger of the ended plateau `[riseAt, fallAt)` at the frame's first sample.
+    void close(std::size_t fallAt, std::size_t riseAt) {
+        const std::size_t width = fallAt - riseAt;
+        if (width < _minWidth) {
+            ++_short;
+            return;
+        }
+        if (width > _maxWidth) {
+            ++_wide;
+            return;
+        }
+        const std::size_t middle = riseAt + (width - 1UZ) / 2UZ;
+        const Complex     peak   = _pRing[middle & _mask];
+
+        const std::int64_t start = static_cast<std::int64_t>(middle) - _midShift;
+        if (start < 0) {
+            ++_late; // the frame began before the stream
+            return;
+        }
+        const auto frameAt = static_cast<std::size_t>(start);
+        if (_triggers > 0ULL && frameAt < _resumeAt) {
+            return; // inside the dead time a frame's own structure can reopen the plateau
+        }
+
+        const double eps = std::atan2(static_cast<double>(peak.imag()), static_cast<double>(peak.real())) / std::numbers::pi;
+        _lastCfo         = eps;
+        ++_triggers;
+        _resumeAt = frameAt + _deadTime;
+
+        _pending.emplace_back(frameAt + _delay,
+            property_map{{gr::tag::TRIGGER_NAME.shortKey(), _accepted.label}, //
+                {gr::tag::TRIGGER_OFFSET.shortKey(), 0.f},                    //
+                {gr::tag::TRIGGER_META_INFO.shortKey(), property_map{{"cfo_fractional", static_cast<float>(eps)}, {"plateau_samples", static_cast<gr::Size_t>(width)}}}},
+            _accepted.correctCfo ? std::optional<double>(-std::numbers::pi * eps / static_cast<double>(_half)) : std::nullopt, true);
+    }
+
+    /**
+     * @brief Writes the delayed stream, split at every tag this call reaches.
+     *
+     * The forwarded input tags and the block's own detections go out as one sequence sorted by sample. The derotation
+     * takes its new increment at the sample its trigger marks. A correction that is not finite returns an error.
+     */
+    [[nodiscard]] std::expected<void, gr::Error> emit(std::size_t base, std::size_t nSamples, OutputSpanLike auto& outSpan) {
+        std::ranges::stable_sort(_pending, std::ranges::less{}, &PendingTag::at);
+
+        const Complex* source   = _window.data();
+        std::size_t    produced = 0UZ;
+        std::size_t    k        = 0UZ;
+
+        while (produced < nSamples) {
+            while (k < _pending.size() && _pending[k].at < base + produced) {
+                if (_pending[k].ownDetection) {
+                    ++_late; // its sample has left the delay line, and placing it here would misalign the frame
+                } else {
+                    outSpan.publishTag(_pending[k].map, produced);
+                }
+                ++k;
+            }
+            std::size_t next = nSamples;
+            if (k < _pending.size() && _pending[k].at < base + nSamples) {
+                next = _pending[k].at - base;
+            }
+            if (next > produced) {
+                write(source + produced, next - produced, produced, outSpan);
+                produced = next;
+                continue;
+            }
+            outSpan.publishTag(_pending[k].map, produced);
+            if (_pending[k].increment.has_value()) {
+                const double increment = *_pending[k].increment;
+                if (!std::isfinite(increment)) {
+                    return std::unexpected(gr::Error(std::format("gr::blocks::ofdm::SchmidlCoxSync: the carrier-offset correction {} rad per sample is not finite", increment)));
+                }
+                _phasor.setIncrement(increment);
+            }
+            ++k;
+        }
+        _pending.erase(_pending.begin(), _pending.begin() + static_cast<std::ptrdiff_t>(k));
+        return {};
+    }
+
+    void write(const Complex* source, std::size_t count, std::size_t at, OutputSpanLike auto& outSpan) {
+        const std::span<Complex> destination(outSpan.begin() + static_cast<std::ptrdiff_t>(at), count);
+        if (_accepted.correctCfo) {
+            _phasor.mix(std::span<const Complex>(source, count), destination);
+        } else {
+            std::copy_n(source, count, destination.begin());
+        }
+    }
+};
+
+} // namespace gr::blocks::ofdm
+
+#endif // GNURADIO_OFDM_SCHMIDL_COX_SYNC_HPP
