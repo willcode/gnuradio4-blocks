@@ -2,7 +2,7 @@ name: main branch CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ci-check/**"]
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ jobs:
       group: ${{ github.workflow }}-${{ github.run_id }}-${{ matrix.name }}
       cancel-in-progress: false
     container:
-      image: ghcr.io/${{ github.repository_owner }}/gnuradio4-core-sdk:${{ matrix.core_sdk_tag }}
+      image: ghcr.io/gnuradio/gnuradio4-core-sdk:${{ matrix.core_sdk_tag }}
     strategy:
       fail-fast: false
       matrix:
