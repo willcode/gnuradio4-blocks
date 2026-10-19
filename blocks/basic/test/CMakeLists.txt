@@ -12,6 +12,7 @@ add_basic_test(qa_SampleDelay)
 add_basic_test(qa_IqCorrection)
 gr_pin_test_optimization(qa_IqCorrection BUILD_TYPE)
 add_basic_test(qa_TriggerBlocks)
+add_basic_test(qa_Decimators)
 add_basic_test(qa_Throttle)
 set_property(TEST qa_Throttle PROPERTY RESOURCE_LOCK rt)
 
