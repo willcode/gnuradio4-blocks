@@ -13,6 +13,7 @@ add_basic_test(qa_IqCorrection)
 gr_pin_test_optimization(qa_IqCorrection BUILD_TYPE)
 add_basic_test(qa_TriggerBlocks)
 add_basic_test(qa_Decimators)
+add_basic_test(qa_RealToComplex)
 add_basic_test(qa_Throttle)
 set_property(TEST qa_Throttle PROPERTY RESOURCE_LOCK rt)
 
@@ -35,3 +36,11 @@ if(PYTHON_AVAILABLE)
   # the block library compiles PythonBlock<int32_t> and PythonBlock<float> in two units, and a case runs both
   target_link_libraries(qa_PythonBlock PRIVATE Python3::Python Python3::NumPy gnuradio4::GrBasicBlocksShared)
 endif()
+
+# RealToComplex moves its tags by the conversion's delay and forwards the ones past its last output at the end-of-stream
+# index
+gr_add_graph_test(
+  graph_basic_real_to_complex_end_tags
+  graphs/real-to-complex-end-tags.yaml
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrBasicBlocksShared>)
