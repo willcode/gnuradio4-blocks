@@ -17,3 +17,6 @@ is the same in the source tree and in an install. A consumer that finds this pro
 License: BSD-3-Clause, copyright the Max-Planck-Society and Peter Bell, with the odd-length DCT-IV path additionally
 copyright Matteo Frigo and the Massachusetts Institute of Technology under the same three clauses. The full notice is
 in the header. `LICENSE.md` is upstream's license file.
+
+Used by `gnuradio-4.0/algorithm/fourier/fft.hpp` in `gr::algorithm::FFT`. The `PocketFFT` backend holds its own
+`pocketfft_c` or `pocketfft_r` plan.
