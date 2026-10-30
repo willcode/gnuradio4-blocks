@@ -1,6 +1,3 @@
-add_ut_test(qa_ConvBlocks)
-target_link_libraries(qa_ConvBlocks PRIVATE gr-fec)
-
 add_ut_test(qa_PunctureBlocks)
 target_link_libraries(qa_PunctureBlocks PRIVATE gr-fec)
 
@@ -26,6 +23,10 @@ gr_fec_graph_test(graph_fec_binary_records graphs/fec-binary-records.yaml)
 gr_fec_graph_test(graph_fec_rs_round_trip graphs/fec-rs-round-trip.yaml)
 gr_fec_graph_test(graph_fec_rs_errors graphs/fec-rs-errors.yaml)
 gr_fec_graph_test(graph_fec_settings graphs/fec-settings.yaml)
+gr_fec_graph_test(graph_fec_conv_encode graphs/conv-encode.yaml)
+gr_fec_graph_test(graph_fec_conv_decode graphs/conv-decode.yaml)
+gr_fec_graph_test(graph_fec_conv_records graphs/conv-records.yaml)
+gr_fec_graph_test(graph_fec_conv_settings graphs/conv-settings.yaml)
 
 # The settings graphs with one setting changed that the block accepts.
 gr_fec_graph_test(
@@ -54,6 +55,21 @@ gr_fec_graph_test(
   graphs/fec-settings.yaml
   SET
   "ccsds_decoder_block.pad=!!uint32 238")
+gr_fec_graph_test(
+  graph_fec_accepted_conv_ccsds_k7
+  graphs/conv-settings.yaml
+  SET
+  "ccsds_encoder_block.constraint_length=!!uint32 7")
+gr_fec_graph_test(
+  graph_fec_accepted_conv_ccsds_invert_agree
+  graphs/conv-settings.yaml
+  SET
+  "ccsds_encoder_block.invert_outputs=!!uint32 2")
+gr_fec_graph_test(
+  graph_fec_accepted_conv_soft_open
+  graphs/conv-settings.yaml
+  SET
+  "soft_decoder_block.termination=open")
 
 # The settings graphs with one setting changed that the block refuses, on the block's reason.
 gr_add_failing_graph_test(
@@ -153,6 +169,105 @@ gr_add_failing_graph_test(
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
   "ccsds_decoder_block.pad=!!uint32 239")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_code_empty
+  graphs/conv-settings.yaml
+  "constraint_length and polynomials have no defaults"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "encoder_block.constraint_length=!!uint32 0"
+  "encoder_block.polynomials=!!uint32 []")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_k2
+  graphs/conv-settings.yaml
+  "constraint_length must be 3 to 9, [^\n]*. got constraint_length 2,"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "decoder_block.constraint_length=!!uint32 2"
+  "decoder_block.polynomials=!!uint32 [3, 2]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_k10
+  graphs/conv-settings.yaml
+  "constraint_length must be 3 to 9, [^\n]*. got constraint_length 10,"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "decoder_block.constraint_length=!!uint32 10"
+  "decoder_block.polynomials=!!uint32 [617, 1003]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_one_polynomial
+  graphs/conv-settings.yaml
+  "polynomials names one generator per coded bit and must hold 2 to 4 of them, got 1"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "encoder_block.polynomials=!!uint32 [121]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_polynomial_twice
+  graphs/conv-settings.yaml
+  "every polynomial must be nonzero, no wider than constraint_length bits and named once[^\n]*. got constraint_length 7,"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "encoder_block.polynomials=!!uint32 [121, 121]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_polynomial_wide
+  graphs/conv-settings.yaml
+  "every polynomial must be nonzero, no wider than constraint_length bits and named once[^\n]*. got constraint_length 7,"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "encoder_block.polynomials=!!uint32 [121, 219]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_polynomial_zero
+  graphs/conv-settings.yaml
+  "every polynomial must be nonzero, no wider than constraint_length bits and named once[^\n]*. got constraint_length 7,"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "encoder_block.polynomials=!!uint32 [121, 0]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_ccsds_k5
+  graphs/conv-settings.yaml
+  "code 'ccsds' supplies constraint_length 7 and the explicit setting says 5"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "ccsds_encoder_block.constraint_length=!!uint32 5")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_ccsds_polynomials
+  graphs/conv-settings.yaml
+  "code 'ccsds' supplies its own polynomials and the explicit setting disagrees"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "ccsds_encoder_block.polynomials=!!uint32 [121, 91]")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_ccsds_invert
+  graphs/conv-settings.yaml
+  "code 'ccsds' supplies invert_outputs 0b10 and the explicit setting says 0b1:"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "ccsds_encoder_block.invert_outputs=!!uint32 1")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_code_unknown
+  graphs/conv-settings.yaml
+  "code must name one of 'ccsds', [^\n]*, got 'voyager'"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "decoder_block.code=voyager")
+gr_add_failing_graph_test(
+  graph_fec_refused_conv_termination
+  graphs/conv-settings.yaml
+  "termination must be 'terminated' or 'open', got 'running'"
+  PLUGIN_DIRS
+  $<TARGET_FILE_DIR:GrFecBlocksShared>
+  SET
+  "decoder_block.termination=running")
 
 # The line a block prints at stop, for the counts no output record carries.
 gr_fec_graph_test(
@@ -195,3 +310,23 @@ gr_fec_graph_test(
   graphs/fec-rs-errors.yaml
   PASS_REGULAR_EXPRESSION
   "RsDecode 'truncated_decoder': records: 1, codewords: 1, records refused: 1")
+gr_fec_graph_test(
+  graph_fec_counters_refused_encode
+  graphs/conv-records.yaml
+  PASS_REGULAR_EXPRESSION
+  "ConvEncode 'refused_encode_coder': frames: 1, information bits: 50, records refused: 1")
+gr_fec_graph_test(
+  graph_fec_counters_refused_hard
+  graphs/conv-records.yaml
+  PASS_REGULAR_EXPRESSION
+  "ViterbiDecode 'refused_hard_decoder': frames: 1, information bits: 20, records refused: 2")
+gr_fec_graph_test(
+  graph_fec_counters_refused_soft
+  graphs/conv-records.yaml
+  PASS_REGULAR_EXPRESSION
+  "ViterbiDecodeSoft 'refused_soft_decoder': frames: 1, information bits: 20, records refused: 1")
+gr_fec_graph_test(
+  graph_fec_counters_refused_step
+  graphs/conv-records.yaml
+  PASS_REGULAR_EXPRESSION
+  "ViterbiDecode 'refused_step_decoder': records refused: 1")
