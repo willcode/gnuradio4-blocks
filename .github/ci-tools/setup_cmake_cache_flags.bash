@@ -12,13 +12,13 @@ printf '::group::S3 setup\n'
   if [[ -z "${SCCACHE_S3_BUCKET}" ]] ; then
     echo "using default S3 bucket"
     use_default=true
-    export SCCACHE_S3_BUCKET="gnuradio4-library-sccache"
+    export SCCACHE_S3_BUCKET="gnuradio4-blocks-sccache"
     add_env SCCACHE_S3_BUCKET "${SCCACHE_S3_BUCKET}"
   fi
   if [[ -z "${SCCACHE_S3_ENDPOINT}" ]] ; then
     echo "using default S3 endpoint"
     use_default=true
-    export SCCACHE_S3_ENDPOINT="s3.us-west-002.backblazeb2.com"
+    export SCCACHE_S3_ENDPOINT="s3.us-west-004.backblazeb2.com"
     add_env SCCACHE_S3_ENDPOINT "${SCCACHE_S3_ENDPOINT}"
   fi
   if [[ -z "${SCCACHE_S3_REGION}" ]] ; then
@@ -31,10 +31,10 @@ printf '::group::S3 setup\n'
     # set up default bucket here
     echo "AWS key ID not set. Using default read-only key ID & key"
     use_default=true
-    export AWS_ACCESS_KEY_ID="0021090e73dcc120000000013"
+    export AWS_ACCESS_KEY_ID="0041a59fe7b29a0000000000c"
     add_env AWS_ACCESS_KEY_ID "${AWS_ACCESS_KEY_ID}"
     # Can't have a key without a key id.
-    export AWS_SECRET_ACCESS_KEY="K002ZYij26CF0K/7AxPqnOVJe4nCWRE"
+    export AWS_SECRET_ACCESS_KEY="K0045HvWznyYFyLyGBK0Avlak+w9n9Q"
   fi
   add_env AWS_SECRET_ACCESS_KEY "${AWS_SECRET_ACCESS_KEY}"
   # lets mask a few things in output. I bet people are scraping github action
