@@ -2,6 +2,8 @@ name: common/pull-request CI
 
 on:
   pull_request:
+  push:
+    branches: ["ci-check/**"]
 
 permissions:
   contents: read
@@ -10,6 +12,7 @@ permissions:
 jobs:
   dco:
     name: "DCO"
+    if: github.event_name == 'pull_request'
     runs-on: "ubuntu-latest"
     steps:
       - name: Check commit signoffs
@@ -35,6 +38,7 @@ jobs:
 
   restyled:
     name: "Restyled"
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     concurrency:
       group: Restyled-${{ github.ref }}
@@ -65,15 +69,17 @@ jobs:
 
   build:
     needs: [dco, restyled]
+    if: ${{ !cancelled() && !failure() }}
     name: "${{ matrix.name }}"
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ matrix.name }}
       cancel-in-progress: true
     container:
-      image: ghcr.io/${{ github.repository_owner }}/gnuradio4-core-sdk:${{ matrix.core_sdk_tag }}
+      image: ghcr.io/gnuradio/gnuradio4-core-sdk:${{ matrix.core_sdk_tag }}
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 3
+      SCCACHE_IDLE_TIMEOUT: 0
     strategy:
       fail-fast: false
       matrix:
