@@ -1,17 +1,23 @@
 #include <boost/ut.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <complex>
+#include <expected>
+#include <format>
 #include <numbers>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/analog/Agc.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -23,14 +29,15 @@ constexpr double kPi = std::numbers::pi;
 template<typename T>
 Agc<T> makeAgc(gr::property_map settings) {
     Agc<T> agc(std::move(settings));
-    agc.settings().init();
-    std::ignore = agc.settings().applyStagedParameters();
+    boost::ut::expect(agc.check({}).has_value());
     return agc;
 }
 
+// the work function assigns `current_gain_db`, which it does on the block's own thread
 template<typename T>
 void runAgc(Agc<T>& agc, std::span<const T> input, std::span<T> output, std::size_t chunkSize = 0UZ) {
-    const std::size_t stride = chunkSize == 0UZ ? std::max(input.size(), 1UZ) : chunkSize;
+    const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(agc));
+    const std::size_t                     stride = chunkSize == 0UZ ? std::max(input.size(), 1UZ) : chunkSize;
     for (std::size_t base = 0UZ; base < input.size(); base += stride) {
         const std::size_t count = std::min(stride, input.size() - base);
         std::ignore             = agc.processBulk(input.subspan(base, count), output.subspan(base, count));
@@ -147,7 +154,7 @@ struct SerialAgc {
     std::size_t   phase   = 0UZ;
 
     void process(std::span<const T> input, std::span<T> output) {
-        const double reference = block.reference_db, gate = block.gate_threshold_db, minGain = block.min_gain_db, maxGain = block.max_gain_db;
+        const double reference = block.settings.reference_db, gate = block.settings.gate_threshold_db, minGain = block.settings.min_gain_db, maxGain = block.settings.max_gain_db;
         const double attack = block._alphaAttack, decay = block._alphaDecay;
         const auto   step = [&](double gain, float magnitudeSquared) {
             const double level = gr::blocks::analog::detail::kDecibelPerHalfLog2 * static_cast<double>(gr::blocks::analog::detail::fastLog2(std::max(magnitudeSquared, gr::blocks::analog::detail::kMagnitudeFloorSquared)));
@@ -155,7 +162,7 @@ struct SerialAgc {
             const double alpha = level < gate ? 0.0 : (error > 0.0 ? attack : decay);
             return gr::blocks::analog::detail::clampOrdered(gain - alpha * error, minGain, maxGain);
         };
-        const std::size_t stride = block.update_decimation.value;
+        const std::size_t stride = block.settings.update_decimation.value;
         for (std::size_t i = 0UZ; i < input.size(); ++i) {
             if (stride == 1UZ || phase == 0UZ) {
                 gainDb  = step(gainDb, Agc<T>::magnitudeSquared(input[i]));
@@ -194,7 +201,7 @@ double serialLoopDeviation(gr::Size_t decimation, double fadeHz, std::size_t chu
     const std::vector<T> input = fadingTone<T>(96000UZ, 48000.0, fadeHz);
     std::vector<T>       expected(input.size()), actual(input.size());
     Agc<T>               agc = makeAgc<T>({{"sample_rate", 48000.f}, {"update_decimation", decimation}});
-    SerialAgc<T>         serial{agc, agc._gainDb};
+    SerialAgc<T>         serial{agc, agc.status.current_gain_db.value};
     serial.process(input, expected);
     runAgc(agc, std::span<const T>(input), std::span<T>(actual), chunk);
     double worst = 0.0;
@@ -207,6 +214,62 @@ double serialLoopDeviation(gr::Size_t decimation, double fadeHz, std::size_t chu
 }
 
 } // namespace
+
+namespace qa_agc {
+
+// a source of `n_samples` ones, at most `chunk` per work call
+struct OnesSource : gr::Block<OnesSource> {
+    gr::PortOut<float> out;
+
+    struct Settings {
+        gr::Size_t n_samples = 0U;
+        gr::Size_t chunk     = 4096U;
+
+        GR_MAKE_REFLECTABLE(Settings, n_samples, chunk);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(OnesSource, out, settings);
+
+    std::size_t _sent = 0UZ;
+
+    [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& output) {
+        const std::size_t nSamples = std::min({output.size(), static_cast<std::size_t>(settings.chunk), static_cast<std::size_t>(settings.n_samples) - _sent});
+        std::fill_n(output.begin(), nSamples, 1.f);
+        output.publish(nSamples);
+        _sent += nSamples;
+        return _sent == static_cast<std::size_t>(settings.n_samples) ? gr::work::Status::DONE : gr::work::Status::OK;
+    }
+};
+
+// a sink that takes `hold_at` samples, then takes nothing more until the test releases it
+struct HeldSink : gr::Block<HeldSink> {
+    gr::PortIn<float> in;
+
+    struct Settings {
+        gr::Size_t hold_at = 0U;
+
+        GR_MAKE_REFLECTABLE(Settings, hold_at);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(HeldSink, in, settings);
+
+    std::vector<float>       _samples{};
+    std::atomic<std::size_t> _taken{0UZ};
+    std::atomic<bool>        _released{false};
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input) {
+        std::size_t nSamples = input.size();
+        if (!_released.load(std::memory_order_acquire)) {
+            nSamples = std::min(nSamples, static_cast<std::size_t>(settings.hold_at) - std::min(_samples.size(), static_cast<std::size_t>(settings.hold_at)));
+        }
+        _samples.insert(_samples.end(), input.begin(), input.begin() + static_cast<std::ptrdiff_t>(nSamples));
+        std::ignore = input.consume(nSamples);
+        _taken.store(_samples.size(), std::memory_order_release);
+        return gr::work::Status::OK;
+    }
+};
+
+} // namespace qa_agc
 
 const boost::ut::suite<"Agc"> agcTests = [] {
     using namespace boost::ut;
@@ -231,7 +294,7 @@ const boost::ut::suite<"Agc"> agcTests = [] {
 
             const std::vector<std::complex<float>> output = processPhasor(agc, nSamples, magnitude);
             expect(approx(static_cast<double>(std::abs(output.back())), 1.0, 1e-3)) << "settled magnitude at m=" << magnitude;
-            expect(approx(agc.gain_db.value, -20.0 * std::log10(magnitude), 0.01)) << "settled gain at m=" << magnitude;
+            expect(approx(agc.status.current_gain_db.value, -20.0 * std::log10(magnitude), 0.01)) << "settled gain at m=" << magnitude;
         }
     };
 
@@ -262,35 +325,38 @@ const boost::ut::suite<"Agc"> agcTests = [] {
     };
 
     "the gain never leaves the clamps"_test = [] {
-        Agc<std::complex<float>>         rising = makeAgc<std::complex<float>>({{"sample_rate", 48000.f}, {"reference_db", 0.0}, {"decay_s", 0.01}, {"max_gain_db", 6.0}, {"min_gain_db", -20.0}});
-        const auto                       quiet  = phasor(20000UZ, 1e-6);
-        std::vector<std::complex<float>> risingOut(quiet.size());
+        Agc<std::complex<float>>              rising = makeAgc<std::complex<float>>({{"sample_rate", 48000.f}, {"reference_db", 0.0}, {"decay_s", 0.01}, {"max_gain_db", 6.0}, {"min_gain_db", -20.0}});
+        const auto                            quiet  = phasor(20000UZ, 1e-6);
+        std::vector<std::complex<float>>      risingOut(quiet.size());
+        const gr::settings::detail::OwnThread risingThread(gr::settings::detail::settingsOf(rising));
         for (std::size_t base = 0UZ; base < quiet.size(); base += 250UZ) {
             std::ignore = rising.processBulk(std::span<const std::complex<float>>(quiet).subspan(base, 250UZ), std::span<std::complex<float>>(risingOut).subspan(base, 250UZ));
-            expect(le(rising.gain_db.value, 6.0)) << "gain exceeded max_gain_db at " << base;
+            expect(le(rising.status.current_gain_db.value, 6.0)) << "gain exceeded max_gain_db at " << base;
         }
-        expect(eq(rising.gain_db.value, 6.0)) << "the gain must rest exactly on the clamp";
+        expect(eq(rising.status.current_gain_db.value, 6.0)) << "the gain must rest exactly on the clamp";
 
-        Agc<std::complex<float>>         falling = makeAgc<std::complex<float>>({{"sample_rate", 48000.f}, {"reference_db", 0.0}, {"attack_s", 0.01}, {"max_gain_db", 60.0}, {"min_gain_db", -6.0}});
-        const auto                       loud    = phasor(20000UZ, 1e6);
-        std::vector<std::complex<float>> fallingOut(loud.size());
+        Agc<std::complex<float>>              falling = makeAgc<std::complex<float>>({{"sample_rate", 48000.f}, {"reference_db", 0.0}, {"attack_s", 0.01}, {"max_gain_db", 60.0}, {"min_gain_db", -6.0}});
+        const auto                            loud    = phasor(20000UZ, 1e6);
+        std::vector<std::complex<float>>      fallingOut(loud.size());
+        const gr::settings::detail::OwnThread fallingThread(gr::settings::detail::settingsOf(falling));
         for (std::size_t base = 0UZ; base < loud.size(); base += 250UZ) {
             std::ignore = falling.processBulk(std::span<const std::complex<float>>(loud).subspan(base, 250UZ), std::span<std::complex<float>>(fallingOut).subspan(base, 250UZ));
-            expect(ge(falling.gain_db.value, -6.0)) << "gain fell below min_gain_db at " << base;
+            expect(ge(falling.status.current_gain_db.value, -6.0)) << "gain fell below min_gain_db at " << base;
         }
-        expect(eq(falling.gain_db.value, -6.0)) << "the gain must rest exactly on the clamp";
+        expect(eq(falling.status.current_gain_db.value, -6.0)) << "the gain must rest exactly on the clamp";
     };
 
     "the gate freezes the gain below its threshold"_test = [] {
         Agc<std::complex<float>> agc = makeAgc<std::complex<float>>({{"sample_rate", 48000.f}, {"reference_db", 0.0}, {"decay_s", 0.05}, {"gate_threshold_db", -40.0}, {"max_gain_db", 120.0}, {"min_gain_db", -120.0}});
 
         std::ignore = processPhasor(agc, 100000UZ, 1e-3);
-        expect(eq(agc.gain_db.value, 0.0)) << "a -60 dB input must not move a gate set at -40 dB";
+        expect(eq(agc.status.current_gain_db.value, 0.0)) << "a -60 dB input must not move a gate set at -40 dB";
 
-        const std::complex<float> audible{0.1f, 0.f};
-        std::complex<float>       demoted{};
+        const std::complex<float>             audible{0.1f, 0.f};
+        std::complex<float>                   demoted{};
+        const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(agc));
         std::ignore = agc.processBulk(std::span<const std::complex<float>>(&audible, 1UZ), std::span<std::complex<float>>(&demoted, 1UZ));
-        expect(gt(agc.gain_db.value, 0.0)) << "the loop must move on the first sample above the gate";
+        expect(gt(agc.status.current_gain_db.value, 0.0)) << "the loop must move on the first sample above the gate";
     };
 
     "manual mode applies gain_db exactly and leaves it alone"_test = [] {
@@ -305,7 +371,7 @@ const boost::ut::suite<"Agc"> agcTests = [] {
             expect(eq(output[i].real(), input[i].real() * expectedGain)) << "manual gain at i=" << i;
             expect(eq(output[i].imag(), input[i].imag() * expectedGain)) << "manual gain at i=" << i;
         }
-        expect(eq(agc.gain_db.value, 12.0)) << "manual mode must not move the gain";
+        expect(eq(agc.status.current_gain_db.value, 12.0)) << "manual mode must not move the gain";
     };
 
     "switching to manual mode is bumpless"_test = [] {
@@ -316,8 +382,7 @@ const boost::ut::suite<"Agc"> agcTests = [] {
         std::vector<std::complex<float>> output(input.size());
         runAgc(agc, std::span<const std::complex<float>>(input).first(settleCount), std::span<std::complex<float>>(output).first(settleCount));
 
-        std::ignore = agc.settings().setStaged({{"enabled", false}});
-        std::ignore = agc.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(agc), {{"enabled", false}}).empty());
         runAgc(agc, std::span<const std::complex<float>>(input).subspan(settleCount, 8UZ), std::span<std::complex<float>>(output).subspan(settleCount, 8UZ));
 
         const float outputStep = std::abs(output[settleCount] - output[settleCount - 1UZ]);
@@ -358,8 +423,8 @@ const boost::ut::suite<"Agc"> agcTests = [] {
             allZero = allZero && sample.real() == 0.f && sample.imag() == 0.f && std::isfinite(sample.real()) && std::isfinite(sample.imag());
         }
         expect(allZero) << "an all-zero input must produce an all-zero, finite output";
-        expect(ge(agc.gain_db.value, -20.0));
-        expect(le(agc.gain_db.value, 60.0));
+        expect(ge(agc.status.current_gain_db.value, -20.0));
+        expect(le(agc.status.current_gain_db.value, 60.0));
     };
 
     "the real instantiation regulates the peak, not the RMS"_test = [] {
@@ -398,11 +463,70 @@ const boost::ut::suite<"Agc"> agcTests = [] {
     };
 
     "unusable parameters are rejected at settings time"_test = [] {
-        expect(throws([] { std::ignore = makeAgc<std::complex<float>>({{"sample_rate", 0.f}}); })) << "zero sample_rate";
-        expect(throws([] { std::ignore = makeAgc<std::complex<float>>({{"attack_s", 0.0}}); })) << "zero attack_s";
-        expect(throws([] { std::ignore = makeAgc<std::complex<float>>({{"decay_s", -1.0}}); })) << "negative decay_s";
-        expect(throws([] { std::ignore = makeAgc<std::complex<float>>({{"max_gain_db", -30.0}, {"min_gain_db", -20.0}}); })) << "inverted clamps";
-        expect(throws([] { std::ignore = makeAgc<std::complex<float>>({{"update_decimation", gr::Size_t(0)}}); })) << "zero update_decimation";
+        using gr::testing::initRefused;
+        expect(initRefused<Agc<std::complex<float>>>({{"sample_rate", 0.f}})) << "zero sample_rate";
+        expect(initRefused<Agc<std::complex<float>>>({{"attack_s", 0.0}})) << "zero attack_s";
+        expect(initRefused<Agc<std::complex<float>>>({{"decay_s", -1.0}})) << "negative decay_s";
+        expect(initRefused<Agc<std::complex<float>>>({{"max_gain_db", -30.0}, {"min_gain_db", -20.0}})) << "inverted clamps";
+        expect(initRefused<Agc<std::complex<float>>>({{"update_decimation", gr::Size_t(0)}})) << "zero update_decimation";
+    };
+
+    "a gain set on a running Agc is the loop's next starting point, and a read returns the gain the loop reached"_test = [] {
+        // unit input against a 0 dB reference holds the loop at 0 dB until the set moves it, and the loop then
+        // decays back to 0 dB with the attack time constant
+        constexpr gr::Size_t kTotal  = 1U << 19U;
+        constexpr gr::Size_t kHoldAt = 4096U;
+        constexpr double     kSetDb  = 20.0;
+
+        gr::Graph graph;
+        auto&     source = graph.emplaceBlock<qa_agc::OnesSource>({{"n_samples", kTotal}});
+        auto&     agc    = graph.emplaceBlock<Agc<float>>({{"sample_rate", 48000.f}, {"reference_db", 0.0}, {"attack_s", 0.01}, {"decay_s", 0.01}});
+        auto&     sink   = graph.emplaceBlock<qa_agc::HeldSink>({{"hold_at", kHoldAt}});
+        expect(fatal(graph.connect<"out", "in">(source, agc).has_value()));
+        expect(fatal(graph.connect<"out", "in">(agc, sink).has_value()));
+
+        gr::scheduler::Simple scheduler;
+        expect(fatal(scheduler.exchange(std::move(graph)).has_value()));
+        std::thread runner([&scheduler] { std::ignore = scheduler.runAndWait(); });
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (sink._taken.load(std::memory_order_acquire) < kHoldAt && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        expect(eq(sink._taken.load(std::memory_order_acquire), static_cast<std::size_t>(kHoldAt))) << "the sink holds the stream";
+        expect(agc.set({{"gain_db", kSetDb}}, gr::settings::noWait).has_value()) << "a running Agc takes a gain";
+        sink._released.store(true, std::memory_order_release);
+        runner.join();
+
+        const std::vector<float>& output = sink._samples;
+        expect(fatal(eq(output.size(), static_cast<std::size_t>(kTotal))));
+        const auto moved = std::ranges::find_if(output, [](float sample) { return std::abs(sample - 1.f) > 1e-5f; });
+        expect(fatal(moved != output.end())) << "the set reached the output";
+        expect(ge(static_cast<std::size_t>(moved - output.begin()), static_cast<std::size_t>(kHoldAt))) << "no sample before the hold moved";
+        const double alpha   = agc._alphaAttack;
+        const double firstDb = 20.0 * std::log10(static_cast<double>(*moved));
+        expect(approx(firstDb, (1.0 - alpha) * kSetDb, 1e-3)) << "the first sample after the set is one loop step from the gain set";
+
+        const std::expected<double, gr::settings::Rejected> reached = agc.get<double>("current_gain_db");
+        expect(fatal(reached.has_value()));
+        expect(lt(*reached, 0.01)) << "the loop is back at the reference, and the read follows it";
+        expect(approx(*reached, 20.0 * std::log10(static_cast<double>(output.back())), 1e-3)) << "the read is the gain of the last sample";
+    };
+
+    "Agc initializes at each setting"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<Agc<float>>({
+            {"sample_rate", 96000.f},
+            {"enabled", false},
+            {"reference_db", -3.0},
+            {"attack_s", 0.01},
+            {"decay_s", 0.2},
+            {"max_gain_db", 40.0},
+            {"min_gain_db", -10.0},
+            {"gate_threshold_db", -100.0},
+            {"gain_db", 6.0},
+            {"update_decimation", gr::Size_t{4U}},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 
     "a non-reserved tag key rides through at its own offset"_test = [] {

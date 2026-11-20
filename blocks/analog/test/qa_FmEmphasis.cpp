@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <print>
@@ -16,6 +17,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/analog/FmEmphasis.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -28,8 +30,7 @@ constexpr double kPi = std::numbers::pi;
 template<typename TBlock>
 TBlock makeEmphasis(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -267,10 +268,8 @@ const boost::ut::suite<"FmEmphasis"> fmEmphasisTests = [] {
             lastPreemphasized = filterOne(preemphasis, 1.0);
         }
 
-        std::ignore = deemphasis.settings().setStaged({{"tau", 50e-6}});
-        std::ignore = deemphasis.settings().applyStagedParameters();
-        std::ignore = preemphasis.settings().setStaged({{"tau", 50e-6}});
-        std::ignore = preemphasis.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(deemphasis), {{"tau", 50e-6}});
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(preemphasis), {{"tau", 50e-6}});
 
         expect(approx(deemphasis._section.p, 0.6509814095438752, 1e-9)) << "the retune must have taken effect";
         for (std::size_t n = 0UZ; n < 50UZ; ++n) {
@@ -284,14 +283,17 @@ const boost::ut::suite<"FmEmphasis"> fmEmphasisTests = [] {
     };
 
     "unusable parameters are rejected at settings time"_test = [] {
-        expect(throws([] { std::ignore = makeDeemphasis(-1.f, 75e-6); })) << "negative sample_rate";
-        expect(throws([] { std::ignore = makeDeemphasis(0.f, 75e-6); })) << "zero sample_rate";
-        expect(throws([] { std::ignore = makeDeemphasis(48000.f, -75e-6); })) << "negative tau";
-        expect(throws([] { std::ignore = makeDeemphasis(2000.f, 75e-6); })) << "corner at or above Nyquist";
-        expect(throws([] { std::ignore = makePreemphasis(-1.f, 75e-6); })) << "negative sample_rate";
-        expect(throws([] { std::ignore = makePreemphasis(48000.f, -75e-6); })) << "negative tau";
+        using gr::testing::initRefused;
+        const auto deemphasisRefused  = [](float sampleRate, double tau) { return initRefused<FmDeemphasis<double>>({{"sample_rate", sampleRate}, {"tau", tau}}); };
+        const auto preemphasisRefused = [](float sampleRate, double tau) { return initRefused<FmPreemphasis<double>>({{"sample_rate", sampleRate}, {"tau", tau}}); };
+        expect(deemphasisRefused(-1.f, 75e-6)) << "negative sample_rate";
+        expect(deemphasisRefused(0.f, 75e-6)) << "zero sample_rate";
+        expect(deemphasisRefused(48000.f, -75e-6)) << "negative tau";
+        expect(deemphasisRefused(2000.f, 75e-6)) << "corner at or above Nyquist";
+        expect(preemphasisRefused(-1.f, 75e-6)) << "negative sample_rate";
+        expect(preemphasisRefused(48000.f, -75e-6)) << "negative tau";
         // zero tau is no longer unusable: it is the bypass, pinned in its own case below
-        expect(throws([] { std::ignore = makePreemphasis(2000.f, 75e-6); })) << "corner at or above Nyquist";
+        expect(preemphasisRefused(2000.f, 75e-6)) << "corner at or above Nyquist";
     };
 
     "output does not depend on chunking"_test = [] {
@@ -338,13 +340,11 @@ const boost::ut::suite<"FmEmphasis"> fmEmphasisTests = [] {
         };
 
         FmDeemphasis<float> deemph({{"sample_rate", kRate}, {"tau", 0.0}});
-        deemph.settings().init();
-        std::ignore          = deemph.settings().applyStagedParameters();
+        boost::ut::expect(deemph.check({}).has_value());
         const auto deemphOut = through(deemph);
 
         FmPreemphasis<float> preemph({{"sample_rate", kRate}, {"tau", 0.0}});
-        preemph.settings().init();
-        std::ignore           = preemph.settings().applyStagedParameters();
+        boost::ut::expect(preemph.check({}).has_value());
         const auto preemphOut = through(preemph);
 
         for (std::size_t k = 0UZ; k < input.size(); ++k) {
@@ -355,18 +355,13 @@ const boost::ut::suite<"FmEmphasis"> fmEmphasisTests = [] {
         // the same spelling on both, which is what lets one parameter turn the pair off together
         expect(nothrow([&] {
             FmPreemphasis<float> pair({{"sample_rate", kRate}, {"tau", 0.0}, {"high_corner", 12000.0}});
-            pair.settings().init();
-            std::ignore = pair.settings().applyStagedParameters();
+            boost::ut::expect(pair.check({}).has_value());
         })) << "a bypassed pre-emphasis ignores its high corner rather than refusing it";
 
-        // a negative or non-finite tau is still refused: zero is a convention, not a relaxation
-        const auto refused = [kRate](double tau) {
-            FmDeemphasis<float> block({{"sample_rate", kRate}, {"tau", tau}});
-            block.settings().init();
-            std::ignore = block.settings().applyStagedParameters();
-        };
-        expect(throws([&] { refused(-1e-6); }));
-        expect(throws([&] { refused(std::numeric_limits<double>::quiet_NaN()); }));
+        // a negative tau or a NaN is still refused: zero is a convention, not a relaxation
+        const auto refused = [kRate](double tau) { return gr::testing::initRefused<FmDeemphasis<float>>({{"sample_rate", kRate}, {"tau", tau}}); };
+        expect(refused(-1e-6));
+        expect(refused(std::numeric_limits<double>::quiet_NaN()));
     };
 
     "a run of exact zeros leaves the state at zero, not at a subnormal"_test = []<typename T> {
@@ -437,6 +432,26 @@ const boost::ut::suite<"FmEmphasis"> fmEmphasisTests = [] {
             with             = std::min(with, static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(kZeros));
         }
         std::println("FmDeemphasis<float>, {} zeros after a signal: {:.3f} ns/sample without the flush, {:.3f} ns/sample with it", kZeros, without, with);
+    };
+};
+
+const boost::ut::suite<"FmEmphasis settings at the initialization"> fmEmphasisInitTests = [] {
+    using namespace boost::ut;
+
+    "FmDeemphasis initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<FmDeemphasis<float>>({
+            {"sample_rate", 44100.f},
+            {"tau", 50e-6},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "FmPreemphasis initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<FmPreemphasis<float>>({
+            {"sample_rate", 44100.f},
+            {"tau", 50e-6},
+            {"high_corner", 15000.0},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

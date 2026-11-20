@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <print>
@@ -16,6 +17,7 @@
 #include <gnuradio-4.0/analog/Squelch.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
@@ -33,8 +35,7 @@ constexpr std::size_t kLead = 32UZ, kBurst = 64UZ, kTail = 64UZ;
 template<typename T>
 [[nodiscard]] PowerSquelch<T> makeSquelch(gr::property_map settings) {
     PowerSquelch<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -60,10 +61,11 @@ template<typename T>
 }
 
 [[nodiscard]] std::vector<char> observeUnmuted(PowerSquelch<CF>& block, std::span<const CF> input) {
-    std::vector<char> open(input.size());
+    const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block)); // the work function publishes `unmuted`
+    std::vector<char>                     open(input.size());
     for (std::size_t i = 0UZ; i < input.size(); ++i) {
         std::ignore = spans::run<PowerSquelch<CF>, CF>(block, input.subspan(i, 1UZ));
-        open[i]     = block.unmuted.value ? 1 : 0;
+        open[i]     = block.status.unmuted.value ? 1 : 0;
     }
     return open;
 }
@@ -160,13 +162,12 @@ const boost::ut::suite<"PowerSquelch"> powerSquelchTests = [] {
                 const auto       input = stepBurst(kLead, kBurst, 400UZ);
 
                 const auto before = spans::run<PowerSquelch<CF>, CF>(block, std::span<const CF>(input).first(interrupt));
-                std::ignore       = block.settings().setStaged({{"ramp", replacement}});
-                std::ignore       = block.settings().applyStagedParameters();
+                std::ignore       = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"ramp", replacement}});
                 const auto after  = spans::run<PowerSquelch<CF>, CF>(block, std::span<const CF>(input).subspan(interrupt));
 
                 expect(allFinite(before.samples, 1.0)) << "ramp -> " << replacement << " at " << interrupt;
                 expect(allFinite(after.samples, 1.0)) << "ramp -> " << replacement << " at " << interrupt;
-                expect(!block.unmuted.value) << "the burst must terminate after the change";
+                expect(!block.status.unmuted.value) << "the burst must terminate after the change";
                 expect(eq(before.tags.size() + after.tags.size(), 2UZ)) << "one sob and one eob, neither lost nor duplicated";
             }
         }
@@ -310,7 +311,7 @@ const boost::ut::suite<"PowerSquelch"> powerSquelchTests = [] {
 
     "threshold_db reads back exactly as set"_test = [] {
         PowerSquelch<CF> block = makeSquelch<CF>({{"threshold_db", -37.5}});
-        expect(approx(block.threshold_db.value, -37.5, 1e-6)) << "never round-tripped through the linear form";
+        expect(approx(block.settings.threshold_db.value, -37.5, 1e-6)) << "never round-tripped through the linear form";
     };
 
     "the steady-state decision is a power comparison"_test = [] {
@@ -319,7 +320,7 @@ const boost::ut::suite<"PowerSquelch"> powerSquelchTests = [] {
             PowerSquelch<CF>      block  = makeSquelch<CF>({{"alpha", 0.1}, {"threshold_db", kThreshold}});
             const std::vector<CF> signal = steady(2000UZ, std::pow(10.0, (kThreshold + offsetDb) / 20.0));
             std::ignore                  = spans::run<PowerSquelch<CF>, CF>(block, std::span<const CF>(signal));
-            expect(eq(block.unmuted.value, offsetDb > 0.0)) << "a signal " << offsetDb << " dB from the threshold";
+            expect(eq(block.status.unmuted.value, offsetDb > 0.0)) << "a signal " << offsetDb << " dB from the threshold";
         }
 
         // -6.02 dB is magnitude 0.5, which is what the /10 conversion says; the /20 one would put it at 0.7075
@@ -327,15 +328,15 @@ const boost::ut::suite<"PowerSquelch"> powerSquelchTests = [] {
         const std::vector<CF> above    = steady(4UZ, 0.6);
         const std::vector<CF> below    = steady(4UZ, 0.45);
         std::ignore                    = spans::run<PowerSquelch<CF>, CF>(boundary, std::span<const CF>(above));
-        expect(boundary.unmuted.value) << "magnitude 0.6 is above a -6.02 dB power threshold";
+        expect(boundary.status.unmuted.value) << "magnitude 0.6 is above a -6.02 dB power threshold";
         std::ignore = spans::run<PowerSquelch<CF>, CF>(boundary, std::span<const CF>(below));
-        expect(!boundary.unmuted.value) << "and 0.45 is below it";
+        expect(!boundary.status.unmuted.value) << "and 0.45 is below it";
     };
 
     "averaging_time_s sets alpha from a time constant"_test = [] {
         PowerSquelch<CF> block = makeSquelch<CF>({{"sample_rate", 48000.f}, {"averaging_time_s", 0.02}});
-        expect(approx(block.alpha.value, 1.0 - std::exp(-1.0 / 960.0), 1e-12)) << "1 - exp(-1/(fs*T)) at fs*T = 960";
-        expect(approx(block.alpha.value, 1.0411243e-3, 1e-9)) << "the exact value of 1 - exp(-1/960), not a rounded one";
+        expect(approx(block.status.current_alpha.value, 1.0 - std::exp(-1.0 / 960.0), 1e-12)) << "1 - exp(-1/(fs*T)) at fs*T = 960";
+        expect(approx(block.status.current_alpha.value, 1.0411243e-3, 1e-9)) << "the exact value of 1 - exp(-1/960), not a rounded one";
     };
 
     "the average starts at zero, so the block starts muted and takes time to open"_test = [] {
@@ -345,32 +346,35 @@ const boost::ut::suite<"PowerSquelch"> powerSquelchTests = [] {
         const std::vector<CF> rest   = steady(static_cast<std::size_t>(3.0 / kAlpha), 1.0);
 
         std::ignore = spans::run<PowerSquelch<CF>, CF>(block, std::span<const CF>(first));
-        expect(!block.unmuted.value) << "muted at sample 0";
+        expect(!block.status.unmuted.value) << "muted at sample 0";
         std::ignore = spans::run<PowerSquelch<CF>, CF>(block, std::span<const CF>(rest));
-        expect(block.unmuted.value) << "and open within 3/alpha samples";
+        expect(block.status.unmuted.value) << "and open within 3/alpha samples";
     };
 
     "unusable parameters are rejected at settings time"_test = [] {
-        expect(throws([] { std::ignore = makeSquelch<CF>({{"alpha", 0.0}}); })) << "zero alpha";
-        expect(throws([] { std::ignore = makeSquelch<CF>({{"alpha", 1.5}}); })) << "alpha above one";
-        expect(throws([] { std::ignore = makeSquelch<CF>({{"averaging_time_s", 0.02}, {"sample_rate", 0.f}}); })) << "zero sample_rate with a time constant";
+        using gr::testing::initRefused;
+        expect(initRefused<PowerSquelch<CF>>({{"alpha", 0.0}})) << "zero alpha";
+        expect(initRefused<PowerSquelch<CF>>({{"alpha", 1.5}})) << "alpha above one";
+        expect(initRefused<PowerSquelch<CF>>({{"averaging_time_s", 0.02}, {"sample_rate", 0.f}})) << "zero sample_rate with a time constant";
     };
 
-    "the coefficient helper returns its refusal, and the block throws the same text"_test = [] {
+    "the coefficient helper follows alpha or the rate, and the block refuses against the setting at fault"_test = [] {
         using gr::blocks::analog::detail::averagerCoefficient;
-        expect(eq(averagerCoefficient(0.25, 0.0, 48000.0).value_or(0.0), 0.25)) << "with no time constant the coefficient is alpha";
-        expect(eq(averagerCoefficient(0.25, 0.02, 48000.0).value_or(0.0), 1.0 - std::exp(-1.0 / 960.0))) << "with one it follows from the rate";
+        expect(eq(averagerCoefficient(0.25, 0.0, 48000.0), 0.25)) << "with no time constant the coefficient is alpha";
+        expect(eq(averagerCoefficient(0.25, 0.02, 48000.0), 1.0 - std::exp(-1.0 / 960.0))) << "with one it follows from the rate";
 
-        for (const auto& [settings, refused] : {std::pair{gr::property_map{{"alpha", 1.5}}, averagerCoefficient(1.5, 0.0, 48000.0)}, std::pair{gr::property_map{{"averaging_time_s", 0.02}, {"sample_rate", 0.f}}, averagerCoefficient(1e-4, 0.02, 0.0)}, std::pair{gr::property_map{{"averaging_time_s", 1e12}, {"sample_rate", 48000.f}}, averagerCoefficient(1e-4, 1e12, 48000.0)}}) {
-            expect(!refused.has_value()) << "the helper returns an error and throws nothing";
-            std::string thrown;
-            try {
-                std::ignore = makeSquelch<CF>(settings);
-            } catch (const gr::exception& error) {
-                thrown = error.message;
-            }
-            expect(eq(thrown, refused.has_value() ? std::string() : refused.error().message)) << "the settings application throws the helper's text";
-        }
+        const auto refusal = [](gr::property_map settings) {
+            PowerSquelch<CF> block(std::move(settings));
+            const auto       result = block.check({});
+            return result.has_value() || result.error().empty() ? gr::settings::Rejection{} : result.error().front();
+        };
+        expect(eq(refusal({{"alpha", 1.5}}).key, std::string("alpha"))) << "alpha above 1 is refused by its limits";
+        expect(eq(refusal({{"averaging_time_s", 0.02}, {"sample_rate", 0.f}}).key, std::string("sample_rate"))) << "a rate of 0 is refused against the rate";
+        expect(eq(refusal({{"averaging_time_s", 1e12}, {"sample_rate", 48000.f}}).key, std::string("averaging_time_s"))) << "a time constant whose pole rounds to 0";
+
+        PowerSquelch<CF> block = makeSquelch<CF>({{"sample_rate", 48000.f}, {"averaging_time_s", 0.02}});
+        expect(!block.set({{"averaging_time_s", 1e12}}).has_value()) << "and on a live change";
+        expect(eq(block.status.current_alpha.value, 1.0 - std::exp(-1.0 / 960.0))) << "the pole in force stays";
     };
 
     "nanoseconds per sample"_test = [] {
@@ -402,18 +406,38 @@ const boost::ut::suite<"PowerSquelch"> powerSquelchTests = [] {
         std::vector<double> worst(std::size(kArms), 0.0);
         for (int repeat = 0; repeat < kRepeats; ++repeat) { // arms interleaved, so a thermal drift moves all of them
             for (std::size_t a = 0UZ; a < std::size(kArms); ++a) {
-                spans::InputSpan<CF>  inSpan{std::span<const CF>(x)};
-                spans::OutputSpan<CF> outSpan{std::span<CF>(y)};
-                const auto            start = Clock::now();
-                std::ignore                 = blocks[a].processBulk(inSpan, outSpan);
-                const double ns             = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(x.size());
-                best[a]                     = std::min(best[a], ns);
-                worst[a]                    = std::max(worst[a], ns);
+                spans::InputSpan<CF>                  inSpan{std::span<const CF>(x)};
+                spans::OutputSpan<CF>                 outSpan{std::span<CF>(y)};
+                const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(blocks[a]));
+                const auto                            start = Clock::now();
+                std::ignore                                 = blocks[a].processBulk(inSpan, outSpan);
+                const double ns                             = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(x.size());
+                best[a]                                     = std::min(best[a], ns);
+                worst[a]                                    = std::max(worst[a], ns);
             }
         }
         for (std::size_t a = 0UZ; a < std::size(kArms); ++a) {
             std::println("{}: best {:.3f} ns/sample, spread {:.3f} ns", kArms[a].label, best[a], worst[a] - best[a]);
         }
+    };
+};
+
+const boost::ut::suite<"PowerSquelch settings at the initialization"> powerSquelchInitTests = [] {
+    using namespace boost::ut;
+
+    "PowerSquelch initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::analog::PowerSquelch<std::complex<float>>>({
+            {"threshold_db", -40.0},
+            {"alpha", 0.01},
+            {"averaging_time_s", 0.01},
+            {"sample_rate", 8000.f},
+            {"ramp", gr::Size_t{8U}},
+            {"gate", true},
+            {"threshold_min_db", -100.0},
+            {"threshold_max_db", 0.0},
+            {"threshold_step_db", 0.5},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

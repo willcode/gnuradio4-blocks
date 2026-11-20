@@ -24,8 +24,7 @@ std::vector<float> makeAudioBurst() {
 template<typename TBlock>
 TBlock makeBlock() {
     TBlock block;
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

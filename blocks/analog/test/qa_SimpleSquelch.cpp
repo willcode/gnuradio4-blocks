@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdlib>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <print>
@@ -16,6 +17,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/analog/Squelch.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -31,15 +33,15 @@ using CF = std::complex<float>;
 template<typename TBlock>
 [[nodiscard]] TBlock makeBlock(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
 template<typename T>
 [[nodiscard]] std::vector<T> run(SimpleSquelch<T>& block, std::span<const T> input, std::size_t chunkSize = 0UZ) {
-    std::vector<T>    output(input.size());
-    const std::size_t stride = chunkSize == 0UZ ? std::max(input.size(), 1UZ) : chunkSize;
+    const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block)); // the work function publishes `unmuted`
+    std::vector<T>                        output(input.size());
+    const std::size_t                     stride = chunkSize == 0UZ ? std::max(input.size(), 1UZ) : chunkSize;
     for (std::size_t base = 0UZ; base < input.size(); base += stride) {
         const std::size_t count = std::min(stride, input.size() - base);
         std::ignore             = block.processBulk(input.subspan(base, count), std::span<T>(output).subspan(base, count));
@@ -164,7 +166,7 @@ const boost::ut::suite<"SimpleSquelch"> simpleSquelchTests = [] {
         expect(std::ranges::equal(passed, loud)) << "above the threshold the samples come through untouched";
         const std::vector<float> blocked = run<float>(block, std::span<const float>(quiet));
         expect(std::ranges::all_of(blocked, [](float sample) { return sample == 0.f; })) << "below it they are exactly zero";
-        expect(!block.unmuted.value);
+        expect(!block.status.unmuted.value);
     };
 
     "a run of exact zeros leaves the detector at zero, not at a subnormal"_test = [] {
@@ -197,6 +199,7 @@ const boost::ut::suite<"SimpleSquelch"> simpleSquelchTests = [] {
         double               reference = 0.0;
         bool                 identical = true;
 
+        const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block)); // the work function publishes `unmuted`
         for (std::size_t i = 0UZ; i < kStep + kDecay; ++i) {
             const float sample = i < kStep ? 1.f : 0.f;
             reference          = (1.0 - kAlpha) * reference + kAlpha * static_cast<double>(sample) * static_cast<double>(sample);
@@ -259,16 +262,26 @@ const boost::ut::suite<"SimpleSquelch"> simpleSquelchTests = [] {
         expect(decision[1000UZ] && !decision.back()) << "the reference opens on the step and is closed at the end";
 
         for (const std::size_t chunk : {1UZ, 7UZ, 4096UZ}) {
-            SimpleSquelch<float> block = makeBlock<SimpleSquelch<float>>({{"alpha", kAlpha}, {"threshold_db", kThresholdDb}});
-            std::size_t          wrong = 0UZ;
+            SimpleSquelch<float>                  block = makeBlock<SimpleSquelch<float>>({{"alpha", kAlpha}, {"threshold_db", kThresholdDb}});
+            std::size_t                           wrong = 0UZ;
+            const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block)); // the work function publishes `unmuted`
             for (std::size_t base = 0UZ; base < input.size(); base += chunk) {
                 const std::size_t  count = std::min(chunk, input.size() - base);
                 std::vector<float> output(count);
                 std::ignore = block.processBulk(std::span<const float>(input).subspan(base, count), std::span<float>(output));
-                wrong += block.unmuted != decision[base + count - 1UZ] ? 1UZ : 0UZ;
+                wrong += block.status.unmuted != decision[base + count - 1UZ] ? 1UZ : 0UZ;
             }
             expect(eq(wrong, 0UZ)) << "calls of " << chunk << ": the decision at the end of each call is the flushed recursion's";
         }
+    };
+
+    "a time constant whose pole rounds to 0 is refused against averaging_time_s"_test = [] {
+        expect(gr::testing::initRefused<SimpleSquelch<CF>>({{"averaging_time_s", 1e12}, {"sample_rate", 48000.f}}));
+
+        SimpleSquelch<CF> block  = makeBlock<SimpleSquelch<CF>>({{"averaging_time_s", 0.02}, {"sample_rate", 48000.f}});
+        const auto        result = block.set({{"averaging_time_s", 1e12}});
+        expect(!result.has_value() && eq(result.error().size(), 1UZ) && result.error().front().key == "averaging_time_s") << "and on a live change";
+        expect(eq(block.status.current_alpha.value, 1.0 - std::exp(-1.0 / 960.0))) << "the pole in force stays";
     };
 
     "nanoseconds per sample"_test = [] {
@@ -287,7 +300,9 @@ const boost::ut::suite<"SimpleSquelch"> simpleSquelchTests = [] {
         SimpleSquelch<float> realBlock    = makeBlock<SimpleSquelch<float>>({{"alpha", 1e-3}, {"threshold_db", -12.0}});
         constexpr int        kRepeats     = 7;
 
-        double bestComplex = 1e30, worstComplex = 0.0, bestReal = 1e30, worstReal = 0.0;
+        const gr::settings::detail::OwnThread complexThread(gr::settings::detail::settingsOf(complexBlock)); // the work functions publish `unmuted`
+        const gr::settings::detail::OwnThread realThread(gr::settings::detail::settingsOf(realBlock));
+        double                                bestComplex = 1e30, worstComplex = 0.0, bestReal = 1e30, worstReal = 0.0;
         for (int repeat = 0; repeat < kRepeats; ++repeat) { // arms interleaved, so a thermal drift moves both of them
             auto start   = Clock::now();
             std::ignore  = complexBlock.processBulk(std::span<const CF>(x), std::span<CF>(yComplex));
@@ -308,6 +323,20 @@ const boost::ut::suite<"SimpleSquelch"> simpleSquelchTests = [] {
     "a non-reserved tag key rides through at its own offset"_test = [] {
         const std::vector<std::size_t> offsets = privateTagOffsets<float, float, SimpleSquelch<float>>({{"threshold_db", -150.0}});
         expect(that % (offsets == std::vector<std::size_t>{7UZ, 300UZ, 1000UZ})) << "the default forwarder keeps a key outside the gr: domain";
+    };
+};
+
+const boost::ut::suite<"SimpleSquelch settings at the initialization"> simpleSquelchInitTests = [] {
+    using namespace boost::ut;
+
+    "SimpleSquelch initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::analog::SimpleSquelch<std::complex<float>>>({
+            {"threshold_db", -40.0},
+            {"alpha", 0.01},
+            {"averaging_time_s", 0.01},
+            {"sample_rate", 8000.f},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

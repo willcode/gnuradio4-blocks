@@ -8,11 +8,10 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
-#include <format>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <span>
-#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -27,12 +26,6 @@
 namespace gr::blocks::analog {
 
 namespace detail {
-
-/// @brief The validator of `sample_rate`: true above 0.
-inline constexpr auto kPowerMeterSampleRatePositive = [](float rate) { return rate > 0.f; };
-
-/// @brief The validator of `window_time`: true above 0.
-inline constexpr auto kWindowTimePositive = [](double time) { return time > 0.0; };
 
 /// @brief The longest window in samples, 2^53. Every whole number of samples up to it is exact in a double.
 inline constexpr double kMaxWindowSamples = 9007199254740992.0;
@@ -65,32 +58,41 @@ only the input whose records fit. A stream that ends mid-window emits a final re
 last record, and none when no segment closed.
 
 `window_time` sets the window in seconds, `segments` the number of parts it is read in, and `sample_rate` the rate it
-counts against. A change of any of the three rebuilds the window and restarts the reading. The window spans at most
-2^53 samples, `sample_rate` times `window_time`. The meter refuses a longer one and keeps the window it has.
+counts against. A change of any of the three rebuilds the window and restarts the reading.
 `segment_samples` and `window_samples` report the window as built. `floor_db` sets the lowest level reported, from the
 next read on, and keeps the window. A reset restarts the window, and the record stamps keep counting.
+
+The rolling average spans `window_time`, up to 2^53 samples. `segment_samples` and `window_samples` report the realized
+segment, at least one sample, and window, segments * segment_samples.
 )"">;
 
     PortIn<T> in;
     /// One measurement record per completed window.
     PortOut<DataSet<float>, Async, Optional> records;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate">, Limits<0.f, std::numeric_limits<float>::max(), detail::kPowerMeterSampleRatePositive>>                              sample_rate     = 96000.f;
-    Annotated<double, "window_time", Unit<"s">, Doc<"length of the rolling average, up to 2^53 samples">, Limits<0.0, std::numeric_limits<double>::max(), detail::kWindowTimePositive>> window_time     = 0.100;
-    Annotated<gr::Size_t, "segments", Doc<"segments per window">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>>                                                                   segments        = 16U;
-    Annotated<double, "floor_db", Unit<"dBFS">, Doc<"lowest level reported">, Limits<std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max()>>                        floor_db        = -200.0;
-    Annotated<std::uint64_t, "segment_samples", Doc<"observable realized segment length, at least one sample">>                                                                         segment_samples = 600U;
-    Annotated<std::uint64_t, "window_samples", Doc<"observable realized window, segments * segment_samples">>                                                                           window_samples  = 9600U;
+    struct Settings {
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>      sample_rate = 96000.f;
+        Annotated<double, Unit<"s">, Doc<"averaging window">, Limits<Over<0.0>>> window_time = 0.100;
+        Annotated<gr::Size_t, Doc<"segments per window">, Limits<Min<1U>>>       segments    = 16U;
+        Annotated<double, Unit<"dBFS">, Doc<"reporting floor">>                  floor_db    = -200.0;
 
-    GR_MAKE_REFLECTABLE(PowerMeter, in, records, sample_rate, window_time, segments, floor_db, segment_samples, window_samples);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, window_time, segments, floor_db);
+    } settings;
+
+    struct Status {
+        Annotated<std::uint64_t, Unit<"samples">, Doc<"segment length">> segment_samples = 600U;
+        Annotated<std::uint64_t, Unit<"samples">, Doc<"window length">>  window_samples  = 9600U;
+
+        GR_MAKE_REFLECTABLE(Status, segment_samples, window_samples);
+    } status;
+
+    GR_MAKE_REFLECTABLE(PowerMeter, in, records, settings, status);
 
     std::array<double, 8UZ> _lanes{};
     std::vector<double>     _segments{};
     std::uint64_t           _segmentSamples = 600ULL;
     std::uint64_t           _index          = 0ULL; ///< position within the current segment
     std::size_t             _completed      = 0UZ;
-    float                   _rate           = 96000.f; ///< the `sample_rate` the window is built for
-    double                  _windowTime     = 0.100;   ///< the `window_time` the window is built for
 
     // A reader touches only atomics. A settings change beside a poll is not a race.
     gr::measurement::MeasurementSlot<1UZ> _slot{};
@@ -104,37 +106,30 @@ next read on, and keeps the window. A reset restarts the window, and the record 
     std::atomic<double>         _floorLinear{1e-20};
     std::atomic<double>         _floorDb{-200.0};
 
-    /// Sizes the window for the default settings.
-    explicit PowerMeter(property_map init = {}) : Block<PowerMeter<T>, NoTagPropagation>(std::move(init)) { configure({}, true); }
+    // a block with private members is no aggregate, so it inherits the base's constructors
+    using Block<PowerMeter<T>, NoTagPropagation>::Block;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) { configure(newSettings, false); }
-
-    /// @brief Take the settings @p newSettings names, every one when @p everything is set.
-    ///
-    /// A change of the rate, the window time or the segment count rebuilds the window. The stream index stays. A
-    /// window longer than 2^53 samples throws before anything changes.
-    void configure(const property_map& newSettings, bool everything) {
-        const auto        moves   = [&newSettings, everything](std::string_view key) { return everything || newSettings.contains(key); };
-        const float       rate    = moves("sample_rate") ? sample_rate.value : _rate;
-        const double      time    = moves("window_time") ? window_time.value : _windowTime;
-        const std::size_t count   = moves("segments") ? static_cast<std::size_t>(segments.value) : _segments.size();
-        const bool        rebuild = everything || rate != _rate || time != _windowTime || count != _segments.size();
-        const double      span    = static_cast<double>(rate) * time;
-        if (rebuild && !(span <= detail::kMaxWindowSamples)) {
-            throw gr::exception(std::format("the window of {} s at {} Hz is {} samples, more than 2^53", time, rate, span));
+    // a span of at most 2^53 samples is inside the range of llround, and the window fits 64 bits
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!(static_cast<double>(s.sample_rate) * s.window_time <= detail::kMaxWindowSamples)) {
+            return gr::Refused(s.window_time, "must give a window of at most 2^53 samples at this sample_rate");
         }
+        return {};
+    }
 
-        _floorDb.store(floor_db, std::memory_order_relaxed);
-        _floorLinear.store(std::pow(10.0, floor_db / 10.0), std::memory_order_relaxed);
+    // a change of the rate, the window time or the segment count rebuilds the window; the stream index stays
+    void applySettings(const Settings& s) {
+        _floorDb.store(s.floor_db, std::memory_order_relaxed);
+        _floorLinear.store(std::pow(10.0, s.floor_db / 10.0), std::memory_order_relaxed);
+        const bool rebuild = s.sample_rate.changed() || s.window_time.changed() || s.segments.changed();
         if (!rebuild) {
             return;
         }
-        // a span of at most 2^53 is inside the range of llround, and the window fits 64 bits
-        _rate           = rate;
-        _windowTime     = time;
-        _segmentSamples = std::max<std::uint64_t>(1ULL, static_cast<std::uint64_t>(std::llround(span / static_cast<double>(count))));
-        segment_samples = _segmentSamples;
-        window_samples  = _segmentSamples * count;
+        const std::size_t count = s.segments;
+        const double      span  = static_cast<double>(s.sample_rate) * s.window_time;
+        _segmentSamples         = std::max<std::uint64_t>(1ULL, static_cast<std::uint64_t>(std::llround(span / static_cast<double>(count))));
+        status.segment_samples  = _segmentSamples;
+        status.window_samples   = _segmentSamples * static_cast<std::uint64_t>(count);
         _segments.assign(count, 0.0);
         _windowSegments.store(static_cast<std::uint32_t>(count), std::memory_order_relaxed);
         reset();
@@ -155,7 +150,7 @@ next read on, and keeps the window. A reset restarts the window, and the record 
         _completed     = 0UZ;
         _sinceRecord   = 0UZ;
         _windowStartAt = _streamAt;
-        publish(0.0, 0U);
+        publishReading(0.0, 0U);
     }
 
     /// @brief Mean power over the accumulated window, in dBFS, clamped at floor_db. Callable from any thread.
@@ -220,7 +215,7 @@ next read on, and keeps the window. A reset restarts the window, and the record 
             {"power_linear", "Power", "1", static_cast<float>(power)},
             {"coverage", "Coverage", "1", coverageOf(filled)},
         }};
-        return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), _rate, _windowStartAt, property_map{{std::pmr::string("n_segments"), pmt::Value(static_cast<std::uint64_t>(filled))}, {std::pmr::string("window_samples"), pmt::Value(window_samples.value)}});
+        return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), settings.sample_rate.value, _windowStartAt, property_map{{std::pmr::string("n_segments"), pmt::Value(static_cast<std::uint64_t>(filled))}, {std::pmr::string("window_samples"), pmt::Value(status.window_samples.value)}});
     }
 
 private:
@@ -325,7 +320,7 @@ private:
             mean += _segments[slot];
         }
         mean /= static_cast<double>(filled);
-        publish(mean, static_cast<std::uint32_t>(filled));
+        publishReading(mean, static_cast<std::uint32_t>(filled));
 
         // A record covers one completed window. It holds the reading at that window's close.
         if (++_sinceRecord >= _segments.size()) {
@@ -338,7 +333,7 @@ private:
     }
 
     /// The one reading and the segments behind it, carried across the thread boundary by the seqlock.
-    void publish(double power, std::uint32_t filled) noexcept { _slot.publish({power}, static_cast<std::uint64_t>(filled)); }
+    void publishReading(double power, std::uint32_t filled) noexcept { _slot.publish({power}, static_cast<std::uint64_t>(filled)); }
 
     [[nodiscard]] std::pair<double, std::uint32_t> read() const noexcept {
         const auto [values, filled] = _slot.read();

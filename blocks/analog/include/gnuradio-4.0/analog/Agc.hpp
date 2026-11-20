@@ -7,7 +7,6 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
-#include <format>
 #include <limits>
 #include <span>
 
@@ -73,62 +72,66 @@ rate. The gain in force for a sample is the one this sample's update produced. `
 per K samples against a stream-absolute phase, so the output does not depend on how the scheduler chunked the stream.
 
 The block is 1:1. Every input tag leaves at its own offset with the values it arrived with.
+
+`sample_rate` can follow gr:sample_rate. Disabled, the block freezes the gain and applies it as a manual gain. The
+attack time constant applies while the gain decreases, the decay time constant while it increases. Input levels below
+`gate_threshold_db` freeze the gain. The gain is updated every `update_decimation` samples; 1 is the normative choice.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate; can follow gr:sample_rate">>                  sample_rate       = 48000.f;
-    Annotated<bool, "enabled", Doc<"false freezes the gain and applies it as a manual gain">>                   enabled           = true;
-    Annotated<double, "reference_db", Unit<"dB">, Doc<"target level of the output magnitude">>                  reference_db      = -6.0;
-    Annotated<double, "attack_s", Unit<"s">, Doc<"time constant used when the gain must decrease">>             attack_s          = 0.005;
-    Annotated<double, "decay_s", Unit<"s">, Doc<"time constant used when the gain must increase">>              decay_s           = 0.500;
-    Annotated<double, "max_gain_db", Unit<"dB">, Doc<"upper clamp on the gain">>                                max_gain_db       = 60.0;
-    Annotated<double, "min_gain_db", Unit<"dB">, Doc<"lower clamp on the gain">>                                min_gain_db       = -20.0;
-    Annotated<double, "gate_threshold_db", Unit<"dB">, Doc<"input levels below this freeze the gain">>          gate_threshold_db = -150.0;
-    Annotated<double, "gain_db", Unit<"dB">, Doc<"gain currently applied; writable to force a starting point">> gain_db           = 0.0;
-    Annotated<gr::Size_t, "update_decimation", Doc<"update the gain every K-th sample; 1 is normative">>        update_decimation = 1U;
+    struct Settings {
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>          sample_rate       = 48000.f;
+        Annotated<bool, Doc<"loop enabled">>                                         enabled           = true;
+        Annotated<double, Unit<"dB">, Doc<"output target level">>                    reference_db      = -6.0;
+        Annotated<double, Unit<"s">, Doc<"attack time constant">, Limits<Over<0.0>>> attack_s          = 0.005;
+        Annotated<double, Unit<"s">, Doc<"decay time constant">, Limits<Over<0.0>>>  decay_s           = 0.500;
+        Annotated<double, Unit<"dB">, Doc<"maximum gain">>                           max_gain_db       = 60.0;
+        Annotated<double, Unit<"dB">, Doc<"minimum gain">>                           min_gain_db       = -20.0;
+        Annotated<double, Unit<"dB">, Doc<"gate threshold">>                         gate_threshold_db = -150.0;
+        Annotated<double, Unit<"dB">, Doc<"initial gain">>                           gain_db           = 0.0;
+        Annotated<gr::Size_t, Doc<"samples per gain update">, Limits<Min<1U>>>       update_decimation = 1U;
 
-    GR_MAKE_REFLECTABLE(Agc, in, out, sample_rate, enabled, reference_db, attack_s, decay_s, max_gain_db, min_gain_db, gate_threshold_db, gain_db, update_decimation);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, enabled, reference_db, attack_s, decay_s, max_gain_db, min_gain_db, gate_threshold_db, gain_db, update_decimation);
+    } settings;
 
-    double _gainDb{};
-    // The loop coefficients are a function of the members, and a batch that moves no value never calls back, so
-    // each states that function of the settings declared above it.
-    double      _alphaAttack = loopCoefficient(attack_s);
-    double      _alphaDecay  = loopCoefficient(decay_s);
+    struct Status {
+        Annotated<double, Unit<"dB">, Doc<"applied gain">> current_gain_db = 0.0;
+
+        GR_MAKE_REFLECTABLE(Status, current_gain_db);
+    } status;
+
+    GR_MAKE_REFLECTABLE(Agc, in, out, settings, status);
+
+    double      _gainDb{};
+    double      _alphaAttack{};
+    double      _alphaDecay{};
     float       _manualGain{1.f};
     float       _appliedGain{1.f};
     std::size_t _updatePhase{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
-            throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.max_gain_db < s.min_gain_db) {
+            return gr::Refused(s.max_gain_db, "must be >= min_gain_db");
         }
-        if (!(attack_s > 0.0) || !(decay_s > 0.0)) {
-            throw gr::exception(std::format("attack_s and decay_s must be positive, got {} and {}", attack_s.value, decay_s.value));
-        }
-        if (max_gain_db < min_gain_db) {
-            throw gr::exception(std::format("max_gain_db ({}) must not be below min_gain_db ({})", max_gain_db.value, min_gain_db.value));
-        }
-        if (update_decimation < 1U) {
-            throw gr::exception("update_decimation must be >= 1");
-        }
-
-        _alphaAttack = loopCoefficient(attack_s);
-        _alphaDecay  = loopCoefficient(decay_s);
-
-        if (newSettings.contains("gain_db")) {
-            _gainDb = gain_db;
-        }
-        _gainDb     = std::clamp(_gainDb, min_gain_db.value, max_gain_db.value);
-        gain_db     = _gainDb;
-        _manualGain = static_cast<float>(std::pow(10.0, _gainDb / 20.0));
+        return {};
     }
 
-    void reset() {
-        _gainDb      = gain_db;
-        _updatePhase = 0UZ;
+    // `gain_db` is the loop's starting point: a changed value restarts the loop there, and every apply clamps the
+    // loop's gain into the range in force
+    void applySettings(const Settings& s) {
+        _alphaAttack = loopCoefficient(s.attack_s);
+        _alphaDecay  = loopCoefficient(s.decay_s);
+        if (s.gain_db.changed()) {
+            _gainDb = s.gain_db;
+        }
+        _gainDb                = std::clamp(_gainDb, s.min_gain_db.value, s.max_gain_db.value);
+        status.current_gain_db = _gainDb;
+        _manualGain            = static_cast<float>(std::pow(10.0, _gainDb / 20.0));
     }
+
+    void reset() { _updatePhase = 0UZ; }
 
     static constexpr std::size_t kSubBlock = 512UZ;
 
@@ -137,10 +140,10 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
     // sign of the error is a compare of g against reference - level, so the serial chain is fma, select, max, min;
     // the coefficients depend only on the level and are computed ahead without a dependence between iterations.
     [[nodiscard]] double runLoop(double gainDb, const float* level, float* exponent, std::size_t count) const noexcept {
-        const double reference = reference_db;
-        const double gate      = gate_threshold_db;
-        const double minGain   = min_gain_db;
-        const double maxGain   = max_gain_db;
+        const double reference = settings.reference_db;
+        const double gate      = settings.gate_threshold_db;
+        const double minGain   = settings.min_gain_db;
+        const double maxGain   = settings.max_gain_db;
         const double attack    = _alphaAttack;
         const double decay     = _alphaDecay;
 
@@ -171,7 +174,7 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         const std::size_t nSamples = std::min(input.size(), output.size());
 
-        if (!enabled) {
+        if (!settings.enabled) {
             const float manualGain = _manualGain;
             for (std::size_t i = 0UZ; i < nSamples; ++i) {
                 output[i] = input[i] * manualGain;
@@ -181,7 +184,7 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
         }
 
         double gainDb = _gainDb;
-        if (update_decimation == 1U) {
+        if (settings.update_decimation == 1U) {
             float level[kSubBlock];
             float exponent[kSubBlock];
             for (std::size_t base = 0UZ; base < nSamples; base += kSubBlock) {
@@ -197,7 +200,7 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
                 }
             }
         } else {
-            const std::size_t stride = static_cast<std::size_t>(update_decimation.value);
+            const std::size_t stride = settings.update_decimation;
             // the first sample of this call that starts a hold interval, then every stride-th after it
             const std::size_t first   = _updatePhase == 0UZ ? 0UZ : std::min(stride - _updatePhase, nSamples);
             const std::size_t updates = first < nSamples ? (nSamples - 1UZ - first) / stride + 1UZ : 0UZ;
@@ -230,8 +233,8 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
             _updatePhase = (_updatePhase + nSamples) % stride;
         }
 
-        _gainDb = gainDb;
-        gain_db = _gainDb;
+        _gainDb                = gainDb;
+        status.current_gain_db = gainDb;
         return work::Status::OK;
     }
 
@@ -244,7 +247,7 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
     }
 
     [[nodiscard]] double loopCoefficient(double tau) const noexcept {
-        const double samples = tau * static_cast<double>(sample_rate);
+        const double samples = tau * static_cast<double>(settings.sample_rate);
         return samples < 1.0 ? 1.0 : std::clamp(1.0 - std::exp(-1.0 / samples), std::numeric_limits<double>::denorm_min(), 1.0);
     }
 };

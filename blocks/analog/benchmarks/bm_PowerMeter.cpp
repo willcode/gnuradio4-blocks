@@ -23,10 +23,7 @@ constexpr std::size_t kSamples = 1UZ << 22;
 constexpr std::size_t kChunk   = 4096UZ;
 constexpr std::size_t kRepeats = 7UZ;
 
-void init(PowerMeter<CF>& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
-}
+void init(PowerMeter<CF>& block) { std::ignore = block.check({}); }
 
 } // namespace
 

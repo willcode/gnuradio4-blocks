@@ -7,7 +7,7 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
-#include <format>
+#include <expected>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -310,7 +310,7 @@ sits at magnitude `0.5`, not `0.25`. The average starts at zero, so the block st
 samples to settle - about 0.2 s at 48 kHz at the default - which is why a squelch appears to take a moment to open.
 
 `alpha` is the averager coefficient; `averaging_time_s`, in seconds and when positive, overrides it with
-`alpha = 1 - exp(-1/(sample_rate * averaging_time_s))` and writes the result back. `threshold_db` reads back exactly as
+`alpha = 1 - exp(-1/(sample_rate * averaging_time_s))`, and `current_alpha` reports the coefficient in force. `threshold_db` reads back exactly as
 set, never round-tripped through the linear form, so a slider does not drift. `threshold_min_db`, `threshold_max_db`
 and `threshold_step_db` are advisory metadata for a user interface and take no part in processing.
 
@@ -321,36 +321,55 @@ block is exactly 1:1 and emits zeros while muted; with `gate = true` it emits no
 becomes data-dependent. Input tags are re-published by hand: while gating, a tag on a suppressed sample moves forward
 to the next produced sample rather than to an offset the rate change has invalidated. Every key survives that
 re-publication with the value it arrived with.
+
+Average power below `threshold_db` mutes the output. `alpha` is the single-pole power averager's coefficient; a positive
+`averaging_time_s` sets it from that time constant instead. `sample_rate` can follow gr:sample_rate. `ramp` is the
+attack and decay length. With `gate`, muted samples are dropped instead of zeroed. `threshold_min_db`,
+`threshold_max_db` and `threshold_step_db` are an advisory range for a user interface. `unmuted` is true while the gate
+is open or attacking.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<double, "threshold_db", Unit<"dB">, Doc<"average power below this mutes the output">>       threshold_db      = -150.0;
-    Annotated<double, "alpha", Doc<"single-pole power averager coefficient, in (0, 1]">>                  alpha             = 1e-4;
-    Annotated<double, "averaging_time_s", Unit<"s">, Doc<"when > 0, sets alpha from this time constant">> averaging_time_s  = 0.0;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"rate for alpha; can follow gr:sample_rate">>         sample_rate       = 48000.f;
-    Annotated<gr::Size_t, "ramp", Doc<"attack and decay length in samples; 0 is instantaneous">>          ramp              = 0U;
-    Annotated<bool, "gate", Doc<"true drops muted samples instead of zeroing them">>                      gate              = false;
-    Annotated<double, "threshold_min_db", Unit<"dB">, Doc<"advisory range for a user interface">>         threshold_min_db  = -150.0;
-    Annotated<double, "threshold_max_db", Unit<"dB">, Doc<"advisory range for a user interface">>         threshold_max_db  = 10.0;
-    Annotated<double, "threshold_step_db", Unit<"dB">, Doc<"advisory range for a user interface">>        threshold_step_db = 1.0;
-    Annotated<bool, "unmuted", Doc<"observable: true while the gate is open or attacking">>               unmuted           = false;
+    struct Settings {
+        Annotated<double, Unit<"dB">, Doc<"squelch threshold">>                     threshold_db      = -150.0;
+        Annotated<double, Doc<"averager coefficient">, Limits<Over<0.0>, Max<1.0>>> alpha             = 1e-4;
+        Annotated<double, Unit<"s">, Doc<"averaging time constant (0 = alpha)">>    averaging_time_s  = 0.0;
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>         sample_rate       = 48000.f;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"ramp length (0 = instant)">>    ramp              = 0U;
+        Annotated<bool, Doc<"muted sample dropping">>                               gate              = false;
+        Annotated<double, Unit<"dB">, Doc<"threshold UI minimum">>                  threshold_min_db  = -150.0;
+        Annotated<double, Unit<"dB">, Doc<"threshold UI maximum">>                  threshold_max_db  = 10.0;
+        Annotated<double, Unit<"dB">, Doc<"threshold UI step">>                     threshold_step_db = 1.0;
 
-    GR_MAKE_REFLECTABLE(PowerSquelch, in, out, threshold_db, alpha, averaging_time_s, sample_rate, ramp, gate, threshold_min_db, threshold_max_db, threshold_step_db, unmuted);
+        GR_MAKE_REFLECTABLE(Settings, threshold_db, alpha, averaging_time_s, sample_rate, ramp, gate, threshold_min_db, threshold_max_db, threshold_step_db);
+    } settings;
+
+    struct Status {
+        Annotated<bool, Doc<"unmuted state">>                   unmuted       = false;
+        Annotated<double, Doc<"averager coefficient in force">> current_alpha = 1e-4;
+
+        GR_MAKE_REFLECTABLE(Status, unmuted, current_alpha);
+    } status;
+
+    GR_MAKE_REFLECTABLE(PowerSquelch, in, out, settings, status);
 
     detail::PowerDetector                _detector{};
     detail::SquelchGate<PowerSquelch<T>> _machine{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        const auto coefficient = detail::averagerCoefficient(alpha, averaging_time_s, static_cast<double>(sample_rate));
-        if (!coefficient) {
-            throw gr::exception(coefficient.error().message);
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!(detail::averagerCoefficient(s.alpha, s.averaging_time_s, static_cast<double>(s.sample_rate)) > 0.0)) {
+            return gr::Refused(s.averaging_time_s, "must give a pole above 0 at this sample_rate");
         }
-        _detector._alpha = *coefficient;
-        _detector.setThresholdDb(threshold_db);
-        alpha = _detector._alpha;
-        _machine._gate.setRamp(static_cast<std::uint32_t>(ramp.value));
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        _detector._alpha = detail::averagerCoefficient(s.alpha, s.averaging_time_s, static_cast<double>(s.sample_rate));
+        _detector.setThresholdDb(s.threshold_db);
+        status.current_alpha = _detector._alpha;
+        _machine._gate.setRamp(s.ramp);
     }
 
     void reset() {
@@ -361,11 +380,11 @@ re-publication with the value it arrived with.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
         auto              pass     = _detector.begin();
-        const std::size_t made     = _machine.run(*this, pass, inSpan, outSpan, nSamples, gate);
+        const std::size_t made     = _machine.run(*this, pass, inSpan, outSpan, nSamples, settings.gate);
         _detector.end(pass);
 
-        unmuted     = _machine._gate.isOpen();
-        std::ignore = inSpan.consume(nSamples);
+        status.unmuted = _machine._gate.isOpen();
+        std::ignore    = inSpan.consume(nSamples);
         outSpan.publish(made);
         return work::Status::OK;
     }
@@ -392,24 +411,38 @@ caller who needs that lengthens `length`, widens `epsilon` to match, and accepts
 `tone_freq`, `length` or `epsilon` discards the partial integration and restarts, and the standing decision holds until
 the first new block completes. Ramping, gating, the burst tags and the tag re-publication are the shared squelch
 machine documented on PowerSquelch.
+
+`sample_rate` can follow gr:sample_rate. The normalized magnitude of the center bin must reach `level` to unmute; the
+neighbor bins sit at tone_freq * (1 -/+ epsilon). `ramp` is the attack and decay length. With `gate`, muted samples are
+dropped instead of zeroed. `level_min`, `level_max` and `level_step` are an advisory range for a user interface.
+`unmuted` is true while the gate is open or attacking.
 )"">;
 
     PortIn<float>  in;
     PortOut<float> out;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"audio rate; can follow gr:sample_rate">>         sample_rate = 8000.f;
-    Annotated<double, "tone_freq", Unit<"Hz">, Doc<"center (tone) frequency">>                        tone_freq   = 100.0;
-    Annotated<double, "level", Doc<"minimum normalized center-bin magnitude required to unmute">>     level       = 0.01;
-    Annotated<gr::Size_t, "length", Doc<"integration length N in samples; 0 selects sample_rate/10">> length      = 0U;
-    Annotated<double, "epsilon", Doc<"neighbor bins sit at tone_freq * (1 -/+ epsilon)">>             epsilon     = 0.02;
-    Annotated<gr::Size_t, "ramp", Doc<"attack and decay length in samples; 0 is instantaneous">>      ramp        = 0U;
-    Annotated<bool, "gate", Doc<"true drops muted samples instead of zeroing them">>                  gate        = false;
-    Annotated<double, "level_min", Doc<"advisory range for a user interface">>                        level_min   = 0.0;
-    Annotated<double, "level_max", Doc<"advisory range for a user interface">>                        level_max   = 1.0;
-    Annotated<double, "level_step", Doc<"advisory range for a user interface">>                       level_step  = 0.01;
-    Annotated<bool, "unmuted", Doc<"observable: true while the gate is open or attacking">>           unmuted     = false;
+    struct Settings {
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                      sample_rate = 8000.f;
+        Annotated<double, Unit<"Hz">, Doc<"tone frequency">, Limits<Over<0.0>>>                  tone_freq   = 100.0;
+        Annotated<double, Doc<"unmute level">>                                                   level       = 0.01;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"integration length (0 = sample_rate / 10)">> length      = 0U;
+        Annotated<double, Doc<"neighbor bin spacing">, Limits<Over<0.0>>>                        epsilon     = 0.02;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"ramp length (0 = instant)">>                 ramp        = 0U;
+        Annotated<bool, Doc<"muted sample dropping">>                                            gate        = false;
+        Annotated<double, Doc<"level UI minimum">>                                               level_min   = 0.0;
+        Annotated<double, Doc<"level UI maximum">>                                               level_max   = 1.0;
+        Annotated<double, Doc<"level UI step">>                                                  level_step  = 0.01;
 
-    GR_MAKE_REFLECTABLE(CtcssSquelch, in, out, sample_rate, tone_freq, level, length, epsilon, ramp, gate, level_min, level_max, level_step, unmuted);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, tone_freq, level, length, epsilon, ramp, gate, level_min, level_max, level_step);
+    } settings;
+
+    struct Status {
+        Annotated<bool, Doc<"unmuted state">> unmuted = false;
+
+        GR_MAKE_REFLECTABLE(Status, unmuted);
+    } status;
+
+    GR_MAKE_REFLECTABLE(CtcssSquelch, in, out, settings, status);
 
     std::array<detail::Goertzel, 3UZ> _bins{};
     std::array<double, 3UZ>           _magnitude{};
@@ -418,20 +451,26 @@ machine documented on PowerSquelch.
     bool                              _open   = false;
     detail::SquelchGate<CtcssSquelch> _machine{};
 
-    /// The three bins are tuned from the members, and a batch that moves no value never calls back, so a block
-    /// constructed at its declared defaults is born on the tone its settings name.
-    explicit CtcssSquelch(property_map init = {}) : Block<CtcssSquelch, NoTagPropagation>(std::move(init)) { configure(); }
+    // the private members make the block no aggregate, so it takes the constructors of its base
+    using Block<CtcssSquelch, NoTagPropagation>::Block;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.tone_freq * (1.0 + s.epsilon) >= 0.5 * static_cast<double>(s.sample_rate)) {
+            return gr::Refused("tone_freq * (1 + epsilon) must be < sample_rate / 2");
+        }
+        if (s.length == 0U && s.sample_rate < 10.f) {
+            return gr::Refused(s.sample_rate, "must be >= 10 when length is 0");
+        }
+        return {};
+    }
 
-    void configure() {
-        validate();
-        _length = length == 0U ? static_cast<std::uint32_t>(sample_rate / 10.f) : static_cast<std::uint32_t>(length.value);
-        _bins[0].configure(tone_freq * (1.0 - epsilon), static_cast<double>(sample_rate));
-        _bins[1].configure(tone_freq, static_cast<double>(sample_rate));
-        _bins[2].configure(tone_freq * (1.0 + epsilon), static_cast<double>(sample_rate));
+    void applySettings(const Settings& s) {
+        _length = s.length == 0U ? static_cast<std::uint32_t>(s.sample_rate / 10.f) : static_cast<std::uint32_t>(s.length);
+        _bins[0].configure(s.tone_freq * (1.0 - s.epsilon), static_cast<double>(s.sample_rate));
+        _bins[1].configure(s.tone_freq, static_cast<double>(s.sample_rate));
+        _bins[2].configure(s.tone_freq * (1.0 + s.epsilon), static_cast<double>(s.sample_rate));
         _filled = 0U;
-        _machine._gate.setRamp(static_cast<std::uint32_t>(ramp.value));
+        _machine._gate.setRamp(s.ramp);
     }
 
     void reset() {
@@ -453,10 +492,10 @@ machine documented on PowerSquelch.
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
-        const std::size_t made     = _machine.run(*this, *this, inSpan, outSpan, nSamples, gate);
+        const std::size_t made     = _machine.run(*this, *this, inSpan, outSpan, nSamples, settings.gate);
 
-        unmuted     = _machine._gate.isOpen();
-        std::ignore = inSpan.consume(nSamples);
+        status.unmuted = _machine._gate.isOpen();
+        std::ignore    = inSpan.consume(nSamples);
         outSpan.publish(made);
         return work::Status::OK;
     }
@@ -467,28 +506,13 @@ machine documented on PowerSquelch.
     [[nodiscard]] std::uint32_t integrationLength() const noexcept { return _length; }
 
 private:
-    void validate() const {
-        if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
-            throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
-        }
-        if (!(epsilon > 0.0) || !(tone_freq > 0.0)) {
-            throw gr::exception(std::format("tone_freq ({}) and epsilon ({}) must both be positive", tone_freq.value, epsilon.value));
-        }
-        if (tone_freq * (1.0 + epsilon) >= 0.5 * static_cast<double>(sample_rate)) {
-            throw gr::exception(std::format("the upper neighbor at {} Hz must stay below Nyquist", tone_freq * (1.0 + epsilon)));
-        }
-        if (length == 0U && sample_rate < 10.f) {
-            throw gr::exception(std::format("the default integration length needs a sample_rate of at least 10 Hz, got {}", sample_rate.value));
-        }
-    }
-
     [[nodiscard]] bool decide() noexcept {
         for (std::size_t which = 0UZ; which < _bins.size(); ++which) {
             _magnitude[which] = _bins[which].magnitude(_length);
             _bins[which].reset();
         }
         _filled = 0U;
-        _open   = _magnitude[1] >= level && _magnitude[1] > _magnitude[0] && _magnitude[1] > _magnitude[2];
+        _open   = _magnitude[1] >= settings.level && _magnitude[1] > _magnitude[0] && _magnitude[1] > _magnitude[2];
         return _open;
     }
 };
@@ -508,43 +532,60 @@ PowerSquelch at `ramp = 0`, `gate = false` on every sample; the two detectors ar
 The average starts at zero, so the block starts muted, and `threshold_db` is a power level: the conversion uses `/10`
 and happens once per settings change. Always exactly 1:1 and synchronous. Every input tag leaves at its own offset
 with the values it arrived with.
+
+Average power below `threshold_db` mutes the output. `alpha` is the single-pole power averager's coefficient; a positive
+`averaging_time_s` sets it from that time constant instead. `sample_rate` can follow gr:sample_rate. `unmuted` reports
+the most recent sample's decision.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<double, "threshold_db", Unit<"dB">, Doc<"average power below this mutes the output">>       threshold_db     = -150.0;
-    Annotated<double, "alpha", Doc<"single-pole power averager coefficient, in (0, 1]">>                  alpha            = 1e-4;
-    Annotated<double, "averaging_time_s", Unit<"s">, Doc<"when > 0, sets alpha from this time constant">> averaging_time_s = 0.0;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"alpha's rate; can follow gr:sample_rate">>           sample_rate      = 48000.f;
-    Annotated<bool, "unmuted", Doc<"observable: the most recent sample's decision">>                      unmuted          = false;
+    struct Settings {
+        Annotated<double, Unit<"dB">, Doc<"squelch threshold">>                     threshold_db     = -150.0;
+        Annotated<double, Doc<"averager coefficient">, Limits<Over<0.0>, Max<1.0>>> alpha            = 1e-4;
+        Annotated<double, Unit<"s">, Doc<"averaging time constant (0 = alpha)">>    averaging_time_s = 0.0;
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>         sample_rate      = 48000.f;
 
-    GR_MAKE_REFLECTABLE(SimpleSquelch, in, out, threshold_db, alpha, averaging_time_s, sample_rate, unmuted);
+        GR_MAKE_REFLECTABLE(Settings, threshold_db, alpha, averaging_time_s, sample_rate);
+    } settings;
+
+    struct Status {
+        Annotated<bool, Doc<"unmuted state">>                   unmuted       = false;
+        Annotated<double, Doc<"averager coefficient in force">> current_alpha = 1e-4;
+
+        GR_MAKE_REFLECTABLE(Status, unmuted, current_alpha);
+    } status;
+
+    GR_MAKE_REFLECTABLE(SimpleSquelch, in, out, settings, status);
 
     detail::PowerDetector _detector{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        const auto coefficient = detail::averagerCoefficient(alpha, averaging_time_s, static_cast<double>(sample_rate));
-        if (!coefficient) {
-            throw gr::exception(coefficient.error().message);
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!(detail::averagerCoefficient(s.alpha, s.averaging_time_s, static_cast<double>(s.sample_rate)) > 0.0)) {
+            return gr::Refused(s.averaging_time_s, "must give a pole above 0 at this sample_rate");
         }
-        _detector._alpha = *coefficient;
-        _detector.setThresholdDb(threshold_db);
-        alpha = _detector._alpha;
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        _detector._alpha = detail::averagerCoefficient(s.alpha, s.averaging_time_s, static_cast<double>(s.sample_rate));
+        _detector.setThresholdDb(s.threshold_db);
+        status.current_alpha = _detector._alpha;
     }
 
     void reset() { _detector.reset(); }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         const std::size_t nSamples = std::min(input.size(), output.size());
-        bool              open     = unmuted;
+        bool              open     = status.unmuted.value;
         auto              pass     = _detector.begin();
         for (std::size_t i = 0UZ; i < nSamples; ++i) {
             open      = pass.detectorUnmuted(input[i]);
             output[i] = open ? input[i] : T{};
         }
         _detector.end(pass);
-        unmuted = open;
+        status.unmuted = open;
         return work::Status::OK;
     }
 };

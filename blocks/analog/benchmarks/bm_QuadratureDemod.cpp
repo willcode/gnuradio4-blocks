@@ -28,8 +28,7 @@ void benchmark(const char* name) {
     const std::vector<std::complex<T>>     input = makeToneBurst<T>();
     std::vector<T>                         output(kSamplesPerCall);
     gr::blocks::analog::QuadratureDemod<T> demod;
-    demod.settings().init();
-    std::ignore = demod.settings().applyStagedParameters();
+    std::ignore = demod.check({});
 
     gr::blocks::testing::bench::report(name, kSamplesPerCall, kIterations, [&demod, &input, &output] {
         std::ignore = demod.processBulk(std::span<const std::complex<T>>(input), std::span<T>(output));

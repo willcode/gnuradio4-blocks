@@ -41,14 +41,20 @@ tone's residual against a double reference is -147.21 dB (5 kHz deviation at 48 
 below the tone with g++, the same as `std::atan2`, and -145.31 dB and -151.72 dB with clang.
 
 The block is 1:1, so every input tag key passes through at its own offset.
+
+`gain` is output units per radian of per-sample phase advance.
 )"">;
 
     PortIn<std::complex<T>> in;
     PortOut<T>              out;
 
-    Annotated<T, "gain", Unit<"1/rad">, Doc<"output units per radian of per-sample phase advance">> gain = T(1);
+    struct Settings {
+        Annotated<T, Unit<"1/rad">, Doc<"demodulator gain">> gain = T(1);
 
-    GR_MAKE_REFLECTABLE(QuadratureDemod, in, out, gain);
+        GR_MAKE_REFLECTABLE(Settings, gain);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(QuadratureDemod, in, out, settings);
 
     std::complex<T> _previous{};
 
@@ -82,7 +88,7 @@ The block is 1:1, so every input tag key passes through at its own offset.
                 const std::complex<T> prior  = input[base + i - 1UZ];
                 store(i, sample.real() * prior.real() + sample.imag() * prior.imag(), sample.imag() * prior.real() - sample.real() * prior.imag());
             }
-            gr::math::scaledAtan2<T>(std::span<const T>(productImag).first(count), std::span<const T>(productReal).first(count), output.subspan(base, count), gain);
+            gr::math::scaledAtan2<T>(std::span<const T>(productImag).first(count), std::span<const T>(productReal).first(count), output.subspan(base, count), settings.gain);
         }
 
         _previous = input[nSamples - 1UZ];

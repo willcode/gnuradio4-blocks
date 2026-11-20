@@ -28,8 +28,7 @@ constexpr std::size_t kRepeats = 7UZ;
 
 [[nodiscard]] NoiseBlanker<CF> make(gr::property_map settings) {
     NoiseBlanker<CF> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

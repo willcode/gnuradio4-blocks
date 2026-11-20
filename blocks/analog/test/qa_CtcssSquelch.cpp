@@ -5,14 +5,17 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <numbers>
 #include <print>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <gnuradio-4.0/analog/Squelch.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
@@ -25,8 +28,7 @@ constexpr double kTone = 100.0;
 
 [[nodiscard]] CtcssSquelch makeSquelch(gr::property_map settings) {
     CtcssSquelch block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -57,10 +59,11 @@ constexpr double kTone = 100.0;
 }
 
 [[nodiscard]] std::vector<char> observeUnmuted(CtcssSquelch& block, std::span<const float> input) {
-    std::vector<char> open(input.size());
+    const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block)); // the work function publishes `unmuted`
+    std::vector<char>                     open(input.size());
     for (std::size_t i = 0UZ; i < input.size(); ++i) {
         std::ignore = spans::run<CtcssSquelch, float>(block, input.subspan(i, 1UZ));
-        open[i]     = block.unmuted.value ? 1 : 0;
+        open[i]     = block.status.unmuted.value ? 1 : 0;
     }
     return open;
 }
@@ -103,17 +106,17 @@ const boost::ut::suite<"CtcssSquelch"> ctcssSquelchTests = [] {
         CtcssSquelch             onTone = makeSquelch(settings);
         const std::vector<float> match  = tone(1600UZ, kTone);
         std::ignore                     = spans::run<CtcssSquelch, float>(onTone, std::span<const float>(match));
-        expect(onTone.unmuted.value) << "a tone at the analysis frequency opens the squelch";
+        expect(onTone.status.unmuted.value) << "a tone at the analysis frequency opens the squelch";
 
         CtcssSquelch             onNoise = makeSquelch(settings);
         const std::vector<float> hiss    = noise(1600UZ, 1.0 / std::numbers::sqrt2);
         std::ignore                      = spans::run<CtcssSquelch, float>(onNoise, std::span<const float>(hiss));
-        expect(!onNoise.unmuted.value) << "noise of the same RMS does not";
+        expect(!onNoise.status.unmuted.value) << "noise of the same RMS does not";
 
         CtcssSquelch             offTone   = makeSquelch(settings);
         const std::vector<float> displaced = tone(1600UZ, kTone + 30.0); // 3/T Hz away at T = 100 ms
         std::ignore                        = spans::run<CtcssSquelch, float>(offTone, std::span<const float>(displaced));
-        expect(!offTone.unmuted.value) << "and neither does a tone 3/T Hz away";
+        expect(!offTone.status.unmuted.value) << "and neither does a tone 3/T Hz away";
     };
 
     "the decision changes only on a multiple of the integration length"_test = [] {
@@ -131,7 +134,7 @@ const boost::ut::suite<"CtcssSquelch"> ctcssSquelchTests = [] {
         for (const double level : {0.49, 0.51}) {
             CtcssSquelch block = makeSquelch({{"sample_rate", kRate}, {"tone_freq", kTone}, {"length", 800U}, {"level", level}});
             std::ignore        = spans::run<CtcssSquelch, float>(block, std::span<const float>(signal));
-            expect(eq(block.unmuted.value, level < 0.5)) << "level " << level << " against a center magnitude of 0.5";
+            expect(eq(block.status.unmuted.value, level < 0.5)) << "level " << level << " against a center magnitude of 0.5";
         }
     };
 
@@ -140,17 +143,16 @@ const boost::ut::suite<"CtcssSquelch"> ctcssSquelchTests = [] {
         const std::vector<float> signal = tone(4000UZ, kTone);
 
         std::ignore = spans::run<CtcssSquelch, float>(block, std::span<const float>(signal).first(1600UZ));
-        expect(block.unmuted.value) << "open on its tone";
+        expect(block.status.unmuted.value) << "open on its tone";
 
-        std::ignore = block.settings().setStaged({{"tone_freq", 200.0}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"tone_freq", 200.0}});
 
         const auto held = spans::run<CtcssSquelch, float>(block, std::span<const float>(signal).subspan(1600UZ, 799UZ));
-        expect(block.unmuted.value) << "the standing decision holds until the first new block completes";
+        expect(block.status.unmuted.value) << "the standing decision holds until the first new block completes";
         expect(std::ranges::all_of(held.samples, [](float sample) { return std::isfinite(sample); })) << "and nothing goes non-finite across the change";
 
         std::ignore = spans::run<CtcssSquelch, float>(block, std::span<const float>(signal).subspan(2399UZ, 1UZ));
-        expect(!block.unmuted.value) << "and then the 200 Hz detector closes on a 100 Hz tone";
+        expect(!block.status.unmuted.value) << "and then the 200 Hz detector closes on a 100 Hz tone";
     };
 
     "output and tag offsets do not depend on chunking"_test = [] {
@@ -196,10 +198,18 @@ const boost::ut::suite<"CtcssSquelch"> ctcssSquelchTests = [] {
     };
 
     "unusable parameters are rejected at settings time"_test = [] {
-        expect(throws([] { std::ignore = makeSquelch({{"sample_rate", 0.f}}); })) << "zero sample_rate";
-        expect(throws([] { std::ignore = makeSquelch({{"epsilon", 0.0}}); })) << "zero epsilon";
-        expect(throws([] { std::ignore = makeSquelch({{"tone_freq", -1.0}}); })) << "negative tone_freq";
-        expect(throws([] { std::ignore = makeSquelch({{"sample_rate", kRate}, {"tone_freq", 3950.0}}); })) << "an upper neighbor above Nyquist";
+        using gr::testing::initRefused;
+        expect(initRefused<CtcssSquelch>({{"sample_rate", 0.f}})) << "zero sample_rate";
+        expect(initRefused<CtcssSquelch>({{"epsilon", 0.0}})) << "zero epsilon";
+        expect(initRefused<CtcssSquelch>({{"tone_freq", -1.0}})) << "negative tone_freq";
+        expect(initRefused<CtcssSquelch>({{"sample_rate", kRate}, {"tone_freq", 3950.0}})) << "an upper neighbor above Nyquist";
+    };
+
+    "a refusal names the key the call changed"_test = [] {
+        CtcssSquelch                 block   = makeSquelch({{"sample_rate", kRate}, {"tone_freq", kTone}});
+        const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"epsilon", 50.0}});
+        expect(fatal(eq(refused.size(), 1UZ))) << "an upper neighbor above Nyquist";
+        expect(eq(refused.front().key, std::string("epsilon"))) << "the tone the call left alone is not refused";
     };
 
     "nanoseconds per sample"_test = [] {
@@ -227,18 +237,39 @@ const boost::ut::suite<"CtcssSquelch"> ctcssSquelchTests = [] {
         std::vector<double> worst(std::size(kArms), 0.0);
         for (int repeat = 0; repeat < kRepeats; ++repeat) { // arms interleaved, so a thermal drift moves all of them
             for (std::size_t a = 0UZ; a < std::size(kArms); ++a) {
-                spans::InputSpan<float>  inSpan{std::span<const float>(x)};
-                spans::OutputSpan<float> outSpan{std::span<float>(y)};
-                const auto               start = Clock::now();
-                std::ignore                    = blocks[a].processBulk(inSpan, outSpan);
-                const double ns                = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(x.size());
-                best[a]                        = std::min(best[a], ns);
-                worst[a]                       = std::max(worst[a], ns);
+                spans::InputSpan<float>               inSpan{std::span<const float>(x)};
+                spans::OutputSpan<float>              outSpan{std::span<float>(y)};
+                const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(blocks[a]));
+                const auto                            start = Clock::now();
+                std::ignore                                 = blocks[a].processBulk(inSpan, outSpan);
+                const double ns                             = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start).count()) / static_cast<double>(x.size());
+                best[a]                                     = std::min(best[a], ns);
+                worst[a]                                    = std::max(worst[a], ns);
             }
         }
         for (std::size_t a = 0UZ; a < std::size(kArms); ++a) {
             std::println("{}: best {:.3f} ns/sample, spread {:.3f} ns", kArms[a].label, best[a], worst[a] - best[a]);
         }
+    };
+};
+
+const boost::ut::suite<"CtcssSquelch settings at the initialization"> ctcssSquelchInitTests = [] {
+    using namespace boost::ut;
+
+    "CtcssSquelch initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::analog::CtcssSquelch>({
+            {"sample_rate", 16000.f},
+            {"tone_freq", 123.0},
+            {"level", 0.05},
+            {"length", gr::Size_t{1600U}},
+            {"epsilon", 0.03},
+            {"ramp", gr::Size_t{8U}},
+            {"gate", true},
+            {"level_min", 0.01},
+            {"level_max", 0.9},
+            {"level_step", 0.02},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

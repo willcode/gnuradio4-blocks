@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <future>
 #include <iterator>
@@ -19,6 +20,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -31,6 +33,7 @@
 
 #include <gnuradio-4.0/analog/PowerMeter.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/Instrumentation.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -88,14 +91,17 @@ constexpr float  kRate = 96000.f;
 /// The block holds atomics and is therefore not movable, so it is built in place and initialized by reference.
 template<typename T>
 void init(PowerMeter<T>& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
 }
 
+// the keys the meter refused or failed, empty when every key applied
 template<typename T>
-void apply(PowerMeter<T>& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
+gr::settings::Rejected apply(PowerMeter<T>& block, gr::property_map settings) {
+    return gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings));
+}
+
+[[nodiscard]] bool names(const gr::settings::Rejected& rejected, std::string_view key) {
+    return std::ranges::any_of(rejected, [key](const gr::settings::Rejection& entry) { return entry.key == key; });
 }
 
 template<typename T>
@@ -435,10 +441,10 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
     "the window fills segment by segment and is already correct at the first"_test = [] {
         PowerMeter<CF> block({{"sample_rate", kRate}, {"window_time", 0.1}, {"segments", 16U}});
         init(block);
-        expect(eq(block.segment_samples.value, 600U));
-        expect(eq(block.window_samples.value, 9600U));
+        expect(eq(block.status.segment_samples.value, 600U));
+        expect(eq(block.status.window_samples.value, 9600U));
         expect(eq(block.coverage(), 0.f)) << "nothing accumulated yet";
-        expect(eq(block.level(), static_cast<float>(block.floor_db.value))) << "and the floor rather than 0 dBFS, which is full scale";
+        expect(eq(block.level(), static_cast<float>(block.settings.floor_db.value))) << "and the floor rather than 0 dBFS, which is full scale";
 
         const std::vector<CF> x = complexTone(9600UZ, 1.0);
         feed<CF>(block, std::span<const CF>(x).first(599UZ));
@@ -465,7 +471,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
             if (remaining > 0.0) {
                 expect(approx(static_cast<double>(block.level()), 10.0 * std::log10(remaining / 16.0), 0.01)) << std::format("{} of 16 segments still hold signal", remaining);
             } else {
-                expect(eq(block.level(), static_cast<float>(block.floor_db.value))) << "exactly window_samples later the reading is the floor; a single pole never gets there";
+                expect(eq(block.level(), static_cast<float>(block.settings.floor_db.value))) << "exactly window_samples later the reading is the floor; a single pole never gets there";
             }
         }
     };
@@ -584,53 +590,38 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
             PowerMeter<CF> filled({{"sample_rate", kRate}});
             init(filled);
             feed<CF>(filled, std::span<const CF>(complexTone(9600UZ, 1.0)), 600UZ);
-            apply<CF>(filled, change);
+            expect(apply<CF>(filled, change).empty());
             expect(eq(filled.coverage(), 0.f)) << "a window rescaled into a different shape holds neither the old nor the new average";
             expect(eq(filled.level(), -200.f));
         }
 
-        apply<CF>(block, {{"floor_db", -140.0}});
+        expect(apply<CF>(block, {{"floor_db", -140.0}}).empty());
         expect(eq(block.coverage(), 1.f)) << "floor_db alone changes the clamp and nothing else";
         expect(approx(static_cast<double>(block.level()), 0.0, 1e-4));
     };
 
     "degenerate settings"_test = [] {
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"sample_rate", 0.f}});
-            init(rejected);
-        }));
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"sample_rate", -1.f}});
-            init(rejected);
-        }));
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"sample_rate", std::numeric_limits<float>::infinity()}});
-            init(rejected);
-        }));
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"window_time", 0.0}});
-            init(rejected);
-        }));
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"window_time", -0.1}});
-            init(rejected);
-        }));
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"segments", 0U}});
-            init(rejected);
-        }));
+        expect(gr::testing::initRefused<PowerMeter<CF>>({{"sample_rate", 0.f}}));
+        expect(gr::testing::initRefused<PowerMeter<CF>>({{"sample_rate", -1.f}}));
+        expect(gr::testing::initRefused<PowerMeter<CF>>({{"window_time", 0.0}}));
+        expect(gr::testing::initRefused<PowerMeter<CF>>({{"window_time", -0.1}}));
+        expect(gr::testing::initRefused<PowerMeter<CF>>({{"segments", 0U}}));
 
         PowerMeter<CF> block({{"sample_rate", kRate}});
         init(block);
-        std::ignore       = block.settings().setStaged({{"segments", 0U}});
-        const auto staged = block.settings().applyStagedParameters();
-        expect(staged.failedParameters.contains(gr::property_map::key_type{"segments"})) << "the limits refuse a live change too";
-        expect(eq(block.segments.value, 16U)) << "and the member keeps the accepted count";
+        expect(names(apply<CF>(block, {{"segments", 0U}}), "segments")) << "the limits refuse a live change too";
+        expect(eq(block.settings.segments.value, 16U)) << "and the member keeps the accepted count";
+
+        // 2^53 samples is the longest window llround takes exactly
+        expect(gr::testing::initRefused<PowerMeter<CF>>({{"sample_rate", kRate}, {"window_time", 1e300}}));
+        expect(names(apply<CF>(block, {{"window_time", 1e300}}), "window_time")) << "a window far past 2^53 samples";
+        expect(names(apply<CF>(block, {{"window_time", 2.0 * 9007199254740992.0 / static_cast<double>(kRate)}}), "window_time")) << "a window of 2^54 samples";
+        expect(eq(block.settings.window_time.value, 0.100)) << "and the member keeps the accepted window";
 
         PowerMeter<CF> tiny({{"sample_rate", kRate}, {"window_time", 1e-9}, {"segments", 16U}});
         init(tiny);
-        expect(eq(tiny.segment_samples.value, 1U)) << "a window too short for a segment is clamped to one sample";
-        expect(eq(tiny.window_samples.value, 16U)) << "and the realized window is reported rather than silently wrong";
+        expect(eq(tiny.status.segment_samples.value, 1U)) << "a window too short for a segment is clamped to one sample";
+        expect(eq(tiny.status.window_samples.value, 16U)) << "and the realized window is reported rather than silently wrong";
 
         PowerMeter<CF> single({{"sample_rate", kRate}, {"segments", 1U}});
         init(single);
@@ -638,36 +629,16 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         expect(approx(static_cast<double>(single.level()), 0.0, 1e-4)) << "one segment is an integrate-and-dump and is legal";
     };
 
-    "a window past 2^32 samples is reported whole, and one past 2^53 samples is refused"_test = [] {
+    "a window past 2^32 samples is reported whole"_test = [] {
         constexpr double kRateHz = 1e6;
         for (const double seconds : {4000.0, 5000.0}) {
             PowerMeter<CF> block({{"sample_rate", static_cast<float>(kRateHz)}, {"window_time", seconds}, {"segments", gr::Size_t{16U}}});
             init(block);
             const auto want = static_cast<std::uint64_t>(kRateHz * seconds);
-            expect(eq(block.window_samples.value, want)) << std::format("{} s at {} Hz is {} samples", seconds, kRateHz, want);
-            expect(eq(block.segment_samples.value * 16ULL, want)) << "the window is 16 whole segments";
+            expect(eq(block.status.window_samples.value, want)) << std::format("{} s at {} Hz is {} samples", seconds, kRateHz, want);
+            expect(eq(block.status.segment_samples.value * 16ULL, want)) << "the window is 16 whole segments";
             expect(eq(windowSamplesOf(block.makeRecord(1.0, 16U)), want)) << "and a record states the same window";
         }
-
-        // At 1 Hz the window in samples equals window_time. 2^53 + 2 is the next double above 2^53.
-        constexpr double kBound = 9007199254740992.0;
-        PowerMeter<CF>   edge({{"sample_rate", 1.f}, {"window_time", kBound}, {"segments", gr::Size_t{16U}}});
-        init(edge);
-        expect(eq(edge.window_samples.value, static_cast<std::uint64_t>(kBound))) << "a window of 2^53 samples applies";
-        expect(throws([] {
-            PowerMeter<CF> rejected({{"sample_rate", 1.f}, {"window_time", kBound + 2.0}});
-            init(rejected);
-        })) << "one sample step past 2^53 is refused";
-
-        PowerMeter<CF> block({{"sample_rate", static_cast<float>(kRateHz)}});
-        init(block);
-        const std::uint64_t window = block.window_samples.value;
-        for (const double seconds : {1e10, 1e300}) {
-            expect(throws([&block, seconds] { apply<CF>(block, {{"window_time", seconds}}); })) << std::format("{} s at {} Hz is refused", seconds, kRateHz);
-            expect(eq(block.window_samples.value, window)) << "and the meter keeps its window";
-        }
-        expect(nothrow([&block] { apply<CF>(block, {{"floor_db", -90.0}}); })) << "the next change of another setting applies";
-        expect(eq(block.window_samples.value, window));
     };
 
     "a refused batch leaves the floor it named at the accepted value for the next change"_test = [] {
@@ -677,13 +648,13 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         init(block);
         expect(eq(block.level(), static_cast<float>(kAccepted))) << "an empty window reads the floor";
 
-        const gr::property_map batch{{"window_time", 1e20}, {"floor_db", kRefused}};
-        expect(throws([&block, &batch] { apply<CF>(block, batch); })) << "a window past 2^53 samples refuses the whole batch";
-        apply<CF>(block, {{"sample_rate", 2e6f}});
+        const gr::property_map batch{{"window_time", -1.0}, {"floor_db", kRefused}};
+        expect(names(apply<CF>(block, batch), "window_time")) << "a negative window refuses the whole batch";
+        expect(apply<CF>(block, {{"sample_rate", 2e6f}}).empty());
         expect(eq(block.level(), static_cast<float>(kAccepted))) << "a later change of the rate keeps the accepted floor";
-        expect(eq(block.floor_db.value, kAccepted));
+        expect(eq(block.settings.floor_db.value, kAccepted));
 
-        apply<CF>(block, {{"floor_db", kRefused}});
+        expect(apply<CF>(block, {{"floor_db", kRefused}}).empty());
         expect(eq(block.level(), static_cast<float>(kRefused))) << "the same floor sent alone applies";
     };
 
@@ -805,11 +776,10 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
     "the record port publishes a completed window, and an unconnected one publishes nothing"_test = [] {
         constexpr gr::Size_t kSegments = 4U;
         PowerMeter<CF>       block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", kSegments}});
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        boost::ut::expect(block.check({}).has_value());
 
         // two whole windows of a unit-power tone, so a record is due and its value is known
-        const std::size_t window = static_cast<std::size_t>(block.window_samples.value);
+        const std::size_t window = static_cast<std::size_t>(block.status.window_samples.value);
         std::vector<CF>   x(2UZ * window, CF(1.f, 0.f));
         const auto        records = drive(block, std::span<const CF>(x));
 
@@ -828,8 +798,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         expect(meta.find(std::pmr::string("sample_start")) != meta.end());
 
         PowerMeter<CF> bare({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", kSegments}});
-        bare.settings().init();
-        std::ignore = bare.settings().applyStagedParameters();
+        boost::ut::expect(bare.check({}).has_value());
         {
             namespace test        = gr::blocks::testing::span;
             std::size_t published = 0UZ;
@@ -855,7 +824,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         PowerMeter<CF>        block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", kSegments}});
         init(block);
 
-        const std::size_t window = static_cast<std::size_t>(block.window_samples.value);
+        const std::size_t window = static_cast<std::size_t>(block.status.window_samples.value);
         std::vector<CF>   x(kWindows * window, CF(1.f, 0.f));
 
         namespace test = gr::blocks::testing::span;
@@ -881,8 +850,8 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         PowerMeter<CF>       block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", kSegments}});
         init(block);
 
-        const std::size_t window  = static_cast<std::size_t>(block.window_samples.value);
-        const std::size_t segment = static_cast<std::size_t>(block.segment_samples.value);
+        const std::size_t window  = static_cast<std::size_t>(block.status.window_samples.value);
+        const std::size_t segment = static_cast<std::size_t>(block.status.segment_samples.value);
         std::vector<CF>   x(2UZ * window, CF(1.f, 0.f));
         x.insert(x.end(), 2UZ * segment + segment / 2UZ, CF(0.1f, 0.f)); // two segments at -20 dBFS and half of a third
 
@@ -906,7 +875,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         for (const std::size_t extra : {0UZ, 5UZ}) {
             PowerMeter<CF> block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", gr::Size_t{4U}}});
             init(block);
-            const std::size_t     window = static_cast<std::size_t>(block.window_samples.value);
+            const std::size_t     window = static_cast<std::size_t>(block.status.window_samples.value);
             const std::vector<CF> x(window + extra, CF(1.f, 0.f));
             expect(eq(drive(block, std::span<const CF>(x)).size(), 1UZ));
             expect(finish(block, std::span<const CF>{}).empty()) << std::format("{} samples past the record: no segment closed, no record", extra);
@@ -960,8 +929,8 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         const auto before = drive(block, std::span<const CF>(std::vector<CF>(288UZ, CF(1.f, 0.f))));
         expect(eq(before.size(), 3UZ));
 
-        apply<CF>(block, {{"window_time", 0.002}});
-        expect(eq(block.window_samples.value, 192U));
+        expect(apply<CF>(block, {{"window_time", 0.002}}).empty());
+        expect(eq(block.status.window_samples.value, 192U));
         expect(eq(block.coverage(), 0.f)) << "the window starts empty";
         const auto after = drive(block, std::span<const CF>(std::vector<CF>(384UZ, CF(1.f, 0.f))));
         expect(eq(after.size(), 2UZ));
@@ -980,7 +949,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         init(block);
         expect(eq(endWithNoRoom(block, 120UZ), 0UZ)) << "the window of the first 96 samples closes, and its record waits";
 
-        apply<CF>(block, {{"window_time", 0.002}});
+        expect(apply<CF>(block, {{"window_time", 0.002}}).empty());
         const auto after = drive(block, std::span<const CF>(std::vector<CF>(192UZ, CF(0.1f, 0.f))));
         expect(eq(after.size(), 2UZ)) << "the waiting record, then the first window of the rebuild";
         if (after.size() == 2UZ) {
@@ -994,11 +963,10 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
     "a reset to defaults drops the unfinished window and keeps the stream index and the waiting records"_test = [] {
         PowerMeter<CF> block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", gr::Size_t{4U}}});
         init(block);
-        block.settings().storeDefaults(); // the defaults a graph stores after the constructor's map
         expect(eq(endWithNoRoom(block, 132UZ), 0UZ)) << "the window of the first 96 samples closes, and its record waits";
         expect(eq(block.coverage(), 1.f)) << "the reading covers a whole window before the reset";
 
-        block.settings().resetDefaults();
+        expect(block.resetDefaults().has_value());
         expect(eq(block.coverage(), 0.f)) << "the reset empties the window";
         const auto after = drive(block, std::span<const CF>(std::vector<CF>(96UZ, CF(0.1f, 0.f))));
         expect(eq(after.size(), 2UZ)) << "the waiting record, then the first window after the reset";
@@ -1018,21 +986,19 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
             const auto* rate  = entry == meta.end() ? nullptr : entry->second.get_if<float>();
             return rate == nullptr ? -1.f : *rate;
         };
-        const auto refused = [&block](gr::property_map change) {
-            std::ignore = block.settings().setStaged(std::move(change));
-            return block.settings().applyStagedParameters().failedParameters;
-        };
+        const auto refused = [&block](gr::property_map change) { return apply<CF>(block, std::move(change)); };
 
-        expect(refused({{"sample_rate", 0.f}}).contains(gr::property_map::key_type{"sample_rate"})) << "a rate of zero is outside the limits";
-        const std::optional<gr::pmt::Value> held = block.settings().get("sample_rate");
-        const float*                        kept = held.has_value() ? held->get_if<float>() : nullptr;
-        expect(kept != nullptr && *kept == kRate) << "the member and the settings keep the accepted rate";
+        expect(names(refused({{"sample_rate", 0.f}}), "sample_rate")) << "a rate of zero is outside the limits";
+        const std::expected<float, gr::settings::Rejected> kept = block.get<float>("sample_rate");
+        expect(kept.has_value() && *kept == kRate) << "the member and the settings keep the accepted rate";
         expect(!refused({{"sample_rate", 0.f}}).empty()) << "sent again, it is refused again";
-        const gr::property_map batch = refused({{"floor_db", -60.0}, {"window_time", -1.0}});
-        expect(batch.contains(gr::property_map::key_type{"window_time"}) && !batch.contains(gr::property_map::key_type{"floor_db"})) << "each key of a batch is checked on its own";
+        const gr::settings::Rejected batch = refused({{"floor_db", -60.0}, {"window_time", -1.0}});
+        expect(names(batch, "window_time") && !names(batch, "floor_db")) << "the refusal names the key outside its limits alone";
+        expect(eq(block.settings.floor_db.value, -200.0)) << "and refuses the whole call, the floor with it";
+        expect(refused({{"floor_db", -60.0}}).empty()) << "the floor sent alone applies";
 
         const auto records = drive(block, std::span<const CF>(std::vector<CF>(96UZ, CF(1e-4f, 0.f))));
-        expect(eq(block.window_samples.value, 96U)) << "the window keeps its accepted size";
+        expect(eq(block.status.window_samples.value, 96U)) << "the window keeps its accepted size";
         expect(eq(records.size(), 1UZ));
         if (!records.empty()) {
             expect(eq(rateOf(records.front()), kRate)) << "a record states the accepted rate";
@@ -1041,15 +1007,10 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
 
         for (int attempt = 0; attempt < 2; ++attempt) {
             expect(!refused({{"window_time", std::numeric_limits<double>::quiet_NaN()}}).empty()) << "a NaN is outside every limit";
-            expect(eq(block.window_time.value, 0.001)) << "and never reaches the member";
+            expect(eq(block.settings.window_time.value, 0.001)) << "and never reaches the member";
         }
-        for (const double floor : {std::numeric_limits<double>::quiet_NaN(), -std::numeric_limits<double>::infinity()}) {
-            expect(refused({{"floor_db", floor}}).contains(gr::property_map::key_type{"floor_db"})) << std::format("a floor of {} is outside the limits", floor);
-            expect(eq(block.floor_db.value, -60.0)) << "the member keeps the accepted floor";
-            expect(approx(static_cast<double>(block.level()), -60.0, 1e-6)) << "and the -80 dBFS window still reads it";
-        }
-        apply<CF>(block, {{"sample_rate", 48000.f}});
-        expect(eq(block.window_samples.value, 48U)) << "a value inside the limits applies at once";
+        expect(apply<CF>(block, {{"sample_rate", 48000.f}}).empty());
+        expect(eq(block.status.window_samples.value, 48U)) << "a value inside the limits applies at once";
     };
 
     "a value outside its limits on a tag is refused, the run completes, and the meter keeps its window"_test = [] {
@@ -1062,7 +1023,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
                 source._tags.emplace_back(kAt, *change);
             }
             auto& meter = graph.emplaceBlock<PowerMeter<CF>>({{"sample_rate", 9600.f}, {"segments", gr::Size_t{4U}}});
-            meter.settings().setTagCouplings({{"window_time", std::string("window_time")}});
+            boost::ut::expect(meter.setTagCouplings({{"window_time", std::string("window_time")}}).has_value());
             auto& sink = graph.emplaceBlock<RecordSink>();
             boost::ut::expect(graph.connect<"out", "in">(source, meter).has_value());
             boost::ut::expect(graph.connect<"records", "in">(meter, sink).has_value());
@@ -1074,7 +1035,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
             for (const auto& record : sink.received) {
                 records.emplace_back(sampleStartOf(record), record.signal_values[0UZ]);
             }
-            return std::tuple{ran, records, meter.window_time.value, meter.window_samples.value};
+            return std::tuple{ran, records, meter.settings.window_time.value, meter.status.window_samples.value};
         };
 
         const auto [plainRan, plain, plainTime, plainWindow] = runWith(std::nullopt);
@@ -1103,7 +1064,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         PowerMeter<CF> block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", gr::Size_t{4U}}, {"floor_db", -60.0}});
         init(block);
 
-        const std::size_t window = static_cast<std::size_t>(block.window_samples.value);
+        const std::size_t window = static_cast<std::size_t>(block.status.window_samples.value);
         std::vector<CF>   quiet(window + 1UZ, CF(1e-6f, 0.f)); // -120 dBFS, far under the floor
 
         const auto records = drive(block, std::span<const CF>(quiet));
@@ -1139,7 +1100,7 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
         PowerMeter<CF> block({{"sample_rate", kRate}, {"window_time", 0.001}, {"segments", gr::Size_t{4U}}});
         init(block);
 
-        const std::size_t     window = static_cast<std::size_t>(block.window_samples.value);
+        const std::size_t     window = static_cast<std::size_t>(block.status.window_samples.value);
         const std::vector<CF> x(window, CF(1.f, 0.f));
         expect(drive(block, std::span<const CF>(x).first(window - 1UZ)).empty()) << "one sample short of the window's close";
 
@@ -1206,6 +1167,20 @@ const boost::ut::suite<"PowerMeter"> powerMeterTests = [] {
             expect(approx(static_cast<double>(meter->level()), 0.0, 1e-4));
         }
         expect(eq(records.received, 1UZ)) << "and the connected one publishes the window that closed after it";
+    };
+};
+
+const boost::ut::suite<"PowerMeter settings at the initialization"> powerMeterInitTests = [] {
+    using namespace boost::ut;
+
+    "PowerMeter initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::analog::PowerMeter<std::complex<float>>>({
+            {"sample_rate", 48000.f},
+            {"window_time", 0.2},
+            {"segments", gr::Size_t{8U}},
+            {"floor_db", -120.0},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

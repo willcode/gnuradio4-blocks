@@ -34,8 +34,7 @@ std::vector<T> makeFadingBurst() {
 template<typename T>
 gr::blocks::analog::Agc<T> makeAgc(gr::property_map settings) {
     gr::blocks::analog::Agc<T> agc(std::move(settings));
-    agc.settings().init();
-    std::ignore = agc.settings().applyStagedParameters();
+    std::ignore = agc.check({});
     return agc;
 }
 

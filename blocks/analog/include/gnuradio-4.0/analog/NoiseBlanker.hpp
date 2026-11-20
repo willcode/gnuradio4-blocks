@@ -7,11 +7,9 @@
 #include <concepts>
 #include <cstdint>
 #include <expected>
-#include <format>
 #include <limits>
 #include <span>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -29,26 +27,7 @@ namespace detail {
 
 inline constexpr const char* kNoiseBlanked = "noise_blanked";
 
-/// @brief The validator of `sample_rate`: true above 0.
-inline constexpr auto kSampleRatePositive = [](float rate) { return rate > 0.f; };
-
-/// @brief The validator of `alpha`: true above 0.
-inline constexpr auto kAlphaPositive = [](double pole) { return pole > 0.0; };
-
 enum class Replacement : std::uint8_t { Interpolate, Hold, Zero };
-
-[[nodiscard]] inline std::expected<Replacement, gr::Error> parseReplacement(std::string_view name) {
-    if (name == "interpolate") {
-        return Replacement::Interpolate;
-    }
-    if (name == "hold") {
-        return Replacement::Hold;
-    }
-    if (name == "zero") {
-        return Replacement::Zero;
-    }
-    return std::unexpected(gr::Error(std::format("replacement must be 'interpolate', 'hold' or 'zero', got '{}'", name)));
-}
 
 } // namespace detail
 
@@ -79,8 +58,8 @@ than the delay line holds the sample before it until the run's end enters the li
 left.
 
 `averaging_time` sets the tracker's time constant in seconds at `sample_rate`. At 0 the block takes `alpha` as the pole,
-and otherwise it writes the pole it derives to `alpha`. The block refuses a pole outside (0, 1], an `averaging_time`
-long enough that the pole rounds to zero, and a `replacement` other than the three names. The tracker learns the level
+and otherwise it derives the pole; `current_alpha` reports the pole in force. The block refuses a pole outside (0, 1] and a `replacement`
+other than the three names. The tracker learns the level
 during a warm-up of one averaging time, in which only a sample whose power is not finite counts as a detection. Enabling
 the block and a change of the pole restart the warm-up. A count rises with each input from a detection to the end of its
 window and falls with each passed one. When it reaches one averaging time of samples, the warm-up restarts too. A rise
@@ -96,27 +75,45 @@ ten tracker time constants, of the fraction of inputs from a detection to the en
 `lookback_samples` replaced ahead of each detection. At the default settings it reads about 0.137 % on a clean
 circular-complex-Gaussian stream, against about 0.18 % replaced. The block writes both to its members and to its
 settings at the end of each call that changes them.
+
+A sample is detected when its power exceeds the tracked mean power by `threshold_db`. With `averaging_time` 0, `alpha`
+is the tracker's pole. A detection replaces `blank_samples` from the detected sample and `lookback_samples` before it.
+With `retrigger`, a detection inside a window restarts it, up to `max_window_samples`, which 0 sets to 4 *
+blank_samples. With `emit_tags`, a noise_blanked tag holding the run's length marks each run's last replaced sample.
+`delay_samples` is lookback_samples + blank_samples and holds also while blanking is disabled. `tracked_power` is the
+censored mean power the threshold is taken against; `blanked_fraction` is a slow average of the window duty.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<bool, "enabled", Doc<"blanking switch">, Visible>                                                                                                                                             enabled            = false;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream rate">, Limits<0.f, std::numeric_limits<float>::max(), detail::kSampleRatePositive>>                                                            sample_rate        = 96000.f;
-    Annotated<double, "threshold_db", Unit<"dB">, Doc<"how far above the tracked mean power a sample must be">, Limits<std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max()>, Visible> threshold_db       = 9.32;
-    Annotated<double, "averaging_time", Unit<"s">, Doc<"tracker time constant, 0 to use alpha directly">, Limits<0.0, std::numeric_limits<double>::max()>>                                                  averaging_time     = 0.01;
-    Annotated<double, "alpha", Doc<"the pole when averaging_time is 0, read back as the resolved value">, Limits<0.0, 1.0, detail::kAlphaPositive>>                                                         alpha              = 1e-3;
-    Annotated<gr::Size_t, "blank_samples", Doc<"length of the replaced run from a detected sample">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>>                                                    blank_samples      = 7U;
-    Annotated<gr::Size_t, "lookback_samples", Doc<"samples before the detected one also replaced">>                                                                                                         lookback_samples   = 2U;
-    Annotated<std::string, "replacement", Doc<"'interpolate' (default), 'hold' or 'zero'">, Visible>                                                                                                        replacement        = std::string("interpolate");
-    Annotated<bool, "retrigger", Doc<"restart the window on a detection inside one, up to max_window_samples">>                                                                                             retrigger          = false;
-    Annotated<gr::Size_t, "max_window_samples", Doc<"cap on a retriggering window, 0 meaning 4 * blank_samples">>                                                                                           max_window_samples = 0U;
-    Annotated<bool, "emit_tags", Doc<"publish noise_blanked on each run's last replaced sample, with its length">>                                                                                          emit_tags          = false;
-    Annotated<gr::Size_t, "delay_samples", Doc<"observable lookback_samples + blank_samples, present when disabled">>                                                                                       delay_samples      = 9U;
-    Annotated<double, "tracked_power", Doc<"observable censored mean power the threshold is taken against">>                                                                                                tracked_power      = 0.0;
-    Annotated<double, "blanked_fraction", Doc<"observable slow average of the window duty">>                                                                                                                blanked_fraction   = 0.0;
+    struct Settings {
+        Annotated<bool, Doc<"blanking">, Visible>                                                enabled            = false;
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                      sample_rate        = 96000.f;
+        Annotated<double, Unit<"dB">, Doc<"detection threshold">, Visible>                       threshold_db       = 9.32;
+        Annotated<double, Unit<"s">, Doc<"tracker time constant (0 = alpha)">, Limits<Min<0.0>>> averaging_time     = 0.01;
+        Annotated<double, Doc<"tracker pole">, Limits<Over<0.0>, Max<1.0>>>                      alpha              = 1e-3;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"blanked run length">, Limits<Min<1U>>>       blank_samples      = 7U;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"lookback length">>                           lookback_samples   = 2U;
+        Annotated<detail::Replacement, Doc<"replacement">, Visible>                              replacement        = detail::Replacement::Interpolate;
+        Annotated<bool, Doc<"retriggering">>                                                     retrigger          = false;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"retriggered window limit (0 = derived)">>    max_window_samples = 0U;
+        Annotated<bool, Doc<"blanking tags">>                                                    emit_tags          = false;
 
-    GR_MAKE_REFLECTABLE(NoiseBlanker, in, out, enabled, sample_rate, threshold_db, averaging_time, alpha, blank_samples, lookback_samples, replacement, retrigger, max_window_samples, emit_tags, delay_samples, tracked_power, blanked_fraction);
+        GR_MAKE_REFLECTABLE(Settings, enabled, sample_rate, threshold_db, averaging_time, alpha, blank_samples, lookback_samples, replacement, retrigger, max_window_samples, emit_tags);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"delay">> delay_samples    = 9U;
+        Annotated<double, Doc<"tracked mean power">>         tracked_power    = 0.0;
+        Annotated<double, Doc<"blanked fraction">>           blanked_fraction = 0.0;
+
+        Annotated<double, Doc<"tracker pole in force">> current_alpha = 1e-3;
+
+        GR_MAKE_REFLECTABLE(Status, delay_samples, tracked_power, blanked_fraction, current_alpha);
+    } status;
+
+    GR_MAKE_REFLECTABLE(NoiseBlanker, in, out, settings, status);
 
     std::vector<T>                                      _line{};
     std::vector<std::uint8_t>                           _marked{};      // a byte per slot and not a bitset, read and written once per sample
@@ -128,17 +125,8 @@ settings at the end of each call that changes them.
     std::size_t                                         _lookback     = 2UZ;
     std::size_t                                         _blank        = 7UZ;
     std::size_t                                         _maxWindow    = 28UZ;
-    std::size_t                                         _maxSetting   = 0UZ; ///< the accepted `max_window_samples`
-    detail::Replacement                                 _rule         = detail::Replacement::Interpolate;
-    bool                                                _enabled      = false;   ///< the accepted `enabled`
-    bool                                                _retrigger    = false;   ///< the accepted `retrigger`
-    bool                                                _emitTags     = false;   ///< the accepted `emit_tags`
-    float                                               _rate         = 96000.f; ///< the accepted `sample_rate`
-    double                                              _averaging    = 0.01;    ///< the accepted `averaging_time`
     double                                              _alpha        = 1e-3;
     double                                              _threshold    = 8.5507;
-    double                                              _power        = 0.0;
-    double                                              _duty         = 0.0;
     std::size_t                                         _warmup       = 960UZ;
     std::size_t                                         _warmupLength = 960UZ;
     std::uint32_t                                       _remaining    = 0U;
@@ -149,88 +137,42 @@ settings at the end of each call that changes them.
     std::uint64_t                                       _emitted      = 0ULL; ///< outputs since start(), the index of the next one
     T                                                   _anchor{};
 
-    /// Derives the coefficients and the delay line from the default settings.
-    explicit NoiseBlanker(property_map init = {}) : Block<NoiseBlanker<T>, NoTagPropagation>(std::move(init)) { configure({}, true); }
+    // the block has private members, so it takes its settings through the base's constructor
+    using Block<NoiseBlanker<T>, NoTagPropagation>::Block;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) { configure(newSettings, false); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!(detail::averagerCoefficient(s.alpha, s.averaging_time, static_cast<double>(s.sample_rate)) > 0.0)) {
+            return gr::Refused(s.averaging_time, "must give a pole above 0 at this sample_rate");
+        }
+        return {};
+    }
 
-    /// @brief Check the settings @p newSettings names, every one when @p everything is set, then take them together.
-    void configure(const property_map& newSettings, bool everything) {
-        const auto          moves       = [&newSettings, everything](std::string_view key) { return everything || newSettings.contains(key); };
-        bool                nextEnabled = _enabled;
-        float               rate        = _rate;
-        double              averaging   = _averaging;
-        double              pole        = _alpha;
-        double              threshold   = _threshold;
-        std::size_t         lookback    = _lookback;
-        std::size_t         blank       = _blank;
-        std::size_t         maxSetting  = _maxSetting;
-        detail::Replacement rule        = _rule;
-        bool                nextRetrig  = _retrigger;
-        bool                nextTags    = _emitTags;
-
-        if (moves("enabled")) {
-            nextEnabled = enabled;
-        }
-        if (moves("sample_rate")) {
-            rate = sample_rate;
-        }
-        if (moves("averaging_time")) {
-            averaging = averaging_time;
-        }
-        if (moves("alpha")) {
-            pole = alpha;
-        }
-        if (moves("threshold_db")) {
-            threshold = std::pow(10.0, threshold_db / 10.0);
-        }
-        if (moves("blank_samples")) {
-            blank = static_cast<std::size_t>(blank_samples.value);
-        }
-        if (moves("lookback_samples")) {
-            lookback = static_cast<std::size_t>(lookback_samples.value);
-        }
-        if (moves("max_window_samples")) {
-            maxSetting = static_cast<std::size_t>(max_window_samples.value);
-        }
-        if (moves("replacement")) {
-            const auto parsed = detail::parseReplacement(replacement.value);
-            if (!parsed) {
-                throw gr::exception(parsed.error().message);
-            }
-            rule = *parsed;
-        }
-        if (moves("retrigger")) {
-            nextRetrig = retrigger;
-        }
-        if (moves("emit_tags")) {
-            nextTags = emit_tags;
-        }
-        const auto coefficient = detail::averagerCoefficient(pole, averaging, static_cast<double>(rate));
-        if (!coefficient) {
-            throw gr::exception(coefficient.error().message);
-        }
-
+    void applySettings(const Settings& s) {
+        const double pole = detail::averagerCoefficient(s.alpha, s.averaging_time, static_cast<double>(s.sample_rate));
         // the tracked power is stale after a pole move or after the tracker was disabled
-        const bool restart = everything || *coefficient != _alpha || (nextEnabled && !_enabled);
-        _enabled           = nextEnabled;
-        _rate              = rate;
-        _averaging         = averaging;
-        _alpha             = *coefficient;
-        alpha              = _alpha;
-        _threshold         = threshold;
-        _maxSetting        = maxSetting;
-        _maxWindow         = maxSetting == 0UZ ? 4UZ * blank : maxSetting;
-        _rule              = rule;
-        _retrigger         = nextRetrig;
-        _emitTags          = nextTags;
-        _warmupLength      = averaging > 0.0 ? static_cast<std::size_t>(std::ceil(static_cast<double>(rate) * averaging)) : static_cast<std::size_t>(std::ceil(1.0 / _alpha));
+        const bool restart = pole != _alpha || (s.enabled && s.enabled.changed());
+        derive(pole);
         if (restart) {
             _warmup = _warmupLength;
         }
-        if (everything || lookback != _lookback || blank != _blank) {
-            relay(lookback, blank);
+        if (s.lookback_samples.changed() || s.blank_samples.changed()) {
+            relay(s.lookback_samples, s.blank_samples);
         }
+    }
+
+    /// @brief The tracker's pole, the threshold and the window cap the settings give; `current_alpha` reports the pole.
+    void derive(double pole) {
+        _alpha               = pole;
+        status.current_alpha = pole;
+        _threshold           = std::pow(10.0, settings.threshold_db / 10.0);
+        _maxWindow           = settings.max_window_samples == 0U ? 4UZ * settings.blank_samples : static_cast<std::size_t>(settings.max_window_samples);
+        _warmupLength        = settings.averaging_time > 0.0 ? static_cast<std::size_t>(std::ceil(static_cast<double>(settings.sample_rate) * settings.averaging_time)) : static_cast<std::size_t>(std::ceil(1.0 / pole));
+    }
+
+    /// @brief The tracker's state is its two status members.
+    void reportTracker(double power, double duty) {
+        status.tracked_power    = power;
+        status.blanked_fraction = duty;
     }
 
     void start() {
@@ -256,8 +198,8 @@ settings at the end of each call that changes them.
         } else {
             // The block forwards the tags itself. Each tag waits `delay_samples` for its sample and leaves in index
             // order with the block's own markers. The filter is the framework's.
-            double meanPower = _power;
-            double meanDuty  = _duty;
+            double meanPower = status.tracked_power.value;
+            double meanDuty  = status.blanked_fraction.value;
             for (std::size_t i = 0UZ; i < nSamples; ++i) {
                 const std::uint64_t at = _emitted + i;
                 while (tag < nTags && inSpan.rawTags[tag].index <= inSpan.streamIndex + i) {
@@ -276,17 +218,11 @@ settings at the end of each call that changes them.
                 }
                 outSpan[i] = emit(outSpan, i);
             }
-            _power = flushed(meanPower);
-            _duty  = flushed(meanDuty);
+            reportTracker(flushed(meanPower), flushed(meanDuty));
         }
         _pendingTags.erase(_pendingTags.begin(), _pendingTags.begin() + static_cast<std::ptrdiff_t>(leaving));
         _emitted += nSamples;
 
-        if (tracked_power.value != _power || blanked_fraction.value != _duty) {
-            tracked_power    = _power;
-            blanked_fraction = _duty;
-            std::ignore      = this->updateActiveParameters({"tracked_power", "blanked_fraction"});
-        }
         std::ignore = inSpan.consume(nSamples);
         outSpan.publish(nSamples);
         return work::Status::OK;
@@ -307,7 +243,7 @@ settings at the end of each call that changes them.
         }
         std::vector<std::pair<std::uint64_t, property_map>> leaving = std::move(_pendingTags);
         _pendingTags.clear();
-        if (_emitTags) {
+        if (settings.emit_tags) {
             std::uint32_t length = _runPosition;
             for (std::size_t ahead = 1UZ; ahead <= _delay; ++ahead) {
                 if (_marked[slot(ahead)] == 0U) {
@@ -372,7 +308,7 @@ private:
     /// True when the block is disabled, no window is open, no input in the line is marked, and the excess count is
     /// below the warm-up length. Each input then leaves `delay_samples` later unchanged.
     [[nodiscard]] bool passesUnchanged() const noexcept {
-        if (_enabled || _remaining > 0U || _excess >= _warmupLength) {
+        if (settings.enabled || _remaining > 0U || _excess >= _warmupLength) {
             return false;
         }
         const std::span<const std::uint8_t> marked(_marked); // every slot but `_oldest`, which holds the sample emitted last
@@ -436,14 +372,14 @@ private:
         _windowLength = 0U;
         _warmup       = _warmup > nSamples ? _warmup - nSamples : 0UZ;
         _excess       = _excess > nSamples ? _excess - static_cast<std::uint32_t>(nSamples) : 0U;
-        double duty   = _duty;
+        double duty   = status.blanked_fraction.value;
         for (std::size_t i = 0UZ; i < nSamples && duty != 0.0; ++i) { // the duty average decays toward zero, as in accept()
             duty += 0.1 * _alpha * (0.0 - duty);
             if (duty < std::numeric_limits<double>::min()) {
                 duty = 0.0;
             }
         }
-        _duty = duty;
+        reportTracker(status.tracked_power.value, duty);
         return leaving;
     }
 
@@ -480,26 +416,25 @@ private:
             _runPosition = 0U;
             _held        = 0U;
         }
-        _line         = std::move(line);
-        _marked       = std::move(marked);
-        _ring         = delay + 1UZ;
-        _cursor       = delay;
-        _oldest       = 0UZ;
-        _delay        = delay;
-        _lookback     = lookback;
-        _blank        = blank;
-        _remaining    = std::min(_remaining, static_cast<std::uint32_t>(blank));
-        delay_samples = static_cast<gr::Size_t>(delay);
+        _line                = std::move(line);
+        _marked              = std::move(marked);
+        _ring                = delay + 1UZ;
+        _cursor              = delay;
+        _oldest              = 0UZ;
+        _delay               = delay;
+        _lookback            = lookback;
+        _blank               = blank;
+        _remaining           = std::min(_remaining, static_cast<std::uint32_t>(blank));
+        status.delay_samples = static_cast<gr::Size_t>(delay);
     }
 
     /// @brief Fill the line with zeros, clear its marks and restart the tracker.
     void restart() {
         std::ranges::fill(_line, T{});
         _marked.assign(_ring, std::uint8_t{0});
-        _cursor       = 0UZ;
-        _oldest       = 1UZ;
-        _power        = 0.0;
-        _duty         = 0.0;
+        _cursor = 0UZ;
+        _oldest = 1UZ;
+        reportTracker(0.0, 0.0);
         _warmup       = _warmupLength;
         _remaining    = 0U;
         _windowLength = 0U;
@@ -533,7 +468,7 @@ private:
             }
             ++length;
             if (ahead == _delay || _marked[slot(ahead + 1UZ)] == 0U) {
-                if (_emitTags) {
+                if (settings.emit_tags) {
                     pending.emplace_back(_emitted, marker(length));
                 }
                 length = 0U;
@@ -562,11 +497,11 @@ private:
         bool detected = false;
         if (_warmup > 0UZ) {
             --_warmup;
-            detected = _enabled && !(power < std::numeric_limits<double>::infinity());
-        } else if (_enabled) {
+            detected = settings.enabled && !(power < std::numeric_limits<double>::infinity());
+        } else if (settings.enabled) {
             detected = !(power <= _threshold * meanPower);
         }
-        if (!windowOpen && !detected && _enabled) {
+        if (!windowOpen && !detected && settings.enabled) {
             meanPower += _alpha * (power - meanPower);
         }
 
@@ -593,7 +528,7 @@ private:
         }
         meanDuty += 0.1 * _alpha * ((marked ? 1.0 : 0.0) - meanDuty); // ten tracker time constants, since a 0.14 % duty needs a longer average than the power
 
-        if (detected && windowOpen && _retrigger) {
+        if (detected && windowOpen && settings.retrigger) {
             const std::uint32_t room = _windowLength > static_cast<std::uint32_t>(_maxWindow) ? 0U : static_cast<std::uint32_t>(_maxWindow) + 1U - _windowLength;
             _remaining               = std::min(static_cast<std::uint32_t>(_blank), room);
         }
@@ -626,20 +561,20 @@ private:
         ++_runPosition;
         if (ahead > _delay) {
             _held = _runPosition;
-            return _rule == detail::Replacement::Zero ? T{} : _anchor;
+            return settings.replacement.value == detail::Replacement::Zero ? T{} : _anchor;
         }
 
         const std::uint32_t position = _runPosition - _held;
         const std::uint32_t span     = position + static_cast<std::uint32_t>(ahead) - 1U;
         if (ahead == 1UZ) {
-            if (_emitTags) {
+            if (settings.emit_tags) {
                 outSpan.publishTag(marker(_runPosition), at);
             }
             _runPosition = 0U;
             _held        = 0U;
         }
 
-        switch (_rule) {
+        switch (settings.replacement.value) {
         case detail::Replacement::Zero: return T{};
         case detail::Replacement::Hold: return _anchor;
         default: break;

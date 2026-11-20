@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
+#include <expected>
 #include <format>
 #include <limits>
 #include <numbers>
@@ -14,6 +15,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -23,6 +25,7 @@
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/analog/NoiseBlanker.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -36,22 +39,32 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<bool, "enabled", Visible>                                                                                                       enabled            = false;
-    Annotated<float, "sample_rate", Unit<"Hz">, Limits<0.f, std::numeric_limits<float>::max(), detail::kSampleRatePositive>>                  sample_rate        = 96000.f;
-    Annotated<double, "threshold_db", Unit<"dB">, Limits<std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max()>, Visible> threshold_db       = 9.32;
-    Annotated<double, "averaging_time", Unit<"s">, Limits<0.0, std::numeric_limits<double>::max()>>                                           averaging_time     = 0.01;
-    Annotated<double, "alpha", Limits<0.0, 1.0, detail::kAlphaPositive>>                                                                      alpha              = 1e-3;
-    Annotated<gr::Size_t, "blank_samples", Limits<1U, std::numeric_limits<gr::Size_t>::max()>>                                                blank_samples      = 7U;
-    Annotated<gr::Size_t, "lookback_samples">                                                                                                 lookback_samples   = 2U;
-    Annotated<std::string, "replacement", Visible>                                                                                            replacement        = std::string("Interpolate");
-    Annotated<bool, "retrigger">                                                                                                              retrigger          = false;
-    Annotated<gr::Size_t, "max_window_samples">                                                                                               max_window_samples = 0U;
-    Annotated<bool, "emit_tags">                                                                                                              emit_tags          = false;
-    Annotated<gr::Size_t, "delay_samples">                                                                                                    delay_samples      = 9U;
-    Annotated<double, "tracked_power">                                                                                                        tracked_power      = 0.0;
-    Annotated<double, "blanked_fraction">                                                                                                     blanked_fraction   = 0.0;
+    struct Settings {
+        Annotated<bool, Visible>                       enabled            = false;
+        Annotated<float, Unit<"Hz">, Limits<Min<0.f>>> sample_rate        = 96000.f;
+        Annotated<double, Unit<"dB">, Visible>         threshold_db       = 9.32;
+        Annotated<double, Unit<"s">, Limits<Min<0.0>>> averaging_time     = 0.01;
+        Annotated<double, Limits<Min<0.0>, Max<1.0>>>  alpha              = 1e-3;
+        Annotated<gr::Size_t, Limits<Min<1U>>>         blank_samples      = 7U;
+        Annotated<gr::Size_t>                          lookback_samples   = 2U;
+        Annotated<detail::Replacement, Visible>        replacement        = detail::Replacement::Interpolate;
+        Annotated<bool>                                retrigger          = false;
+        Annotated<gr::Size_t>                          max_window_samples = 0U;
+        Annotated<bool>                                emit_tags          = false;
 
-    GR_MAKE_REFLECTABLE(NoiseBlanker, in, out, enabled, sample_rate, threshold_db, averaging_time, alpha, blank_samples, lookback_samples, replacement, retrigger, max_window_samples, emit_tags, delay_samples, tracked_power, blanked_fraction);
+        GR_MAKE_REFLECTABLE(Settings, enabled, sample_rate, threshold_db, averaging_time, alpha, blank_samples, lookback_samples, replacement, retrigger, max_window_samples, emit_tags);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t> delay_samples    = 9U;
+        Annotated<double>     tracked_power    = 0.0;
+        Annotated<double>     blanked_fraction = 0.0;
+        Annotated<double>     current_alpha    = 1e-3;
+
+        GR_MAKE_REFLECTABLE(Status, delay_samples, tracked_power, blanked_fraction, current_alpha);
+    } status;
+
+    GR_MAKE_REFLECTABLE(NoiseBlanker, in, out, settings, status);
 
     std::vector<T>                                      _line{};
     std::vector<std::uint8_t>                           _marked{};
@@ -84,16 +97,15 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
     std::uint64_t                                       _emitted      = 0ULL;
     T                                                   _anchor{};
 
-    explicit NoiseBlanker(property_map init = {}) : Block<NoiseBlanker<T>, NoTagPropagation>(std::move(init)) { configure({}, true); }
+    explicit NoiseBlanker(property_map init = {}) : Block<NoiseBlanker<T>, NoTagPropagation>(std::move(init)) { configure(settings, true); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) { configure(newSettings, false); }
+    void applySettings(const Settings& s) { configure(s, false); }
 
-    void configure(const property_map& newSettings, bool everything) {
-        const auto          moves       = [&newSettings, everything](std::string_view key) { return everything || newSettings.contains(key); };
+    void configure(const Settings& s, bool everything) {
+        const auto          moves       = [everything](const auto& now) { return everything || now.changed(); };
         bool                nextEnabled = _enabled;
         float               rate        = _rate;
         double              averaging   = _averaging;
-        double              pole        = _alpha;
         double              threshold   = _threshold;
         std::size_t         lookback    = _lookback;
         std::size_t         blank       = _blank;
@@ -102,61 +114,52 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
         bool                nextRetrig  = _retrigger;
         bool                nextTags    = _emitTags;
 
-        if (moves("enabled")) {
-            nextEnabled = enabled;
+        if (moves(s.enabled)) {
+            nextEnabled = s.enabled;
         }
-        if (moves("sample_rate")) {
-            rate = sample_rate;
+        if (moves(s.sample_rate)) {
+            rate = s.sample_rate;
         }
-        if (moves("averaging_time")) {
-            averaging = averaging_time;
+        if (moves(s.averaging_time)) {
+            averaging = s.averaging_time;
         }
-        if (moves("alpha")) {
-            pole = alpha;
+        if (moves(s.threshold_db)) {
+            threshold = std::pow(10.0, s.threshold_db / 10.0);
         }
-        if (moves("threshold_db")) {
-            threshold = std::pow(10.0, threshold_db / 10.0);
+        if (moves(s.blank_samples)) {
+            blank = static_cast<std::size_t>(s.blank_samples.value);
         }
-        if (moves("blank_samples")) {
-            blank = static_cast<std::size_t>(blank_samples.value);
+        if (moves(s.lookback_samples)) {
+            lookback = static_cast<std::size_t>(s.lookback_samples.value);
         }
-        if (moves("lookback_samples")) {
-            lookback = static_cast<std::size_t>(lookback_samples.value);
+        if (moves(s.max_window_samples)) {
+            maxSetting = static_cast<std::size_t>(s.max_window_samples.value);
         }
-        if (moves("max_window_samples")) {
-            maxSetting = static_cast<std::size_t>(max_window_samples.value);
+        if (moves(s.replacement)) {
+            rule = s.replacement.value;
         }
-        if (moves("replacement")) {
-            const auto parsed = detail::parseReplacement(replacement.value);
-            if (!parsed) {
-                throw gr::exception(parsed.error().message);
-            }
-            rule = *parsed;
+        if (moves(s.retrigger)) {
+            nextRetrig = s.retrigger;
         }
-        if (moves("retrigger")) {
-            nextRetrig = retrigger;
+        if (moves(s.emit_tags)) {
+            nextTags = s.emit_tags;
         }
-        if (moves("emit_tags")) {
-            nextTags = emit_tags;
-        }
-        const auto coefficient = detail::averagerCoefficient(pole, averaging, static_cast<double>(rate));
-        if (!coefficient) {
-            throw gr::exception(coefficient.error().message);
-        }
+        // alpha is the pole the caller gave; the one in force is reported as current_alpha
+        const double coefficient = detail::averagerCoefficient(s.alpha, averaging, static_cast<double>(rate));
 
-        const bool restart = everything || *coefficient != _alpha || (nextEnabled && !_enabled);
-        _enabled           = nextEnabled;
-        _rate              = rate;
-        _averaging         = averaging;
-        _alpha             = *coefficient;
-        alpha              = _alpha;
-        _threshold         = threshold;
-        _maxSetting        = maxSetting;
-        _maxWindow         = maxSetting == 0UZ ? 4UZ * blank : maxSetting;
-        _rule              = rule;
-        _retrigger         = nextRetrig;
-        _emitTags          = nextTags;
-        _warmupLength      = averaging > 0.0 ? static_cast<std::size_t>(std::ceil(static_cast<double>(rate) * averaging)) : static_cast<std::size_t>(std::ceil(1.0 / _alpha));
+        const bool restart   = everything || coefficient != _alpha || (nextEnabled && !_enabled);
+        _enabled             = nextEnabled;
+        _rate                = rate;
+        _averaging           = averaging;
+        _alpha               = coefficient;
+        status.current_alpha = _alpha;
+        _threshold           = threshold;
+        _maxSetting          = maxSetting;
+        _maxWindow           = maxSetting == 0UZ ? 4UZ * blank : maxSetting;
+        _rule                = rule;
+        _retrigger           = nextRetrig;
+        _emitTags            = nextTags;
+        _warmupLength        = averaging > 0.0 ? static_cast<std::size_t>(std::ceil(static_cast<double>(rate) * averaging)) : static_cast<std::size_t>(std::ceil(1.0 / _alpha));
         if (restart) {
             _warmup = _warmupLength;
         }
@@ -203,12 +206,9 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
         _pendingTags.erase(_pendingTags.begin(), _pendingTags.begin() + static_cast<std::ptrdiff_t>(leaving));
         _emitted += nSamples;
 
-        if (tracked_power.value != _power || blanked_fraction.value != _duty) {
-            tracked_power    = _power;
-            blanked_fraction = _duty;
-            std::ignore      = this->updateActiveParameters({"tracked_power", "blanked_fraction"});
-        }
-        std::ignore = inSpan.consume(nSamples);
+        status.tracked_power    = _power;
+        status.blanked_fraction = _duty;
+        std::ignore             = inSpan.consume(nSamples);
         outSpan.publish(nSamples);
         return work::Status::OK;
     }
@@ -308,16 +308,16 @@ private:
             _runPosition = 0U;
             _held        = 0U;
         }
-        _line         = std::move(line);
-        _marked       = std::move(marked);
-        _ring         = delay + 1UZ;
-        _cursor       = delay;
-        _oldest       = 0UZ;
-        _delay        = delay;
-        _lookback     = lookback;
-        _blank        = blank;
-        _remaining    = std::min(_remaining, static_cast<std::uint32_t>(blank));
-        delay_samples = static_cast<gr::Size_t>(delay);
+        _line                = std::move(line);
+        _marked              = std::move(marked);
+        _ring                = delay + 1UZ;
+        _cursor              = delay;
+        _oldest              = 0UZ;
+        _delay               = delay;
+        _lookback            = lookback;
+        _blank               = blank;
+        _remaining           = std::min(_remaining, static_cast<std::uint32_t>(blank));
+        status.delay_samples = static_cast<gr::Size_t>(delay);
     }
 
     void restart() {
@@ -484,15 +484,31 @@ constexpr float  kRate = 96000.f;
 template<typename T>
 [[nodiscard]] NoiseBlanker<T> make(gr::property_map settings = {}) {
     NoiseBlanker<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
+// the keys the block refused or failed, empty when every key applied
 template<typename TBlock>
-void apply(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
+gr::settings::Rejected apply(TBlock& block, gr::property_map settings) {
+    return gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings));
+}
+
+// the tracker as a run leaves it; the block's own thread moves it, as its work function does
+template<typename T>
+void presetTracker(NoiseBlanker<T>& block, double power, std::optional<double> duty = std::nullopt) {
+    const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block));
+    block.reportTracker(power, duty.value_or(block.status.blanked_fraction.value));
+}
+
+template<typename T>
+void presetTracker(gr::blocks::analog::reference::NoiseBlanker<T>& block, double power, std::optional<double> duty = std::nullopt) {
+    block._power = power;
+    block._duty  = duty.value_or(block._duty);
+}
+
+[[nodiscard]] bool names(const gr::settings::Rejected& rejected, std::string_view key) {
+    return std::ranges::any_of(rejected, [key](const gr::settings::Rejection& entry) { return entry.key == key; });
 }
 
 struct Random {
@@ -651,8 +667,7 @@ template<typename TBlock, typename T>
     constexpr std::size_t kWindows[] = {1UZ, 9UZ, 64UZ, 1000UZ, 4096UZ, 3UZ};
 
     TBlock block{gr::property_map{}};
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     block.start();
     Blanked<T>      result;
     test::TagCursor cursor(tags);
@@ -661,19 +676,22 @@ template<typename TBlock, typename T>
     std::size_t     next = 0UZ;
     for (std::size_t call = 0UZ; at < input.size(); ++call) {
         for (; next < changes.size() && changes[next].at <= at; ++next) {
-            apply(block, changes[next].settings);
+            std::ignore = apply(block, changes[next].settings);
         }
         const std::size_t   count = std::min(kWindows[call % std::size(kWindows)], input.size() - at);
         const std::size_t   room  = call % 3UZ == 2UZ ? std::max(count / 2UZ, 1UZ) : count;
         test::InputSpan<T>  inSpan(input.subspan(at, count), at, cursor.window(at, count));
         test::OutputSpan<T> outSpan(std::span<T>(scratch).first(room), result.samples.size(), &result.tags);
-        std::ignore = block.processBulk(inSpan, outSpan);
+        {
+            const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block)); // the work function assigns the tracker
+            std::ignore = block.processBulk(inSpan, outSpan);
+        }
         cursor.retire(inSpan);
         result.samples.insert(result.samples.end(), scratch.begin(), scratch.begin() + static_cast<std::ptrdiff_t>(outSpan.count));
         at += inSpan.consumed;
     }
-    result.trackedPower    = block.tracked_power.value;
-    result.blankedFraction = block.blanked_fraction.value;
+    result.trackedPower    = block.status.tracked_power.value;
+    result.blankedFraction = block.status.blanked_fraction.value;
     return result;
 }
 
@@ -741,9 +759,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const std::size_t stride = 137UZ;
         for (std::size_t base = 0UZ; base < ramp.size(); base += stride) {
             if (calls == 5UZ) {
-                apply(toggled, {{"enabled", true}});
+                expect(apply(toggled, {{"enabled", true}}).empty());
             } else if (calls == 17UZ) {
-                apply(toggled, {{"enabled", false}});
+                expect(apply(toggled, {{"enabled", false}}).empty());
             }
             ++calls;
             const std::size_t      count = std::min(stride, ramp.size() - base);
@@ -768,7 +786,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             const auto fires = [db](double scale) {
                 NoiseBlanker<CF> probe = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", db}, {"emit_tags", true}});
                 probe._warmup          = 0UZ;
-                probe._power           = 1.0;
+                presetTracker(probe, 1.0);
                 std::vector<CF> one(32UZ, CF{}); // the probe is the first sample, so p_bar is still exactly what was set
                 one[0UZ] = CF(static_cast<float>(std::sqrt(probe._threshold * scale)), 0.f);
                 return test::run(probe, std::span<const CF>(one), 32UZ).tags.size() == 1UZ;
@@ -780,7 +798,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         // Exactly at the threshold, in a case binary arithmetic represents exactly, with T = 4, p_bar = 1 and |x| = 2.
         NoiseBlanker<CF> exactly = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", 10.0 * std::log10(4.0)}, {"emit_tags", true}});
         exactly._warmup          = 0UZ;
-        exactly._power           = 1.0;
+        presetTracker(exactly, 1.0);
         expect(eq(exactly._threshold, 4.0));
         std::vector<CF> atThreshold(32UZ, CF{});
         atThreshold[0UZ] = CF(2.f, 0.f);
@@ -792,7 +810,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             const auto firesAt = [k](double scale) {
                 NoiseBlanker<CF> probe = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", thresholdFromMagnitudeRatio(k)}, {"emit_tags", true}});
                 probe._warmup          = 0UZ;
-                probe._power           = 1.0;
+                presetTracker(probe, 1.0);
                 std::vector<CF> one(32UZ, CF{});
                 one[0UZ] = CF(static_cast<float>(k * std::sqrt(kPi) / 2.0 * scale), 0.f);
                 return test::run(probe, std::span<const CF>(one), 32UZ).tags.size() == 1UZ;
@@ -825,14 +843,14 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             // Two triggers less than four samples apart leave one contiguous replaced run and one marker. The
             // first-order merge term below accounts for that.
             const auto [modeled, modeledRate] = censoredRunRate(db, 7UZ);
-            const double perSample            = std::exp(-std::pow(10.0, db / 10.0) * block._power);
+            const double perSample            = std::exp(-std::pow(10.0, db / 10.0) * block.status.tracked_power.value);
             const double wantRate             = perSample / (1.0 + perSample * 6.0) * (1.0 - 3.0 * perSample);
             const double gotRate              = static_cast<double>(got.tags.size()) / static_cast<double>(samples);
             const double error                = std::sqrt(wantRate / static_cast<double>(samples));
-            std::println("threshold {:.2f} dB: {} runs, rate {:.6e} against {:.6e} at a tracker of {:.4f} (model {:.4f}); exp(-T) alone is {:.6e}", db, got.tags.size(), gotRate, wantRate, block._power, modeled, std::exp(-std::pow(10.0, db / 10.0)));
+            std::println("threshold {:.2f} dB: {} runs, rate {:.6e} against {:.6e} at a tracker of {:.4f} (model {:.4f}); exp(-T) alone is {:.6e}", db, got.tags.size(), gotRate, wantRate, block.status.tracked_power.value, modeled, std::exp(-std::pow(10.0, db / 10.0)));
             expect(lt(std::abs(gotRate - wantRate), 5.0 * error)) << std::format("threshold_db {}: the trigger rate is the exponential tail of |x|^2 against the tracked reference", db);
-            expect(lt(block._power, 1.0)) << "and the reference sits below the true power, which is what censoring costs";
-            expect(gt(block._power, 0.5)) << "but not far below it";
+            expect(lt(block.status.tracked_power.value, 1.0)) << "and the reference sits below the true power, which is what censoring costs";
+            expect(gt(block.status.tracked_power.value, 0.5)) << "but not far below it";
             std::ignore = modeledRate;
         }
     };
@@ -857,8 +875,8 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             uncensored += alpha * (power - uncensored);
         }
 
-        std::println("period 50, INR 30 dB: censored {:.4f}, uncensored {:.4f}", block._power, uncensored);
-        expect(approx(block._power, 1.0, 0.05)) << "the censored tracker settles on the noise, which is what the threshold is taken against";
+        std::println("period 50, INR 30 dB: censored {:.4f}, uncensored {:.4f}", block.status.tracked_power.value, uncensored);
+        expect(approx(block.status.tracked_power.value, 1.0, 0.05)) << "the censored tracker settles on the noise, which is what the threshold is taken against";
         expect(gt(uncensored, 15.0)) << "where an uncensored one is dragged up by the events it is meant to detect";
     };
 
@@ -910,9 +928,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
             // The reference is held exact. A 5 % duty of impulses would otherwise raise it and cost detection. That
             // effect belongs to the scene and not to the statistic under test here.
-            NoiseBlanker<CF> block     = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 1e8 / static_cast<double>(kRate)}, {"replacement", std::string("Zero")}});
-            block._warmup              = 0UZ;
-            block._power               = 1.0;
+            NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 1e8 / static_cast<double>(kRate)}, {"replacement", std::string("Zero")}});
+            block._warmup          = 0UZ;
+            presetTracker(block, 1.0);
             const test::Result<CF> got = test::run(block, std::span<const CF>(x), 4096UZ);
 
             // Counts whether the planted sample was replaced. Counting run starts instead
@@ -957,7 +975,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         for (const auto& [rule, bound] : kArms) {
             NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 100000.0 / static_cast<double>(kRate)}, {"replacement", std::string(rule)}});
             block._warmup          = 0UZ;
-            block._power           = rms * rms;
+            presetTracker(block, rms * rms);
 
             const test::Result<CF> got = test::run(block, std::span<const CF>(dirty), 4096UZ);
             std::vector<CF>        error(kLength - 9UZ);
@@ -984,7 +1002,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}});
         block._warmup          = 0UZ;
-        block._power           = 20.0;
+        presetTracker(block, 20.0);
 
         const test::Result<CF> got = test::run(block, std::span<const CF>(planted), 64UZ);
         for (std::size_t i = kAt - 2UZ; i <= kAt + 6UZ; ++i) {
@@ -1001,7 +1019,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
         block._warmup          = 0UZ;
-        block._power           = 1.0;
+        presetTracker(block, 1.0);
 
         const test::Result<CF>   got = test::run(block, std::span<const CF>(x), 251UZ);
         std::vector<std::size_t> replaced;
@@ -1035,7 +1053,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
         block._warmup          = 0UZ;
-        block._power           = 1.0;
+        presetTracker(block, 1.0);
 
         // Sample by sample, so the bound can be read at every point and need not be inferred from the output.
         std::uint32_t highest = 0U;
@@ -1047,9 +1065,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         expect(eq(made, kLength)) << "the block never stops producing";
         expect(eq(highest, 28U)) << "a retriggering window stops extending at exactly max_window_samples, 4 * blank_samples";
 
-        NoiseBlanker<CF> again     = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
-        again._warmup              = 0UZ;
-        again._power               = 1.0;
+        NoiseBlanker<CF> again = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        again._warmup          = 0UZ;
+        presetTracker(again, 1.0);
         const test::Result<CF> got = test::run(again, std::span<const CF>(x), 97UZ);
         expect(eq(got.tags.size(), 2UZ)) << "the burst is one replaced run and the later impulse opens a second: a closed window reopens on the next detection";
 
@@ -1164,19 +1182,15 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             gr::scheduler::Simple scheduler;
             boost::ut::expect(scheduler.exchange(std::move(graph)).has_value());
             boost::ut::expect(scheduler.runAndWait().has_value());
-            const auto read = [&block](const char* key) {
-                const std::optional<gr::pmt::Value> held  = block.settings().get(key);
-                const double*                       value = held.has_value() ? held->get_if<double>() : nullptr;
-                return value != nullptr ? *value : std::numeric_limits<double>::quiet_NaN();
-            };
-            return std::tuple{block.tracked_power.value, read("tracked_power"), block.blanked_fraction.value, read("blanked_fraction")};
+            const auto read = [&block](const char* key) { return block.template get<double>(key).value_or(std::numeric_limits<double>::quiet_NaN()); };
+            return std::tuple{block.status.tracked_power.value, read("tracked_power"), block.status.blanked_fraction.value, read("blanked_fraction")};
         };
 
         const auto [power, powerSetting, fraction, fractionSetting] = runWith(true);
         expect(gt(power, 0.5)) << "the enabled block tracks the level of the ones";
         expect(gt(fraction, 0.0)) << "and replaces the windows around the impulses";
-        expect(eq(powerSetting, power)) << "settings().get(\"tracked_power\") reads the member";
-        expect(eq(fractionSetting, fraction)) << "settings().get(\"blanked_fraction\") reads the member";
+        expect(eq(powerSetting, power)) << "get(\"tracked_power\") reads the member";
+        expect(eq(fractionSetting, fraction)) << "get(\"blanked_fraction\") reads the member";
 
         const auto [offPower, offPowerSetting, offFraction, offFractionSetting] = runWith(false);
         expect(eq(offPower, 0.0) && eq(offFraction, 0.0)) << "the disabled block tracks nothing";
@@ -1184,22 +1198,23 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
     };
 
     "degenerate settings"_test = [] {
-        expect(throws([] { std::ignore = make<CF>({{"blank_samples", 0U}}); }));
-        expect(throws([] { std::ignore = make<CF>({{"sample_rate", 0.f}}); }));
-        expect(throws([] { std::ignore = make<CF>({{"sample_rate", -1.f}}); }));
-        expect(throws([] { std::ignore = make<CF>({{"averaging_time", -1.0}}); }));
-        expect(throws([] { std::ignore = make<CF>({{"replacement", std::string("taper")}}); })) << "'taper' is not one of the accepted replacement rules";
+        using gr::testing::initRefused;
+        expect(initRefused<NoiseBlanker<CF>>({{"blank_samples", 0U}}));
+        expect(initRefused<NoiseBlanker<CF>>({{"sample_rate", 0.f}}));
+        expect(initRefused<NoiseBlanker<CF>>({{"sample_rate", -1.f}}));
+        expect(initRefused<NoiseBlanker<CF>>({{"averaging_time", -1.0}}));
+        expect(initRefused<NoiseBlanker<CF>>({{"replacement", std::string("taper")}})) << "'taper' is not one of the accepted replacement rules";
 
         NoiseBlanker<CF> block = make<CF>({{"sample_rate", kRate}});
-        std::ignore            = block.settings().setStaged({{"blank_samples", 0U}});
-        const auto staged      = block.settings().applyStagedParameters();
-        expect(staged.failedParameters.contains(gr::property_map::key_type{"blank_samples"})) << "the limits refuse a live change too";
-        expect(eq(block.delay_samples.value, 9U)) << "and the line keeps its accepted length";
+        expect(names(apply(block, {{"blank_samples", 0U}}), "blank_samples")) << "the limits refuse a live change too";
+        expect(eq(block.status.delay_samples.value, 9U)) << "and the line keeps its accepted length";
 
-        const double pole = block.alpha.value;
-        expect(throws([&block] { apply(block, {{"averaging_time", 1e12}}); })) << "a time constant whose pole rounds to zero is refused";
-        expect(eq(block.alpha.value, pole)) << "and alpha keeps the resolved pole";
-        expect(nothrow([&block] { apply(block, {{"threshold_db", 12.0}}); })) << "the next application passes";
+        const double pole = block.status.current_alpha.value;
+        expect(!apply(block, {{"averaging_time", -1.0}}).empty()) << "a negative time constant is refused";
+        expect(eq(block.status.current_alpha.value, pole)) << "and alpha keeps the resolved pole";
+        expect(names(apply(block, {{"averaging_time", 1e12}}), "averaging_time")) << "a time constant whose pole rounds to 0 is refused";
+        expect(eq(block.status.current_alpha.value, pole)) << "and alpha keeps the resolved pole";
+        expect(apply(block, {{"threshold_db", 12.0}}).empty()) << "the next application passes";
         expect(eq(block._threshold, std::pow(10.0, 1.2))) << "and the block takes its value";
 
         NoiseBlanker<CF>       silly = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"threshold_db", -60.0}});
@@ -1247,11 +1262,11 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             for (const std::size_t at : impulses) {
                 caught += got.samples[at + 9UZ] == CF{} ? 1UZ : 0UZ;
             }
-            std::println("{}: replaced {:.4f} in the first 9 ms, {:.4f} from 0.1 s on; {} of {} impulses; tracker {:.4g}", what, replaced(resume, resume + 864UZ), replaced(resume + 9600UZ, x.size() - 9UZ), caught, impulses.size(), block._power);
+            std::println("{}: replaced {:.4f} in the first 9 ms, {:.4f} from 0.1 s on; {} of {} impulses; tracker {:.4g}", what, replaced(resume, resume + 864UZ), replaced(resume + 9600UZ, x.size() - 9UZ), caught, impulses.size(), block.status.tracked_power.value);
             expect(gt(replaced(resume, resume + 864UZ), 0.99)) << what << ": the rise is replaced while it is younger than one averaging time";
             expect(lt(replaced(resume + 9600UZ, x.size() - 9UZ), 0.05)) << what << ": then the tracker has learned the level and the scene passes";
             expect(eq(caught, impulses.size())) << what << ": and every impulse above the new level is replaced";
-            expect(gt(block._power, 0.5 * scenePower)) << what << ": the tracker sits at the new level";
+            expect(gt(block.status.tracked_power.value, 0.5 * scenePower)) << what << ": the tracker sits at the new level";
         }
     };
 
@@ -1265,9 +1280,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
                 for (std::size_t i = kAt; i < kAt + burst; ++i) {
                     x[i] += CF(200.f, 0.f);
                 }
-                NoiseBlanker<CF> block     = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string(rule)}, {"emit_tags", true}});
-                block._warmup              = 0UZ;
-                block._power               = 1.0;
+                NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string(rule)}, {"emit_tags", true}});
+                block._warmup          = 0UZ;
+                presetTracker(block, 1.0);
                 const test::Result<CF> got = test::run(block, std::span<const CF>(x), 251UZ);
 
                 double worst = 0.0;
@@ -1304,25 +1319,18 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const auto notFinite = [](CF sample) { return !std::isfinite(sample.real()) || !std::isfinite(sample.imag()); };
         expect(eq(std::ranges::count_if(got.samples, notFinite), std::ptrdiff_t{0})) << "each sample that is not finite is replaced";
         expect(eq(caught, impulses.size())) << "and detection goes on after them";
-        expect(approx(block._power, 1.0, 0.2)) << "the tracker never took one in";
+        expect(approx(block.status.tracked_power.value, 1.0, 0.2)) << "the tracker never took one in";
     };
 
-    "a batch the block refuses changes nothing it computes, and the limits refuse a NaN alone"_test = [] {
+    "a batch the block refuses changes nothing it computes"_test = [] {
         const std::vector<CF> x     = noise(30000UZ, 0x9b05688c2b3e6c1fULL);
         NoiseBlanker<CF>      block = make<CF>({{"sample_rate", kRate}, {"replacement", std::string("Zero")}});
         std::ignore                 = test::run(block, std::span<const CF>(x).first(5000UZ), 4096UZ);
 
-        expect(throws([&block] { apply(block, {{"enabled", true}, {"replacement", std::string("taper")}}); })) << "an unknown rule refuses the whole batch";
-        const std::optional<gr::pmt::Value> held = block.settings().get("enabled");
-        const bool*                         kept = held.has_value() ? held->get_if<bool>() : nullptr;
-        expect(kept != nullptr && !*kept) << "the settings take back the accepted value";
-        expect(!block.enabled.value) << "and so does the member";
-        for (int attempt = 0; attempt < 2; ++attempt) {
-            std::ignore       = block.settings().setStaged({{"threshold_db", std::numeric_limits<double>::quiet_NaN()}});
-            const auto staged = block.settings().applyStagedParameters();
-            expect(staged.failedParameters.contains(gr::property_map::key_type{"threshold_db"})) << "a NaN is outside every limit, each time it is sent";
-            expect(eq(block.threshold_db.value, 9.32)) << "and never reaches the member";
-        }
+        expect(!apply(block, {{"enabled", true}, {"replacement", std::string("taper")}}).empty()) << "an unknown rule refuses the whole batch";
+        const std::expected<bool, gr::settings::Rejected> kept = block.get<bool>("enabled");
+        expect(kept.has_value() && !*kept) << "the settings take back the accepted value";
+        expect(!block.settings.enabled.value) << "and so does the member";
 
         const test::Result<CF> got     = test::run(block, std::span<const CF>(x).subspan(5000UZ), 4096UZ);
         bool                   delayed = true;
@@ -1340,7 +1348,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             auto&     source = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(kLength)}, {"mark_tag", false}});
             source._tags.emplace_back(kAt, std::move(change));
             auto& block = graph.emplaceBlock<NoiseBlanker<CF>>({{"sample_rate", kRate}});
-            block.settings().setTagCouplings({{"blank_samples", std::string("blank_samples")}, {"threshold_db", std::string("threshold_db")}});
+            boost::ut::expect(block.setTagCouplings({{"blank_samples", std::string("blank_samples")}}).has_value());
             auto& sink = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
             boost::ut::expect(graph.connect<"out", "in">(source, block).has_value());
             boost::ut::expect(graph.connect<"out", "in">(block, sink).has_value());
@@ -1352,7 +1360,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             for (std::size_t i = 0UZ; i < sink._samples.size(); ++i) {
                 out.push_back(sink._samples[i]);
             }
-            return std::tuple{ran, out, block.blank_samples.value, block.threshold_db.value, block.delay_samples.value};
+            return std::tuple{ran, out, block.settings.blank_samples.value, block.settings.threshold_db.value, block.status.delay_samples.value};
         };
         // The source counts: input i is i. Output n is n less the delay in force.
         const auto delayedBy = [](const std::vector<CF>& out, std::size_t from, std::size_t to, std::size_t delay) {
@@ -1363,16 +1371,13 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             return exact;
         };
 
-        for (const gr::property_map& change : {gr::property_map{{"blank_samples", gr::Size_t{0U}}}, gr::property_map{{"threshold_db", std::numeric_limits<double>::quiet_NaN()}}}) {
-            const auto& key                                = change.begin()->first;
-            const auto [ran, out, blank, threshold, delay] = runWith(change);
-            expect(ran) << std::format("{}: the refusal on a tag is a plain message, and the run completes", key);
-            expect(eq(out.size(), kLength)) << std::format("{}: every sample comes out", key);
-            expect(that % delayedBy(out, 9UZ, kLength, 9UZ)) << std::format("{}: the output is the input delayed by the accepted nine samples, after the tag too", key);
-            expect(eq(blank, 7U)) << std::format("{}: the members keep the accepted values", key);
-            expect(eq(threshold, 9.32));
-            expect(eq(delay, 9U));
-        }
+        const auto [refusedRan, refusedOut, refusedBlank, refusedThreshold, refusedDelay] = runWith(gr::property_map{{"blank_samples", gr::Size_t{0U}}});
+        expect(refusedRan) << "the refusal on a tag is a plain message, and the run completes";
+        expect(eq(refusedOut.size(), kLength)) << "every sample comes out";
+        expect(that % delayedBy(refusedOut, 9UZ, kLength, 9UZ)) << "the output is the input delayed by the accepted nine samples, after the tag too";
+        expect(eq(refusedBlank, 7U)) << "the members keep the accepted values";
+        expect(eq(refusedThreshold, 9.32));
+        expect(eq(refusedDelay, 9U));
 
         const auto [ran, out, blank, threshold, delay] = runWith(gr::property_map{{"blank_samples", gr::Size_t{3U}}});
         expect(ran);
@@ -1400,7 +1405,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         for (std::size_t base = 0UZ, piece = 0UZ; base < kLength; base += kPiece, ++piece) {
             if (piece == 5UZ || piece == 17UZ) {
                 const gr::Size_t blank = piece == 5UZ ? 14U : 3U;
-                apply(block, {{"blank_samples", blank}});
+                expect(apply(block, {{"blank_samples", blank}}).empty());
                 while (line.size() < 2UZ + blank) {
                     line.push_front(CF{});
                 }
@@ -1428,7 +1433,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             }
         }
         expect(that % (got == want)) << "zeros enter where the line grows, the oldest inputs drop out where it shrinks, and the rest come out once, in order";
-        expect(eq(block.delay_samples.value, 5U));
+        expect(eq(block.status.delay_samples.value, 5U));
 
         const auto                                             placeOf = [&got](std::size_t input) { return static_cast<std::size_t>(std::ranges::find(got, CF(static_cast<float>(input + 1UZ), 0.f)) - got.begin()); };
         const std::vector<std::pair<std::string, std::size_t>> expected{{gr::tag::TRIGGER_NAME.key(), placeOf(5UZ * kPiece - 1UZ)}, {gr::tag::SIGNAL_NAME.key(), placeOf(17UZ * kPiece - 5UZ)}, {gr::tag::TRIGGER_NAME.key(), placeOf(17UZ * kPiece - 1UZ)}};
@@ -1444,7 +1449,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const auto blanker = [](const char* rule) {
             NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string(rule)}, {"emit_tags", true}});
             block._warmup          = 0UZ;
-            block._power           = 1.0;
+            presetTracker(block, 1.0);
             return block;
         };
 
@@ -1452,7 +1457,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         NoiseBlanker<CF>           shrunk = blanker("zero");
         const std::vector<gr::Tag> marks{{kAt + 2UZ, tagged(gr::tag::TRIGGER_NAME.key())}, {kAt + 8UZ, tagged(gr::tag::SIGNAL_NAME.key())}, {kAt + 9UZ, tagged(gr::tag::TRIGGER_TIME.key())}};
         const test::Result<CF>     before = test::run(shrunk, std::span<const CF>(x).first(kFirst), kFirst, std::span<const gr::Tag>(marks));
-        apply(shrunk, {{"lookback_samples", 0U}, {"blank_samples", 1U}});
+        expect(apply(shrunk, {{"lookback_samples", 0U}, {"blank_samples", 1U}}).empty());
         const test::Result<CF> after = test::run(shrunk, std::span<const CF>(x).subspan(kFirst), 64UZ);
         expect(before.tags.empty()) << "the tags and the run's end are still in the line when it shrinks";
         std::vector<std::string> keys;
@@ -1473,7 +1478,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const test::Result<CF> whole     = test::run(reference, std::span<const CF>(x), kFirst);
         NoiseBlanker<CF>       cut       = blanker("Interpolate");
         std::ignore                      = test::run(cut, std::span<const CF>(x).first(kFirst), kFirst);
-        apply(cut, {{"lookback_samples", 0U}});
+        expect(apply(cut, {{"lookback_samples", 0U}}).empty());
         const test::Result<CF> rest = test::run(cut, std::span<const CF>(x).subspan(kFirst), 64UZ);
         bool                   same = true;
         for (std::size_t input = kAt + 3UZ; input <= kAt + 6UZ; ++input) {
@@ -1493,9 +1498,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const auto                 tagged = [](const char* key) { return gr::property_map{{gr::property_map::key_type{key}, gr::pmt::Value(std::string("x"))}}; };
         const std::vector<gr::Tag> marks{{40UZ, tagged(gr::tag::TRIGGER_NAME.key())}, {94UZ, tagged(gr::tag::SIGNAL_NAME.key())}};
 
-        NoiseBlanker<CF> block     = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
-        block._warmup              = 0UZ;
-        block._power               = 1.0;
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        block._warmup          = 0UZ;
+        presetTracker(block, 1.0);
         const test::Result<CF> got = test::run(block, std::span<const CF>(x), 37UZ, std::span<const gr::Tag>(marks));
         expect(that % (got.offsetsOf(gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{49UZ})) << "a tag whose sample leaves is published with it";
         expect(eq(got.tags.size(), 1UZ)) << "and nothing else left during the stream";
@@ -1531,16 +1536,15 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const auto tagged = [](const char* key) { return gr::property_map{{gr::property_map::key_type{key}, gr::pmt::Value(std::string("x"))}}; };
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
-        block.settings().storeDefaults(); // the defaults a graph stores after the constructor's map
-        block._warmup = 0UZ;
-        block._power  = 1.0;
+        block._warmup          = 0UZ;
+        presetTracker(block, 1.0);
         const std::vector<gr::Tag> marks{{kAt + 2UZ, tagged(gr::tag::TRIGGER_NAME.key())}, {kAt + 8UZ, tagged(gr::tag::SIGNAL_NAME.key())}};
         const test::Result<CF>     before = test::run(block, std::span<const CF>(x).first(kFirst), kFirst, std::span<const gr::Tag>(marks));
         expect(before.tags.empty()) << "the tags and the run's end are still in the line at the reset";
 
-        block.settings().resetDefaults();
+        expect(block.resetDefaults().has_value());
         expect(eq(block._warmup, block._warmupLength)) << "the reset restarts the warm-up";
-        expect(eq(block._power, 0.0)) << "and the tracked power";
+        expect(eq(block.status.tracked_power.value, 0.0)) << "and the tracked power";
 
         const test::Result<CF>   after = test::run(block, std::span<const CF>(x).subspan(kFirst), 64UZ);
         std::vector<std::string> keys;
@@ -1580,14 +1584,13 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 0.0}, {"alpha", 0.1}});
         block._warmup          = 0UZ;
-        block._power           = 1.0; // where a settled tracker on unit-power noise sits
-        block._duty            = 0.5; // and where a run of impulses leaves the duty
+        presetTracker(block, 1.0, 0.5); // where a settled tracker on unit-power noise sits
 
         const std::vector<CF>  zeros(kZeros, CF{});
         const test::Result<CF> got = test::run(block, std::span<const CF>(zeros), 4096UZ);
 
-        expect(eq(std::fpclassify(block._power), FP_ZERO)) << "the tracked power is exactly zero, not the smallest subnormal";
-        expect(eq(std::fpclassify(block._duty), FP_ZERO)) << "and so is the duty, ten times slower to get there and flushed all the same";
+        expect(eq(std::fpclassify(block.status.tracked_power.value), FP_ZERO)) << "the tracked power is exactly zero, not the smallest subnormal";
+        expect(eq(std::fpclassify(block.status.blanked_fraction.value), FP_ZERO)) << "and so is the duty, ten times slower to get there and flushed all the same";
         const auto subnormal = [](CF sample) { return std::fpclassify(sample.real()) == FP_SUBNORMAL || std::fpclassify(sample.imag()) == FP_SUBNORMAL; };
         expect(eq(std::ranges::count_if(got.samples, subnormal), std::ptrdiff_t{0})) << "and no output on the run is subnormal";
     };
@@ -1604,14 +1607,14 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 0.0}, {"alpha", kAlpha}});
         block._warmup          = 0UZ;
-        block._power           = 1.0;
-        block._duty            = 0.5;
+        presetTracker(block, 1.0, 0.5);
 
-        double      power        = block._power;
-        double      duty         = block._duty;
+        double      power        = block.status.tracked_power.value;
+        double      duty         = block.status.blanked_fraction.value;
         std::size_t powerSamples = 0UZ;
         bool        identical    = true;
 
+        const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(block));
         for (std::size_t i = 0UZ; i < kTotal && identical; ++i) {
             const CF     sample = i < kStep ? CF(1.f, 0.f) : CF{};
             const double p      = static_cast<double>(sample.real()) * static_cast<double>(sample.real()) + static_cast<double>(sample.imag()) * static_cast<double>(sample.imag());
@@ -1625,9 +1628,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             std::ignore = block.processBulk(inSpan, outSpan);
 
             const CF want = i >= 9UZ && i < kStep + 9UZ ? CF(1.f, 0.f) : CF{}; // nothing is marked, so the output is the input delayed by nine
-            identical     = identical && block._duty == duty && made == want;
+            identical     = identical && block.status.blanked_fraction.value == duty && made == want;
             if (above) {
-                identical    = identical && block._power == power;
+                identical    = identical && block.status.tracked_power.value == power;
                 powerSamples = i + 1UZ;
             }
         }
@@ -1646,8 +1649,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const auto             seeded = [&]<typename TBlock>(TBlock block) {
             block.start();
             block._warmup = 0UZ;
-            block._power  = 1.0; // where a settled tracker on unit-power noise sits
-            block._duty   = 0.5; // and where a run of impulses leaves the duty
+            presetTracker(block, 1.0, 0.5); // where a settled tracker on unit-power noise sits
             return block;
         };
         const auto sameBits = [](const test::Result<CF>& a, const test::Result<CF>& b) { return std::ranges::equal(std::as_bytes(std::span(a.samples)), std::as_bytes(std::span(b.samples))) && a.tags == b.tags; };
@@ -1662,8 +1664,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         NoiseBlanker<CF> block     = seeded(make<CF>(settings));
         Reference        reference = seeded([&] {
             Reference b{settings};
-            b.settings().init();
-            std::ignore = b.settings().applyStagedParameters();
+            boost::ut::expect(b.check({}).has_value());
             return b;
         }());
 
@@ -1671,27 +1672,26 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const test::Result<CF> gotZeros  = test::run(block, std::span<const CF>(zeros));
         const test::Result<CF> wantZeros = test::run(reference, std::span<const CF>(zeros));
         expect(that % sameBits(gotZeros, wantZeros)) << "the silence leaves as the per-sample form's, bit for bit";
-        expect(eq(std::fpclassify(reference._power), FP_ZERO) && eq(std::fpclassify(block._power), FP_ZERO)) << "both end the call with the power at zero, the block's flushed at the end";
-        expect(block._duty == reference._duty && gt(block._duty, 0.0)) << "the duty is normal at the end and equal to the reference's";
+        expect(eq(std::fpclassify(reference._power), FP_ZERO) && eq(std::fpclassify(block.status.tracked_power.value), FP_ZERO)) << "both end the call with the power at zero, the block's flushed at the end";
+        expect(block.status.blanked_fraction.value == reference._duty && gt(block.status.blanked_fraction.value, 0.0)) << "the duty is normal at the end and equal to the reference's";
 
         const test::Result<CF> gotQuiet  = test::run(block, std::span<const CF>(quiet));
         const test::Result<CF> wantQuiet = test::run(reference, std::span<const CF>(quiet));
         expect(that % sameBits(gotQuiet, wantQuiet)) << "the next call, which finds the power at zero, leaves samples and tags as the per-sample form's";
         expect(gt(gotQuiet.tags.size(), 2UZ)) << "with the impulses detected and marked";
-        expect(block._power == reference._power && block._duty == reference._duty) << "and with the same trackers at its end";
+        expect(block.status.tracked_power.value == reference._power && block.status.blanked_fraction.value == reference._duty) << "and with the same trackers at its end";
 
         NoiseBlanker<CF>       longRun = seeded(make<CF>(settings));
         Reference              longRef = seeded([&] {
             Reference b{settings};
-            b.settings().init();
-            std::ignore = b.settings().applyStagedParameters();
+            boost::ut::expect(b.check({}).has_value());
             return b;
         }());
         const std::vector<CF>  silence(80000UZ, CF{});
         const test::Result<CF> gotSilence  = test::run(longRun, std::span<const CF>(silence));
         const test::Result<CF> wantSilence = test::run(longRef, std::span<const CF>(silence));
         expect(that % sameBits(gotSilence, wantSilence)) << "a call that carries both trackers into the subnormals leaves the same samples";
-        expect(eq(std::fpclassify(longRun._power), FP_ZERO) && eq(std::fpclassify(longRun._duty), FP_ZERO)) << "and ends with both at zero";
+        expect(eq(std::fpclassify(longRun.status.tracked_power.value), FP_ZERO) && eq(std::fpclassify(longRun.status.blanked_fraction.value), FP_ZERO)) << "and ends with both at zero";
     };
 
     "the per-sample cost stays inside the recorded budget"_test = [] {
@@ -1708,9 +1708,10 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
         NoiseBlanker<CF> full = make<CF>({{"enabled", true}, {"sample_rate", kRate}});
 
-        double best      = 1e300;
-        double worst     = 0.0;
-        double floorBest = 1e300;
+        const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(full));
+        double                                best      = 1e300;
+        double                                worst     = 0.0;
+        double                                floorBest = 1e300;
         for (int repeat = 0; repeat <= kRuns; ++repeat) {
             const auto floorStart = Clock::now();
             std::copy_n(x.begin(), kLength, y.begin());
@@ -1732,6 +1733,27 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         std::println("NoiseBlanker<complex<float>> {:.3f} ns/sample (spread {:.3f}), span copy {:.3f}", best, worst - best, floorBest);
         // The bound holds with margin for an optimized build of this test. It catches a change of shape.
         expect(lt(best, 22.0)) << std::format("the block reads {:.3f} ns/sample", best);
+    };
+};
+
+const boost::ut::suite<"NoiseBlanker settings at the initialization"> noiseBlankerInitTests = [] {
+    using namespace boost::ut;
+
+    "NoiseBlanker initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::analog::NoiseBlanker<std::complex<float>>>({
+            {"enabled", true},
+            {"sample_rate", 48000.f},
+            {"threshold_db", 12.0},
+            {"averaging_time", 0.02},
+            {"alpha", 0.01},
+            {"blank_samples", gr::Size_t{5U}},
+            {"lookback_samples", gr::Size_t{3U}},
+            {"replacement", std::string("Hold")},
+            {"retrigger", true},
+            {"max_window_samples", gr::Size_t{40U}},
+            {"emit_tags", true},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

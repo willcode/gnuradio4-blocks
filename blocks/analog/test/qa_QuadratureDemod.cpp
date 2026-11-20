@@ -17,6 +17,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/analog/QuadratureDemod.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 // The tolerances of the cases that compare against a reference vector are set by float rounding of the complex
@@ -47,8 +48,7 @@ std::vector<std::complex<float>> tone(std::size_t nSamples, double frequency, do
 
 QuadratureDemod<float> makeDemod(float gain) {
     QuadratureDemod<float> demod({{"gain", gain}});
-    demod.settings().init();
-    std::ignore = demod.settings().applyStagedParameters();
+    boost::ut::expect(demod.check({}).has_value());
     return demod;
 }
 
@@ -288,8 +288,7 @@ const boost::ut::suite<"QuadratureDemod"> quadratureDemodTests = [] {
         demodulateInto(changedGain, std::span(input).first(split), std::span(retuned).first(split));
         expect(std::ranges::equal(std::span(reference).first(split), std::span(retuned).first(split)));
 
-        std::ignore = changedGain.settings().setStaged({{"gain", 2.0f}});
-        std::ignore = changedGain.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(changedGain), {{"gain", 2.0f}});
 
         const std::size_t remaining = input.size() - split;
         demodulateInto(fixedGain, std::span(input).subspan(split, remaining), std::span(reference).subspan(split, remaining));
@@ -398,15 +397,13 @@ const boost::ut::suite<"QuadratureDemod"> quadratureDemodTests = [] {
         }
 
         QuadratureDemod<double> demod({{"gain", 1.5}});
-        demod.settings().init();
-        std::ignore = demod.settings().applyStagedParameters();
+        boost::ut::expect(demod.check({}).has_value());
         std::vector<std::complex<double>> wide(input.begin(), input.end());
         std::vector<double>               wholeWide(wide.size());
         std::ignore = demod.processBulk(wide, wholeWide);
         for (const std::size_t chunkSize : {1UZ, 7UZ, 256UZ, 257UZ, 1000UZ}) {
             QuadratureDemod<double> chunked({{"gain", 1.5}});
-            chunked.settings().init();
-            std::ignore = chunked.settings().applyStagedParameters();
+            boost::ut::expect(chunked.check({}).has_value());
             std::vector<double> pieces(wide.size());
             for (std::size_t base = 0UZ; base < wide.size(); base += chunkSize) {
                 const std::size_t count = std::min(chunkSize, wide.size() - base);
