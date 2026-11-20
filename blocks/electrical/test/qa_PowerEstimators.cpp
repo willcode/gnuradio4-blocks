@@ -100,7 +100,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
             std::span<std::span<const T>> spanInCurrent(currentSpans);
 
             // prepare output vectors
-            std::size_t                 nSamplesOut = nSamplesIn / block.decimate;
+            std::size_t                 nSamplesOut = nSamplesIn / block.settings.decimate;
             std::vector<std::vector<T>> activePowerVec(kNPhases, std::vector<T>(nSamplesOut));
             std::vector<std::vector<T>> reactivePowerVec(kNPhases, std::vector<T>(nSamplesOut));
             std::vector<std::vector<T>> apparentPowerVec(kNPhases, std::vector<T>(nSamplesOut));
@@ -191,7 +191,7 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
         auto&     block = graph.emplaceBlock<PowerMetrics<T, kNPhases>>();
         block.start();
 
-        const std::size_t nOut = nIn / static_cast<std::size_t>(block.decimate);
+        const std::size_t nOut = nIn / static_cast<std::size_t>(block.settings.decimate);
         std::vector<T>    dcVoltage(nIn, V_rms);
         std::vector<T>    dcCurrent(nIn, I_rms);
         std::vector<T>    activePowerVec(nOut), reactivePowerVec(nOut), apparentPowerVec(nOut), rmsVoltageVec(nOut), rmsCurrentVec(nOut);
@@ -227,11 +227,11 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
         gr::Graph graph;
         // high_pass = 0 disables the AC-coupling stage, so the DC input above survives to the RMS outputs
         auto& block = graph.emplaceBlock<PowerMetrics<T, kNPhases>>({{"high_pass", 0.f}, {"low_pass", 45.f}});
-        expect(eq(block.high_pass.value, 0.f)) << "high_pass did not reach the block";
-        expect(eq(block.low_pass.value, 45.f)) << "low_pass did not reach the block";
+        expect(eq(block.settings.high_pass.value, 0.f)) << "high_pass did not reach the block";
+        expect(eq(block.settings.low_pass.value, 45.f)) << "low_pass did not reach the block";
         block.start();
 
-        const std::size_t nOut = nIn / static_cast<std::size_t>(block.decimate);
+        const std::size_t nOut = nIn / static_cast<std::size_t>(block.settings.decimate);
         std::vector<T>    dcVoltage(nIn, V_rms);
         std::vector<T>    dcCurrent(nIn, I_rms);
         std::vector<T>    activePowerVec(nOut), reactivePowerVec(nOut), apparentPowerVec(nOut), rmsVoltageVec(nOut), rmsCurrentVec(nOut);
@@ -266,17 +266,11 @@ const boost::ut::suite<"Power Metrics Estimators"> powerEstimatorTests = [] {
 
         PowerMetrics<T, kNPhases> block({{"decimate", kFactor}});
         block.init(block.progress);
-        expect(fatal(eq(block.decimate.value, kFactor)));
+        expect(fatal(eq(block.settings.decimate.value, kFactor)));
 
-        std::ignore  = block.settings().setStaged({{"decimate", gr::Size_t{0U}}});
-        bool refused = false;
-        try {
-            refused = !block.settings().applyStagedParameters().failedParameters.empty();
-        } catch (const std::exception&) {
-            refused = true;
-        }
+        const bool refused = !block.set({{"decimate", gr::Size_t{0U}}}).has_value();
         expect(refused) << "the factor of zero is refused";
-        expect(fatal(eq(block.decimate.value, kFactor))) << "the refused factor leaves the factor the block had";
+        expect(fatal(eq(block.settings.decimate.value, kFactor))) << "the refused factor leaves the factor the block had";
         expect(eq(block.input_chunk_size, kFactor));
         block.start();
 

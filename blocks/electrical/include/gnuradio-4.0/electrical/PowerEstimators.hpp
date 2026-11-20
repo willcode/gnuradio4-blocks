@@ -32,6 +32,9 @@ applies low-pass filters to calculate average values, and outputs decimated resu
 [0] "IEEE Standard Definitions for the Measurement of Electric Power Quantities Under Sinusoidal, Nonsinusoidal,
     Balanced, or Unbalanced Conditions," in IEEE Std 1459-2010 (Revision of IEEE Std 1459-2000), vol., no., pp.1-50,
     19 March 2010, doi: 10.1109/IEEESTD.2010.5439063, https://ieeexplore.ieee.org/document/5439063
+
+The high-pass AC coupling rejects the ADC's DC bias. `decimation factor` is the input samples per output value of each
+metric.
 )"">;
     // ports
     std::vector<PortIn<T>> U{nPhases};
@@ -44,12 +47,16 @@ applies low-pass filters to calculate average values, and outputs decimated resu
     std::vector<PortOut<T>> I_rms{nPhases};
 
     // settings
-    Annotated<float, "sample_rate", Unit<"Hz">>                                                                                                          sample_rate{10'000.f};
-    Annotated<float, "high pass", Unit<"Hz">, Doc<"AC-input coupling (rejects ADC DC-bias)">>                                                            high_pass{2.f};
-    Annotated<float, "low pass", Unit<"Hz">, Doc<"Upper Low-Pass Frequency">>                                                                            low_pass{90.f};
-    Annotated<gr::Size_t, "decimation factor", Doc<"input samples per output value of each metric">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>> decimate{100U};
+    struct Settings {
+        Annotated<float, Unit<"Hz">>                              sample_rate{10'000.f};
+        Annotated<float, Unit<"Hz">, Doc<"AC coupling cutoff">>   high_pass{2.f};
+        Annotated<float, Unit<"Hz">, Doc<"lowpass cutoff">>       low_pass{90.f};
+        Annotated<gr::Size_t, Doc<"decimation">, Limits<Min<1U>>> decimate{100U};
 
-    GR_MAKE_REFLECTABLE(PowerMetrics, U, I, P, Q, S, U_rms, I_rms, sample_rate, high_pass, low_pass, decimate);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, high_pass, low_pass, decimate);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PowerMetrics, U, I, P, Q, S, U_rms, I_rms, settings);
 
     // private state for exponential moving average (EMA)
     using FilterImpl = std::conditional_t<UncertainValueLike<T>, filter::ErrorPropagatingFilter<T>, filter::Filter<meta::fundamental_base_value_type_t<T>>>;
@@ -61,45 +68,52 @@ applies low-pass filters to calculate average values, and outputs decimated resu
     std::array<FilterImpl, nPhases> _lpCurrentSquared;
     std::array<FilterImpl, nPhases> _lpActivePower;
 
-    void initFilters() {
-        using namespace gr::filter;
-        using ValueType = meta::fundamental_base_value_type_t<T>;
+    using ValueType = meta::fundamental_base_value_type_t<T>;
 
-        const auto hp_filter_init = [&](auto) { //
-            if (high_pass > 0.f) {
-                return FilterImpl(iir::designFilter<ValueType>(Type::HIGHPASS,                                                       //
-                    FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(high_pass), .fs = static_cast<double>(sample_rate)}, //
-                    iir::Design::BUTTERWORTH));
-            }
-            return FilterImpl();
-        };
-        constexpr auto indices = std::views::iota(0UZ, nPhases);
+    // the AC coupling; the design throws for a corner the sample rate cannot hold
+    [[nodiscard]] static std::vector<gr::filter::FilterCoefficients<ValueType>> designHighPass(float sampleRate, float highPass) {
+        using namespace gr::filter;
+        return iir::designFilter<ValueType>(Type::HIGHPASS, FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(highPass), .fs = static_cast<double>(sampleRate)}, iir::Design::BUTTERWORTH);
+    }
+
+    // the averaging low pass, at most half the output rate; the design throws for a corner the sample rate cannot hold
+    [[nodiscard]] static std::vector<gr::filter::FilterCoefficients<ValueType>> designLowPass(float sampleRate, float lowPass, gr::Size_t decimation) {
+        using namespace gr::filter;
+        const double cutoff = std::min(0.5 * (static_cast<double>(sampleRate) / static_cast<double>(decimation)), static_cast<double>(lowPass));
+        return iir::designFilter<ValueType>(Type::LOWPASS, FilterParameters{.order = 2UZ, .fLow = cutoff, .fs = static_cast<double>(sampleRate)}, iir::Design::BUTTERWORTH);
+    }
+
+    void initFilters() {
+        const auto     hp_filter_init = [&](auto) { return settings.high_pass > 0.f ? FilterImpl(designHighPass(settings.sample_rate, settings.high_pass)) : FilterImpl(); };
+        constexpr auto indices        = std::views::iota(0UZ, nPhases);
         std::ranges::transform(indices, _hpVoltage.begin(), hp_filter_init);
         std::ranges::transform(indices, _hpCurrent.begin(), hp_filter_init);
 
         if constexpr (not TParent::ResamplingControl::kIsConst) {
-            this->input_chunk_size = decimate;
+            this->input_chunk_size = settings.decimate;
         }
 
-        const double cutoff_frequency = std::min(0.5 * (static_cast<double>(sample_rate) / static_cast<double>(decimate)), static_cast<double>(low_pass.value));
-        const auto   lp_filter_init   = [&, cutoff_frequency](auto) {                                                 //
-            return FilterImpl(iir::designFilter<ValueType>(Type::LOWPASS,                                         //
-                    FilterParameters{.order = 2UZ, .fLow = cutoff_frequency, .fs = static_cast<double>(sample_rate)}, //
-                    iir::Design::BUTTERWORTH));
-        };
-
+        const auto lp_filter_init = [&](auto) { return FilterImpl(designLowPass(settings.sample_rate, settings.low_pass, settings.decimate)); };
         std::ranges::transform(indices, _lpVoltageSquared.begin(), lp_filter_init);
         std::ranges::transform(indices, _lpCurrentSquared.begin(), lp_filter_init);
         std::ranges::transform(indices, _lpActivePower.begin(), lp_filter_init);
     }
 
-    // `settingsChanged` is not reached by a batch that moves no value, so the filters are also designed at start.
+    // a restart begins with the filters' state cleared
     void start() { initFilters(); }
 
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.high_pass > 0.f) {
+            std::ignore = designHighPass(s.sample_rate, s.high_pass);
+        }
+        std::ignore = designLowPass(s.sample_rate, s.low_pass, s.decimate);
+        return {};
+    }
+
     // re-designing resets the filter state, so only the keys the design depends on may trigger it
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kDesignKeys{"sample_rate", "decimate", "high_pass", "low_pass"};
-        if (std::ranges::any_of(kDesignKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+    void applySettings(const Settings& s) {
+        const bool redesign = s.sample_rate.changed() || s.decimate.changed() || s.high_pass.changed() || s.low_pass.changed();
+        if (redesign) {
             initFilters();
         }
     }
@@ -118,8 +132,8 @@ applies low-pass filters to calculate average values, and outputs decimated resu
                 const T ema_u2 = _lpVoltageSquared[phaseIdx].processOne(u_i * u_i); // update exponential moving average for voltage squared
                 const T ema_i2 = _lpCurrentSquared[phaseIdx].processOne(i_i * i_i); // update exponential moving average for current squared
 
-                if (i % static_cast<std::size_t>(decimate) == 0UZ) {
-                    const std::size_t outIdx = i / static_cast<std::size_t>(decimate);
+                if (i % static_cast<std::size_t>(settings.decimate) == 0UZ) {
+                    const std::size_t outIdx = i / static_cast<std::size_t>(settings.decimate);
                     const T           u_rms  = math::sqrt(ema_u2);
                     const T           i_rms  = math::sqrt(ema_i2);
 
