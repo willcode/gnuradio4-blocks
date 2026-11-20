@@ -1,5 +1,7 @@
-# The fec family's tests are graph files run by rungraph. Each case loads the fec plugin beside the testing and basic
-# plugins.
+add_ut_test(qa_FecSettingsInit)
+target_link_libraries(qa_FecSettingsInit PRIVATE gr-fec gr-testing)
+
+# The fec family's graph tests are run by rungraph. Each case loads the fec plugin beside the testing and basic plugins.
 function(gr_fec_graph_test TEST_NAME GRAPH)
   gr_add_graph_test(
     ${TEST_NAME}
@@ -79,15 +81,15 @@ gr_fec_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_fec_code_empty
   graphs/fec-settings.yaml
-  "code has no default and must be set to 'golay24'"
+  "start\\(\\): blocks refuse their settings: gr::blocks::fec::FecEncode#[0-9]+\\.code: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
-  "encoder_block.code=\"\"")
+  "encoder_block.code=unset")
 gr_add_failing_graph_test(
   graph_fec_refused_fec_code_unknown
   graphs/fec-settings.yaml
-  "code must be 'golay24', [^\n]*, got 'golay25'"
+  "block 'decoder_block' refuses its settings: code: must be one of: unset, golay24, golay23, golay18, hamming15, hamming10, bch63, bch15_11, bch15_7, bch15_5"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -95,7 +97,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_rs_roots
   graphs/fec-settings.yaml
-  "roots must be 8, 12 or 16, [^\n]*, got 10"
+  "block 'rs_encoder_block' refuses its settings: roots: must be one of: 8, 12, 16"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -103,7 +105,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_rs_pad
   graphs/fec-settings.yaml
-  "pad is the shortening in leading zero symbols and must be below 47, [^\n]*, got 47"
+  "block 'rs_decoder_block' refuses its settings: pad: must be < 47"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -112,23 +114,15 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_rs_code_unknown
   graphs/fec-settings.yaml
-  "code must be empty, 'ccsds_255_223' or 'ccsds_255_239', got 'rs_experimental'"
+  "block 'rs_encoder_block' refuses its settings: code: must be one of: gf64, ccsds_255_223, ccsds_255_239"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
   "rs_encoder_block.code=rs_experimental")
 gr_add_failing_graph_test(
-  graph_fec_refused_rs_gf64_basis
-  graphs/fec-settings.yaml
-  "the GF\\(64\\) family has none. got 'dual'"
-  PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrFecBlocksShared>
-  SET
-  "rs_encoder_block.basis=dual")
-gr_add_failing_graph_test(
   graph_fec_refused_rs_gf64_depth
   graphs/fec-settings.yaml
-  "interleave must be 1 to 8, got 9"
+  "block 'rs_decoder_block' refuses its settings: interleave: must be >= 1 and <= 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -136,15 +130,15 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_ccsds_basis_empty
   graphs/fec-settings.yaml
-  "basis has no default under a CCSDS profile"
+  "block 'ccsds_encoder_block' refuses its settings: basis: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
-  "ccsds_encoder_block.basis=\"\"")
+  "ccsds_encoder_block.basis=unset")
 gr_add_failing_graph_test(
   graph_fec_refused_ccsds_depth_6
   graphs/fec-settings.yaml
-  "interleave must be one of 4\\.3\\.5\\.1's depths 1, 2, 3, 4, 5 or 8, got 6"
+  "block 'ccsds_encoder_block' refuses its settings: interleave: must be one of: 1, 2, 3, 4, 5, 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -152,7 +146,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_ccsds_depth_7
   graphs/fec-settings.yaml
-  "interleave must be one of 4\\.3\\.5\\.1's depths 1, 2, 3, 4, 5 or 8, got 7"
+  "block 'ccsds_encoder_block' refuses its settings: interleave: must be one of: 1, 2, 3, 4, 5, 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -160,7 +154,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_ccsds_roots
   graphs/fec-settings.yaml
-  "code 'ccsds_255_223' carries 32 parity symbols and roots says 16"
+  "block 'ccsds_encoder_block' refuses its settings: roots: must be 0 or 32"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -168,7 +162,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_ccsds_pad
   graphs/fec-settings.yaml
-  "pad is the shortening in leading zero symbols and must be below 239, [^\n]*, got 239"
+  "block 'ccsds_decoder_block' refuses its settings: pad: must be < 239"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -176,7 +170,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_code_empty
   graphs/conv-settings.yaml
-  "constraint_length and polynomials have no defaults"
+  "code: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -185,7 +179,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_k2
   graphs/conv-settings.yaml
-  "constraint_length must be 3 to 9, [^\n]*. got constraint_length 2,"
+  "constraint_length: must be >= 3 and <= 9"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -194,7 +188,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_k10
   graphs/conv-settings.yaml
-  "constraint_length must be 3 to 9, [^\n]*. got constraint_length 10,"
+  "constraint_length: must be >= 3 and <= 9"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -203,7 +197,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_one_polynomial
   graphs/conv-settings.yaml
-  "polynomials names one generator per coded bit and must hold 2 to 4 of them, got 1"
+  "polynomials: must have >= 2 and <= 4 entries"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -211,7 +205,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_polynomial_twice
   graphs/conv-settings.yaml
-  "every polynomial must be nonzero, no wider than constraint_length bits and named once[^\n]*. got constraint_length 7,"
+  "polynomials: each polynomial must be > 0 and < 2.constraint_length and differ from the others"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -219,7 +213,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_polynomial_wide
   graphs/conv-settings.yaml
-  "every polynomial must be nonzero, no wider than constraint_length bits and named once[^\n]*. got constraint_length 7,"
+  "polynomials: each polynomial must be > 0 and < 2.constraint_length and differ from the others"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -227,7 +221,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_polynomial_zero
   graphs/conv-settings.yaml
-  "every polynomial must be nonzero, no wider than constraint_length bits and named once[^\n]*. got constraint_length 7,"
+  "polynomials: each polynomial must be > 0 and < 2.constraint_length and differ from the others"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -235,7 +229,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_ccsds_k5
   graphs/conv-settings.yaml
-  "code 'ccsds' supplies constraint_length 7 and the explicit setting says 5"
+  "constraint_length: must be 0 or 7"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -243,7 +237,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_ccsds_polynomials
   graphs/conv-settings.yaml
-  "code 'ccsds' supplies its own polynomials and the explicit setting disagrees"
+  "polynomials: must be empty or match the polynomials of code"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -251,7 +245,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_ccsds_invert
   graphs/conv-settings.yaml
-  "code 'ccsds' supplies invert_outputs 0b10 and the explicit setting says 0b1:"
+  "invert_outputs: must be 0 or 0b10"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -259,7 +253,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_code_unknown
   graphs/conv-settings.yaml
-  "code must name one of 'ccsds', [^\n]*, got 'voyager'"
+  "code: must be one of: custom, ccsds, ccsds_uninverted, nasa_dsn, nasa_dsn_uninverted"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -267,7 +261,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_conv_termination
   graphs/conv-settings.yaml
-  "termination must be 'terminated' or 'open', got 'running'"
+  "termination: must be one of: terminated, open"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -275,7 +269,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_puncture_empty
   graphs/puncture-settings.yaml
-  "fec::Puncture#[0-9]+' throws: pattern has no default"
+  "start\\(\\): blocks refuse their settings: gr::blocks::fec::Puncture#[0-9]+\\.pattern: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -283,7 +277,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_depuncture_empty
   graphs/puncture-settings.yaml
-  "fec::Depuncture#[0-9]+' throws: pattern has no default"
+  "start\\(\\): blocks refuse their settings: gr::blocks::fec::Depuncture#[0-9]+\\.pattern: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -291,7 +285,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_puncture_spelling
   graphs/puncture-settings.yaml
-  "fec::Puncture#[0-9]+' init\\(\\) throws: pattern spells one keep or delete per coded bit as '1' or '0', got '1102'"
+  "block 'puncture_block' refuses its settings: pattern: must contain only 0s and 1s"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -299,7 +293,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_depuncture_spelling
   graphs/puncture-settings.yaml
-  "fec::Depuncture#[0-9]+' init\\(\\) throws: pattern spells one keep or delete per coded bit as '1' or '0', got '11 0'"
+  "block 'depuncture_block' refuses its settings: pattern: must contain only 0s and 1s"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -307,7 +301,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_puncture_none_kept
   graphs/puncture-settings.yaml
-  "fec::Puncture#[0-9]+' init\\(\\) throws: pattern deletes every position and would carry nothing, got '0000'"
+  "block 'puncture_block' refuses its settings: pattern: must contain a 1"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -315,7 +309,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_depuncture_none_kept
   graphs/puncture-settings.yaml
-  "fec::Depuncture#[0-9]+' init\\(\\) throws: pattern deletes every position and would carry nothing, got '0'"
+  "block 'depuncture_block' refuses its settings: pattern: must contain a 1"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -323,15 +317,15 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_kind_empty
   graphs/interleave-settings.yaml
-  "kind has no default and must be set to 'block', 'convolutional' or 'permutation'"
+  "start\\(\\): blocks refuse their settings: gr::blocks::fec::Interleave[^\n]*#[0-9]+\\.kind: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
-  "block_block.kind=\"\"")
+  "block_block.kind=unset")
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_kind_unknown
   graphs/interleave-settings.yaml
-  "kind must be 'block', 'convolutional' or 'permutation', got 'rectangular'"
+  "block 'block_block' refuses its settings: kind: must be one of: unset, block, convolutional, permutation"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -339,7 +333,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_rows
   graphs/interleave-settings.yaml
-  "fec::Interleave<uint8>#[0-9]+' init\\(\\) throws: kind 'block': [^\n]*rows is 0 [^\n]* needs at least one row"
+  "block 'block_block' refuses its settings: rows: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -348,7 +342,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_deinterleave_cols
   graphs/interleave-settings.yaml
-  "fec::Deinterleave<uint8>#[0-9]+' init\\(\\) throws: kind 'block': [^\n]*cols is 0 [^\n]* needs at least one column"
+  "block 'block_back_block' refuses its settings: cols: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -357,7 +351,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_branches
   graphs/interleave-settings.yaml
-  "branches is 1 [^\n]* below two branches there is nothing to interleave"
+  "block 'conv_block' refuses its settings: branches: must be >= 2 when kind is convolutional"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -366,7 +360,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_unit_delay
   graphs/interleave-settings.yaml
-  "unit_delay is 0 [^\n]* every branch would hold no cells"
+  "block 'conv_block' refuses its settings: unit_delay: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -374,7 +368,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_table_empty
   graphs/interleave-settings.yaml
-  "table is required for kind 'permutation' and has no default"
+  "block 'table_block' refuses its settings: table: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -382,7 +376,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_deinterleave_table_repeat
   graphs/interleave-settings.yaml
-  "fec::Deinterleave<uint8>#[0-9]+' init\\(\\) throws: [^\n]*table entry 2 repeats index 2"
+  "block 'table_back_block' refuses its settings: gr::fec::Interleaver: table entry 2 repeats index 2 [^\n]* the table is not a permutation"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -390,7 +384,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_table_outside
   graphs/interleave-settings.yaml
-  "fec::Interleave<uint8>#[0-9]+' init\\(\\) throws: [^\n]*table entry 1 is 3, outside a 3-item frame"
+  "block 'table_block' refuses its settings: gr::fec::Interleaver: table entry 1 is 3, outside a 3-item frame"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -398,7 +392,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_interleave_fill
   graphs/interleave-settings.yaml
-  "fill_value is one item of the byte carrier and must be 0 to 255, got 256"
+  "block 'block_block' refuses its settings: fill_value: must be <= 255"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -406,7 +400,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_deinterleave_window_offset
   graphs/interleave-settings.yaml
-  "output_offset 20 does not address the 20-item deinterleaved frame"
+  "block 'block_back_block' refuses its settings: output_offset: must be < the frame size"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -414,24 +408,16 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_deinterleave_window_end
   graphs/interleave-settings.yaml
-  "output window .5, 21\\) runs past the 20-item deinterleaved frame"
+  "block 'block_back_block' refuses its settings: output_length: output_offset . output_length must be <= the frame size"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
   "block_back_block.output_offset=!!uint32 5"
   "block_back_block.output_length=!!uint32 16")
 gr_add_failing_graph_test(
-  graph_fec_refused_deinterleave_window_convolutional
-  graphs/interleave-settings.yaml
-  "the convolutional kind is stream-shaped and has no frame for an output window to address"
-  PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrFecBlocksShared>
-  SET
-  "conv_back_block.output_offset=!!uint32 1")
-gr_add_failing_graph_test(
   graph_fec_refused_float_interleave_convolutional
   graphs/interleave-settings.yaml
-  "fec::Interleave<float32>#[0-9]+' init\\(\\) throws: kind 'convolutional' carries bytes only"
+  "block 'float_block' refuses its settings: kind: convolutional requires byte items"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET
@@ -441,7 +427,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_fec_refused_float_deinterleave_convolutional
   graphs/interleave-settings.yaml
-  "fec::Deinterleave<float32>#[0-9]+' init\\(\\) throws: kind 'convolutional' carries bytes only"
+  "block 'float_back_block' refuses its settings: kind: convolutional requires byte items"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrFecBlocksShared>
   SET

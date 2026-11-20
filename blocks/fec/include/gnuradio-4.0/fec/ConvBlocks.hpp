@@ -1,10 +1,13 @@
 #ifndef GNURADIO_FEC_CONV_BLOCKS_HPP
 #define GNURADIO_FEC_CONV_BLOCKS_HPP
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <iterator>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -48,71 +51,85 @@
  */
 namespace gr::blocks::fec {
 
+/// @brief The convolutional code a block runs: `custom` takes `constraint_length`, `polynomials` and `invert_outputs` as
+/// given, and every other enumerator is the library's published convention of that name.
+enum class ConvCode : std::uint8_t { custom, ccsds, ccsds_uninverted, nasa_dsn, nasa_dsn_uninverted };
+
 namespace detail {
 
-//! The code the settings name — a convention by `code`, or the explicit `constraint_length` and
-//! `polynomials` pair — reporting the kernel's own refusals through the graph's exception type.
-//! An explicit setting staged beside a named convention must agree with it: two answers to one
-//! question is a refusal naming both, never a silent preference.
-[[nodiscard]] inline gr::fec::ConvolutionalCode convolutionalCode(gr::Size_t constraintLength, const std::vector<gr::Size_t>& polynomials, const std::string& codeName, gr::Size_t invertOutputs) {
-    if (!codeName.empty()) {
-        const gr::fec::ConvolutionalConvention* convention = gr::fec::conventionByName(codeName);
-        if (convention == nullptr) {
-            std::string names;
-            for (const gr::fec::ConvolutionalConvention& entry : gr::fec::kConvConventions) {
-                std::format_to(std::back_inserter(names), "{}'{}'", names.empty() ? "" : ", ", entry.name);
-            }
-            throw gr::exception(std::format("code must name one of {}, got '{}'", names, codeName));
+// each enumerator after `custom` names the row of the library's table at its own position less one, so a lookup is an
+// index and a reordered table fails here rather than selecting another code
+static_assert(
+    [] {
+        constexpr auto codes = gr::meta::enumValues<ConvCode>();
+        if (codes.size() != gr::fec::kConvConventions.size() + 1UZ) {
+            return false;
         }
-        if (constraintLength != 0U && static_cast<std::size_t>(constraintLength) != convention->constraintLength) {
-            throw gr::exception(std::format("code '{}' supplies constraint_length {} and the explicit setting says {}: one question, two answers", codeName, convention->constraintLength, constraintLength));
-        }
-        if (!polynomials.empty()) {
-            bool agrees = polynomials.size() == convention->polynomialCount;
-            for (std::size_t i = 0UZ; agrees && i < polynomials.size(); ++i) {
-                agrees = polynomials[i] == convention->polynomials[i];
-            }
-            if (!agrees) {
-                throw gr::exception(std::format("code '{}' supplies its own polynomials and the explicit setting disagrees: one question, two answers", codeName));
+        for (std::size_t i = 1UZ; i < codes.size(); ++i) {
+            if (gr::meta::enumName(codes[i]) != gr::fec::kConvConventions[i - 1UZ].name) {
+                return false;
             }
         }
-        if (invertOutputs != 0U && invertOutputs != convention->outputInversion) {
-            throw gr::exception(std::format("code '{}' supplies invert_outputs {:#b} and the explicit setting says {:#b}: one question, two answers", codeName, convention->outputInversion, invertOutputs));
+        return true;
+    }(),
+    "ConvCode's named enumerators must follow gr::fec::kConvConventions");
+
+//! The published convention @p code names; `code` is not `custom`.
+[[nodiscard]] inline const gr::fec::ConvolutionalConvention& conventionOf(ConvCode code) noexcept { return gr::fec::kConvConventions[static_cast<std::size_t>(code) - 1UZ]; }
+
+//! The fault in the code the settings name — a convention by `code`, or under `custom` the explicit `constraint_length`
+//! and `polynomials` pair — under the setting at fault, or nothing when they name one. An explicit setting staged beside
+//! a named convention must agree with it: two answers to one question is a refusal, never a silent preference. Zero, or
+//! an empty list, is a setting not given.
+template<typename TSettings>
+[[nodiscard]] std::optional<gr::Refused> checkConvolutionalCode(const TSettings& s) {
+    const std::vector<gr::Size_t> generators = s.polynomials.value;
+    if (s.code.value != ConvCode::custom) {
+        const gr::fec::ConvolutionalConvention* convention = &conventionOf(s.code.value);
+        if (s.constraint_length.value != 0U && s.constraint_length.value != convention->constraintLength) {
+            return gr::Refused(s.constraint_length, std::format("must be 0 or {}", convention->constraintLength));
         }
-        gr::fec::ConvolutionalCode named;
-        std::ignore = gr::fec::configureConvention(named, codeName); // the name resolved, so this cannot refuse
-        return named;
+        const std::span<const std::uint32_t> supplied(convention->polynomials.data(), convention->polynomialCount);
+        if (!generators.empty() && !std::ranges::equal(generators, supplied)) {
+            return gr::Refused(s.polynomials, "must be empty or match the polynomials of code");
+        }
+        if (s.invert_outputs.value != 0U && s.invert_outputs.value != convention->outputInversion) {
+            return gr::Refused(s.invert_outputs, std::format("must be 0 or {:#b}", convention->outputInversion));
+        }
+        return {};
     }
 
-    if (constraintLength == 0U && polynomials.empty()) {
-        throw gr::exception("constraint_length and polynomials have no defaults: a convolutional code is the pair, and neither end of a link can guess the other's; code names a published convention instead");
+    if (s.constraint_length.value == 0U && generators.empty()) {
+        return gr::Refused(s.code, "required");
     }
-    if (polynomials.size() < gr::fec::kConvMinPolynomials || polynomials.size() > gr::fec::kConvMaxPolynomials) {
-        throw gr::exception(std::format("polynomials names one generator per coded bit and must hold {} to {} of them, got {}", gr::fec::kConvMinPolynomials, gr::fec::kConvMaxPolynomials, polynomials.size()));
+    if (s.constraint_length.value < gr::fec::kConvMinConstraintLength || s.constraint_length.value > gr::fec::kConvMaxConstraintLength) {
+        return gr::Refused(s.constraint_length, std::format("must be >= {} and <= {}", gr::fec::kConvMinConstraintLength, gr::fec::kConvMaxConstraintLength));
+    }
+    if (generators.size() < gr::fec::kConvMinPolynomials || generators.size() > gr::fec::kConvMaxPolynomials) {
+        return gr::Refused(s.polynomials, std::format("must have >= {} and <= {} entries", gr::fec::kConvMinPolynomials, gr::fec::kConvMaxPolynomials));
+    }
+    if ((s.invert_outputs.value >> generators.size()) != 0U) {
+        return gr::Refused(s.invert_outputs, std::format("must be < {}", 1U << generators.size()));
     }
 
-    std::array<std::uint32_t, gr::fec::kConvMaxPolynomials> generators{};
-    for (std::size_t i = 0UZ; i < polynomials.size(); ++i) {
-        generators[i] = polynomials[i];
+    // the length, the count and the inversion passed above, so a configure that fails has the generators at fault
+    gr::fec::ConvolutionalCode trial;
+    const bool                 configured = trial.configure(s.constraint_length.value, generators, s.invert_outputs.value);
+    if (!configured) {
+        return gr::Refused(s.polynomials, "each polynomial must be > 0 and < 2^constraint_length and differ from the others");
     }
-
-    gr::fec::ConvolutionalCode code;
-    if (!code.configure(static_cast<std::size_t>(constraintLength), std::span<const std::uint32_t>(generators).first(polynomials.size()), invertOutputs)) {
-        throw gr::exception(std::format("constraint_length must be {} to {}, every polynomial must be nonzero, no wider than constraint_length bits and named once, and invert_outputs may set only bits below the polynomial count; got constraint_length {}, invert_outputs {:#b}", //
-            gr::fec::kConvMinConstraintLength, gr::fec::kConvMaxConstraintLength, constraintLength, invertOutputs));
-    }
-    return code;
+    return {};
 }
 
-//! The termination mode the `termination` setting names, or the refusal naming its two values.
-[[nodiscard]] inline gr::fec::ConvTermination terminationByName(const std::string& name) {
-    if (name == "terminated") {
-        return gr::fec::ConvTermination::Terminated;
+//! The code the settings name, for settings `checkConvolutionalCode` accepts.
+[[nodiscard]] inline gr::fec::ConvolutionalCode makeConvolutionalCode(gr::Size_t constraintLength, const std::vector<gr::Size_t>& polynomials, ConvCode named, gr::Size_t invertOutputs) {
+    gr::fec::ConvolutionalCode code;
+    if (named == ConvCode::custom) {
+        std::ignore = code.configure(constraintLength, polynomials, invertOutputs);
+    } else {
+        std::ignore = gr::fec::configureConvention(code, conventionOf(named).name);
     }
-    if (name == "open") {
-        return gr::fec::ConvTermination::Open;
-    }
-    throw gr::exception(std::format("termination must be 'terminated' or 'open', got '{}'", name));
+    return code;
 }
 
 } // namespace detail
@@ -132,34 +149,35 @@ Every frame is terminated, so this block has no `termination` setting.
 An encoder has no status to report, so the record's metadata crosses unchanged; its signal name and its single-map
 shape follow it, and the output record's extent names its own length. ViterbiDecode and ViterbiDecodeSoft are the
 decoding counterparts.
+
+`polynomials` are octal, bit 0 the current input, and bit j of `invert_outputs` complements output j. code custom takes
+the explicit settings.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "constraint_length", Doc<"K, the register's width in input bits: 3 to 9; required, with no default">, Visible>                                                                                                                  constraint_length{};
-    Annotated<std::vector<gr::Size_t>, "polynomials", Doc<"one generator per coded bit, 2 to 4 of them, each the octal spelling's value, 0171 and 0133 for the classic K = 7 pair; bit 0 taps the current input bit">, Visible>                           polynomials{};
-    Annotated<std::string, "code", Doc<"a published convention supplying constraint_length, polynomials and invert_outputs: 'ccsds', 'ccsds_uninverted', 'nasa_dsn' or 'nasa_dsn_uninverted'; an explicit setting staged beside it must agree">, Visible> code{};
-    Annotated<gr::Size_t, "invert_outputs", Doc<"bit j set: coded output j is emitted complemented; bits at or past the polynomial count are refused">>                                                                                                   invert_outputs = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"bits">, Doc<"constraint length">, Visible>        constraint_length{};
+        Annotated<std::vector<gr::Size_t>, Doc<"generator polynomials">, Visible>     polynomials{};
+        Annotated<ConvCode, Doc<"published convention (custom = explicit)">, Visible> code           = ConvCode::custom;
+        Annotated<gr::Size_t, Doc<"output inversion mask">>                           invert_outputs = 0U;
 
-    GR_MAKE_REFLECTABLE(ConvEncode, in, out, constraint_length, polynomials, code, invert_outputs);
+        GR_MAKE_REFLECTABLE(Settings, constraint_length, polynomials, code, invert_outputs);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ConvEncode, in, out, settings);
 
     gr::fec::ConvolutionalCode _code{};
-    bool                       _configured = false;
 
     // ConvEncode's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords        = 0ULL; ///< frames published on `out`
     std::uint64_t nInfoBits       = 0ULL; ///< information bits those frames carry
     std::uint64_t nRecordsRefused = 0ULL; ///< records that were not a frame this code can encode
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkConvolutionalCode(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _code       = detail::convolutionalCode(constraint_length.value, polynomials.value, code.value, invert_outputs.value);
-        _configured = true;
-    }
+    void applySettings(const Settings& s) { _code = detail::makeConvolutionalCode(s.constraint_length, s.polynomials, s.code, s.invert_outputs); }
 
     void stop() {
         const std::array<std::pair<std::string_view, std::uint64_t>, 3UZ> counters{{{"frames", nRecords}, {"information bits", nInfoBits}, {"records refused", nRecordsRefused}}};
@@ -167,12 +185,6 @@ decoding counterparts.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
@@ -221,23 +233,28 @@ map gains one to carry the key.
 
 There is no `uncorrectable_errors`: the trellis has a best path through any received word, so the key would always be
 zero. The distance in `corrected_errors` is how far the received frame stood from the path chosen.
+
+`polynomials` are octal, bit 0 the current input, and bit j of `invert_outputs` complements output j. code custom takes
+the explicit settings. termination terminated adds constraint_length - 1 tail bits.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "constraint_length", Doc<"K, the register's width in input bits: 3 to 9; required, with no default">, Visible>                                                                                                                  constraint_length{};
-    Annotated<std::vector<gr::Size_t>, "polynomials", Doc<"one generator per coded bit, 2 to 4 of them, each the octal spelling's value, 0171 and 0133 for the classic K = 7 pair; bit 0 taps the current input bit">, Visible>                           polynomials{};
-    Annotated<std::string, "code", Doc<"a published convention supplying constraint_length, polynomials and invert_outputs: 'ccsds', 'ccsds_uninverted', 'nasa_dsn' or 'nasa_dsn_uninverted'; an explicit setting staged beside it must agree">, Visible> code{};
-    Annotated<gr::Size_t, "invert_outputs", Doc<"bit j set: coded output j arrived complemented and is compared against the complement; bits at or past the polynomial count are refused">>                                                               invert_outputs = 0U;
-    Annotated<std::string, "termination", Doc<"'terminated': the frame ends in the zero state and carries K-1 tail bits. 'open': a record cut out of a continuous stream, every step an information bit and both end states free">>                       termination    = std::string("terminated");
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"bits">, Doc<"constraint length">, Visible>        constraint_length{};
+        Annotated<std::vector<gr::Size_t>, Doc<"generator polynomials">, Visible>     polynomials{};
+        Annotated<ConvCode, Doc<"published convention (custom = explicit)">, Visible> code           = ConvCode::custom;
+        Annotated<gr::Size_t, Doc<"output inversion mask">>                           invert_outputs = 0U;
+        Annotated<gr::fec::ConvTermination, Doc<"frame termination">>                 termination    = gr::fec::ConvTermination::Terminated;
 
-    GR_MAKE_REFLECTABLE(ViterbiDecode, in, out, constraint_length, polynomials, code, invert_outputs, termination);
+        GR_MAKE_REFLECTABLE(Settings, constraint_length, polynomials, code, invert_outputs, termination);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ViterbiDecode, in, out, settings);
 
     gr::fec::ConvolutionalCode _code{};
     gr::fec::ViterbiDecoder    _decoder{};
-    gr::fec::ConvTermination   _termination = gr::fec::ConvTermination::Terminated;
-    bool                       _configured  = false;
 
     // ViterbiDecode's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords         = 0ULL; ///< frames published on `out`
@@ -245,15 +262,11 @@ zero. The distance in `corrected_errors` is how far the received frame stood fro
     std::uint64_t nRecordsRefused  = 0ULL; ///< records whose length was not a frame of this code
     std::uint64_t nCorrectedErrors = 0ULL; ///< bits between the received frames and the paths decoded, totaled
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkConvolutionalCode(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _code        = detail::convolutionalCode(constraint_length.value, polynomials.value, code.value, invert_outputs.value);
-        _termination = detail::terminationByName(termination.value);
-        std::ignore  = _decoder.configure(_code, _termination);
-        _configured  = true;
+    void applySettings(const Settings& s) {
+        _code       = detail::makeConvolutionalCode(s.constraint_length, s.polynomials, s.code, s.invert_outputs);
+        std::ignore = _decoder.configure(_code, s.termination);
     }
 
     void stop() {
@@ -262,17 +275,11 @@ zero. The distance in `corrected_errors` is how far the received frame stood fro
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
             const DataSet<std::uint8_t>& record  = inSpan[consumed];
-            const std::size_t            carried = gr::fec::convolutionalInfoBits(_code, record.signal_values.size(), _termination);
+            const std::size_t            carried = gr::fec::convolutionalInfoBits(_code, record.signal_values.size(), settings.termination);
             if (carried == 0UZ) {
                 ++nRecordsRefused;
                 continue;
@@ -318,23 +325,28 @@ decision; a demodulator needs neither a normalization step nor a quantization ta
 `corrected_errors` gains the distance between the sign-sliced input and the winning path, the same account of the
 channel the hard decoder gives, and there is no `uncorrectable_errors` here either. The length contract, the counted
 drops and the metadata carry are ViterbiDecode's.
+
+`polynomials` are octal, bit 0 the current input, and bit j of `invert_outputs` complements output j. code custom takes
+the explicit settings. termination terminated adds constraint_length - 1 tail bits.
 )"">;
 
     PortIn<DataSet<float>, Async>         in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "constraint_length", Doc<"K, the register's width in input bits: 3 to 9; required, with no default">, Visible>                                                                                                                  constraint_length{};
-    Annotated<std::vector<gr::Size_t>, "polynomials", Doc<"one generator per coded bit, 2 to 4 of them, each the octal spelling's value, 0171 and 0133 for the classic K = 7 pair; bit 0 taps the current input bit">, Visible>                           polynomials{};
-    Annotated<std::string, "code", Doc<"a published convention supplying constraint_length, polynomials and invert_outputs: 'ccsds', 'ccsds_uninverted', 'nasa_dsn' or 'nasa_dsn_uninverted'; an explicit setting staged beside it must agree">, Visible> code{};
-    Annotated<gr::Size_t, "invert_outputs", Doc<"bit j set: coded output j arrived complemented and enters the correlation sign-flipped; bits at or past the polynomial count are refused">>                                                              invert_outputs = 0U;
-    Annotated<std::string, "termination", Doc<"'terminated': the frame ends in the zero state and carries K-1 tail bits. 'open': a record cut out of a continuous stream, every step an information bit and both end states free">>                       termination    = std::string("terminated");
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"bits">, Doc<"constraint length">, Visible>        constraint_length{};
+        Annotated<std::vector<gr::Size_t>, Doc<"generator polynomials">, Visible>     polynomials{};
+        Annotated<ConvCode, Doc<"published convention (custom = explicit)">, Visible> code           = ConvCode::custom;
+        Annotated<gr::Size_t, Doc<"output inversion mask">>                           invert_outputs = 0U;
+        Annotated<gr::fec::ConvTermination, Doc<"frame termination">>                 termination    = gr::fec::ConvTermination::Terminated;
 
-    GR_MAKE_REFLECTABLE(ViterbiDecodeSoft, in, out, constraint_length, polynomials, code, invert_outputs, termination);
+        GR_MAKE_REFLECTABLE(Settings, constraint_length, polynomials, code, invert_outputs, termination);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ViterbiDecodeSoft, in, out, settings);
 
     gr::fec::ConvolutionalCode _code{};
     gr::fec::ViterbiDecoder    _decoder{};
-    gr::fec::ConvTermination   _termination = gr::fec::ConvTermination::Terminated;
-    bool                       _configured  = false;
 
     // ViterbiDecodeSoft's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords         = 0ULL; ///< frames published on `out`
@@ -342,15 +354,11 @@ drops and the metadata carry are ViterbiDecode's.
     std::uint64_t nRecordsRefused  = 0ULL; ///< records whose length was not a frame of this code
     std::uint64_t nCorrectedErrors = 0ULL; ///< bits between the sign-sliced frames and the paths decoded, totaled
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkConvolutionalCode(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _code        = detail::convolutionalCode(constraint_length.value, polynomials.value, code.value, invert_outputs.value);
-        _termination = detail::terminationByName(termination.value);
-        std::ignore  = _decoder.configure(_code, _termination);
-        _configured  = true;
+    void applySettings(const Settings& s) {
+        _code       = detail::makeConvolutionalCode(s.constraint_length, s.polynomials, s.code, s.invert_outputs);
+        std::ignore = _decoder.configure(_code, s.termination);
     }
 
     void stop() {
@@ -359,17 +367,11 @@ drops and the metadata carry are ViterbiDecode's.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
             const DataSet<float>& record  = inSpan[consumed];
-            const std::size_t     carried = gr::fec::convolutionalInfoBits(_code, record.signal_values.size(), _termination);
+            const std::size_t     carried = gr::fec::convolutionalInfoBits(_code, record.signal_values.size(), settings.termination);
             if (carried == 0UZ) {
                 ++nRecordsRefused;
                 continue;

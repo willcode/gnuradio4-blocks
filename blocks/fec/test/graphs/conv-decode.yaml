@@ -3,8 +3,8 @@
 # corrected and no uncorrectable_errors key. The soft chains decode the coded bits as soft values, a one at +1.0 and a
 # zero at -1.0. The plain soft chain expects the information back with nothing corrected. The damaged soft chain
 # negates the values at 11 and 93 and erases 40 to 43 to 0.0, and expects the information back. The open chains
-# decode under termination 'open', where every step carries an information bit: the sinks expect the 120 information
-# bits, then the six tail steps as zeros. The step chain decodes the first two coded bits, one step, under 'open'.
+# decode under termination Open, where every step carries an information bit: the sinks expect the 120 information
+# bits, then the six tail steps as zeros. The step chain decodes the first two coded bits, one step, under Open.
 # Written by generate_graphs.py from seed 0x9E3779B97F4A7C15 ^ 0x6. Oracle: the drawn information and the generator's
 # convolutional encoder.
 blocks:

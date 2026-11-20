@@ -7,10 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <format>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -69,42 +67,69 @@ struct InterleaverOrigin {
     property_map meta{};      //!< its metadata map, or an empty one where it carried none
 };
 
-//! The kernel the family settings name, reporting its refusals through the graph's exception type.
-template<typename T>
-[[nodiscard]] inline gr::fec::Interleaver<T> interleaverKernel(const std::string& kind, gr::Size_t rows, gr::Size_t cols, gr::Size_t windowOffset, gr::Size_t windowLength, //
-    gr::Size_t branches, gr::Size_t unitDelay, const std::vector<gr::Size_t>& table, gr::Size_t fillValue) {
-    if (kind.empty()) {
-        throw gr::exception("kind has no default and must be set to 'block', 'convolutional' or 'permutation': the three families share a contract but not a shape, and neither end of a link can guess the other's");
-    }
-    if (fillValue > 0xFFU) {
-        throw gr::exception(std::format("fill_value is one item of the byte carrier and must be 0 to 255, got {}", fillValue));
-    }
-    const T fill = static_cast<T>(fillValue);
+//! The family settings one kernel is built from; the readout window is Interleave's alone.
+struct InterleaverSettings {
+    gr::fec::InterleaverKind kind         = gr::fec::InterleaverKind::Unset;
+    gr::Size_t               rows         = 0U;
+    gr::Size_t               cols         = 0U;
+    gr::Size_t               windowOffset = 0U;
+    gr::Size_t               windowLength = 0U; //!< 0 reads out the whole frame
+    gr::Size_t               branches     = 0U;
+    gr::Size_t               unitDelay    = 0U;
+    std::vector<gr::Size_t>  table{};
+    gr::Size_t               fillValue = 0U;
+};
 
-    try {
-        if (kind == "block") {
-            const std::size_t frame  = static_cast<std::size_t>(rows) * static_cast<std::size_t>(cols);
-            const std::size_t length = (windowLength == 0U) ? frame : static_cast<std::size_t>(windowLength);
-            return gr::fec::Interleaver<T>::block(rows, cols, windowOffset, length, fill);
-        }
-        if (kind == "convolutional") {
-            if constexpr (!std::same_as<T, std::uint8_t>) {
-                throw gr::exception("kind 'convolutional' carries bytes only: its fill and its across-record state have no float semantics, and no consumer asks");
-            } else {
-                return gr::fec::Interleaver<T>::convolutional(branches, unitDelay, fill);
-            }
-        }
-        if (kind == "permutation") {
-            if (table.empty()) {
-                throw gr::exception("table is required for kind 'permutation' and has no default: a published table is an interoperability constant, and a default table would be an interoperability assumption nobody made");
-            }
-            std::vector<std::size_t> indices(table.begin(), table.end());
-            return gr::fec::Interleaver<T>::permutation(std::span<const std::size_t>(indices));
-        }
-    } catch (const std::invalid_argument& refusal) {
-        throw gr::exception(std::format("kind '{}': {}", kind, refusal.what()));
+//! The kernel the family settings name, for settings `checkInterleaver` accepts. The kernel's constructor judges how
+//! the values combine (the frame ceiling, the window, a table that is no permutation) and throws.
+template<typename T>
+[[nodiscard]] inline gr::fec::Interleaver<T> interleaverKernel(const InterleaverSettings& settings) {
+    const T fill = static_cast<T>(settings.fillValue);
+    if (settings.kind == gr::fec::InterleaverKind::Block) {
+        const std::size_t frame  = std::size_t{settings.rows} * settings.cols;
+        const std::size_t length = settings.windowLength == 0U ? frame : settings.windowLength;
+        return gr::fec::Interleaver<T>::block(settings.rows, settings.cols, settings.windowOffset, length, fill);
     }
-    throw gr::exception(std::format("kind must be 'block', 'convolutional' or 'permutation', got '{}'", kind));
+    if constexpr (std::same_as<T, std::uint8_t>) {
+        if (settings.kind == gr::fec::InterleaverKind::Convolutional) {
+            return gr::fec::Interleaver<T>::convolutional(settings.branches, settings.unitDelay, fill);
+        }
+    }
+    std::vector<std::size_t> indices(settings.table.begin(), settings.table.end());
+    return gr::fec::Interleaver<T>::permutation(std::span<const std::size_t>(indices));
+}
+
+//! The fault in the settings a family requires, under the setting at fault, or nothing when the family has them.
+template<typename T, typename TSettings>
+[[nodiscard]] std::optional<gr::Refused> checkInterleaver(const TSettings& s) {
+    switch (s.kind.value) {
+    case gr::fec::InterleaverKind::Block:
+        if (s.rows.value == 0U) {
+            return gr::Refused(s.rows, "required");
+        }
+        if (s.cols.value == 0U) {
+            return gr::Refused(s.cols, "required");
+        }
+        return {};
+    case gr::fec::InterleaverKind::Convolutional:
+        if (!std::same_as<T, std::uint8_t>) {
+            return gr::Refused(s.kind, "convolutional requires byte items");
+        }
+        if (s.branches.value < 2U) {
+            return gr::Refused(s.branches, "must be >= 2 when kind is convolutional");
+        }
+        if (s.unit_delay.value == 0U) {
+            return gr::Refused(s.unit_delay, "required");
+        }
+        return {};
+    case gr::fec::InterleaverKind::Permutation:
+        if (s.table.value.empty()) {
+            return gr::Refused(s.table, "required");
+        }
+        return {};
+    case gr::fec::InterleaverKind::Unset: break;
+    }
+    return gr::Refused(s.kind, "required");
 }
 
 /*!
@@ -190,40 +215,70 @@ An interleaver has no status to report, so the record's facts cross unchanged; i
 shape follow it, and the output record's extent names its own length. A framed output carries the facts of the record
 it came from; a convolutional output carries those of the record that held the first item of its span, or those of the
 record being consumed while the delay lines are still filling. Deinterleave puts the items back.
+
+Under kind block, the rectangle of `rows` by `cols` is written row-major and read column-major, so items adjacent at the
+input land `rows` apart at the output; `window_offset` and `window_length` select the part of the readout emitted. Under
+convolutional, branch b of the `branches` delay lines holds b * unit_delay cells, and the end-to-end delay is branches *
+(branches - 1) * unit_delay items. Under permutation, out[i] = in[table[i]], every index below the frame size once.
 )"">;
 
     PortIn<DataSet<T>, Async>  in;
     PortOut<DataSet<T>, Async> out;
 
-    Annotated<std::string, "kind", Doc<"'block', 'convolutional' or 'permutation'; required, with no default">, Visible>                                                       kind{};
-    Annotated<gr::Size_t, "rows", Doc<"kind 'block': rows of the rectangle, written row-major and read column-major">, Visible>                                                rows          = 0U;
-    Annotated<gr::Size_t, "cols", Doc<"kind 'block': columns of the rectangle; items adjacent at the input land 'rows' apart at the output">, Visible>                         cols          = 0U;
-    Annotated<gr::Size_t, "window_offset", Doc<"kind 'block': first item of the column-major readout to emit">>                                                                window_offset = 0U;
-    Annotated<gr::Size_t, "window_length", Doc<"kind 'block': items of the readout to emit; 0 means the whole frame">>                                                         window_length = 0U;
-    Annotated<gr::Size_t, "branches", Doc<"kind 'convolutional': delay lines B, at least two; branch b holds b * unit_delay cells">, Visible>                                  branches      = 0U;
-    Annotated<gr::Size_t, "unit_delay", Doc<"kind 'convolutional': cells M per branch step; the end-to-end delay is B * (B - 1) * M items">, Visible>                          unit_delay    = 0U;
-    Annotated<std::vector<gr::Size_t>, "table", Doc<"kind 'permutation': the gather out[i] = in[table[i]], every index below the frame size once; required, with no default">> table{};
-    Annotated<gr::Size_t, "fill_value", Doc<"the item value the convolutional fill emits, 0 to 255">>                                                                          fill_value = 0U;
+    struct Settings {
+        Annotated<gr::fec::InterleaverKind, Doc<"interleaver family">, Visible>   kind          = gr::fec::InterleaverKind::Unset;
+        Annotated<gr::Size_t, Doc<"block rows">, Visible>                         rows          = 0U;
+        Annotated<gr::Size_t, Doc<"block columns">, Visible>                      cols          = 0U;
+        Annotated<gr::Size_t, Doc<"readout window offset">>                       window_offset = 0U;
+        Annotated<gr::Size_t, Doc<"readout window length (0 = whole frame)">>     window_length = 0U;
+        Annotated<gr::Size_t, Doc<"delay line count">, Visible>                   branches      = 0U;
+        Annotated<gr::Size_t, Doc<"cells per branch step">, Visible>              unit_delay    = 0U;
+        Annotated<std::vector<gr::Size_t>, Doc<"permutation table">>              table{};
+        Annotated<gr::Size_t, Doc<"convolutional fill value">, Limits<Max<255U>>> fill_value = 0U;
 
-    GR_MAKE_REFLECTABLE(Interleave, in, out, kind, rows, cols, window_offset, window_length, branches, unit_delay, table, fill_value);
+        GR_MAKE_REFLECTABLE(Settings, kind, rows, cols, window_offset, window_length, branches, unit_delay, table, fill_value);
+    } settings;
 
-    std::optional<gr::fec::Interleaver<T>> _kernel{};
+    GR_MAKE_REFLECTABLE(Interleave, in, out, settings);
+
+    std::optional<gr::fec::Interleaver<T>> interleaver{};
     detail::OriginQueue                    _origins{};
-    bool                                   _configured = false;
 
     // Interleave's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords        = 0ULL; ///< records published on `out`
     std::uint64_t nItems          = 0ULL; ///< items those records carry
     std::uint64_t nRecordsRefused = 0ULL; ///< records whose length was not a whole number of frames
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::optional<gr::Refused> refused = detail::checkInterleaver<T>(s);
+        if (refused) {
+            return refused;
+        }
+        std::ignore = kernelOf(s);
+        return {};
+    }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _kernel.emplace(detail::interleaverKernel<T>(kind.value, rows.value, cols.value, window_offset.value, window_length.value, branches.value, unit_delay.value, table.value, fill_value.value));
+    void applySettings(const Settings& s) {
+        interleaver.emplace(kernelOf(s));
         _origins.reset();
-        _configured = true;
+    }
+
+    [[nodiscard]] gr::fec::Interleaver<T> kernelOf(const Settings& s) const {
+        return detail::interleaverKernel<T>({.kind = s.kind.value,
+            .rows                                  = s.rows.value,
+            .cols                                  = s.cols.value,
+            .windowOffset                          = s.window_offset.value,
+            .windowLength                          = s.window_length.value, //
+            .branches                              = s.branches.value,
+            .unitDelay                             = s.unit_delay.value,
+            .table                                 = s.table.value,
+            .fillValue                             = s.fill_value.value});
+    }
+
+    // a restart begins the stream again: the delay lines hold their fill and no record is in flight
+    void start() {
+        interleaver->reset();
+        _origins.reset();
     }
 
     void stop() {
@@ -232,14 +287,9 @@ record being consumed while the delay lines are still filling. Deinterleave puts
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-        const bool        stream   = _kernel->kind() == gr::fec::InterleaverKind::Convolutional;
-        const std::size_t inFrame  = _kernel->frameSize();
-        const std::size_t outFrame = _kernel->interleavedSize();
+        const bool        stream   = interleaver->kind() == gr::fec::InterleaverKind::Convolutional;
+        const std::size_t inFrame  = interleaver->frameSize();
+        const std::size_t outFrame = interleaver->interleavedSize();
 
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
@@ -257,12 +307,12 @@ record being consumed while the delay lines are still filling. Deinterleave puts
                 // The span opens at the stream position this record's items open at, so the branch the
                 // commutator is on there is what dates the span's first item.
                 const std::size_t start                 = _origins.admit(record);
-                const std::size_t depth                 = (start % _kernel->branches()) * _kernel->unitDelay() * _kernel->branches();
-                std::ignore                             = _kernel->interleave(record.signal_values, moved.signal_values);
-                const detail::InterleaverOrigin& origin = _origins.originAt(start, depth, _kernel->latency());
+                const std::size_t depth                 = (start % interleaver->branches()) * interleaver->unitDelay() * interleaver->branches();
+                std::ignore                             = interleaver->interleave(record.signal_values, moved.signal_values);
+                const detail::InterleaverOrigin& origin = _origins.originAt(start, depth, interleaver->latency());
                 detail::carryOrigin(moved, origin.name, origin.meta);
             } else {
-                std::ignore = _kernel->interleave(record.signal_values, moved.signal_values);
+                std::ignore = interleaver->interleave(record.signal_values, moved.signal_values);
                 detail::carryOrigin(moved, detail::originName(record), detail::originMeta(record));
             }
 
@@ -302,28 +352,37 @@ stream-shaped `convolutional` kind refuses it. Interleave's readout window is a 
 the interleaved frame on the transmit side, and has no counterpart here.
 
 Length refusals, the counters and the metadata carry are Interleave's, unchanged.
+
+Under kind block, the rectangle of `rows` by `cols` is written row-major and read column-major. Under the framed kinds,
+`output_offset` items are dropped from the front of each deinterleaved frame and `output_length` items kept. Under
+convolutional, branch b of the `branches` delay lines holds (branches - 1 - b) * unit_delay cells on this side, and the
+end-to-end delay is branches * (branches - 1) * unit_delay items. Under permutation, `table` is the interleaver's table,
+inverted once at configure.
 )"">;
 
     PortIn<DataSet<T>, Async>  in;
     PortOut<DataSet<T>, Async> out;
 
-    Annotated<std::string, "kind", Doc<"'block', 'convolutional' or 'permutation'; required, with no default">, Visible>                                             kind{};
-    Annotated<gr::Size_t, "rows", Doc<"kind 'block': rows of the rectangle, written row-major and read column-major">, Visible>                                      rows          = 0U;
-    Annotated<gr::Size_t, "cols", Doc<"kind 'block': columns of the rectangle; items adjacent at the input land 'rows' apart at the output">, Visible>               cols          = 0U;
-    Annotated<gr::Size_t, "output_offset", Doc<"framed kinds: items dropped from the front of each deinterleaved frame">>                                            output_offset = 0U;
-    Annotated<gr::Size_t, "output_length", Doc<"framed kinds: items kept of each deinterleaved frame; 0 means to the end of the frame">>                             output_length = 0U;
-    Annotated<gr::Size_t, "branches", Doc<"kind 'convolutional': delay lines B, at least two; branch b holds (B - 1 - b) * unit_delay cells on this side">, Visible> branches      = 0U;
-    Annotated<gr::Size_t, "unit_delay", Doc<"kind 'convolutional': cells M per branch step; the end-to-end delay is B * (B - 1) * M items">, Visible>                unit_delay    = 0U;
-    Annotated<std::vector<gr::Size_t>, "table", Doc<"kind 'permutation': the interleaver's table, inverted once at configure; required, with no default">>           table{};
-    Annotated<gr::Size_t, "fill_value", Doc<"the item value the convolutional fill emits, 0 to 255">>                                                                fill_value = 0U;
+    struct Settings {
+        Annotated<gr::fec::InterleaverKind, Doc<"interleaver family">, Visible>   kind          = gr::fec::InterleaverKind::Unset;
+        Annotated<gr::Size_t, Doc<"block rows">, Visible>                         rows          = 0U;
+        Annotated<gr::Size_t, Doc<"block columns">, Visible>                      cols          = 0U;
+        Annotated<gr::Size_t, Doc<"output offset">>                               output_offset = 0U;
+        Annotated<gr::Size_t, Doc<"output length (0 = to frame end)">>            output_length = 0U;
+        Annotated<gr::Size_t, Doc<"delay line count">, Visible>                   branches      = 0U;
+        Annotated<gr::Size_t, Doc<"cells per branch step">, Visible>              unit_delay    = 0U;
+        Annotated<std::vector<gr::Size_t>, Doc<"permutation table">>              table{};
+        Annotated<gr::Size_t, Doc<"convolutional fill value">, Limits<Max<255U>>> fill_value = 0U;
 
-    GR_MAKE_REFLECTABLE(Deinterleave, in, out, kind, rows, cols, output_offset, output_length, branches, unit_delay, table, fill_value);
+        GR_MAKE_REFLECTABLE(Settings, kind, rows, cols, output_offset, output_length, branches, unit_delay, table, fill_value);
+    } settings;
 
-    std::optional<gr::fec::Interleaver<T>> _kernel{};
+    GR_MAKE_REFLECTABLE(Deinterleave, in, out, settings);
+
+    std::optional<gr::fec::Interleaver<T>> interleaver{};
     detail::OriginQueue                    _origins{};
-    bool                                   _configured = false;
-    std::size_t                            _outOffset  = 0UZ; //!< the resolved window, in items of the deinterleaved frame
-    std::size_t                            _outLength  = 0UZ;
+    std::size_t                            _outOffset = 0UZ; //!< the resolved window, in items of the deinterleaved frame
+    std::size_t                            _outLength = 0UZ;
     std::vector<T>                         _whole{}; //!< the full deinterleaved frames, when only a window of them is emitted
 
     // Deinterleave's counters are plain members, read by the owning thread and reported once at stop().
@@ -331,31 +390,44 @@ Length refusals, the counters and the metadata carry are Interleave's, unchanged
     std::uint64_t nItems          = 0ULL; ///< items those records carry
     std::uint64_t nRecordsRefused = 0ULL; ///< records whose length was not a whole number of frames
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _kernel.emplace(detail::interleaverKernel<T>(kind.value, rows.value, cols.value, 0U, 0U, branches.value, unit_delay.value, table.value, fill_value.value));
-        if (_kernel->kind() == gr::fec::InterleaverKind::Convolutional) {
-            if (output_offset.value != 0U || output_length.value != 0U) {
-                throw gr::exception("the convolutional kind is stream-shaped and has no frame for an output window to address");
-            }
-            _outOffset = 0UZ;
-            _outLength = 0UZ;
-        } else {
-            const std::size_t frame = _kernel->frameSize();
-            if (static_cast<std::size_t>(output_offset.value) >= frame) {
-                throw gr::exception(std::format("output_offset {} does not address the {}-item deinterleaved frame", output_offset.value, frame));
-            }
-            _outOffset = static_cast<std::size_t>(output_offset.value);
-            _outLength = (output_length.value == 0U) ? frame - _outOffset : static_cast<std::size_t>(output_length.value);
-            if (_outOffset + _outLength > frame) {
-                throw gr::exception(std::format("output window [{}, {}) runs past the {}-item deinterleaved frame", _outOffset, _outOffset + _outLength, frame));
-            }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::optional<gr::Refused> refused = detail::checkInterleaver<T>(s);
+        if (refused) {
+            return refused;
         }
+        const gr::fec::Interleaver<T> kernel = kernelOf(s);
+        if (s.kind == gr::fec::InterleaverKind::Convolutional) { // stream-shaped: there is no frame for an output window to address
+            if (s.output_offset != 0U) {
+                return gr::Refused(s.output_offset, "must be 0 when kind is convolutional");
+            }
+            if (s.output_length != 0U) {
+                return gr::Refused(s.output_length, "must be 0 when kind is convolutional");
+            }
+            return {};
+        }
+        if (s.output_offset >= kernel.frameSize()) {
+            return gr::Refused(s.output_offset, "must be < the frame size");
+        }
+        if (std::size_t{s.output_offset} + s.output_length > kernel.frameSize()) {
+            return gr::Refused(s.output_length, "output_offset + output_length must be <= the frame size");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        interleaver.emplace(kernelOf(s));
+        const bool framed = interleaver->kind() != gr::fec::InterleaverKind::Convolutional; // the window is read by the framed kinds alone
+        _outOffset        = framed ? std::size_t{s.output_offset} : 0UZ;
+        _outLength        = framed && s.output_length != 0U ? std::size_t{s.output_length} : interleaver->frameSize() - _outOffset;
         _origins.reset();
-        _configured = true;
+    }
+
+    [[nodiscard]] gr::fec::Interleaver<T> kernelOf(const Settings& s) const { return detail::interleaverKernel<T>({.kind = s.kind.value, .rows = s.rows.value, .cols = s.cols.value, .branches = s.branches.value, .unitDelay = s.unit_delay.value, .table = s.table.value, .fillValue = s.fill_value.value}); }
+
+    // a restart returns the delay lines to their fill and forgets the records in flight
+    void start() {
+        interleaver->reset();
+        _origins.reset();
     }
 
     void stop() {
@@ -364,14 +436,9 @@ Length refusals, the counters and the metadata carry are Interleave's, unchanged
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-        const bool        stream   = _kernel->kind() == gr::fec::InterleaverKind::Convolutional;
-        const std::size_t inFrame  = _kernel->interleavedSize();
-        const std::size_t outFrame = _kernel->frameSize();
+        const bool        stream   = interleaver->kind() == gr::fec::InterleaverKind::Convolutional;
+        const std::size_t inFrame  = interleaver->interleavedSize();
+        const std::size_t outFrame = interleaver->frameSize();
 
         const bool windowed = !stream && !(_outOffset == 0UZ && _outLength == outFrame);
 
@@ -390,16 +457,16 @@ Length refusals, the counters and the metadata carry are Interleave's, unchanged
                 // The complementary delay set, so that the two sides together delay every item alike.
                 moved.signal_values.resize(items);
                 const std::size_t start                 = _origins.admit(record);
-                const std::size_t depth                 = (_kernel->branches() - 1UZ - (start % _kernel->branches())) * _kernel->unitDelay() * _kernel->branches();
-                std::ignore                             = _kernel->deinterleave(record.signal_values, moved.signal_values);
-                const detail::InterleaverOrigin& origin = _origins.originAt(start, depth, _kernel->latency());
+                const std::size_t depth                 = (interleaver->branches() - 1UZ - (start % interleaver->branches())) * interleaver->unitDelay() * interleaver->branches();
+                std::ignore                             = interleaver->deinterleave(record.signal_values, moved.signal_values);
+                const detail::InterleaverOrigin& origin = _origins.originAt(start, depth, interleaver->latency());
                 detail::carryOrigin(moved, origin.name, origin.meta);
             } else if (windowed) {
                 // deinterleave the whole frames, then emit the window of each: the window addresses the
                 // deinterleaved order, which only exists once the frame is whole
                 const std::size_t frames = items / inFrame;
                 _whole.resize(frames * outFrame);
-                std::ignore = _kernel->deinterleave(record.signal_values, _whole);
+                std::ignore = interleaver->deinterleave(record.signal_values, _whole);
                 moved.signal_values.resize(frames * _outLength);
                 for (std::size_t f = 0UZ; f < frames; ++f) {
                     const T* from = _whole.data() + f * outFrame + _outOffset;
@@ -408,7 +475,7 @@ Length refusals, the counters and the metadata carry are Interleave's, unchanged
                 detail::carryOrigin(moved, detail::originName(record), detail::originMeta(record));
             } else {
                 moved.signal_values.resize((items / inFrame) * outFrame);
-                std::ignore = _kernel->deinterleave(record.signal_values, moved.signal_values);
+                std::ignore = interleaver->deinterleave(record.signal_values, moved.signal_values);
                 detail::carryOrigin(moved, detail::originName(record), detail::originMeta(record));
             }
 

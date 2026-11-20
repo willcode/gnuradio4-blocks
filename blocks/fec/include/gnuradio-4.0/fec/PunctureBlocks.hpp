@@ -1,10 +1,11 @@
 #ifndef GNURADIO_FEC_PUNCTURE_BLOCKS_HPP
 #define GNURADIO_FEC_PUNCTURE_BLOCKS_HPP
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -73,23 +74,24 @@ struct PuncturePattern {
     }
 };
 
-//! The pattern @p spelling names, reporting its refusals through the graph's exception type.
-[[nodiscard]] inline PuncturePattern puncturePattern(const std::string& spelling) {
+//! The fault in `pattern`, under `pattern`, or nothing when it is a mask that keeps a position.
+template<typename TSettings>
+[[nodiscard]] std::optional<gr::Refused> checkPuncturePattern(const TSettings& s) {
+    const std::string spelling = s.pattern.value;
     if (spelling.empty()) {
-        throw gr::exception("pattern has no default: a puncture is the mask it applies, and neither end of a link can guess the other's");
+        return gr::Refused(s.pattern, "required");
     }
-    std::size_t kept = 0UZ;
-    for (const char position : spelling) {
-        if (position != '0' && position != '1') {
-            throw gr::exception(std::format("pattern spells one keep or delete per coded bit as '1' or '0', got '{}'", spelling));
-        }
-        kept += (position == '1') ? 1UZ : 0UZ;
+    if (spelling.find_first_not_of("01") != std::string::npos) {
+        return gr::Refused(s.pattern, "must contain only 0s and 1s");
     }
-    if (kept == 0UZ) {
-        throw gr::exception(std::format("pattern deletes every position and would carry nothing, got '{}'", spelling));
+    if (!spelling.contains('1')) {
+        return gr::Refused(s.pattern, "must contain a 1");
     }
-    return PuncturePattern{spelling, kept};
+    return {};
 }
+
+//! The pattern @p spelling names, for a spelling `checkPuncturePattern` accepts.
+[[nodiscard]] inline PuncturePattern puncturePattern(const std::string& spelling) { return PuncturePattern{spelling, static_cast<std::size_t>(std::ranges::count(spelling, '1'))}; }
 
 } // namespace detail
 
@@ -109,31 +111,32 @@ its single-map shape follow it, and the output record's extent names its own len
 
 A record whose length is not a whole number of pattern periods punctures here and is refused by Depuncture, the
 receiving counterpart.
+
+In `pattern`, '1' keeps and '0' deletes, walked cyclically over the coded bits in the encoder's output order; "1110" is
+the classic rate 2/3 puncture of a rate 1/2 code.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "pattern", Doc<"'1' keeps and '0' deletes, walked cyclically over the coded bits in the encoder's output order; required. \"1110\" is the classic rate 2/3 puncture of a rate 1/2 code">, Visible> pattern{};
+    struct Settings {
+        Annotated<std::string, Doc<"puncture pattern">, Visible> pattern{};
 
-    GR_MAKE_REFLECTABLE(Puncture, in, out, pattern);
+        GR_MAKE_REFLECTABLE(Settings, pattern);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Puncture, in, out, settings);
 
     detail::PuncturePattern _pattern{};
-    bool                    _configured = false;
 
     // Puncture's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords        = 0ULL; ///< records published on `out`
     std::uint64_t nBits           = 0ULL; ///< coded bits those records kept
     std::uint64_t nRecordsRefused = 0ULL; ///< records this pattern could not puncture
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkPuncturePattern(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _pattern    = detail::puncturePattern(pattern.value);
-        _configured = true;
-    }
+    void applySettings(const Settings& s) { _pattern = detail::puncturePattern(s.pattern); }
 
     void stop() {
         const std::array<std::pair<std::string_view, std::uint64_t>, 3UZ> counters{{{"records", nRecords}, {"bits kept", nBits}, {"records refused", nRecordsRefused}}};
@@ -141,12 +144,6 @@ receiving counterpart.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
@@ -201,31 +198,32 @@ leave no trace in what was sent.
 
 Nothing is written to metadata; every key crosses verbatim. An inserted erasure is the pattern's own fact, and a
 decoder's `corrected_errors` reports what the channel and the puncturing together cost.
+
+`pattern` is the mask the sending Puncture was given. A position marked '0' returns as 0.0F, the soft convention's pure
+erasure.
 )"">;
 
     PortIn<DataSet<float>, Async>  in;
     PortOut<DataSet<float>, Async> out;
 
-    Annotated<std::string, "pattern", Doc<"the same mask the sending Puncture was given; required. A position marked '0' returns as 0.0F, the soft convention's pure erasure">, Visible> pattern{};
+    struct Settings {
+        Annotated<std::string, Doc<"puncture pattern">, Visible> pattern{};
 
-    GR_MAKE_REFLECTABLE(Depuncture, in, out, pattern);
+        GR_MAKE_REFLECTABLE(Settings, pattern);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Depuncture, in, out, settings);
 
     detail::PuncturePattern _pattern{};
-    bool                    _configured = false;
 
     // Depuncture's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords        = 0ULL; ///< records published on `out`
     std::uint64_t nBits           = 0ULL; ///< coded positions those records carry, erasures included
     std::uint64_t nRecordsRefused = 0ULL; ///< records whose length was inconsistent with this pattern
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkPuncturePattern(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _pattern    = detail::puncturePattern(pattern.value);
-        _configured = true;
-    }
+    void applySettings(const Settings& s) { _pattern = detail::puncturePattern(s.pattern); }
 
     void stop() {
         const std::array<std::pair<std::string_view, std::uint64_t>, 3UZ> counters{{{"records", nRecords}, {"items emitted", nBits}, {"records refused", nRecordsRefused}}};
@@ -233,12 +231,6 @@ decoder's `corrected_errors` reports what the channel and the puncturing togethe
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {

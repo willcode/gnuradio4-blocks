@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -31,13 +32,13 @@
  * CCSDS profiles' GF(256). A symbol is the code's natural unit, and packing symbols into a bit
  * stream is composition work for the bit-packing blocks rather than something to fold in here.
  *
- * Two families share the pair. The validated GF(64) instantiations are selected by `roots` at
- * 8, 12 or 16 parity symbols over the 63-symbol block. The `code` setting names a CCSDS
+ * Two families share the pair. Under `code` `gf64` the validated GF(64) instantiations are selected
+ * by `roots` at 8, 12 or 16 parity symbols over the 63-symbol block. The `code` setting names a CCSDS
  * profile instead — `ccsds_255_223` or `ccsds_255_239`, 131.0-B-5 section 4's codes over
  * GF(256) with their first consecutive root and primitive step — and with it come the two
  * conventions the standard attaches: `basis` says whether the wire's symbols are dual-basis
  * strings (4.3.9's recoding, one table lookup per symbol on the way in and on the information
- * on the way out), and `interleave` is the codeword count `I` of one codeblock, the symbols of
+ * on the way out), and `interleave` is the codeword count `I` of one codeblock (4.3.5.1's 1 to 5 or 8), the symbols of
  * the `I` codewords alternating on the wire so a channel burst lands spread across them. In
  * every family both ends know that the leading `pad` symbols of each codeword are zero and
  * neither sends them. The adapters stage each codeword into the kernel's block with the
@@ -45,6 +46,13 @@
  * arithmetic and the checks.
  */
 namespace gr::blocks::fec {
+
+//! The Reed-Solomon code a block runs: the GF(64) family `roots` selects in, or a CCSDS profile over GF(256).
+enum class RsCodeFamily : std::uint8_t { gf64, ccsds_255_223, ccsds_255_239 };
+
+//! The basis of a CCSDS profile's wire symbols, conventional or dual. A profile starts at `unset`: neither end
+//! can guess it.
+enum class RsBasis : std::uint8_t { unset, conventional, dual };
 
 namespace detail {
 
@@ -89,75 +97,61 @@ template<typename TKernel>
     return {TKernel::kRoots, TKernel::kBlock, mask, ccsds, &rsEncodeThrough<TKernel>, &rsDecodeThrough<TKernel>};
 }
 
-//! The code the `code` and `roots` settings name: a CCSDS profile by name, or the validated
-//! GF(64) family by parity count. A `roots` staged beside a profile must equal the profile's
-//! own parity count — one question, one answer.
-[[nodiscard]] inline RsCode reedSolomonCode(const std::string& codeName, gr::Size_t roots) {
-    if (codeName == "ccsds_255_223" || codeName == "ccsds_255_239") {
-        const std::size_t profileRoots = codeName == "ccsds_255_223" ? 32UZ : 16UZ;
-        if (roots != 0U && static_cast<std::size_t>(roots) != profileRoots) {
-            throw gr::exception(std::format("code '{}' carries {} parity symbols and roots says {}: one question, two answers", codeName, profileRoots, roots));
+//! The code the `code` and `roots` settings name: a CCSDS profile, or the validated GF(64) family
+//! by parity count, for settings `checkReedSolomon` accepts.
+[[nodiscard]] inline RsCode reedSolomonCode(RsCodeFamily family, gr::Size_t roots) {
+    switch (family) {
+    case RsCodeFamily::ccsds_255_223: return rsCodeOver<gr::fec::ReedSolomonCcsds255_223>(0xFFU, true);
+    case RsCodeFamily::ccsds_255_239: return rsCodeOver<gr::fec::ReedSolomonCcsds255_239>(0xFFU, true);
+    case RsCodeFamily::gf64: break;
+    }
+    if (roots == 8U) {
+        return rsCodeOver<gr::fec::ReedSolomon6<8UZ>>(0x3FU, false);
+    }
+    if (roots == 12U) {
+        return rsCodeOver<gr::fec::ReedSolomon6<12UZ>>(0x3FU, false);
+    }
+    return rsCodeOver<gr::fec::ReedSolomon6<16UZ>>(0x3FU, false);
+}
+
+/**
+ * The fault in the Reed-Solomon settings, under the setting at fault, or nothing when they name a code.
+ *
+ * A `roots` staged beside a profile must equal the profile's own parity count — one question, one answer. A CCSDS
+ * profile requires the `basis` choice — 131.0-B-5 4.3.9.1 mandates `dual` while a substantial flown population runs
+ * `conventional`, a wrong choice decodes nothing, and neither end can guess. The GF(64) family has no dual-basis
+ * convention, and the block refuses a `basis` under `gf64`.
+ */
+template<typename TSettings>
+[[nodiscard]] std::optional<gr::Refused> checkReedSolomon(const TSettings& s) {
+    const RsCodeFamily family = s.code.value;
+    if (family == RsCodeFamily::gf64) {
+        if (s.roots.value == 0U) {
+            return gr::Refused(s.roots, "required");
         }
-        return profileRoots == 32UZ ? rsCodeOver<gr::fec::ReedSolomonCcsds255_223>(0xFFU, true) : rsCodeOver<gr::fec::ReedSolomonCcsds255_239>(0xFFU, true);
-    }
-    if (!codeName.empty()) {
-        throw gr::exception(std::format("code must be empty, 'ccsds_255_223' or 'ccsds_255_239', got '{}'; there is no free-form code tuple", codeName));
-    }
-
-    switch (roots) {
-    case 8U: return rsCodeOver<gr::fec::ReedSolomon6<8UZ>>(0x3FU, false);
-    case 12U: return rsCodeOver<gr::fec::ReedSolomon6<12UZ>>(0x3FU, false);
-    case 16U: return rsCodeOver<gr::fec::ReedSolomon6<16UZ>>(0x3FU, false);
-    default: break;
-    }
-    if (roots == 0U) {
-        throw gr::exception("roots has no default and must be set to 8, 12 or 16: the parity count is half of what names a code, and the two ends of a link cannot guess it; code names a CCSDS profile instead");
-    }
-    throw gr::exception(std::format("roots must be 8, 12 or 16, the validated instantiations of the GF(64) code, got {}", roots));
-}
-
-//! Whether the `basis` setting selects the dual-basis recoding. A CCSDS profile requires the
-//! choice — 131.0-B-5 4.3.9.1 mandates `dual` while a substantial flown population runs
-//! `conventional`, a wrong choice decodes nothing, and neither end can guess — and the GF(64)
-//! family has no dual-basis convention for the setting to select.
-[[nodiscard]] inline bool reedSolomonDual(const RsCode& code, const std::string& basis) {
-    if (!code.ccsds) {
-        if (!basis.empty()) {
-            throw gr::exception(std::format("basis selects a CCSDS profile's symbol convention, and the GF(64) family has none; got '{}'", basis));
+        if (s.roots.value != 8U && s.roots.value != 12U && s.roots.value != 16U) {
+            return gr::Refused(s.roots, "must be one of: 8, 12, 16");
         }
-        return false;
+        if (s.basis.value != RsBasis::unset) {
+            return gr::Refused(s.basis, "must be unset under code gf64: basis selects a CCSDS profile's symbol convention, and the GF(64) family has none");
+        }
+    } else {
+        const gr::Size_t profileRoots = family == RsCodeFamily::ccsds_255_223 ? 32U : 16U;
+        if (s.roots.value != 0U && s.roots.value != profileRoots) {
+            return gr::Refused(s.roots, std::format("must be 0 or {}", profileRoots));
+        }
+        if (s.basis.value == RsBasis::unset) {
+            return gr::Refused(s.basis, "required");
+        }
+        if (!gr::fec::ccsdsInterleaveDepthAllowed(s.interleave.value)) {
+            return gr::Refused(s.interleave, "must be one of: 1, 2, 3, 4, 5, 8");
+        }
     }
-    if (basis == "conventional") {
-        return false;
+    const RsCode named = reedSolomonCode(family, s.roots.value);
+    if (s.pad.value + named.roots >= named.block) {
+        return gr::Refused(s.pad, std::format("must be < {}", named.block - named.roots));
     }
-    if (basis == "dual") {
-        return true;
-    }
-    if (basis.empty()) {
-        throw gr::exception("basis has no default under a CCSDS profile: 4.3.9.1 mandates 'dual' while part of the flown population uses 'conventional', a wrong choice decodes nothing, and neither end can guess");
-    }
-    throw gr::exception(std::format("basis must be 'conventional' or 'dual', got '{}'", basis));
-}
-
-//! The interleave depth, validated against the family: under a CCSDS profile the depths 4.3.5.1
-//! allows, which are 1, 2, 3, 4, 5 and 8; otherwise 1 to 8.
-[[nodiscard]] inline std::size_t reedSolomonDepth(const RsCode& code, gr::Size_t interleave) {
-    const std::size_t depth = static_cast<std::size_t>(interleave);
-    if (code.ccsds && !gr::fec::ccsdsInterleaveDepthAllowed(depth)) {
-        throw gr::exception(std::format("interleave must be one of 4.3.5.1's depths 1, 2, 3, 4, 5 or 8, got {}", interleave));
-    }
-    if (!code.ccsds && (depth < 1UZ || depth > 8UZ)) {
-        throw gr::exception(std::format("interleave must be 1 to 8, got {}", interleave));
-    }
-    return depth;
-}
-
-//! The shortening @p pad describes, checked against the room the code leaves for information.
-[[nodiscard]] inline std::size_t reedSolomonPad(gr::Size_t pad, const RsCode& code) {
-    if (static_cast<std::size_t>(pad) + code.roots >= code.block) {
-        throw gr::exception(std::format("pad is the shortening in leading zero symbols and must be below {}, the information the code carries unshortened, got {}", code.block - code.roots, pad));
-    }
-    return static_cast<std::size_t>(pad);
+    return {};
 }
 
 } // namespace detail
@@ -181,24 +175,30 @@ shape follow it, and the output record's extent names its own length. RsDecode i
 
 A record whose length is not such a multiple is dropped and counted in `nRecordsRefused`, `stop()` states the total,
 and the record that follows is processed normally, so a misaligned record costs one record rather than the stream.
+
+`roots` is 8, 12 or 16 in the GF(64) family; under a CCSDS profile it is 0 or the profile's count. `pad` shortens the
+code by untransmitted leading zero symbols.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "roots", Doc<"parity symbols per codeword: 8, 12 or 16 in the GF(64) family; under a CCSDS profile it may stay unset or must equal the profile's count">, Visible> roots{};
-    Annotated<gr::Size_t, "pad", Doc<"the shortening in leading zero symbols neither end transmits; must leave the code room for information">>                                              pad = 0U;
-    Annotated<std::string, "code", Doc<"'' selects the GF(64) family that roots names; 'ccsds_255_223' and 'ccsds_255_239' are the CCSDS profiles over GF(256)">, Visible>                   code{};
-    Annotated<std::string, "basis", Doc<"'conventional' or 'dual', required under a CCSDS profile and empty for the GF(64) family, which has no dual basis">>                                basis{};
-    Annotated<gr::Size_t, "interleave", Doc<"I, the codewords one record's codeblock holds; 4.3.5.1's {1,2,3,4,5,8} under a CCSDS profile, 1 to 8 otherwise">>                               interleave = 1U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"parity symbols per codeword">, Visible>              roots{};
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"shortening">>                       pad        = 0U;
+        Annotated<RsCodeFamily, Doc<"code family">, Visible>                            code       = RsCodeFamily::gf64;
+        Annotated<RsBasis, Doc<"CCSDS symbol basis">>                                   basis      = RsBasis::unset;
+        Annotated<gr::Size_t, Doc<"codewords per codeblock">, Limits<Min<1U>, Max<8U>>> interleave = 1U;
 
-    GR_MAKE_REFLECTABLE(RsEncode, in, out, roots, pad, code, basis, interleave);
+        GR_MAKE_REFLECTABLE(Settings, roots, pad, code, basis, interleave);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(RsEncode, in, out, settings);
 
     detail::RsCode _code{};
-    std::size_t    _pad        = 0UZ;
-    std::size_t    _depth      = 1UZ;
-    bool           _dual       = false;
-    bool           _configured = false;
+    std::size_t    _pad   = 0UZ;
+    std::size_t    _depth = 1UZ;
+    bool           _dual  = false;
 
     std::vector<std::uint8_t> _infoBlock{}; //!< one codeblock's information symbols, in wire order
     std::vector<std::uint8_t> _infoWords{}; //!< the same symbols gathered codeword by codeword
@@ -209,19 +209,13 @@ and the record that follows is processed normally, so a misaligned record costs 
     std::uint64_t nCodewords      = 0ULL; ///< codewords those records carry
     std::uint64_t nRecordsRefused = 0ULL; ///< records whose length was not a multiple of the information length
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkReedSolomon(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        const detail::RsCode named = detail::reedSolomonCode(code.value, roots.value);
-        const bool           dual  = detail::reedSolomonDual(named, basis.value);
-        const std::size_t    depth = detail::reedSolomonDepth(named, interleave.value);
-        _pad                       = detail::reedSolomonPad(pad.value, named); // every setting is checked before any is kept
-        _code                      = named;
-        _dual                      = dual;
-        _depth                     = depth;
-        _configured                = true;
+    void applySettings(const Settings& s) {
+        _code  = detail::reedSolomonCode(s.code, s.roots);
+        _dual  = _code.ccsds && s.basis == RsBasis::dual; // the GF(64) family reads no basis
+        _depth = s.interleave;
+        _pad   = s.pad;
     }
 
     void stop() {
@@ -236,12 +230,6 @@ and the record that follows is processed normally, so a misaligned record costs 
     [[nodiscard]] std::size_t wireSymbols() const noexcept { return _code.block - _pad; }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         const std::size_t info = infoSymbols();
         const std::size_t wire = wireSymbols();
         _infoBlock.resize(info * _depth);
@@ -329,24 +317,30 @@ verbatim, and a record arriving without a metadata map gains one to carry the tw
 A codeword whose correction lands inside the padding is counted in `nPadCorrupted` and in `uncorrectable_errors` as
 well: such a word violates the shortening both ends agreed on. The metadata carries the two status keys and the
 separate counter keeps the distinction visible. Information symbols are emitted for such a codeword as for any other.
+
+`roots` is 8, 12 or 16 in the GF(64) family; under a CCSDS profile it is 0 or the profile's count. `pad` shortens the
+code by untransmitted leading zero symbols.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "roots", Doc<"parity symbols per codeword: 8, 12 or 16 in the GF(64) family; under a CCSDS profile it may stay unset or must equal the profile's count">, Visible> roots{};
-    Annotated<gr::Size_t, "pad", Doc<"the shortening in leading zero symbols neither end transmits; must leave the code room for information">>                                              pad = 0U;
-    Annotated<std::string, "code", Doc<"'' selects the GF(64) family that roots names; 'ccsds_255_223' and 'ccsds_255_239' are the CCSDS profiles over GF(256)">, Visible>                   code{};
-    Annotated<std::string, "basis", Doc<"'conventional' or 'dual', required under a CCSDS profile and empty for the GF(64) family, which has no dual basis">>                                basis{};
-    Annotated<gr::Size_t, "interleave", Doc<"I, the codewords one record's codeblock holds; 4.3.5.1's {1,2,3,4,5,8} under a CCSDS profile, 1 to 8 otherwise">>                               interleave = 1U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"parity symbols per codeword">, Visible>              roots{};
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"shortening">>                       pad        = 0U;
+        Annotated<RsCodeFamily, Doc<"code family">, Visible>                            code       = RsCodeFamily::gf64;
+        Annotated<RsBasis, Doc<"CCSDS symbol basis">>                                   basis      = RsBasis::unset;
+        Annotated<gr::Size_t, Doc<"codewords per codeblock">, Limits<Min<1U>, Max<8U>>> interleave = 1U;
 
-    GR_MAKE_REFLECTABLE(RsDecode, in, out, roots, pad, code, basis, interleave);
+        GR_MAKE_REFLECTABLE(Settings, roots, pad, code, basis, interleave);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(RsDecode, in, out, settings);
 
     detail::RsCode _code{};
-    std::size_t    _pad        = 0UZ;
-    std::size_t    _depth      = 1UZ;
-    bool           _dual       = false;
-    bool           _configured = false;
+    std::size_t    _pad   = 0UZ;
+    std::size_t    _depth = 1UZ;
+    bool           _dual  = false;
 
     std::vector<std::uint8_t> _codeblock{}; //!< one codeblock's wire symbols, the recoding taken off
     std::vector<std::uint8_t> _codewords{}; //!< the same symbols gathered codeword by codeword
@@ -360,19 +354,13 @@ separate counter keeps the distinction visible. Information symbols are emitted 
     std::uint64_t nUncorrectableCodewords = 0ULL; ///< codewords the kernel reported invalid
     std::uint64_t nPadCorrupted           = 0ULL; ///< codewords whose correction fell in the shortening's padding
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkReedSolomon(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        const detail::RsCode named = detail::reedSolomonCode(code.value, roots.value);
-        const bool           dual  = detail::reedSolomonDual(named, basis.value);
-        const std::size_t    depth = detail::reedSolomonDepth(named, interleave.value);
-        _pad                       = detail::reedSolomonPad(pad.value, named); // every setting is checked before any is kept
-        _code                      = named;
-        _dual                      = dual;
-        _depth                     = depth;
-        _configured                = true;
+    void applySettings(const Settings& s) {
+        _code  = detail::reedSolomonCode(s.code, s.roots);
+        _dual  = _code.ccsds && s.basis == RsBasis::dual; // the GF(64) family reads no basis
+        _depth = s.interleave;
+        _pad   = s.pad;
     }
 
     void stop() {
@@ -388,12 +376,6 @@ separate counter keeps the distinction visible. Information symbols are emitted 
     [[nodiscard]] std::size_t wireSymbols() const noexcept { return _code.block - _pad; }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         const std::size_t info = infoSymbols();
         const std::size_t wire = wireSymbols();
         _codeblock.resize(wire * _depth);

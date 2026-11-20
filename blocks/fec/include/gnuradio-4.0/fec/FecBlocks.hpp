@@ -4,7 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +37,9 @@
  */
 namespace gr::blocks::fec {
 
+//! The binary block code a block runs; a block starts at `unset`, since the code is required and has no default.
+enum class BinaryCodeName : std::uint8_t { unset, golay24, golay23, golay18, hamming15, hamming10, bch63, bch15_11, bch15_7, bch15_5 };
+
 namespace detail {
 
 //! What a binary decoder reports, in the one shape the six forms share.
@@ -55,84 +58,84 @@ struct BinaryCode {
     BinaryResult (*decode)(std::uint64_t)  = nullptr;
 };
 
-//! The form @p name spells, refusing the empty default and reporting through the graph's exception type.
-[[nodiscard]] inline BinaryCode binaryCode(std::string_view name) {
-    if (name == "golay24") {
-        return {24UZ, 12UZ, //
+//! The form @p name selects, or nothing for `unset`.
+[[nodiscard]] inline std::optional<BinaryCode> binaryCode(BinaryCodeName name) {
+    switch (name) {
+    case BinaryCodeName::golay24:
+        return BinaryCode{24UZ, 12UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::golay24Encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::GolayResult r = gr::fec::golay24Decode(static_cast<std::uint32_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "golay23") {
-        return {23UZ, 12UZ, //
+    case BinaryCodeName::golay23:
+        return BinaryCode{23UZ, 12UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::golay23Encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::GolayResult r = gr::fec::golay23Decode(static_cast<std::uint32_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "golay18") {
-        return {18UZ, 6UZ, //
+    case BinaryCodeName::golay18:
+        return BinaryCode{18UZ, 6UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::golay18Encode(static_cast<std::uint8_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::GolayResult r = gr::fec::golay18Decode(static_cast<std::uint32_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "hamming15") {
-        return {15UZ, 11UZ, //
+    case BinaryCodeName::hamming15:
+        return BinaryCode{15UZ, 11UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::hamming1511Encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::HammingResult r = gr::fec::hamming1511Decode(static_cast<std::uint16_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "hamming10") {
-        return {10UZ, 6UZ, //
+    case BinaryCodeName::hamming10:
+        return BinaryCode{10UZ, 6UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::hamming1063Encode(static_cast<std::uint8_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::HammingResult r = gr::fec::hamming1063Decode(static_cast<std::uint16_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "bch63") {
-        return {63UZ, 16UZ, //
+    case BinaryCodeName::bch63:
+        return BinaryCode{63UZ, 16UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::bch63Encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::Bch63Result r = gr::fec::bch63Decode(word);
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "bch15_11") {
-        return {15UZ, 11UZ, //
+    case BinaryCodeName::bch15_11:
+        return BinaryCode{15UZ, 11UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::Bch15_11::encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::Bch15Result r = gr::fec::Bch15_11::decode(static_cast<std::uint16_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "bch15_7") {
-        return {15UZ, 7UZ, //
+    case BinaryCodeName::bch15_7:
+        return BinaryCode{15UZ, 7UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::Bch15_7::encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::Bch15Result r = gr::fec::Bch15_7::decode(static_cast<std::uint16_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
-    }
-    if (name == "bch15_5") {
-        return {15UZ, 5UZ, //
+    case BinaryCodeName::bch15_5:
+        return BinaryCode{15UZ, 5UZ, //
             [](std::uint32_t info) -> std::uint64_t { return gr::fec::Bch15_5::encode(static_cast<std::uint16_t>(info)); },
             [](std::uint64_t word) -> BinaryResult {
                 const gr::fec::Bch15Result r = gr::fec::Bch15_5::decode(static_cast<std::uint16_t>(word));
                 return {r.info, r.errors, r.valid};
             }};
+    case BinaryCodeName::unset: break;
     }
-    if (name.empty()) {
-        throw gr::exception("code has no default and must be set to 'golay24', 'golay23', 'golay18', 'hamming15', 'hamming10', 'bch63', 'bch15_11', 'bch15_7' or 'bch15_5': no code is universal, and a default would be an interoperability assumption nobody made");
+    return std::nullopt;
+}
+
+//! The fault in `code`, under `code`, or nothing when it names a form.
+template<typename TSettings>
+[[nodiscard]] std::optional<gr::Refused> checkBinaryCode(const TSettings& s) {
+    if (s.code.value == BinaryCodeName::unset) {
+        return gr::Refused(s.code, "required");
     }
-    throw gr::exception(std::format("code must be 'golay24', 'golay23', 'golay18', 'hamming15', 'hamming10', 'bch63', 'bch15_11', 'bch15_7' or 'bch15_5', got '{}'", name));
+    return {};
 }
 
 //! Read @p k items as one information or codeword field, the first item the most significant bit.
@@ -173,26 +176,24 @@ and the record that follows is processed normally, so a misaligned record costs 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "code", Doc<"'golay24', 'golay23', 'golay18', 'hamming15', 'hamming10', 'bch63', 'bch15_11', 'bch15_7' or 'bch15_5'; required, with no default">, Visible> code{};
+    struct Settings {
+        Annotated<BinaryCodeName, Doc<"block code">, Visible> code = BinaryCodeName::unset;
 
-    GR_MAKE_REFLECTABLE(FecEncode, in, out, code);
+        GR_MAKE_REFLECTABLE(Settings, code);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(FecEncode, in, out, settings);
 
     detail::BinaryCode _code{};
-    bool               _configured = false;
 
     // FecEncode's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords        = 0ULL; ///< records published on `out`
     std::uint64_t nCodewords      = 0ULL; ///< codewords those records carry
     std::uint64_t nRecordsRefused = 0ULL; ///< records whose length was not a multiple of the code's k
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkBinaryCode(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _code       = detail::binaryCode(code.value);
-        _configured = true;
-    }
+    void applySettings(const Settings& s) { _code = *detail::binaryCode(s.code); }
 
     void stop() {
         const std::array<std::pair<std::string_view, std::uint64_t>, 3UZ> counters{{{"records", nRecords}, {"codewords", nCodewords}, {"records refused", nRecordsRefused}}};
@@ -200,12 +201,6 @@ and the record that follows is processed normally, so a misaligned record costs 
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
@@ -270,12 +265,15 @@ report a failure at all; the perfect codes report every word as valid.
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "code", Doc<"'golay24', 'golay23', 'golay18', 'hamming15', 'hamming10', 'bch63', 'bch15_11', 'bch15_7' or 'bch15_5'; required, with no default">, Visible> code{};
+    struct Settings {
+        Annotated<BinaryCodeName, Doc<"block code">, Visible> code = BinaryCodeName::unset;
 
-    GR_MAKE_REFLECTABLE(FecDecode, in, out, code);
+        GR_MAKE_REFLECTABLE(Settings, code);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(FecDecode, in, out, settings);
 
     detail::BinaryCode _code{};
-    bool               _configured = false;
 
     // FecDecode's counters are plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRecords                = 0ULL; ///< records published on `out`
@@ -284,14 +282,9 @@ report a failure at all; the perfect codes report every word as valid.
     std::uint64_t nCorrectedErrors        = 0ULL; ///< bits the kernel corrected, totaled over every codeword
     std::uint64_t nUncorrectableCodewords = 0ULL; ///< codewords the kernel reported invalid
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkBinaryCode(s); }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        _code       = detail::binaryCode(code.value);
-        _configured = true;
-    }
+    void applySettings(const Settings& s) { _code = *detail::binaryCode(s.code); }
 
     void stop() {
         const std::array<std::pair<std::string_view, std::uint64_t>, 5UZ> counters{{{"records", nRecords}, {"codewords", nCodewords}, {"records refused", nRecordsRefused}, //
@@ -300,12 +293,6 @@ report a failure at all; the perfect codes report every word as valid.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) {
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         std::size_t consumed = 0UZ;
         std::size_t made     = 0UZ;
         for (; consumed < inSpan.size() && made < outSpan.size(); ++consumed) {
