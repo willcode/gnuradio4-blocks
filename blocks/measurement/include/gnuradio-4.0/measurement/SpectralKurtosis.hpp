@@ -190,16 +190,22 @@ The block takes `DataSet<float>` density records and emits one `spectral_kurtosi
 inputs, with one value per bin. `SK` reads 1 on noise, 0 on a noiseless tone, above 1 on a signal present in fewer
 than half the spectra and below 1 on a steady one. The statistic assumes independent spectra. The block refuses a
 record unless its `overlap` metadata is present and exactly zero. It passes no input tag on.
+
+With `emit_records`, the block publishes one DataSet<float> record per accumulation.
 )"">;
 
     PortIn<DataSet<float>, Async>            spectra;
     PortOut<DataSet<float>, Async, Optional> measurements;
 
-    Annotated<gr::Size_t, "n_spectra", Visible, Doc<"spectra per reading, 8 to 2^20">, Limits<detail::kMinSpectralKurtosisSpectra, detail::kMaxSpectralKurtosisSpectra>> n_spectra    = 32U;
-    Annotated<gr::Size_t, "shape", Visible, Doc<"Gamma shape d; 0 reads the record's n_averaged">>                                                                       shape        = 0U;
-    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per accumulation">>                                                                  emit_records = true;
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"spectra per reading">, Limits<Min<detail::kMinSpectralKurtosisSpectra>, Max<detail::kMaxSpectralKurtosisSpectra>>> n_spectra    = 32U;
+        Annotated<gr::Size_t, Visible, Doc<"Gamma shape (0 = from record)">>                                                                                   shape        = 0U;
+        Annotated<bool, Visible, Doc<"record output">>                                                                                                         emit_records = true;
 
-    GR_MAKE_REFLECTABLE(SpectralKurtosis, spectra, measurements, n_spectra, shape, emit_records);
+        GR_MAKE_REFLECTABLE(Settings, n_spectra, shape, emit_records);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SpectralKurtosis, spectra, measurements, settings);
 
     gr::measurement::SpectralKurtosisAccumulator _acc{};
     std::vector<double>                          _skValues{};
@@ -212,10 +218,7 @@ record unless its `overlap` metadata is present and exactly zero. It passes no i
     gr::measurement::MeasurementSlot<2UZ> _slot{};              ///< the worst bin and its spectral kurtosis
     std::uint64_t                         _validReadings{0ULL}; ///< valid readings in this run
 
-    // The settings the block last accepted. The work thread reads these copies.
-    std::atomic<gr::Size_t> _nSpectra{n_spectra.value};
-    gr::Size_t              _shape{shape.value};
-    bool                    _emitRecords{emit_records.value};
+    std::atomic<gr::Size_t> _nSpectra{settings.n_spectra.value}; ///< `n_spectra`, for `coverage()` on another thread
 
     bool                  _haveCycle{false};        ///< the accumulation in progress holds at least one accepted spectrum
     double                _cycleShape{0.};          ///< the shape of the accumulation in progress
@@ -238,19 +241,7 @@ record unless its `overlap` metadata is present and exactly zero. It passes no i
     double                         _shapedWindowParam{std::numeric_limits<double>::quiet_NaN()};
     std::size_t                    _shapedFftSize{0UZ};
 
-    /// @brief Accepts the keys @p newSettings names.
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const auto moved = [&newSettings](std::string_view key) { return newSettings.contains(key); };
-        if (moved("n_spectra")) {
-            _nSpectra.store(n_spectra.value, std::memory_order_relaxed);
-        }
-        if (moved("shape")) {
-            _shape = shape.value;
-        }
-        if (moved("emit_records")) {
-            _emitRecords = emit_records.value;
-        }
-    }
+    void applySettings(const Settings& s) { _nSpectra.store(s.n_spectra, std::memory_order_relaxed); }
 
     /// @brief Clears the accumulation and the counters.
     void start() {
@@ -298,7 +289,7 @@ record unless its `overlap` metadata is present and exactly zero. It passes no i
     [[nodiscard]] double coverage() const noexcept { return std::min(1., static_cast<double>(_filled.load(std::memory_order_relaxed)) / static_cast<double>(std::max(_nSpectra.load(std::memory_order_relaxed), gr::Size_t{1U}))); }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const bool   wantRecords = _emitRecords && outSpan.isConnected;
+        const bool   wantRecords = settings.emit_records && outSpan.isConnected;
         const Folded folded      = foldAll(inSpan, outSpan, wantRecords, "processBulk");
         outSpan.publish(folded.made);
         std::ignore = inSpan.consume(folded.consumed);
@@ -310,7 +301,7 @@ record unless its `overlap` metadata is present and exactly zero. It passes no i
 
     /// @brief Folds in the trailing records at the end of the stream and evaluates the partial accumulation.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const bool wantRecords = _emitRecords && outSpan.isConnected;
+        const bool wantRecords = settings.emit_records && outSpan.isConnected;
         Folded     folded      = foldAll(inSpan, outSpan, wantRecords, "processEpilogue");
         if (!folded.failed && _haveCycle) {
             auto record = evaluate(wantRecords);
@@ -380,8 +371,8 @@ private:
             return std::nullopt;
         }
         double effectiveShape;
-        if (_shape != 0U) {
-            effectiveShape = static_cast<double>(_shape);
+        if (settings.shape.value != 0U) {
+            effectiveShape = static_cast<double>(settings.shape.value);
             if (averaged.has_value() && *averaged != effectiveShape) {
                 refuse();
                 return std::nullopt;

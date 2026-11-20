@@ -35,12 +35,6 @@ namespace gr::blocks::measurement {
 namespace detail {
 inline constexpr gr::Size_t kMinPolarizationWindow = 64U;
 inline constexpr gr::Size_t kMaxPolarizationWindow = 1U << 24U;
-
-/// @brief The validator of `sample_rate`: true above 0.
-inline constexpr auto kCombinerSampleRatePositive = [](float value) { return value > 0.f; };
-
-/// @brief The validator of `weight_smoothing`: true below 1.
-inline constexpr auto kWeightSmoothingBelowOne = [](double value) { return value < 1.0; };
 } // namespace detail
 
 GR_REGISTER_BLOCK(gr::blocks::measurement::PolarizationCombiner)
@@ -97,6 +91,9 @@ weights the previous window's covariance gives. `mode = mrc` maximizes the combi
 takes the stronger branch from the same covariance. Before the first window closes, `out` carries branch 0 and `ortho`
 carries branch 1 unchanged. With `emit_records` set, each window publishes one record of the relative phase, the
 amplitude ratio, the two branch ratios, the combined ratio and the combining gain.
+
+`weight_smoothing` is the share of the previous weights under mrc. With `emit_records`, the block publishes one
+DataSet<float> record per window.
 )"">;
 
     PortIn<std::complex<float>>              in0;
@@ -105,28 +102,24 @@ amplitude ratio, the two branch ratios, the combined ratio and the combining gai
     PortOut<std::complex<float>, Optional>   ortho;
     PortOut<DataSet<float>, Async, Optional> measurements;
 
-    Annotated<std::string, "mode", Visible, Doc<"combining rule, 'mrc' or 'selection'">>                                                                                             mode             = std::string("mrc");
-    Annotated<gr::Size_t, "window", Visible, Doc<"samples per estimate, from 64 to 2^24">, Limits<detail::kMinPolarizationWindow, detail::kMaxPolarizationWindow>>                   window           = 4096U;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"stream sample rate, positive and finite">, Limits<0.f, std::numeric_limits<float>::max(), detail::kCombinerSampleRatePositive>> sample_rate      = 96000.f;
-    Annotated<std::vector<double>, "noise_powers", Visible, Doc<"branch noise powers, empty or two positive entries">>                                                               noise_powers     = std::vector<double>{};
-    Annotated<std::string, "normalize", Visible, Doc<"weight scaling, 'unit_noise' or 'unit_signal'">>                                                                               normalize        = std::string("unit_noise");
-    Annotated<double, "weight_smoothing", Visible, Doc<"share of the previous weights under 'mrc', in [0, 1)">, Limits<0.0, 1.0, detail::kWeightSmoothingBelowOne>>                  weight_smoothing = 0.0;
-    Annotated<bool, "emit_orthogonal", Visible, Doc<"compute and publish the orthogonal output">>                                                                                    emit_orthogonal  = true;
-    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per window">>                                                                                    emit_records     = true;
+    struct Settings {
+        Annotated<gr::measurement::PolarizationMode, Visible, Doc<"combining rule">>                                                                  mode             = gr::measurement::PolarizationMode::mrc;
+        Annotated<gr::Size_t, Visible, Doc<"samples per estimate">, Limits<Min<detail::kMinPolarizationWindow>, Max<detail::kMaxPolarizationWindow>>> window           = 4096U;
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                                                                           sample_rate      = 96000.f;
+        Annotated<std::vector<double>, Visible, Doc<"branch noise powers">>                                                                           noise_powers     = std::vector<double>{};
+        Annotated<gr::measurement::PolarizationNormalization, Visible, Doc<"weight scaling">>                                                         normalize        = gr::measurement::PolarizationNormalization::unit_noise;
+        Annotated<double, Visible, Doc<"weight smoothing">, Limits<Min<0.0>, Under<1.0>>>                                                             weight_smoothing = 0.0;
+        Annotated<bool, Visible, Doc<"orthogonal output">>                                                                                            emit_orthogonal  = true;
+        Annotated<bool, Visible, Doc<"record output">>                                                                                                emit_records     = true;
 
-    GR_MAKE_REFLECTABLE(PolarizationCombiner, in0, in1, out, ortho, measurements, mode, window, sample_rate, noise_powers, normalize, weight_smoothing, emit_orthogonal, emit_records);
+        GR_MAKE_REFLECTABLE(Settings, mode, window, sample_rate, noise_powers, normalize, weight_smoothing, emit_orthogonal, emit_records);
+    } settings;
 
-    gr::measurement::PolarizationMode          _mode{gr::measurement::PolarizationMode::mrc};
-    gr::measurement::PolarizationNormalization _normalize{gr::measurement::PolarizationNormalization::unit_noise};
-    gr::Size_t                                 _window{4096U};
-    float                                      _sampleRate{96000.f};
-    std::vector<double>                        _noisePowers{};
-    double                                     _smoothing{0.};
-    bool                                       _emitOrthogonal{true};
-    bool                                       _emitRecords{true};
-    gr::measurement::BranchCovariance          _covariance{};
-    gr::measurement::PolarizationEstimate      _estimate{gr::measurement::polarizationPassthrough(0UZ)}; ///< the weights in use
-    bool                                       _haveEstimate{false};
+    GR_MAKE_REFLECTABLE(PolarizationCombiner, in0, in1, out, ortho, measurements, settings);
+
+    gr::measurement::BranchCovariance     _covariance{};
+    gr::measurement::PolarizationEstimate _estimate{gr::measurement::polarizationPassthrough(0UZ)}; ///< the weights in use
+    bool                                  _haveEstimate{false};
 
     std::size_t   _covCount{0UZ};
     std::uint64_t _streamAt{0ULL};
@@ -146,65 +139,29 @@ amplitude ratio, the two branch ratios, the combined ratio and the combining gai
 
     std::vector<DataSet<float>> _pending{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const auto changes = [&newSettings](std::string_view key) { return newSettings.contains(key); };
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::vector<double>& powers = s.noise_powers.value;
+        if (!powers.empty() && powers.size() != 2UZ) {
+            return gr::Refused(s.noise_powers, "must be empty or have 2 entries");
+        }
+        if (std::ranges::any_of(powers, [](double power) { return power <= 0.; })) {
+            return gr::Refused(s.noise_powers, "each noise power must be > 0");
+        }
+        return {};
+    }
 
-        gr::measurement::PolarizationMode nextMode = _mode;
-        if (changes("mode")) {
-            const auto parsed = gr::measurement::polarizationModeFrom(mode.value);
-            if (!parsed.has_value()) {
-                throw gr::exception(std::format("mode must be 'mrc' or 'selection', got '{}'", mode.value));
-            }
-            nextMode = *parsed;
+    /// @brief A new window, noise model, mode or normalization discards the partial window.
+    void applySettings(const Settings& s) {
+        const bool restart = s.window.changed() || s.noise_powers.changed() || s.mode.changed() || s.normalize.changed();
+        if (!restart) {
+            return;
         }
-        gr::measurement::PolarizationNormalization nextNorm = _normalize;
-        if (changes("normalize")) {
-            const auto parsed = gr::measurement::polarizationNormalizationFrom(normalize.value);
-            if (!parsed.has_value()) {
-                throw gr::exception(std::format("normalize must be 'unit_noise' or 'unit_signal', got '{}'", normalize.value));
-            }
-            nextNorm = *parsed;
+        if (_covCount > 0UZ) {
+            _nWindowResets.fetch_add(1ULL, std::memory_order_relaxed);
         }
-        if (changes("noise_powers") && !noise_powers.value.empty()) {
-            if (noise_powers.value.size() != 2UZ) {
-                throw gr::exception(std::format("noise_powers takes exactly two branches, got {}", noise_powers.value.size()));
-            }
-            for (const double power : noise_powers.value) {
-                if (!std::isfinite(power) || !(power > 0.)) {
-                    throw gr::exception(std::format("noise_powers entries must be finite and positive, got {}", power));
-                }
-            }
-        }
-
-        const gr::Size_t           nextWindow = changes("window") ? window.value : _window;
-        const std::vector<double>& nextNoise  = changes("noise_powers") ? noise_powers.value : _noisePowers;
-        if (nextWindow != _window || nextNoise != _noisePowers || nextMode != _mode || nextNorm != _normalize) {
-            if (_covCount > 0UZ) {
-                _nWindowResets.fetch_add(1ULL, std::memory_order_relaxed);
-            }
-            _covariance.reset();
-            _covCount      = 0UZ;
-            _windowStartAt = _streamAt;
-        }
-
-        _mode      = nextMode;
-        _normalize = nextNorm;
-        _window    = nextWindow;
-        if (changes("noise_powers")) {
-            _noisePowers = noise_powers.value;
-        }
-        if (changes("sample_rate")) {
-            _sampleRate = sample_rate.value;
-        }
-        if (changes("weight_smoothing")) {
-            _smoothing = weight_smoothing.value;
-        }
-        if (changes("emit_orthogonal")) {
-            _emitOrthogonal = emit_orthogonal.value;
-        }
-        if (changes("emit_records")) {
-            _emitRecords = emit_records.value;
-        }
+        _covariance.reset();
+        _covCount      = 0UZ;
+        _windowStartAt = _streamAt;
     }
 
     void start() {
@@ -245,8 +202,8 @@ amplitude ratio, the two branch ratios, the combined ratio and the combining gai
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& in0Span, InputSpanLike auto& in1Span, OutputSpanLike auto& outSpan, OutputSpanLike auto& orthoSpan, OutputSpanLike auto& measurementsSpan) {
         std::size_t made = drain(measurementsSpan, 0UZ);
 
-        const bool        wantOrtho   = _emitOrthogonal && orthoSpan.isConnected;
-        const bool        wantRecords = _emitRecords && measurementsSpan.isConnected;
+        const bool        wantOrtho   = settings.emit_orthogonal.value && orthoSpan.isConnected;
+        const bool        wantRecords = settings.emit_records.value && measurementsSpan.isConnected;
         const std::size_t offer       = std::min(in0Span.size(), in1Span.size());
         const std::size_t orthoRoom   = wantOrtho ? orthoSpan.size() : std::numeric_limits<std::size_t>::max();
         const std::size_t take        = std::min({offer, outSpan.size(), orthoRoom, wantRecords ? roomFor(measurementsSpan, made, offer) : offer});
@@ -269,7 +226,7 @@ amplitude ratio, the two branch ratios, the combined ratio and the combining gai
 
     /// @brief At the end of the stream, combines the trailing samples and flushes the partial window.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& in0Span, InputSpanLike auto& in1Span, OutputSpanLike auto& outSpan, OutputSpanLike auto& orthoSpan, OutputSpanLike auto& measurementsSpan) {
-        const bool        wantOrtho = _emitOrthogonal && orthoSpan.isConnected;
+        const bool        wantOrtho = settings.emit_orthogonal.value && orthoSpan.isConnected;
         const std::size_t take      = std::min({in0Span.size(), in1Span.size(), outSpan.size(), wantOrtho ? orthoSpan.size() : std::numeric_limits<std::size_t>::max()});
         countDroppedTags(in0Span, in1Span, take);
         if (const auto combined = combine(std::span<const std::complex<float>>(in0Span).first(take), std::span<const std::complex<float>>(in1Span).first(take), std::span<std::complex<float>>(outSpan).first(take), std::span<std::complex<float>>(orthoSpan.data(), wantOrtho ? take : 0UZ), measurementsSpan.isConnected); !combined) {
@@ -324,7 +281,7 @@ private:
     [[nodiscard]] std::expected<void, gr::Error> combine(std::span<const std::complex<float>> branch0, std::span<const std::complex<float>> branch1, std::span<std::complex<float>> combined, std::span<std::complex<float>> orthogonal, bool wantRecords) {
         std::size_t at = 0UZ;
         while (at < branch0.size()) {
-            const std::size_t remaining = static_cast<std::size_t>(_window) - _covCount;
+            const std::size_t remaining = static_cast<std::size_t>(settings.window.value) - _covCount;
             const std::size_t chunk     = std::min(remaining, branch0.size() - at);
 
             if (auto mixed = gr::measurement::polarizationCombine(branch0.subspan(at, chunk), branch1.subspan(at, chunk), _estimate, combined.subspan(at, chunk), orthogonal.empty() ? std::span<std::complex<float>>{} : orthogonal.subspan(at, chunk)); !mixed) {
@@ -337,7 +294,7 @@ private:
             _covCount += chunk;
             _streamAt += chunk;
             at += chunk;
-            if (_covCount == static_cast<std::size_t>(_window)) {
+            if (_covCount == static_cast<std::size_t>(settings.window.value)) {
                 if (auto closed = closeWindow(wantRecords, true); !closed) {
                     return closed;
                 }
@@ -347,8 +304,8 @@ private:
     }
 
     [[nodiscard]] std::expected<void, gr::Error> closeWindow(bool wantRecords, bool full) {
-        const std::span<const double> noisePowers(_noisePowers);
-        const auto                    solution = _covariance.solve(_mode, _normalize, noisePowers);
+        const std::span<const double> noisePowers(settings.noise_powers.value);
+        const auto                    solution = _covariance.solve(settings.mode.value, settings.normalize.value, noisePowers);
         if (!solution) {
             return std::unexpected(solution.error());
         }
@@ -361,7 +318,7 @@ private:
             _nSaturatedFigures.fetch_add(1ULL, std::memory_order_relaxed);
         }
 
-        if (_mode == gr::measurement::PolarizationMode::selection) {
+        if (settings.mode.value == gr::measurement::PolarizationMode::selection) {
             if (_haveSelected && solved.selectedBranch != _lastSelected) {
                 _nBranchSwitches.fetch_add(1ULL, std::memory_order_relaxed);
             }
@@ -371,23 +328,23 @@ private:
 
         const auto finite = [](std::complex<double> value) noexcept { return std::isfinite(value.real()) && std::isfinite(value.imag()); };
         if (_covariance.count() > 0UZ && finite(solved.weight0) && finite(solved.weight1) && finite(solved.ortho0) && finite(solved.ortho1)) {
-            const auto channel = _mode == gr::measurement::PolarizationMode::selection ? _covariance.solve(gr::measurement::PolarizationMode::mrc, gr::measurement::PolarizationNormalization::unit_noise, noisePowers) : solution;
+            const auto channel = settings.mode.value == gr::measurement::PolarizationMode::selection ? _covariance.solve(gr::measurement::PolarizationMode::mrc, gr::measurement::PolarizationNormalization::unit_noise, noisePowers) : solution;
             if (!channel) {
                 return std::unexpected(channel.error());
             }
             gr::measurement::PolarizationEstimate applied = aligned(solved, _estimate, *channel, noisePowers);
-            if (_mode == gr::measurement::PolarizationMode::mrc && _smoothing > 0. && _haveEstimate) {
-                applied = smoothed(applied, _estimate, _smoothing, noisePowers);
+            if (settings.mode.value == gr::measurement::PolarizationMode::mrc && settings.weight_smoothing.value > 0. && _haveEstimate) {
+                applied = smoothed(applied, _estimate, settings.weight_smoothing.value, noisePowers);
             }
             _estimate     = applied;
             _haveEstimate = true;
         }
 
-        const std::uint64_t filled  = full ? static_cast<std::uint64_t>(_window) : static_cast<std::uint64_t>(_covCount);
+        const std::uint64_t filled  = full ? static_cast<std::uint64_t>(settings.window.value) : static_cast<std::uint64_t>(_covCount);
         const DbFigures     figures = dbFigures(solved);
         publishSlot(solved, figures, filled);
 
-        if (wantRecords && _emitRecords) {
+        if (wantRecords && settings.emit_records.value) {
             _pending.push_back(makeRecord(solved, figures, _windowStartAt, filled, _covariance.nonFinite()));
         }
         if (full) {
@@ -512,7 +469,7 @@ private:
 
     /// @brief Publishes the figures of one window and its coverage, @p filled over the window in force.
     void publishSlot(const gr::measurement::PolarizationEstimate& e, const DbFigures& figures, std::uint64_t filled) {
-        const double coverage = std::min(1., static_cast<double>(filled) / static_cast<double>(_window));
+        const double coverage = std::min(1., static_cast<double>(filled) / static_cast<double>(settings.window.value));
         _slot.publish({e.relativePhase, e.amplitudeRatio, figures.branch0, figures.branch1, figures.combined, static_cast<double>(e.selectedBranch), figures.gain, coverage}, filled);
     }
 
@@ -526,9 +483,9 @@ private:
             {"combining_gain_db", "CombiningGain", "dB", static_cast<float>(figures.gain)},
         }};
         property_map                                          extra{
-                                                     {std::pmr::string("window"), pmt::Value(static_cast<std::uint64_t>(_window))},
-                                                     {std::pmr::string("mode"), pmt::Value(std::string(gr::measurement::polarizationModeName(_mode)))},
-                                                     {std::pmr::string("normalize"), pmt::Value(std::string(gr::measurement::polarizationNormalizationName(_normalize)))},
+                                                     {std::pmr::string("window"), pmt::Value(static_cast<std::uint64_t>(settings.window.value))},
+                                                     {std::pmr::string("mode"), pmt::Value(std::string(gr::measurement::polarizationModeName(settings.mode.value)))},
+                                                     {std::pmr::string("normalize"), pmt::Value(std::string(gr::measurement::polarizationNormalizationName(settings.normalize.value)))},
                                                      {std::pmr::string("selected_branch"), pmt::Value(static_cast<std::int32_t>(e.selectedBranch))},
                                                      {std::pmr::string("n_samples"), pmt::Value(filled)},
                                                      {std::pmr::string("non_finite"), pmt::Value(nonFinite)},
@@ -536,14 +493,14 @@ private:
                                                      {std::pmr::string("saturated_ratio"), pmt::Value(e.saturatedRatio)},
                                                      {std::pmr::string("valid"), pmt::Value(filled >= detail::kMinPolarizationWindow && figures.finite && !e.saturatedSnr && !e.saturatedRatio && nonFinite == 0ULL)},
         };
-        return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), _sampleRate, sampleStart, std::move(extra));
+        return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), settings.sample_rate.value, sampleStart, std::move(extra));
     }
 
     /// @brief The input samples, at most @p offer, this call can take with a free record slot for every window they
     /// close. The sum is formed only when the further windows fit in the offer, which keeps it inside 64 bits.
     [[nodiscard]] std::size_t roomFor(OutputSpanLike auto& measurementsSpan, std::size_t made, std::size_t offer) const {
         const std::size_t   free        = measurementsSpan.size() > made + _pending.size() ? measurementsSpan.size() - made - _pending.size() : 0UZ;
-        const std::uint64_t windowSize  = _window;
+        const std::uint64_t windowSize  = settings.window.value;
         const std::uint64_t accumulated = _covCount;
         const std::uint64_t untilClose  = windowSize > accumulated ? windowSize - accumulated : std::uint64_t{0};
         const std::uint64_t limit       = offer;

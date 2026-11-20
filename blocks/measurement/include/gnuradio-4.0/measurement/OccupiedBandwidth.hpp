@@ -23,11 +23,6 @@
 
 namespace gr::blocks::measurement {
 
-namespace detail {
-/// @brief The validator of `fraction`: true above 0.
-inline constexpr auto kFractionPositive = [](double value) { return value > 0.0; };
-} // namespace detail
-
 GR_REGISTER_BLOCK(gr::blocks::measurement::OccupiedBandwidth)
 
 /**
@@ -55,25 +50,24 @@ struct OccupiedBandwidth : Block<OccupiedBandwidth, NoTagPropagation> {
 
 The block emits the bandwidth and both band edges as one record per input record and keeps the latest values for
 polling. It passes no input tag on.
+
+`fraction` is the share of total power inside the band.
 )"">;
 
     PortIn<DataSet<float>, Async>  in;
     PortOut<DataSet<float>, Async> out;
 
-    Annotated<double, "fraction", Visible, Doc<"share of total power inside the band, in (0, 1]">, Limits<0.0, 1.0, detail::kFractionPositive>> fraction = 0.99;
+    struct Settings {
+        Annotated<double, Visible, Doc<"power fraction">, Limits<Over<0.0>, Max<1.0>>> fraction = 0.99;
 
-    GR_MAKE_REFLECTABLE(OccupiedBandwidth, in, out, fraction);
+        GR_MAKE_REFLECTABLE(Settings, fraction);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(OccupiedBandwidth, in, out, settings);
 
     gr::measurement::MeasurementSlot<3UZ> _slot{}; ///< bandwidth, lower edge and upper edge in hertz
-    std::uint64_t                         _records  = 0ULL;
-    double                                _fraction = fraction.value; ///< `fraction` as last accepted
+    std::uint64_t                         _records = 0ULL;
     std::atomic<std::uint64_t>            _malformed{0ULL};
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains(std::string_view("fraction"))) {
-            _fraction = fraction.value;
-        }
-    }
 
     /// @brief Clears the record count and publishes zero readings for a new run.
     void start() {
@@ -136,7 +130,7 @@ private:
             upper = lower;
             width = lower;
         } else if (total > 0.) {
-            const double tail = 0.5 * (1. - _fraction) * total;
+            const double tail = 0.5 * (1. - settings.fraction.value) * total;
 
             double      running = 0.;
             std::size_t low     = 0UZ;
@@ -164,7 +158,7 @@ private:
         if (!record.meta_information.empty()) {
             carried = record.meta_information[0UZ];
         }
-        carried.insert_or_assign(property_map::key_type("fraction"), pmt::Value(_fraction));
+        carried.insert_or_assign(property_map::key_type("fraction"), pmt::Value(settings.fraction.value));
 
         const float         sampleRate  = carriedFloat(carried, "sample_rate");
         const std::uint64_t sampleStart = carriedIndex(carried, "sample_start");

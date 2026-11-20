@@ -27,8 +27,7 @@ constexpr float       kSampleRate     = 1.0e6f;
 /// Applies a block's settings and starts it. The detectors hold atomic counters and cannot move.
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     block.start();
 }
 

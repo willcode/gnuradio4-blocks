@@ -24,6 +24,7 @@
 #include <gnuradio-4.0/algorithm/measurement/Kurtosis.hpp>
 #include <gnuradio-4.0/measurement/SpectralEstimate.hpp>
 #include <gnuradio-4.0/measurement/SpectralKurtosis.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_sk {
@@ -225,22 +226,23 @@ struct Run {
 /// @brief Applies staged settings and starts the block.
 template<typename TBlock>
 void startBlock(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
 }
 
-/// @brief Stages @p settings and applies them. Returns the settings the limits refused.
+/// @brief Stages @p settings and applies them. Returns each key the SpectralKurtosis block refused or failed, with its reason.
 [[nodiscard]] gr::property_map refusedByLimits(SpectralKurtosis& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters;
+    gr::property_map refused;
+    for (const gr::settings::Rejection& entry : gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings))) {
+        refused.insert_or_assign(gr::property_map::key_type{entry.key}, entry.reason);
+    }
+    return refused;
 }
 
-/// @brief The value `settings().get()` returns for `n_spectra`, or 0 when it holds none.
-[[nodiscard]] gr::Size_t reportedSpectra(SpectralKurtosis& block) {
-    const std::optional<gr::pmt::Value> reported = block.settings().get("n_spectra");
-    return reported.has_value() && reported->get_if<gr::Size_t>() != nullptr ? *reported->get_if<gr::Size_t>() : gr::Size_t{0U};
-}
+/// @brief The value `get()` returns for `n_spectra`, or 0 when it holds none.
+[[nodiscard]] gr::Size_t reportedSpectra(SpectralKurtosis& block) { return block.get<gr::Size_t>("n_spectra").value_or(gr::Size_t{0U}); }
 
 /// @brief One work call over @p rows. Returns the records it emits.
 [[nodiscard]] std::vector<gr::DataSet<float>> feed(SpectralKurtosis& block, std::span<const gr::DataSet<float>> rows) {
@@ -593,15 +595,15 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         for (const gr::Size_t value : {gr::Size_t{7U}, gr::Size_t{(1U << 20U) + 1U}}) {
             SpectralKurtosis block(gr::property_map{});
             startBlock(block);
-            expect(throws([&] { std::ignore = block.settings().set({{"n_spectra", value}}); })) << "settings().set() refuses " << value << " at the call";
+            expect(!block.set({{"n_spectra", value}}).has_value()) << "set() refuses " << value << " at the call";
             expect(refusedByLimits(block, {{"n_spectra", value}}).contains("n_spectra")) << "a staged " << value << " is refused at the apply";
-            expect(eq(block.n_spectra.value, gr::Size_t{32U})) << "and the member keeps the accepted value";
+            expect(eq(block.settings.n_spectra.value, gr::Size_t{32U})) << "and the member keeps the accepted value";
         }
         for (const gr::Size_t value : {gr::Size_t{8U}, gr::Size_t{1U << 20U}}) {
             SpectralKurtosis block(gr::property_map{});
             startBlock(block);
             expect(refusedByLimits(block, {{"n_spectra", value}}).empty()) << "the limit " << value << " itself is admitted";
-            expect(eq(block.n_spectra.value, value));
+            expect(eq(block.settings.n_spectra.value, value));
         }
     };
 
@@ -689,7 +691,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
 
     // A started block takes a refused application and then more records. Its readings match a block that saw no
     // refusal, and a valid n_spectra after the refusal applies.
-    "an n_spectra outside its limits on a running block changes nothing it computes, and the rest of its application applies"_test = [] {
+    "an n_spectra outside its limits on a running block changes nothing it computes, and the rest of its call is refused with it"_test = [] {
         Rng                                       rng(0x243f6a8885a308d3ULL);
         const std::vector<gr::DataSet<float>>     rows = noiseRows(rng, 40UZ, 16UZ, 1UZ);
         const std::span<const gr::DataSet<float>> all(rows);
@@ -706,8 +708,8 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             startBlock(block);
             expect(eq(feed(block, all.first(8UZ)).size(), 1UZ));
             expect(refusedByLimits(block, {{"n_spectra", value}}).contains("n_spectra")) << std::format("n_spectra {} is refused", value);
-            expect(eq(block.n_spectra.value, gr::Size_t{8U})) << std::format("n_spectra {}: the member keeps the accepted value", value);
-            expect(eq(reportedSpectra(block), gr::Size_t{8U})) << std::format("n_spectra {}: and settings().get() returns it", value);
+            expect(eq(block.settings.n_spectra.value, gr::Size_t{8U})) << std::format("n_spectra {}: the member keeps the accepted value", value);
+            expect(eq(reportedSpectra(block), gr::Size_t{8U})) << std::format("n_spectra {}: and get() returns it", value);
             const auto tail = feed(block, all.subspan(8UZ));
             expect(eq(tail.size(), referenceTail.size())) << std::format("n_spectra {}: the same readings", value);
             for (std::size_t k = 0UZ; k < std::min(tail.size(), referenceTail.size()); ++k) {
@@ -719,14 +721,14 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             expect(eq(block.nRefusedRecords(), std::uint64_t{0ULL})) << std::format("n_spectra {}: no record refused", value);
         }
 
-        // n_spectra lies outside its limits, and emit_records applies.
+        // n_spectra lies outside its limits, and the call is refused whole: emit_records does not apply.
         SpectralKurtosis block(settings());
         startBlock(block);
         std::ignore                    = feed(block, all.first(8UZ));
         const gr::property_map refused = refusedByLimits(block, {{"n_spectra", gr::Size_t{0U}}, {"emit_records", false}});
-        expect(eq(refused.size(), 1UZ) && refused.contains("n_spectra")) << "only n_spectra is refused";
-        expect(!block.emit_records.value) << "emit_records applies";
-        expect(feed(block, all.subspan(8UZ, 16UZ)).empty()) << "and the block publishes no record";
+        expect(eq(refused.size(), 1UZ) && refused.contains("n_spectra")) << "the refusal names n_spectra";
+        expect(block.settings.emit_records.value) << "emit_records keeps its value";
+        expect(!feed(block, all.subspan(8UZ, 16UZ)).empty()) << "and the block publishes its records";
         expect(eq(block.nRecords(), std::uint64_t{3ULL})) << "while it reads every 8 spectra, the accepted n_spectra";
         expect(refusedByLimits(block, {{"n_spectra", gr::Size_t{16U}}, {"emit_records", true}}).empty()) << "a valid n_spectra is accepted";
         const auto afterChange = feed(block, all.subspan(24UZ));
@@ -894,8 +896,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
             std::vector<gr::DataSet<float>> spectra;
             for (std::size_t half = 0UZ; half < 2UZ; ++half) {
                 if (half == 1UZ) {
-                    std::ignore = welch.settings().setStaged({{"sample_rate", round % 2UZ == 0UZ ? 2000.f : 1000.f}});
-                    std::ignore = welch.settings().applyStagedParameters();
+                    std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(welch), {{"sample_rate", round % 2UZ == 0UZ ? 2000.f : 1000.f}});
                 }
                 for (float& sample : samples) {
                     sample = static_cast<float>(rng.normal());

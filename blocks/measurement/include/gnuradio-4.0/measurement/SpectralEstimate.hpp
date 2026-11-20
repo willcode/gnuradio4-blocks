@@ -8,6 +8,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <stdexcept>
@@ -29,10 +30,12 @@
 
 namespace gr::blocks::measurement {
 
+/// @brief How WelchPsd accumulates a record's segments: their mean, or each bin's largest density.
+enum class AccumulationMode : std::uint8_t { mean, max_hold };
+
 namespace detail {
 
 /// @brief The values a spectral block computes on, and the setting values the hop and the window shape follow from.
-/// The block changes them only when an application passes every check.
 struct SpectralSettings {
     std::size_t                 fftSize          = 1024UZ;
     std::size_t                 hop              = 512UZ;
@@ -432,94 +435,49 @@ inline constexpr gr::Size_t kMaxFftSize = 4194304U;
 /// hop above `size` leaves a gap between segments.
 [[nodiscard]] inline std::size_t hopFrom(std::size_t size, double overlap, gr::Size_t hopSetting) noexcept { return hopSetting == 0U ? hopFor(size, overlap) : static_cast<std::size_t>(hopSetting); }
 
-/// @brief The window type a name selects. Throws for a name outside the window vocabulary.
-[[nodiscard]] inline gr::algorithm::window::Type requireWindow(const std::string& name) {
-    const auto windowType = magic_enum::enum_cast<gr::algorithm::window::Type>(name);
-    if (!windowType.has_value()) {
-        throw gr::exception(std::format("window must be one of {}, got '{}'", std::string_view(gr::algorithm::window::TypeNames), name));
-    }
-    return *windowType;
-}
-
-/// @brief The shape parameter the window is built with: the setting, or the window's default when the setting is 0
-/// or NaN. Throws for a value the window type does not accept, naming the setting.
+/// @brief The shape parameter the window is built with: the setting, or the window's default when the setting is 0.
+/// Returns the window's refusal of a value its type does not accept.
 ///
 /// A window whose parameter is legitimately zero has a type of its own. Kaiser at beta 0 is the rectangular window.
-[[nodiscard]] inline float windowParamFor(gr::algorithm::window::Type windowType, float param) {
-    const float shape = (param == 0.f || std::isnan(param)) ? gr::algorithm::window::defaultParameter<float>(windowType) : param;
+[[nodiscard]] inline std::expected<float, std::string> windowParamFor(gr::algorithm::window::Type windowType, float param) {
+    const float shape = param == 0.f ? gr::algorithm::window::defaultParameter<float>(windowType) : param;
     try {
         gr::algorithm::window::validateParameter<float>(windowType, shape);
     } catch (const std::invalid_argument& refusal) {
-        throw gr::exception(std::format("window_param: {}", refusal.what()));
+        return std::unexpected(std::string(refusal.what()));
     }
     return shape;
 }
 
-/**
- * @brief The settings a spectral block computes on after an application.
- *
- * Each setting `moved` names comes from its member. Every other setting keeps its value in `next`, and the block
- * ignores its member. The hop in force and the window shape follow from the result. Throws for a moved window or mode
- * the block does not know, and for a window shape the window in force refuses, naming the setting.
- */
-template<typename TBlock, typename Moved>
-[[nodiscard]] SpectralSettings settingsAfter(const TBlock& block, SpectralSettings next, Moved moved) {
-    if (moved("fft_size")) {
-        next.fftSize = static_cast<std::size_t>(block.fft_size.value);
+/// @brief The values a spectral block computes on, read from the block's settings @p s. The hop in force and the window
+/// shape follow from them; the check has refused a window shape the window refuses.
+template<typename TSettings>
+[[nodiscard]] SpectralSettings spectralSettings(const TSettings& s) {
+    SpectralSettings spectral;
+    spectral.fftSize          = static_cast<std::size_t>(s.fft_size.value);
+    spectral.overlap          = s.overlap;
+    spectral.hopSetting       = s.hop;
+    spectral.sampleRate       = s.sample_rate;
+    spectral.centerFrequency  = s.center_frequency;
+    spectral.windowType       = s.window;
+    spectral.windowName       = std::string(magic_enum::enum_name(spectral.windowType));
+    spectral.windowParam      = s.window_param;
+    spectral.signalName       = s.signal_name.value;
+    spectral.oneRecordPerCall = s.one_record_per_call;
+    if constexpr (requires { s.n_averages; }) {
+        spectral.nAverages = static_cast<std::size_t>(s.n_averages.value);
+        spectral.maxHold   = s.mode == AccumulationMode::max_hold;
     }
-    if (moved("overlap")) {
-        next.overlap = block.overlap.value;
-    }
-    if (moved("hop")) {
-        next.hopSetting = block.hop.value;
-    }
-    if (moved("sample_rate")) {
-        next.sampleRate = block.sample_rate.value;
-    }
-    if (moved("center_frequency")) {
-        next.centerFrequency = block.center_frequency.value;
-    }
-    if (moved("window")) {
-        next.windowType = requireWindow(block.window.value);
-        next.windowName = block.window.value;
-    }
-    if (moved("window_param")) {
-        next.windowParam = block.window_param.value;
-    }
-    if (moved("signal_name")) {
-        next.signalName = block.signal_name.value;
-    }
-    if (moved("one_record_per_call")) {
-        next.oneRecordPerCall = block.one_record_per_call.value;
-    }
-    if constexpr (requires { block.n_averages; }) {
-        if (moved("n_averages")) {
-            next.nAverages = static_cast<std::size_t>(block.n_averages.value);
-        }
-        if (moved("mode")) {
-            if (block.mode.value != "mean" && block.mode.value != "max_hold") {
-                throw gr::exception(std::format("mode must be 'mean' or 'max_hold', got '{}'", block.mode.value));
-            }
-            next.maxHold = block.mode.value == "max_hold";
-        }
-    }
-    next.hop         = hopFrom(next.fftSize, next.overlap, next.hopSetting);
-    next.windowShape = windowParamFor(next.windowType, next.windowParam);
-    return next;
+    spectral.hop         = hopFrom(spectral.fftSize, spectral.overlap, spectral.hopSetting);
+    spectral.windowShape = windowParamFor(spectral.windowType, spectral.windowParam).value_or(gr::algorithm::window::defaultParameter<float>(spectral.windowType));
+    return spectral;
 }
 
-/// @brief Names every setting, for the settings a block starts from.
-inline constexpr auto everySetting = [](std::string_view) { return true; };
-
-/// @brief True when `next` changes what the segment accumulator computes: the transform length, the hop, the
-/// averaging, the window or its shape, or the sample rate. Two NaN shapes are the same shape.
-[[nodiscard]] inline bool changesEstimate(const SpectralSettings& next, const SpectralSettings& accepted) noexcept {
-    const bool sameShape = next.windowShape == accepted.windowShape || (std::isnan(next.windowShape) && std::isnan(accepted.windowShape));
-    return next.fftSize != accepted.fftSize || next.hop != accepted.hop || next.nAverages != accepted.nAverages || next.maxHold != accepted.maxHold || next.windowType != accepted.windowType || !sameShape || next.sampleRate != accepted.sampleRate;
+/// @brief True when `next` changes the hop, the averaging or the window shape @p core computes with.
+template<typename T>
+[[nodiscard]] bool changesEstimate(const SpectralSettings& next, const SegmentAccumulator<T>& core) noexcept {
+    return next.hop != core.hop || next.nAverages != core.nAverages || next.maxHold != core.maxHold || next.windowShape != core.shape;
 }
-
-/// @brief The validator of `sample_rate`: true above 0.
-inline constexpr auto kSampleRatePositive = [](float value) { return value > 0.f; };
 
 } // namespace detail
 
@@ -546,7 +504,7 @@ GR_REGISTER_BLOCK(gr::blocks::measurement::WelchPsd, [T], [ float, std::complex<
  *
  * `fft_size` sets the transform length, and the bin width is `sample_rate / fft_size`. `window` names the window.
  * `window_param` sets the shape of the Kaiser (beta), Tukey (alpha), Gaussian (sigma) and Exponential (decay in dB)
- * windows, and zero or NaN selects the window's default. The block refuses a shape the window in force does not accept:
+ * windows, and zero selects the window's default. The block refuses a shape the window in force does not accept:
  * a negative Kaiser beta or Exponential decay, a Tukey alpha outside [0, 1] or a Gaussian sigma outside (0, 0.5]. A
  * change of `window` alone is refused when the shape in force does not suit the new window. `hop` sets the samples
  * between segment starts, and at zero the hop follows `overlap`. A hop above `fft_size` skips the samples between
@@ -578,40 +536,53 @@ settings it was computed with, the stream index of its first segment and its com
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"power-of-two transform length, 64 to 4194304">, Limits<detail::kMinFftSize, detail::kMaxFftSize, [](gr::Size_t v) { return std::has_single_bit(v); }>> fft_size            = 1024U;
-    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                                       window              = std::string("Hann");
-    Annotated<float, "window_param", Visible, Doc<"shape parameter, default at 0 or NaN">>                                                                                                                 window_param        = 0.f;
-    Annotated<double, "overlap", Visible, Doc<"segment overlap fraction in [0, 1)">, Limits<0.0, 1.0, [](double v) { return v < 1.0; }>>                                                                   overlap             = 0.5;
-    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples between segment starts; 0 follows overlap">>                                                                                       hop                 = 0U;
-    Annotated<gr::Size_t, "n_averages", Visible, Doc<"segments per emitted record, at least 1">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>>                                                       n_averages          = 16U;
-    Annotated<std::string, "mode", Visible, Doc<"accumulation mode, 'mean' or 'max_hold'">>                                                                                                                mode                = std::string("mean");
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate">, Limits<0.f, std::numeric_limits<float>::max(), detail::kSampleRatePositive>>                                            sample_rate         = 1.f;
-    Annotated<std::string, "signal_name", Doc<"signal name of the emitted record">>                                                                                                                        signal_name         = std::string("psd");
-    Annotated<double, "center_frequency", Visible, Unit<"Hz">, Doc<"frequency at the axis zero">, Limits<std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max()>>                       center_frequency    = 0.;
-    Annotated<bool, "one_record_per_call", Visible, Doc<"emit at most one record per work call">>                                                                                                          one_record_per_call = true;
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"FFT size">, Limits<Min<detail::kMinFftSize>, Max<detail::kMaxFftSize>>> fft_size            = 1024U;
+        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>>                      window              = gr::algorithm::window::Type::Hann;
+        Annotated<float, Visible, Doc<"window parameter (0 = default)">>                                            window_param        = 0.f;
+        Annotated<double, Visible, Doc<"segment overlap">, Limits<Min<0.0>, Under<1.0>>>                            overlap             = 0.5;
+        Annotated<gr::Size_t, Visible, Unit<"samples">, Doc<"hop (0 = from overlap)">>                              hop                 = 0U;
+        Annotated<gr::Size_t, Visible, Doc<"segments per record">, Limits<Min<1U>>>                                 n_averages          = 16U;
+        Annotated<AccumulationMode, Visible, Doc<"accumulation mode">>                                              mode                = AccumulationMode::mean;
+        Annotated<float, Visible, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                                sample_rate         = 1.f;
+        Annotated<std::string, Doc<"signal name">>                                                                  signal_name         = std::string("psd");
+        Annotated<double, Visible, Unit<"Hz">, Doc<"center frequency">>                                             center_frequency    = 0.;
+        Annotated<bool, Visible, Doc<"one record per call">>                                                        one_record_per_call = true;
 
-    GR_MAKE_REFLECTABLE(WelchPsd, in, out, fft_size, window, window_param, overlap, hop, n_averages, mode, sample_rate, signal_name, center_frequency, one_record_per_call);
+        GR_MAKE_REFLECTABLE(Settings, fft_size, window, window_param, overlap, hop, n_averages, mode, sample_rate, signal_name, center_frequency, one_record_per_call);
+    } settings;
 
-    detail::SpectralSettings      _accepted = detail::settingsAfter(*this, {}, detail::everySetting); ///< the settings the block computes on
-    detail::SegmentAccumulator<T> _core{_accepted};
+    GR_MAKE_REFLECTABLE(WelchPsd, in, out, settings);
+
+    detail::SegmentAccumulator<T> _core{};
     bool                          _flushed = false;
     std::atomic<std::uint64_t>    _droppedSegments{0ULL};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        detail::SpectralSettings next = detail::settingsAfter(*this, _accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); });
-        if (next.fftSize != _accepted.fftSize) {
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.fft_size.value)) {
+            return gr::Refused(s.fft_size, "must be a power of 2");
+        }
+        if (const std::expected<float, std::string> shape = detail::windowParamFor(s.window.value, s.window_param.value); !shape) {
+            return gr::Refused(s.window_param, shape.error());
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        const detail::SpectralSettings next = detail::spectralSettings(s);
+        // past a new fft_size the derived hop and shape are compared: an overlap move under a stated hop changes nothing
+        if (s.fft_size.changed()) {
             // A new transform length drops the accumulation in progress and keeps `pending` and the stream position.
             _core.rebuild(next);
-        } else if (detail::changesEstimate(next, _accepted)) {
+        } else if (s.window.changed() || s.sample_rate.changed() || detail::changesEstimate(next, _core)) {
             _core.reconfigure(next);
         }
-        _accepted = std::move(next);
         capInput();
     }
 
     /// @brief Limits the input span to the hop in force when `one_record_per_call` is on. A hop is the least input one
     /// record needs.
-    void capInput() { in.max_samples = _accepted.oneRecordPerCall ? _core.hop : std::numeric_limits<std::size_t>::max(); }
+    void capInput() { in.max_samples = settings.one_record_per_call ? _core.hop : std::numeric_limits<std::size_t>::max(); }
 
     void start() {
         _core.reset();
@@ -627,7 +598,7 @@ settings it was computed with, the stream index of its first segment and its com
     /// @brief Folds input into the accumulator and emits every record it completes. A call that moves nothing returns
     /// `INSUFFICIENT_OUTPUT_ITEMS` when it waits on the output and `INSUFFICIENT_INPUT_ITEMS` otherwise.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const detail::Progress progress = detail::foldSegments(_core, inSpan, outSpan, _accepted.oneRecordPerCall, [this] { return emit(); });
+        const detail::Progress progress = detail::foldSegments(_core, inSpan, outSpan, settings.one_record_per_call.value, [this] { return emit(); });
         outSpan.publish(progress.made);
         std::ignore = inSpan.consume(progress.taken);
         return detail::statusOf(progress);
@@ -654,7 +625,7 @@ private:
         const std::size_t   averaged = _core.segments;
         const std::uint64_t startAt  = _core.recordStartAt;
 
-        DataSet<Real> record = detail::makeSpectralRecord<Real>(_core.take(), _accepted.sampleRate, _accepted.centerFrequency, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.maxHold, _core.hop, _core.scale.enbwBins, _accepted.windowName, _core.shape, _core.gridStart, _accepted.signalName);
+        DataSet<Real> record = detail::makeSpectralRecord<Real>(_core.take(), settings.sample_rate.value, settings.center_frequency.value, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, averaged, _core.maxHold, _core.hop, _core.scale.enbwBins, std::string(magic_enum::enum_name(settings.window.value)), _core.shape, _core.gridStart, settings.signal_name.value);
         detail::stateComputeSeconds(record, folded + detail::secondsSince(assembly));
         return record;
     }
@@ -690,35 +661,48 @@ It passes no input tag on.
     PortIn<T>                     in;
     PortOut<DataSet<Real>, Async> out;
 
-    Annotated<gr::Size_t, "fft_size", Visible, Doc<"power-of-two transform length, 64 to 4194304">, Limits<detail::kMinFftSize, detail::kMaxFftSize, [](gr::Size_t v) { return std::has_single_bit(v); }>> fft_size            = 1024U;
-    Annotated<std::string, "window", Visible, Doc<gr::algorithm::window::TypeNames>>                                                                                                                       window              = std::string("Hann");
-    Annotated<float, "window_param", Visible, Doc<"shape parameter, default at 0 or NaN">>                                                                                                                 window_param        = 0.f;
-    Annotated<double, "overlap", Visible, Doc<"segment overlap fraction in [0, 1)">, Limits<0.0, 1.0, [](double v) { return v < 1.0; }>>                                                                   overlap             = 0.5;
-    Annotated<gr::Size_t, "hop", Visible, Unit<"samples">, Doc<"samples between row starts; 0 follows overlap">>                                                                                           hop                 = 0U;
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"input sample rate">, Limits<0.f, std::numeric_limits<float>::max(), detail::kSampleRatePositive>>                                            sample_rate         = 1.f;
-    Annotated<std::string, "signal_name", Doc<"signal name of the emitted record">>                                                                                                                        signal_name         = std::string("spectrogram");
-    Annotated<double, "center_frequency", Visible, Unit<"Hz">, Doc<"frequency at the axis zero">, Limits<std::numeric_limits<double>::lowest(), std::numeric_limits<double>::max()>>                       center_frequency    = 0.;
-    Annotated<bool, "one_record_per_call", Visible, Doc<"emit at most one row per work call">>                                                                                                             one_record_per_call = true;
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"FFT size">, Limits<Min<detail::kMinFftSize>, Max<detail::kMaxFftSize>>> fft_size            = 1024U;
+        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>>                      window              = gr::algorithm::window::Type::Hann;
+        Annotated<float, Visible, Doc<"window parameter (0 = default)">>                                            window_param        = 0.f;
+        Annotated<double, Visible, Doc<"segment overlap">, Limits<Min<0.0>, Under<1.0>>>                            overlap             = 0.5;
+        Annotated<gr::Size_t, Visible, Unit<"samples">, Doc<"hop (0 = from overlap)">>                              hop                 = 0U;
+        Annotated<float, Visible, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                                sample_rate         = 1.f;
+        Annotated<std::string, Doc<"signal name">>                                                                  signal_name         = std::string("spectrogram");
+        Annotated<double, Visible, Unit<"Hz">, Doc<"center frequency">>                                             center_frequency    = 0.;
+        Annotated<bool, Visible, Doc<"one row per call">>                                                           one_record_per_call = true;
 
-    GR_MAKE_REFLECTABLE(Spectrogram, in, out, fft_size, window, window_param, overlap, hop, sample_rate, signal_name, center_frequency, one_record_per_call);
+        GR_MAKE_REFLECTABLE(Settings, fft_size, window, window_param, overlap, hop, sample_rate, signal_name, center_frequency, one_record_per_call);
+    } settings;
 
-    detail::SpectralSettings      _accepted = detail::settingsAfter(*this, {}, detail::everySetting); ///< the settings the block computes on
-    detail::SegmentAccumulator<T> _core{_accepted};
+    GR_MAKE_REFLECTABLE(Spectrogram, in, out, settings);
+
+    detail::SegmentAccumulator<T> _core{};
     std::atomic<std::uint64_t>    _droppedSegments{0ULL};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        detail::SpectralSettings next = detail::settingsAfter(*this, _accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); });
-        if (next.fftSize != _accepted.fftSize) {
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.fft_size.value)) {
+            return gr::Refused(s.fft_size, "must be a power of 2");
+        }
+        if (const std::expected<float, std::string> shape = detail::windowParamFor(s.window.value, s.window_param.value); !shape) {
+            return gr::Refused(s.window_param, shape.error());
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        const detail::SpectralSettings next = detail::spectralSettings(s);
+        // other changes compare the derived values, so a stated hop leaves an overlap move without effect
+        if (s.fft_size.changed()) {
             _core.rebuild(next);
-        } else if (detail::changesEstimate(next, _accepted)) {
+        } else if (s.window.changed() || s.sample_rate.changed() || detail::changesEstimate(next, _core)) {
             _core.reconfigure(next);
         }
-        _accepted = std::move(next);
         capInput();
     }
 
     /// @brief Limits the input span to the hop in force, as `WelchPsd` does.
-    void capInput() { in.max_samples = _accepted.oneRecordPerCall ? _core.hop : std::numeric_limits<std::size_t>::max(); }
+    void capInput() { in.max_samples = settings.one_record_per_call ? _core.hop : std::numeric_limits<std::size_t>::max(); }
 
     void start() {
         _core.reset();
@@ -733,7 +717,7 @@ It passes no input tag on.
     /// @brief Folds input and emits a row per segment, as `WelchPsd::processBulk` does. A call that moves nothing
     /// reports why.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const detail::Progress progress = detail::foldSegments(_core, inSpan, outSpan, _accepted.oneRecordPerCall, [this] { return emit(); });
+        const detail::Progress progress = detail::foldSegments(_core, inSpan, outSpan, settings.one_record_per_call.value, [this] { return emit(); });
         outSpan.publish(progress.made);
         std::ignore = inSpan.consume(progress.taken);
         return detail::statusOf(progress);
@@ -754,7 +738,7 @@ private:
         const double        folded   = _core.costSeconds;
         const std::uint64_t startAt  = _core.recordStartAt;
 
-        DataSet<Real> record = detail::makeSpectralRecord<Real>(_core.take(), _accepted.sampleRate, _accepted.centerFrequency, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, false, _core.hop, _core.scale.enbwBins, _accepted.windowName, _core.shape, _core.gridStart, _accepted.signalName);
+        DataSet<Real> record = detail::makeSpectralRecord<Real>(_core.take(), settings.sample_rate.value, settings.center_frequency.value, _core.fftSize, detail::SegmentAccumulator<T>::kRealInput, startAt, 1UZ, false, _core.hop, _core.scale.enbwBins, std::string(magic_enum::enum_name(settings.window.value)), _core.shape, _core.gridStart, settings.signal_name.value);
         detail::stateComputeSeconds(record, folded + detail::secondsSince(assembly));
         return record;
     }

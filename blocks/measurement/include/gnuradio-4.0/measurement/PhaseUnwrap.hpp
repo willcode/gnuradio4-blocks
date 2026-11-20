@@ -25,11 +25,6 @@
 
 namespace gr::blocks::measurement {
 
-namespace detail {
-/// @brief The validator of `max_step_fraction`: true above 0.
-inline constexpr auto kMaxStepFractionPositive = [](double value) { return value > 0.0; };
-} // namespace detail
-
 GR_REGISTER_BLOCK(gr::blocks::measurement::PhaseUnwrap)
 
 /**
@@ -62,25 +57,28 @@ struct PhaseUnwrap : Block<PhaseUnwrap> {
 The block writes one cycle count and one residual per input sample on two ports and never adds them.
 `nSuspectSteps()` counts the steps whose magnitude exceeds `max_step_fraction * pi` and each step across non-finite
 samples. With `reset_on_discontinuity` set, a `gr:n_dropped_samples` tag sets the count to zero.
+
+`max_step_fraction` is the suspect-step threshold as a fraction of pi.
 )"">;
 
     PortIn<std::complex<float>> in;
     PortOut<std::int64_t>       cycles;
     PortOut<float>              phase;
 
-    Annotated<std::string, "origin", Visible, Doc<"phase origin, 'first_sample' or 'zero'">>                                                                          origin                 = std::string("first_sample");
-    Annotated<double, "max_step_fraction", Visible, Doc<"suspect-step threshold as a fraction of pi, in (0, 1]">, Limits<0.0, 1.0, detail::kMaxStepFractionPositive>> max_step_fraction      = 0.9;
-    Annotated<bool, "reset_on_discontinuity", Visible, Doc<"reset the cycle count at a gr:n_dropped_samples tag">>                                                    reset_on_discontinuity = true;
+    struct Settings {
+        Annotated<gr::measurement::UnwrapOrigin, Visible, Doc<"phase origin">>                 origin                 = gr::measurement::UnwrapOrigin::first_sample;
+        Annotated<double, Visible, Doc<"suspect step threshold">, Limits<Over<0.0>, Max<1.0>>> max_step_fraction      = 0.9;
+        Annotated<bool, Visible, Doc<"reset at discontinuity">>                                reset_on_discontinuity = true;
 
-    GR_MAKE_REFLECTABLE(PhaseUnwrap, in, cycles, phase, origin, max_step_fraction, reset_on_discontinuity);
+        GR_MAKE_REFLECTABLE(Settings, origin, max_step_fraction, reset_on_discontinuity);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PhaseUnwrap, in, cycles, phase, settings);
 
     static constexpr double kPi    = std::numbers::pi_v<double>;
     static constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 
     gr::measurement::CycleUnwrapper _unwrapper{};
-    gr::measurement::UnwrapOrigin   _origin{gr::measurement::UnwrapOrigin::first_sample};
-    double                          _maxStepFraction{0.9};
-    bool                            _resetOnDiscontinuity{true};
 
     bool          _havePrev{false};
     bool          _inGap{false}; ///< the samples since the last finite one are non-finite
@@ -95,37 +93,20 @@ samples. With `reset_on_discontinuity` set, a `gr:n_dropped_samples` tag sets th
 
     bool _taggedUnits{false}; ///< the `gr:signal_unit` tags are published
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        gr::measurement::UnwrapOrigin nextOrigin = _origin;
-        if (newSettings.contains("origin")) {
-            const auto parsed = gr::measurement::unwrapOriginFrom(origin.value);
-            if (!parsed.has_value()) {
-                throw gr::exception(std::format("origin must be 'first_sample' or 'zero', got '{}'", origin.value));
-            }
-            nextOrigin = *parsed;
-        }
-        const bool changesFraction = newSettings.contains("max_step_fraction");
-
-        if (nextOrigin != _origin) {
-            // A new origin sets the count to zero. The next sample sets the origin again.
-            _origin    = nextOrigin;
-            _unwrapper = gr::measurement::CycleUnwrapper(_origin, 1.0);
+    void applySettings(const Settings& s) {
+        // A new origin sets the count to zero. The next sample sets the origin again.
+        if (s.origin.changed()) {
+            _unwrapper = gr::measurement::CycleUnwrapper(s.origin.value, 1.0);
             _havePrev  = false;
             _inGap     = false;
             _nResets.fetch_add(1ULL, std::memory_order_relaxed);
-        }
-        if (changesFraction) {
-            _maxStepFraction = max_step_fraction.value;
-        }
-        if (newSettings.contains("reset_on_discontinuity")) {
-            _resetOnDiscontinuity = reset_on_discontinuity.value;
         }
     }
 
     void start() {
         // The kernel's threshold is `pi`, and no wrapped step exceeds it. The block tests the live `max_step_fraction`
         // against the kernel's output.
-        _unwrapper = gr::measurement::CycleUnwrapper(_origin, 1.0);
+        _unwrapper = gr::measurement::CycleUnwrapper(settings.origin.value, 1.0);
         _havePrev  = false;
         _inGap     = false;
         _streamAt  = 0ULL;
@@ -166,7 +147,7 @@ samples. With `reset_on_discontinuity` set, a `gr:n_dropped_samples` tag sets th
         const std::uint64_t base = _streamAt;
 
         std::vector<std::size_t> resetOffsets;
-        if (_resetOnDiscontinuity) {
+        if (settings.reset_on_discontinuity) {
             for (const gr::Tag& tag : inSpan.rawTags) {
                 const std::uint64_t at = static_cast<std::uint64_t>(tag.index);
                 if (at < base || at >= base + n) {
@@ -227,7 +208,7 @@ private:
         }
         _nNonFinite.fetch_add(_unwrapper.nNonFiniteSamples() - nonFiniteBefore, std::memory_order_relaxed);
 
-        const double threshold = _maxStepFraction * kPi;
+        const double threshold = settings.max_step_fraction * kPi;
         for (std::size_t k = 0UZ; k < input.size(); ++k) {
             if (!std::isfinite(input[k].real()) || !std::isfinite(input[k].imag())) {
                 _inGap = _havePrev;

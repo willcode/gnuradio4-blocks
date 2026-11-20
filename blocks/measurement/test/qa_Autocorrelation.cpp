@@ -29,6 +29,7 @@
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/measurement/Autocorrelation.hpp>
 #include <gnuradio-4.0/measurement/Detectors.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_autocorrelation {
@@ -144,9 +145,10 @@ struct Run {
     std::uint64_t                   nPartialFlushes{};
     std::uint64_t                   nPartialWindows{};
     std::uint64_t                   nWindowResets{};
-    std::uint64_t                   nRateRefused{};
     bool                            completed{}; ///< `runAndWait()` returned no error
     std::uint64_t                   nTailDropped{};
+    float                           sampleRate{}; ///< `sample_rate` as a settings read returns it after the run
+    std::string                     window{};     ///< `window` as a settings read returns it after the run
     std::uint64_t                   nSamples{};
 };
 
@@ -163,12 +165,12 @@ template<typename T>
     for (const auto& tag : tags) {
         for (const auto& entry : tag.second) {
             const std::string name(gr::tag::nameOf(std::string_view(entry.first)));
-            if (block.settings().writableMembers().contains(name)) {
+            if (block.writableMembers().contains(name)) {
                 couplings.insert_or_assign(gr::property_map::key_type(name), gr::pmt::Value(std::string(entry.first)));
             }
         }
     }
-    block.settings().setTagCouplings(couplings);
+    boost::ut::expect(block.setTagCouplings(couplings).has_value());
     source.samples = std::move(samples);
     source.burst   = burst;
     source.tags    = std::move(tags);
@@ -199,32 +201,44 @@ template<typename T>
     result.nPartialFlushes = block.nPartialFlushes();
     result.nPartialWindows = block.nPartialWindows();
     result.nWindowResets   = block.nWindowResets();
-    result.nRateRefused    = block.nRateRefused();
     result.nTailDropped    = block.nTailDropped();
     result.nSamples        = block.nSamples();
+    result.sampleRate      = block.template get<float>("sample_rate").value_or(-1.f);
+    result.window          = block.template get<std::string>("window").value_or(std::string{});
     return result;
+}
+
+/// @brief Takes @p block through the lifecycle states @p states, as a scheduler does. True when every move succeeds.
+[[nodiscard]] bool moveThrough(Autocorrelation<CF>& block, std::initializer_list<gr::lifecycle::State> states) {
+    return std::ranges::all_of(states, [&block](gr::lifecycle::State state) { return block.changeStateTo(state).has_value(); });
 }
 
 /// @brief A block outside a graph, initialized and started as the scheduler starts one.
 [[nodiscard]] std::unique_ptr<Autocorrelation<CF>> startedBlock(gr::property_map settings) {
     auto block = std::make_unique<Autocorrelation<CF>>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
-    block->start();
+    if (const auto first = block->check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
+    boost::ut::expect(moveThrough(*block, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}));
     return block;
 }
 
-/// @brief Applies @p changes to a block by name, as a settings call does.
-void applyByName(Autocorrelation<CF>& block, gr::property_map changes) {
-    std::ignore = block.settings().set(std::move(changes));
-    std::ignore = block.settings().activateContext();
-    std::ignore = block.settings().applyStagedParameters();
-}
+/// @brief Stops @p block as a scheduler does.
+void stopBlock(Autocorrelation<CF>& block) { boost::ut::expect(moveThrough(block, {gr::lifecycle::State::REQUESTED_STOP, gr::lifecycle::State::STOPPED})); }
 
-/// @brief Stages @p changes on a block and applies them. Returns the settings the limits refused.
+/// @brief Starts a stopped @p block again as a scheduler does: the lifecycle's reset, then a start.
+[[nodiscard]] bool restartBlock(Autocorrelation<CF>& block) { return moveThrough(block, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}); }
+
+/// @brief Applies @p changes to a block by name, as a settings call does. Returns the keys refused or failed.
+gr::settings::Rejected applyByName(Autocorrelation<CF>& block, gr::property_map changes) { return gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(changes)); }
+
+/// @brief Stages @p changes on a block and applies them. Returns each key the Autocorrelation block refused or failed, with its reason.
 [[nodiscard]] gr::property_map refusedByLimits(Autocorrelation<CF>& block, gr::property_map changes) {
-    std::ignore = block.settings().setStaged(std::move(changes));
-    return block.settings().applyStagedParameters().failedParameters;
+    gr::property_map refused;
+    for (const gr::settings::Rejection& entry : gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(changes))) {
+        refused.insert_or_assign(gr::property_map::key_type{entry.key}, entry.reason);
+    }
+    return refused;
 }
 
 /// @brief What one direct call of the block returned and published.
@@ -584,11 +598,12 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }
     };
 
-    "each invalid setting is refused, and the lag refusal names both values"_test = [] {
+    "each invalid setting is refused, and the lag refusal names both settings"_test = [] {
         const auto refused = [](gr::property_map settings) {
             Autocorrelation<CF> block(std::move(settings));
-            block.settings().init();
-            std::ignore = block.settings().applyStagedParameters();
+            if (const auto first = block.check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
         };
         expect(throws([&] { refused({{"max_lag", gr::Size_t(4096)}, {"window_length", gr::Size_t(4096)}}); })) << "a lag of a whole window";
         expect(throws([&] { refused({{"max_lag", gr::Size_t(5000)}, {"window_length", gr::Size_t(4096)}}); })) << "a lag beyond a window";
@@ -610,18 +625,18 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         }};
         for (std::size_t r = 0UZ; r < outside.size(); ++r) {
             auto block = startedBlock({});
-            expect(throws([&] { std::ignore = block->settings().set(outside[r]); })) << std::format("value {}: settings().set() refuses it at the call", r);
+            expect(!block->set(outside[r]).has_value()) << std::format("value {}: set() refuses it at the call", r);
             expect(eq(refusedByLimits(*block, outside[r]).size(), 1UZ)) << std::format("value {}: the limits refuse a staged one", r);
-            expect(eq(block->max_lag.value, gr::Size_t(1024)) && eq(block->window_length.value, gr::Size_t(4096)) && eq(block->n_averages.value, gr::Size_t(16)) && eq(block->overlap.value, 0.5) && eq(block->false_alarm_rate.value, 1e-3) && eq(block->sample_rate.value, 1.f)) << std::format("value {}: the members keep the accepted values", r);
+            expect(eq(block->settings.max_lag.value, gr::Size_t(1024)) && eq(block->settings.window_length.value, gr::Size_t(4096)) && eq(block->settings.n_averages.value, gr::Size_t(16)) && eq(block->settings.overlap.value, 0.5) && eq(block->settings.false_alarm_rate.value, 1e-3) && eq(block->settings.sample_rate.value, 1.f)) << std::format("value {}: the members keep the accepted values", r);
         }
 
-        // the lag refusal names both values
+        // the lag refusal names the lag and the window it must stay below
         try {
             refused({{"max_lag", gr::Size_t(4096)}, {"window_length", gr::Size_t(1024)}});
             expect(false) << "a lag beyond the window is refused";
         } catch (const std::exception& error) {
             const std::string what(error.what());
-            expect(what.find("4096") != std::string::npos && what.find("1024") != std::string::npos) << std::format("the message names both values: {}", what);
+            expect(what.find("max_lag: must be < window_length") != std::string::npos) << std::format("the message names both settings: {}", what);
         }
     };
 
@@ -631,35 +646,34 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         const std::array<gr::property_map, 7> kStaged{gr::property_map{{"window_length", gr::Size_t(2048)}}, gr::property_map{{"max_lag", gr::Size_t(128)}}, gr::property_map{{"kind", std::string("Complex")}}, gr::property_map{{"normalization", std::string("Biased")}}, gr::property_map{{"overlap", 0.25}}, gr::property_map{{"window", std::string("Hann")}}, gr::property_map{{"remove_mean", false}}};
         for (const gr::property_map& change : kStaged) {
             auto block = startedBlock(base);
-            expect(throws([&] { applyByName(*block, change); })) << std::format("a running block refuses '{}'", change.begin()->first.c_str());
+            expect(!applyByName(*block, change).empty()) << std::format("a running block refuses '{}'", change.begin()->first.c_str());
         }
         const std::array<gr::property_map, 5> kLive{gr::property_map{{"n_averages", gr::Size_t(4)}}, gr::property_map{{"false_alarm_rate", 1e-2}}, gr::property_map{{"emit_phase", true}}, gr::property_map{{"signal_name", std::string("r")}}, gr::property_map{{"sample_rate", 96000.f}}};
         for (const gr::property_map& change : kLive) {
             auto block = startedBlock(base);
-            expect(nothrow([&] { applyByName(*block, change); })) << std::format("'{}' is live", change.begin()->first.c_str());
+            expect(applyByName(*block, change).empty()) << std::format("'{}' is live", change.begin()->first.c_str());
+            expect(gr::testing::inForce(gr::settings::detail::settingsOf(*block)).at(change.begin()->first) == change.begin()->second) << std::format("'{}' is in force", change.begin()->first.c_str());
         }
         {
             auto block = startedBlock(base);
-            block->stop();
-            expect(nothrow([&] { applyByName(*block, {{"window_length", gr::Size_t(2048)}}); })) << "a stopped block takes a new window_length";
+            stopBlock(*block);
+            expect(applyByName(*block, {{"window_length", gr::Size_t(2048)}}).empty()) << "a stopped block takes a new window_length";
         }
         {
             auto block = startedBlock(base);
-            expect(nothrow([&] { applyByName(*block, {{"sample_rate", 0.f}}); })) << "a running block counts a rate of zero";
-            expect(eq(block->nRateRefused(), std::uint64_t{1ULL}));
-            expect(block->sample_rate.value == 48000.f) << "and keeps the previous rate";
+            expect(!applyByName(*block, {{"sample_rate", 0.f}}).empty()) << "a running block refuses a rate of zero";
+            expect(block->settings.sample_rate.value == 48000.f) << "and keeps the previous rate";
         }
         {
-            // the limits refuse one key of a staged batch, and the other key applies
+            // the limits refuse a call that holds a value outside them, and its other key with it
             auto                   block  = startedBlock(base);
             const gr::property_map failed = refusedByLimits(*block, {{"false_alarm_rate", 1.5}, {"n_averages", gr::Size_t(4)}});
-            expect(eq(failed.size(), 1UZ) && failed.contains("false_alarm_rate")) << "the limits refuse false_alarm_rate alone";
-            expect(eq(block->false_alarm_rate.value, 1e-3)) << "the member keeps the accepted value";
+            expect(eq(failed.size(), 1UZ) && failed.contains("false_alarm_rate")) << "the refusal names false_alarm_rate";
+            expect(eq(block->settings.false_alarm_rate.value, 1e-3)) << "the member keeps the accepted value";
+            expect(eq(block->settings.n_averages.value, gr::Size_t(16))) << "and n_averages keeps its value";
             const std::vector<CF> input = complexNoise(1024UZ + 3UZ * 512UZ, 0x7A7AULL);
             const Call            call  = callBlock(*block, std::span<const CF>(input), 0UZ, 4UZ, 0UZ);
-            expect(fatal(eq(call.records.size(), 1UZ))) << "four windows make one record at the n_averages of the batch";
-            expect(eq(static_cast<std::size_t>(metaNumber(call.records[0UZ], "n_averaged")), 4UZ));
-            expect(approx(metaNumber(call.records[0UZ], "false_alarm_rate"), 1e-3, 1e-12)) << "on the accepted false_alarm_rate";
+            expect(call.records.empty()) << "four windows make no record at the n_averages in force";
         }
     };
 
@@ -667,32 +681,23 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         constexpr std::size_t     length  = 1024UZ;
         const std::vector<CF>     input   = complexNoise(6UZ * length, 0x2D2DULL);
         const std::span<const CF> samples = std::span<const CF>(input);
-        // sample_rate is coupled to gr:sample_rate. The rate tag below sets it.
-        const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(2)}, {"overlap", 0.0}};
-        const gr::Tag          rateTag{0UZ, gr::property_map{{gr::tag::SAMPLE_RATE.key(), 96000.f}}};
+        const gr::property_map    geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(2)}, {"overlap", 0.0}};
 
         // the reference runs the same stream and changes without the refused application
         auto refused   = startedBlock(geometry);
         auto reference = startedBlock(geometry);
         for (Autocorrelation<CF>* block : {refused.get(), reference.get()}) {
-            block->settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}});
             expect(fatal(eq(callBlock(*block, samples.first(2UZ * length), 0UZ, 4UZ, 0UZ).records.size(), 1UZ)));
         }
-        try {
-            applyByName(*refused, {{"window", std::string("Hann")}});
-            expect(false) << "a running block refuses a new window";
-        } catch (const std::exception& error) {
-            expect(std::string_view(error.what()).find("window") != std::string_view::npos) << std::format("the refusal names the key: {}", error.what());
-        }
-        expect(refused->window.value == std::string("Rectangular")) << "the accepted value is written back to its member";
-        const auto              stored = refused->settings().get(std::string("window"));
-        const std::pmr::string* text   = stored.has_value() ? stored->get_if<std::pmr::string>() : nullptr;
-        expect(text != nullptr && *text == "Rectangular") << "and settings().get() returns it";
+        const gr::settings::Rejected refusal = applyByName(*refused, {{"window", std::string("Hann")}});
+        expect(fatal(!refusal.empty())) << "a running block refuses a new window";
+        expect(refusal.front().key == "window") << std::format("the refusal names the key: {}", gr::settings::describeRejected(refusal));
+        expect(refused->settings.window.value == gr::algorithm::window::Type::Rectangular) << "the member keeps the accepted value";
+        expect(refused->get<std::string>("window").value_or(std::string{}) == "Rectangular") << "and get() returns it";
 
         for (Autocorrelation<CF>* block : {refused.get(), reference.get()}) {
-            expect(nothrow([&] { applyByName(*block, {{"n_averages", gr::Size_t(4)}}); })) << "a live change after the refusal applies";
-            block->settings().autoUpdate(rateTag);
-            expect(nothrow([&] { std::ignore = block->settings().applyStagedParameters(); })) << "and so does a rate tag";
+            expect(applyByName(*block, {{"n_averages", gr::Size_t(4)}}).empty()) << "a live change after the refusal applies";
+            expect(applyByName(*block, {{"sample_rate", 96000.f}}).empty()) << "and so does a new rate";
         }
         const Call after = callBlock(*refused, samples.subspan(2UZ * length, 4UZ * length), 2UZ * length, 4UZ, 0UZ);
         const Call twin  = callBlock(*reference, samples.subspan(2UZ * length, 4UZ * length), 2UZ * length, 4UZ, 0UZ);
@@ -701,14 +706,14 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         const gr::DataSet<float>& record = after.records[0UZ];
         expect(metaText(record, "window") == std::string("Rectangular")) << "the record names the window the kernel runs";
         expect(eq(static_cast<std::size_t>(metaNumber(record, "n_averaged")), 4UZ)) << "the live n_averages applies";
-        expect(approx(metaNumber(record, "sample_rate"), 96000., 1e-3)) << "the tagged rate applies";
+        expect(approx(metaNumber(record, "sample_rate"), 96000., 1e-3)) << "the new rate applies";
         expect(record.signal_values == twin.records[0UZ].signal_values) << "the refused value changes nothing the block computes";
         expect(record.meta_information[0UZ] == twin.records[0UZ].meta_information[0UZ]);
 
         // after a stop, both blocks build from their accepted values, and the refused member takes no part
         const auto restart = [&samples](Autocorrelation<CF>& block) {
-            block.stop();
-            expect(nothrow([&] { block.start(); }));
+            stopBlock(block);
+            expect(restartBlock(block));
             const Call call = callBlock(block, samples.first(4UZ * length), 0UZ, 4UZ, 0UZ);
             expect(fatal(eq(call.records.size(), 1UZ))) << "four windows make one record at the live n_averages";
             expect(approx(metaNumber(call.records[0UZ], "sample_rate"), 96000., 1e-3));
@@ -719,10 +724,10 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         expect(restarted.signal_values == restart(*reference).signal_values) << "and computes what the reference computes";
 
         // the same value sent again to the running block is refused again, and a stopped block takes it
-        expect(throws([&] { applyByName(*refused, {{"window", std::string("Hann")}}); })) << "the value sent again to a running block is refused again";
+        expect(!applyByName(*refused, {{"window", std::string("Hann")}}).empty()) << "the value sent again to a running block is refused again";
         expect(metaText(restart(*refused), "window") == std::string("Rectangular")) << "and changes nothing";
-        refused->stop();
-        expect(nothrow([&] { applyByName(*refused, {{"window", std::string("Hann")}}); }));
+        stopBlock(*refused);
+        expect(applyByName(*refused, {{"window", std::string("Hann")}}).empty());
         const gr::DataSet<float> hannRecord = restart(*refused);
         expect(metaText(hannRecord, "window") == std::string("Hann")) << "a stopped block takes the key";
 
@@ -737,24 +742,21 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         expect(hannRecord.signal_values != restarted.signal_values) << "and the two tapers give different records";
     };
 
-    "an out-of-range staged-restart value refused while running names its range, and the next start works"_test = [] {
+    "an out-of-range staged-restart value is refused while running, names its range once stopped, and the next start works"_test = [] {
         constexpr std::size_t                                              length = 1024UZ;
         const std::vector<CF>                                              input  = complexNoise(4UZ * length, 0x6262ULL);
         const gr::property_map                                             settings{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"sample_rate", 48000.f}};
         const std::array<std::pair<gr::property_map, std::string_view>, 2> kOutOfRange{{
-            {gr::property_map{{"kind", std::string("bogus")}}, "'complex' or 'envelope'"},
-            {gr::property_map{{"max_lag", gr::Size_t(2048)}}, "must be below window_length"},
+            {gr::property_map{{"kind", std::string("bogus")}}, "must be one of: complex, envelope"},
+            {gr::property_map{{"max_lag", gr::Size_t(2048)}}, "must be < window_length"},
         }};
         for (const auto& [change, range] : kOutOfRange) {
             auto block = startedBlock(settings);
-            try {
-                applyByName(*block, change);
-                expect(false) << "a running block refuses an out-of-range value";
-            } catch (const std::exception& error) {
-                expect(std::string_view(error.what()).find(range) != std::string_view::npos) << std::format("the refusal names the range: {}", error.what());
-            }
-            block->stop();
-            expect(nothrow([&] { block->start(); })) << std::format("start() after the refused '{}' works", change.begin()->first.c_str());
+            expect(!applyByName(*block, change).empty()) << "a running block refuses a staged-restart value";
+            stopBlock(*block);
+            const gr::settings::Rejected refusal = applyByName(*block, change);
+            expect(gr::settings::describeRejected(refusal).find(range) != std::string::npos) << std::format("a stopped block refuses an out-of-range value, naming its range: {}", gr::settings::describeRejected(refusal));
+            expect(restartBlock(*block)) << std::format("start() after the refused '{}' works", change.begin()->first.c_str());
             const Call call = callBlock(*block, std::span<const CF>(input), 0UZ, 4UZ, 0UZ);
             expect(fatal(eq(call.records.size(), 1UZ)));
             expect(eq(static_cast<std::size_t>(metaNumber(call.records[0UZ], "window_length")), length)) << "on the accepted values";
@@ -844,7 +846,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
             std::println("sample_rate tag, bursts of {}: flushed n_averaged={} at {} Hz, then n_averaged={} at {} Hz from sample {}", burst, metaNumber(flushed, "n_averaged"), metaNumber(flushed, "sample_rate"), metaNumber(next, "n_averaged"), metaNumber(next, "sample_rate"), metaNumber(next, "sample_start"));
         }
 
-        // A tagged rate of zero is counted, and a tagged false_alarm_rate outside its limits is refused. The run
+        // A tagged rate of zero and a tagged false_alarm_rate outside its limits are refused. The run
         // completes, and the accepted values stay. The valid arm shows that a false_alarm_rate tag reaches the block.
         const Run<CF> validRun = collect<CF>(geometry, input, 512UZ, false, {{0UZ, first}, {tagAt, gr::property_map{{"false_alarm_rate", 1e-2}}}});
         expect(validRun.completed);
@@ -856,11 +858,32 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
             expect(refusedRun.completed) << std::format("{}: the run completes", key);
             expect(eq(refusedRun.records.size(), 2UZ)) << std::format("{}: two records of eight windows", key);
             expect(eq(refusedRun.nWindowResets, std::uint64_t{0ULL})) << std::format("{}: a refused value discards no window", key);
-            expect(eq(refusedRun.nRateRefused, key == gr::tag::SAMPLE_RATE.key() ? std::uint64_t{1ULL} : std::uint64_t{0ULL})) << std::format("{}: the block counts a refused rate alone", key);
             for (const gr::DataSet<float>& record : refusedRun.records) {
                 expect(approx(metaNumber(record, "sample_rate"), 48000., 1e-3) && approx(metaNumber(record, "false_alarm_rate"), 1e-3, 1e-12)) << std::format("{}: every record states the accepted values", key);
             }
         }
+    };
+
+    "a window tag the running block refuses leaves its window, and a later rate tag on the input port retunes it"_test = [] {
+        constexpr std::size_t length    = 1024UZ;
+        constexpr std::size_t refusedAt = 2048UZ;
+        constexpr std::size_t rateAt    = 8192UZ;
+        const std::vector<CF> input     = complexNoise(16384UZ, 0x4444ULL);
+
+        // The source sends both tags on its output port. The block couples `window` and `sample_rate` to them.
+        const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"sample_rate", 48000.f}};
+        const Run<CF>          run = collect<CF>(geometry, input, 512UZ, false, {{refusedAt, gr::property_map{{"window", std::string("Hann")}}}, {rateAt, gr::property_map{{gr::tag::SAMPLE_RATE.key(), 96000.f}}}});
+
+        expect(run.completed) << "the run completes past the refused tag";
+        expect(eq(run.sampleRate, 96000.f)) << "the block's settings read the tagged rate";
+        expect(run.window == std::string("Rectangular")) << "and the window it runs: a running block refuses a staged-restart key";
+        expect(fatal(ge(run.records.size(), 3UZ)));
+        for (const gr::DataSet<float>& record : run.records) {
+            const std::size_t start = static_cast<std::size_t>(metaNumber(record, "sample_start"));
+            expect(metaText(record, "window") == std::string("Rectangular")) << std::format("the record from sample {} runs the accepted window", start);
+            expect(approx(metaNumber(record, "sample_rate"), start < rateAt ? 48000. : 96000., 1e-3)) << std::format("the record from sample {} carries the rate in force at its first sample", start);
+        }
+        expect(approx(metaNumber(run.records.back(), "sample_rate"), 96000., 1e-3)) << "the last record is on the tagged rate's axis";
     };
 
     "records do not depend on the input chunking, and the window counters add up"_test = [] {

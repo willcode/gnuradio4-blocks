@@ -29,8 +29,7 @@ constexpr float       kSampleRate     = 1.0e6f;
 /// Applies the settings of a block built in place and starts it.
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     block.start();
 }
 

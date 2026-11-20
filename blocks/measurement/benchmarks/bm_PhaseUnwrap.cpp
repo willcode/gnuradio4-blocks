@@ -25,8 +25,7 @@ constexpr std::size_t kRepeats        = 9UZ;
 /// Applies a block's settings and starts it.
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     block.start();
 }
 

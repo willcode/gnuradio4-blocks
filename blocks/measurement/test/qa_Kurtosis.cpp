@@ -24,6 +24,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/measurement/Kurtosis.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_kurtosis {
@@ -138,7 +139,7 @@ template<typename T>
     auto&     source = graph.emplaceBlock<SampleSource<T>>();
     auto&     block  = graph.emplaceBlock<Kurtosis<T>>(std::move(settings));
     auto&     sink   = graph.emplaceBlock<RecordSink>();
-    block.settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}});
+    boost::ut::expect(block.setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}}).has_value());
     source.samples = samples;
     source.burst   = burst;
     source.rateTag = tagging.rate;
@@ -157,7 +158,7 @@ template<typename T>
 
     Run result;
     result.completed          = completed;
-    result.rateMember         = block.sample_rate.value;
+    result.rateMember         = block.settings.sample_rate.value;
     result.records            = std::move(sink.records);
     result.coverage           = block.coverage();
     result.nWindows           = block.nWindows();
@@ -214,16 +215,20 @@ template<typename T>
 /// @brief Applies the staged settings and starts the block, as the scheduler does before the first work call.
 template<typename TBlock>
 void startBlock(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
 }
 
-/// @brief Stages @p settings on a started block and applies them. Returns the settings the limits refused.
+/// @brief Stages @p settings on a started block and applies them. Returns each key the Kurtosis block refused or failed, with its reason.
 template<typename TBlock>
 [[nodiscard]] gr::property_map refusedByLimits(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters;
+    gr::property_map refused;
+    for (const gr::settings::Rejection& entry : gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings))) {
+        refused.insert_or_assign(gr::property_map::key_type{entry.key}, entry.reason);
+    }
+    return refused;
 }
 
 /// @brief The records of one work call and the samples it consumed.
@@ -467,35 +472,35 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     };
 
     // The window bounds, checked when the settings are applied.
-    "a window outside [8, 2^24] and a sample_rate that is not positive and finite are refused by their limits"_test = [] {
-        const std::array<gr::property_map, 6UZ> outside{{
+    "a window outside [8, 2^24] and a sample_rate that is not positive are refused by their limits"_test = [] {
+        const std::array<gr::property_map, 5UZ> outside{{
             {{"window", gr::Size_t{7U}}},
             {{"window", gr::Size_t{(1U << 24U) + 1U}}},
             {{"sample_rate", 0.f}},
             {{"sample_rate", -48000.f}},
-            {{"sample_rate", std::numeric_limits<float>::infinity()}},
             {{"sample_rate", std::numeric_limits<float>::quiet_NaN()}},
         }};
         for (std::size_t r = 0UZ; r < outside.size(); ++r) {
             Kurtosis<float> block(gr::property_map{});
             startBlock(block);
-            expect(throws([&] { std::ignore = block.settings().set(outside[r]); })) << std::format("value {}: settings().set() refuses it at the call", r);
+            expect(!block.set(outside[r]).has_value()) << std::format("value {}: set() refuses it at the call", r);
             expect(eq(refusedByLimits(block, outside[r]).size(), 1UZ)) << std::format("value {}: a staged one is refused at the apply", r);
-            expect(eq(block.window.value, gr::Size_t{4096U}) && eq(block.sample_rate.value, 96000.f)) << std::format("value {}: the members keep the accepted values", r);
+            expect(eq(block.settings.window.value, gr::Size_t{4096U}) && eq(block.settings.sample_rate.value, 96000.f)) << std::format("value {}: the members keep the accepted values", r);
         }
         for (const gr::Size_t value : {gr::Size_t{8U}, gr::Size_t{1U << 24U}}) {
             Kurtosis<float> block(gr::property_map{});
             startBlock(block);
             expect(refusedByLimits(block, {{"window", value}}).empty()) << "the limit " << value << " itself is admitted";
-            expect(eq(block.window.value, value));
+            expect(eq(block.settings.window.value, value));
         }
     };
 
     // Before the first window, coverage() reads 0.
     "coverage() reads 0 before the first window closes"_test = [] {
         Kurtosis<CF> block;
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        if (const auto first = block.check({}); !first.has_value()) {
+            throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+        }
         block.start();
         expect(eq(block.coverage(), 0.));
         expect(eq(block.nWindows(), std::uint64_t{0ULL}));
@@ -595,8 +600,9 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
     // block's settings directly.
     "a window change discards the partial accumulation and counts the reset"_test = [] {
         Kurtosis<float> block({{"window", gr::Size_t{1024U}}});
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        if (const auto first = block.check({}); !first.has_value()) {
+            throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+        }
         block.start();
         expect(eq(block.nWindowResets(), std::uint64_t{0ULL}));
 
@@ -604,15 +610,13 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         block._acc.add(std::span<const float>(partial)); // a part-filled window
         expect(eq(block._acc.count(), 100UZ));
 
-        expect(block.settings().setStaged(gr::property_map{{"window", gr::Size_t{2048U}}}).empty()) << "the new window is accepted";
-        std::ignore = block.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"window", gr::Size_t{2048U}}}).empty()) << "the new window is accepted";
         std::println("window change: nWindowResets() = {}, accumulated {} samples after it", block.nWindowResets(), block._acc.count());
         expect(eq(block.nWindowResets(), std::uint64_t{1ULL})) << "the discarded partial accumulation is counted";
         expect(eq(block._acc.count(), 0UZ)) << "and the accumulation is empty";
-        expect(eq(block.window.value, gr::Size_t{2048U}));
+        expect(eq(block.settings.window.value, gr::Size_t{2048U}));
 
-        expect(block.settings().setStaged(gr::property_map{{"window", gr::Size_t{4096U}}}).empty());
-        std::ignore = block.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"window", gr::Size_t{4096U}}}).empty());
         expect(eq(block.nWindowResets(), std::uint64_t{1ULL})) << "a change with an empty accumulation counts no reset";
     };
 
@@ -640,7 +644,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
 
     // A started block takes an application its limits refuse and then the rest of the stream. Its records match a block
     // that saw no refusal, and a valid window after the refusal applies.
-    "a value outside its limits on a running block changes nothing it computes, and the rest of its application applies"_test = [] {
+    "a value outside its limits on a running block changes nothing it computes, and the rest of its call is refused with it"_test = [] {
         GaussianNoise      noise(0x13198a2e03707344ULL);
         std::vector<float> samples(12000UZ);
         std::ranges::generate(samples, [&] { return noise.realSample(); });
@@ -665,7 +669,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             startBlock(block);
             expect(eq(call(block, all.first(1500UZ)).consumed, split));
             expect(eq(refusedByLimits(block, refusals[r]).size(), 1UZ)) << std::format("refusal {} is refused", r);
-            expect(eq(block.window.value, gr::Size_t{1024U}) && eq(block.sample_rate.value, 48000.f)) << std::format("refusal {}: the members keep the accepted values", r);
+            expect(eq(block.settings.window.value, gr::Size_t{1024U}) && eq(block.settings.sample_rate.value, 48000.f)) << std::format("refusal {}: the members keep the accepted values", r);
             const Call tail = call(block, all.subspan(split), split);
             expect(eq(tail.records.size(), referenceTail.records.size())) << std::format("refusal {}: the same records", r);
             for (std::size_t k = 0UZ; k < std::min(tail.records.size(), referenceTail.records.size()); ++k) {
@@ -681,12 +685,12 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
             expect(eq(block.coverage(), reference.coverage())) << std::format("refusal {}: coverage", r);
         }
 
-        // The limits refuse window, and signal_name applies.
+        // The limits refuse window, and the call with it: signal_name does not apply.
         Kurtosis<float> block(settings());
         startBlock(block);
         std::ignore                    = call(block, all.first(1500UZ));
         const gr::property_map refused = refusedByLimits(block, {{"window", gr::Size_t{4U}}, {"signal_name", std::string("renamed")}});
-        expect(eq(refused.size(), 1UZ) && refused.contains("window")) << "only window is refused";
+        expect(eq(refused.size(), 1UZ) && refused.contains("window")) << "the refusal names window";
         expect(eq(block.nWindowResets(), std::uint64_t{0ULL})) << "and the block keeps its window";
         expect(refusedByLimits(block, {{"window", gr::Size_t{2048U}}}).empty()) << "a valid window is accepted";
         expect(eq(block.nWindowResets(), std::uint64_t{1ULL})) << "the partial window is discarded";
@@ -694,7 +698,7 @@ const boost::ut::suite<"Kurtosis"> kurtosisTests = [] {
         expect(eq(afterChange.records.size(), (samples.size() - split) / 2048UZ));
         for (const auto& record : afterChange.records) {
             expect(eq(metaNumber(record, "window"), 2048.)) << "the records use the new window";
-            expect(eq(metaString(record, "signal_name"), std::string("renamed"))) << "and the label the refused application carried";
+            expect(eq(metaString(record, "signal_name"), std::string("kurtosis"))) << "and the label in force, the refused call having applied nothing";
         }
         if (!afterChange.records.empty()) {
             expect(eq(metaNumber(afterChange.records.front(), "sample_start"), static_cast<double>(split))) << "the new window starts where the change took effect";

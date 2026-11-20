@@ -22,3 +22,7 @@ target_link_libraries(qa_PolarizationCombiner PRIVATE gnuradio4::gr-measurement 
 add_ut_test(qa_Autocorrelation)
 gr_pin_test_optimization(qa_Autocorrelation -O2)
 target_link_libraries(qa_Autocorrelation PRIVATE gnuradio4::gr-measurement gnuradio4::gr-testing)
+
+add_ut_test(qa_MeasurementSettingsInit)
+gr_pin_test_optimization(qa_MeasurementSettingsInit -O2)
+target_link_libraries(qa_MeasurementSettingsInit PRIVATE gnuradio4::gr-measurement gnuradio4::gr-testing)

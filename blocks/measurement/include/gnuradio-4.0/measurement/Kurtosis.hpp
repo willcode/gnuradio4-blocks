@@ -31,17 +31,6 @@ namespace gr::blocks::measurement {
 namespace detail {
 inline constexpr gr::Size_t kMinKurtosisWindow = 8U;
 inline constexpr gr::Size_t kMaxKurtosisWindow = 1U << 24U;
-
-/// @brief The validator of `sample_rate`: true above 0.
-inline constexpr auto kKurtosisSampleRatePositive = [](float value) { return value > 0.f; };
-
-/// @brief The settings `Kurtosis` computes on, as the applications it accepted left them.
-struct KurtosisSettings {
-    gr::Size_t  window{};
-    float       sampleRate{};
-    bool        emitRecords{};
-    std::string signalName{};
-};
 } // namespace detail
 
 GR_REGISTER_BLOCK(gr::blocks::measurement::Kurtosis, [T], [ float, std::complex<float> ])
@@ -85,6 +74,8 @@ The block is a sink. Every `window` samples it reports `excess_kurtosis`, `norma
 `excess_kurtosis` is 0 for a zero-mean Gaussian of the input's domain. The block keeps the latest figures for polling
 and emits one `DataSet<float>` record per window when `emit_records` is set. An all-zero window reads zero, and its
 record has `valid` false. It passes no input tag on.
+
+With `emit_records`, the block publishes one DataSet<float> record per window, its metadata labeled with `signal_name`.
 )"">;
 
     static constexpr bool kComplexDomain = std::same_as<T, std::complex<float>>;
@@ -92,12 +83,16 @@ record has `valid` false. It passes no input tag on.
     PortIn<T>                                in;
     PortOut<DataSet<float>, Async, Optional> measurements;
 
-    Annotated<gr::Size_t, "window", Visible, Doc<"samples per reading, 8 to 2^24">, Limits<detail::kMinKurtosisWindow, detail::kMaxKurtosisWindow>>                                 window       = 4096U;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"input sample rate, positive and finite">, Limits<0.f, std::numeric_limits<float>::max(), detail::kKurtosisSampleRatePositive>> sample_rate  = 96000.f;
-    Annotated<bool, "emit_records", Visible, Doc<"publish one DataSet<float> record per window">>                                                                                   emit_records = true;
-    Annotated<std::string, "signal_name", Doc<"label written to each record's metadata">>                                                                                           signal_name  = std::string("kurtosis");
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"samples per reading">, Limits<Min<detail::kMinKurtosisWindow>, Max<detail::kMaxKurtosisWindow>>> window       = 4096U;
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                                                                  sample_rate  = 96000.f;
+        Annotated<bool, Visible, Doc<"record output">>                                                                                       emit_records = true;
+        Annotated<std::string, Doc<"signal name">>                                                                                           signal_name  = std::string("kurtosis");
 
-    GR_MAKE_REFLECTABLE(Kurtosis, in, measurements, window, sample_rate, emit_records, signal_name);
+        GR_MAKE_REFLECTABLE(Settings, window, sample_rate, emit_records, signal_name);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Kurtosis, in, measurements, settings);
 
     gr::measurement::KurtosisAccumulator<T> _acc{};
     gr::measurement::MeasurementSlot<4UZ>   _slot{}; ///< excess_kurtosis, normalized_fourth_moment, mean_power, coverage
@@ -113,8 +108,6 @@ record has `valid` false. It passes no input tag on.
     std::atomic<std::uint64_t> _nWindowResets{0ULL};
     std::atomic<std::uint64_t> _nDroppedSampleTags{0ULL};
 
-    detail::KurtosisSettings _accepted{.window = window.value, .sampleRate = sample_rate.value, .emitRecords = emit_records.value, .signalName = signal_name.value}; ///< the settings the work thread reads
-
     std::uint64_t               _streamAt{0ULL};        ///< samples taken since `start()`
     std::uint64_t               _windowStartAt{0ULL};   ///< the position of the first sample of the window now filling
     bool                        _flushed{false};        ///< the end-of-stream flush has run
@@ -122,31 +115,17 @@ record has `valid` false. It passes no input tag on.
     std::uint64_t               _droppedInWindow{0ULL}; ///< samples reported missing in the window now filling
     std::vector<DataSet<float>> _pending{};             ///< records built at a window's close and not yet published
 
-    /// @brief Accepts the keys @p newSettings names. A new window discards the partial window.
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const auto               moved = [&newSettings](std::string_view key) { return newSettings.contains(key); };
-        detail::KurtosisSettings next  = _accepted;
-        if (moved("window")) {
-            next.window = window.value;
+    /// @brief A new window discards the partial window.
+    void applySettings(const Settings& s) {
+        if (!s.window.changed()) {
+            return;
         }
-        if (moved("sample_rate")) {
-            next.sampleRate = sample_rate.value;
+        if (_acc.count() > 0UZ) {
+            _nWindowResets.fetch_add(1ULL, std::memory_order_relaxed);
         }
-        if (moved("emit_records")) {
-            next.emitRecords = emit_records.value;
-        }
-        if (moved("signal_name")) {
-            next.signalName = signal_name.value;
-        }
-        if (next.window != _accepted.window) {
-            if (_acc.count() > 0UZ) {
-                _nWindowResets.fetch_add(1ULL, std::memory_order_relaxed);
-            }
-            _acc.reset();
-            _windowStartAt   = _streamAt;
-            _droppedInWindow = 0ULL;
-        }
-        _accepted = std::move(next);
+        _acc.reset();
+        _windowStartAt   = _streamAt;
+        _droppedInWindow = 0ULL;
     }
 
     /// @brief Clears the window and the counters.
@@ -183,7 +162,7 @@ record has `valid` false. It passes no input tag on.
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         const std::span<const T> input(inSpan);
-        const bool               wantRecords = _accepted.emitRecords && outSpan.isConnected;
+        const bool               wantRecords = settings.emit_records.value && outSpan.isConnected;
         std::size_t              made        = drain(outSpan, 0UZ);
         const std::size_t        take        = wantRecords ? roomFor(outSpan, made, input.size()) : input.size();
 
@@ -199,7 +178,7 @@ record has `valid` false. It passes no input tag on.
     /// @brief Folds in the trailing samples at the end of the stream and flushes the partial window. The reading
     /// states the sample count it covers.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const bool wantRecords = _accepted.emitRecords && outSpan.isConnected;
+        const bool wantRecords = settings.emit_records.value && outSpan.isConnected;
         scanDroppedTags(inSpan, inSpan.size());
         accumulate(std::span<const T>(inSpan), wantRecords);
         if (!_flushed && _acc.count() > 0UZ) {
@@ -252,7 +231,7 @@ private:
     }
 
     void accumulate(std::span<const T> input, bool wantRecords) {
-        const std::size_t windowSize = static_cast<std::size_t>(_accepted.window);
+        const std::size_t windowSize = static_cast<std::size_t>(settings.window.value);
         std::size_t       at         = 0UZ;
         while (at < input.size()) {
             const std::size_t take = std::min(windowSize - _acc.count(), input.size() - at);
@@ -277,7 +256,7 @@ private:
         if (degenerate) {
             _nDegenerateWindows.fetch_add(1ULL, std::memory_order_relaxed);
         }
-        const double covered = std::min(1., static_cast<double>(nSamples) / static_cast<double>(_accepted.window));
+        const double covered = std::min(1., static_cast<double>(nSamples) / static_cast<double>(settings.window.value));
         _slot.publish({_acc.excess(), _acc.normalized(), _acc.meanPower(), covered}, static_cast<std::uint64_t>(nSamples));
         if (wantRecords) {
             _pending.push_back(makeRecord(nSamples, !degenerate && nSamples >= static_cast<std::size_t>(detail::kMinKurtosisWindow)));
@@ -292,10 +271,10 @@ private:
         }};
         property_map                                          extra{
                                                      {std::pmr::string("n_samples"), pmt::Value(static_cast<std::uint64_t>(nSamples))},
-                                                     {std::pmr::string("window"), pmt::Value(static_cast<std::uint64_t>(_accepted.window))},
+                                                     {std::pmr::string("window"), pmt::Value(static_cast<std::uint64_t>(settings.window.value))},
                                                      {std::pmr::string("input_domain"), pmt::Value(std::string(kComplexDomain ? "complex" : "real"))},
                                                      {std::pmr::string("valid"), pmt::Value(valid)},
-                                                     {std::pmr::string("signal_name"), pmt::Value(_accepted.signalName)},
+                                                     {std::pmr::string("signal_name"), pmt::Value(settings.signal_name.value)},
         };
         if (_droppedInWindow > 0ULL) {
             extra.insert_or_assign(std::pmr::string("n_dropped_samples"), pmt::Value(_droppedInWindow));
@@ -303,7 +282,7 @@ private:
         if (!_acc.finite()) {
             extra.insert_or_assign(std::pmr::string("non_finite"), pmt::Value(true));
         }
-        return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), _accepted.sampleRate, _windowStartAt, std::move(extra));
+        return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), settings.sample_rate.value, _windowStartAt, std::move(extra));
     }
 
     /// @brief The input samples, at most @p offer, this call can take with room for every record they complete. The
@@ -313,7 +292,7 @@ private:
             return offer;
         }
         const std::size_t   free        = outSpan.size() > made + _pending.size() ? outSpan.size() - made - _pending.size() : 0UZ;
-        const std::uint64_t windowSize  = _accepted.window;
+        const std::uint64_t windowSize  = settings.window.value;
         const std::uint64_t accumulated = _acc.count();
         const std::uint64_t untilClose  = windowSize > accumulated ? windowSize - accumulated : std::uint64_t{0};
         const std::uint64_t limit       = offer;

@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/measurement/PolarizationCombiner.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_polcomb {
@@ -269,25 +270,22 @@ template<typename TScheduler>
 
 /// @brief Starts @p block on the settings it was built with.
 void startBlock(PolarizationCombiner& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
 }
 
 /// @brief Returns whether the block or its limits refuse @p settings, staged on a running block.
-[[nodiscard]] bool refuses(PolarizationCombiner& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    try {
-        return !block.settings().applyStagedParameters().failedParameters.empty();
-    } catch (const gr::exception&) {
-        return true;
-    }
-}
+[[nodiscard]] bool refuses(PolarizationCombiner& block, gr::property_map settings) { return !gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings)).empty(); }
 
 /// @brief Stages @p settings on the running block and returns the settings the limits refused.
 [[nodiscard]] gr::property_map refusedByLimits(PolarizationCombiner& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters;
+    gr::property_map refused;
+    for (const gr::settings::Rejection& entry : gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings))) {
+        refused.insert_or_assign(gr::property_map::key_type{entry.key}, entry.reason);
+    }
+    return refused;
 }
 
 /// @brief The outputs and records of a block driven on test spans, the next stream index to offer and the calls made.
@@ -603,9 +601,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         for (std::size_t r = 0UZ; r < outside.size(); ++r) {
             PolarizationCombiner block;
             startBlock(block);
-            expect(throws([&] { std::ignore = block.settings().set(outside[r]); })) << std::format("value {}: settings().set() refuses it at the call", r);
+            expect(!block.set(outside[r]).has_value()) << std::format("value {}: set() refuses it at the call", r);
             expect(eq(refusedByLimits(block, outside[r]).size(), 1UZ)) << std::format("value {}: the limits refuse a staged one", r);
-            expect(eq(block.window.value, gr::Size_t{4096U}) && eq(block.weight_smoothing.value, 0.0) && eq(block.sample_rate.value, 96000.f)) << std::format("value {}: the members keep the accepted values", r);
+            expect(eq(block.settings.window.value, gr::Size_t{4096U}) && eq(block.settings.weight_smoothing.value, 0.0) && eq(block.settings.sample_rate.value, 96000.f)) << std::format("value {}: the members keep the accepted values", r);
         }
         PolarizationCombiner floor;
         startBlock(floor);
@@ -613,8 +611,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
 
         const auto staged = [](gr::property_map settings) {
             PolarizationCombiner block(std::move(settings));
-            block.settings().init();
-            std::ignore = block.settings().applyStagedParameters();
+            if (const auto first = block.check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
         };
         expect(throws([&] { staged({{"mode", std::string("diversity")}}); })) << "mode takes 'mrc' or 'selection'";
         expect(throws([&] { staged({{"normalize", std::string("unit_power")}}); })) << "normalize takes 'unit_noise' or 'unit_signal'";
@@ -637,7 +636,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             auto&     block = graph.emplaceBlock<PolarizationCombiner>({{"window", gr::Size_t{kWindow}}});
             auto&     outS  = graph.emplaceBlock<Collector<CF>>();
             auto&     recS  = graph.emplaceBlock<RecordSink>();
-            block.settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}});
+            boost::ut::expect(block.setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}}).has_value());
             src0.samples     = b.r0;
             src0.burst       = 512UZ;
             src0.settingsTag = {{gr::tag::SAMPLE_RATE.key(), rate}};
@@ -665,7 +664,7 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
             outcome.completed = running.get();
             outcome.out       = outS.items.size();
             outcome.records   = std::move(recS.records);
-            outcome.member    = block.sample_rate.value;
+            outcome.member    = block.settings.sample_rate.value;
             return outcome;
         };
 
@@ -827,8 +826,9 @@ const boost::ut::suite<"PolarizationCombiner"> polarizationCombinerTests = [] {
         // A graph run ends with the end-of-stream flush, which sets the readers. The readers before any sample are
         // read on a started block alone.
         PolarizationCombiner block;
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        if (const auto first = block.check({}); !first.has_value()) {
+            throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+        }
         block.start();
         expect(eq(block.coverage(), 0.));
         expect(eq(block.relativePhase(), 0.));

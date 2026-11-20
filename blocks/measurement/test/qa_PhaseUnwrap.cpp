@@ -22,6 +22,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 #include <gnuradio-4.0/measurement/PhaseUnwrap.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_unwrap {
@@ -125,7 +126,7 @@ struct Scene {
     for (const auto& entry : scene.settingsTag) {
         couplings.insert_or_assign(entry.first, gr::pmt::Value(std::string(entry.first)));
     }
-    block.settings().setTagCouplings(couplings);
+    boost::ut::expect(block.setTagCouplings(couplings).has_value());
     auto& cyclesSink = graph.emplaceBlock<Collector<std::int64_t>>();
     auto& phaseSink  = graph.emplaceBlock<Collector<float>>();
 
@@ -149,7 +150,7 @@ struct Scene {
 
     Run result;
     result.completed        = completed;
-    result.maxStepFraction  = block.max_step_fraction.value;
+    result.maxStepFraction  = block.settings.max_step_fraction.value;
     result.cycles           = std::move(cyclesSink.items);
     result.phase            = std::move(phaseSink.items);
     result.cycleTags        = std::move(cyclesSink.tags);
@@ -190,8 +191,9 @@ struct Scene {
 
 /// @brief Applies the settings @p block was built with and starts it.
 void startBlock(PhaseUnwrap& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
 }
 
@@ -207,19 +209,15 @@ std::size_t drive(PhaseUnwrap& block, std::span<const CF> in, std::size_t at, st
 }
 
 /// @brief Returns whether the block or the limits refuse @p settings, staged on a running block and applied.
-[[nodiscard]] bool refuses(PhaseUnwrap& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    try {
-        return !block.settings().applyStagedParameters().failedParameters.empty();
-    } catch (const gr::exception&) {
-        return true;
-    }
-}
+[[nodiscard]] bool refuses(PhaseUnwrap& block, gr::property_map settings) { return !gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings)).empty(); }
 
-/// @brief Stages @p settings on a running block and applies them. Returns the settings the limits refused.
+/// @brief Stages @p settings on a running block and applies them. Returns each key the PhaseUnwrap block refused or failed, with its reason.
 [[nodiscard]] gr::property_map refusedByLimits(PhaseUnwrap& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters;
+    gr::property_map refused;
+    for (const gr::settings::Rejection& entry : gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings))) {
+        refused.insert_or_assign(gr::property_map::key_type{entry.key}, entry.reason);
+    }
+    return refused;
 }
 
 /// @brief Wraps to `[-pi, pi)`.
@@ -340,8 +338,9 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
 
     "the count reads 0 before any sample"_test = [] {
         PhaseUnwrap block;
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        if (const auto first = block.check({}); !first.has_value()) {
+            throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+        }
         block.start();
         expect(eq(block._unwrapper.cycles(), std::int64_t{0LL}));
     };
@@ -384,15 +383,14 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         for (const double outside : {0.0, 1.5, std::numeric_limits<double>::quiet_NaN()}) {
             PhaseUnwrap block;
             startBlock(block);
-            expect(throws([&] { std::ignore = block.settings().set({{"max_step_fraction", outside}}); })) << "settings().set() refuses " << outside << " at the call";
+            expect(!block.set({{"max_step_fraction", outside}}).has_value()) << "set() refuses " << outside << " at the call";
             expect(refusedByLimits(block, {{"max_step_fraction", outside}}).contains("max_step_fraction")) << "the limits refuse a staged " << outside;
-            expect(eq(block.max_step_fraction.value, 0.9)) << "and the member keeps the accepted value";
+            expect(eq(block.settings.max_step_fraction.value, 0.9)) << "and the member keeps the accepted value";
         }
         PhaseUnwrap block;
         startBlock(block);
         expect(refusedByLimits(block, {{"max_step_fraction", 1.0}}).empty()) << "one is accepted";
-        std::ignore = block.settings().setStaged({{"origin", std::string("elsewhere")}});
-        expect(throws([&] { std::ignore = block.settings().applyStagedParameters(); })) << "the block throws for an origin outside 'first_sample' and 'zero'";
+        expect(refusedByLimits(block, {{"origin", std::string("elsewhere")}}).contains("origin")) << "the block fails an origin outside 'first_sample' and 'zero'";
 
         // 0.42 cycles per sample steps by 0.84*pi, below the default 0.9 and above 0.8.
         constexpr std::size_t kTotal = 2000UZ;
@@ -411,8 +409,9 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
     // A change of origin sets the count to zero and sets the origin again. The test drives the block directly.
     "an origin change resets the count and adds one to nResets()"_test = [] {
         PhaseUnwrap block;
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        if (const auto first = block.check({}); !first.has_value()) {
+            throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+        }
         block.start();
 
         constexpr std::size_t     kSamples = 5000UZ; // about 500 turns at 0.1 cycles per sample
@@ -428,15 +427,13 @@ const boost::ut::suite<"PhaseUnwrap"> phaseUnwrapTests = [] {
         expect(block._unwrapper.cycles() > std::int64_t{400LL}) << "about 500 turns have run up";
         expect(eq(block.nResets(), std::uint64_t{0ULL}));
 
-        expect(block.settings().setStaged(gr::property_map{{"origin", std::string("zero")}}).empty()) << "the new origin is accepted";
-        std::ignore = block.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"origin", std::string("zero")}}).empty()) << "the new origin is accepted";
         expect(eq(block.nResets(), std::uint64_t{1ULL})) << "an origin change is one reset";
         expect(eq(block._unwrapper.cycles(), std::int64_t{0LL})) << "the count returns to zero";
         expect(!block._unwrapper.started()) << "the next sample sets the origin";
 
-        expect(block.settings().setStaged(gr::property_map{{"origin", std::string("zero")}}).empty());
-        std::ignore = block.settings().applyStagedParameters();
-        expect(eq(block.nResets(), std::uint64_t{1ULL})) << "staging the same origin again is not a change";
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"origin", std::string("zero")}}).empty());
+        expect(eq(block.nResets(), std::uint64_t{1ULL})) << "setting the same origin again is not a change";
     };
 
     // Two blocks take the same stream. One refuses an application halfway, and every output and counter of the two
