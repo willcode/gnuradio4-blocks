@@ -164,7 +164,7 @@ void expectBlocksUnderTheirIds(const gr::Graph& graph, std::string_view text) {
     expect(eq(gr::globalPluginLoader().registry().typeName(*found), std::string_view{"gr::blocks::basic::DataSink<float32>"})) << std::format("block '{}'", name) << fatal;
 
     auto* sink = static_cast<DataSink<float>*>((*found)->raw());
-    expect(eq(std::string_view{sink->signal_name.value}, signalName)) << std::format("the signal name of '{}'", name);
+    expect(eq(std::string_view{sink->settings.signal_name.value}, signalName)) << std::format("the signal name of '{}'", name);
     return sink->getStreamingPoller({.overflowPolicy = gr::blocks::basic::OverflowPolicy::Drop});
 }
 
@@ -174,7 +174,7 @@ void expectBlocksUnderTheirIds(const gr::Graph& graph, std::string_view text) {
     if (found == graph.blocks().end()) {
         return {};
     }
-    const gr::property_map couplings = (*found)->settings().tagCouplings();
+    const gr::property_map couplings = (*found)->tagCouplings();
     const auto             it        = couplings.find(gr::property_map::key_type(setting));
     return it == couplings.end() ? std::string{} : it->second.value_or(std::string{});
 }
@@ -200,7 +200,7 @@ void expectBlocksUnderTheirIds(const gr::Graph& graph, std::string_view text) {
 }
 
 /// @brief The `sample_rate` @p block holds, or 0 where it holds none.
-[[nodiscard]] float sampleRateOf(gr::BlockModel& block) { return block.settings().get(std::string(gr::tag::SAMPLE_RATE.name())).value_or(gr::pmt::Value(0.0f)).value_or(0.0f); }
+[[nodiscard]] float sampleRateOf(gr::BlockModel& block) { return block.get<float>(gr::tag::SAMPLE_RATE.name()).value_or(0.0f); }
 
 } // namespace
 
