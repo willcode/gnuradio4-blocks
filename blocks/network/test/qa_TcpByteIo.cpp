@@ -27,6 +27,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/network/TcpByteIo.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // A transport is only proved by a peer it did not build, so the second-peer refusal below meets the sink or source
 // at a raw socket rather than at another instance of the block under test. The byte-identity criterion, in contrast,
@@ -372,17 +373,12 @@ template<typename F>
 }
 
 // TcpByteSink/TcpByteSource hold a mutex, a condition_variable and the IoThreadGuard directly, so they are neither
-// copyable nor movable: a settings check is done in place rather than through a return-by-value helper.
+// copyable nor movable: a settings check is done in place rather than through a return-by-value helper. A rule on the
+// values refuses the block at its first use.
 template<typename TBlock>
-[[nodiscard]] bool stagingThrows(gr::property_map settings) {
-    try {
-        TBlock block(std::move(settings));
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
-        return false;
-    } catch (const gr::exception&) {
-        return true;
-    }
+[[nodiscard]] bool refusedAtCall(gr::property_map settings) {
+    TBlock block(std::move(settings));
+    return !block.check({}).has_value();
 }
 
 /// @brief A seeded byte stream: every value 0x00-0xFF first, then runs of the two SLIP-significant values this layer
@@ -413,20 +409,20 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
     using namespace boost::ut;
 
     "the settings that gate start() are checked before any socket opens"_test = [] {
-        expect(stagingThrows<TcpByteSink>({{"queue_bytes", gr::Size_t{4096U}}})) << "endpoint has no default";
-        expect(stagingThrows<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}})) << "queue_bytes has no default";
-        expect(stagingThrows<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"overflow", std::string("sideways")}})) << "overflow names one of two values";
-        expect(stagingThrows<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{0U}}})) << "a zero reconnect interval spends the thread on nothing else";
-        expect(stagingThrows<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"connect_timeout_ms", gr::Size_t{0U}}})) << "a zero connect timeout abandons every attempt before it can be answered";
-        expect(!stagingThrows<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}}));
+        expect(refusedAtCall<TcpByteSink>({{"queue_bytes", gr::Size_t{4096U}}})) << "endpoint has no default";
+        expect(refusedAtCall<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}})) << "queue_bytes has no default";
+        expect(refusedAtCall<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"overflow", std::string("sideways")}})) << "overflow names one of two values";
+        expect(refusedAtCall<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{0U}}})) << "a zero reconnect interval spends the thread on nothing else";
+        expect(refusedAtCall<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"connect_timeout_ms", gr::Size_t{0U}}})) << "a zero connect timeout abandons every attempt before it can be answered";
+        expect(!refusedAtCall<TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}}));
 
-        expect(stagingThrows<TcpByteSource>({{"queue_bytes", gr::Size_t{4096U}}})) << "endpoint has no default";
-        expect(stagingThrows<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}})) << "queue_bytes has no default";
-        expect(stagingThrows<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"overflow", std::string("sideways")}})) << "overflow names one of two values";
-        expect(stagingThrows<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{0U}}})) << "a zero reconnect interval spends the thread on nothing else";
-        expect(stagingThrows<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"connect_timeout_ms", gr::Size_t{0U}}})) << "a zero connect timeout abandons every attempt before it can be answered";
-        expect(!stagingThrows<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}}));
-        expect(!stagingThrows<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"idle_timeout_ms", gr::Size_t{0U}}})) << "an idle deadline of 0 disables it";
+        expect(refusedAtCall<TcpByteSource>({{"queue_bytes", gr::Size_t{4096U}}})) << "endpoint has no default";
+        expect(refusedAtCall<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}})) << "queue_bytes has no default";
+        expect(refusedAtCall<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"overflow", std::string("sideways")}})) << "overflow names one of two values";
+        expect(refusedAtCall<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{0U}}})) << "a zero reconnect interval spends the thread on nothing else";
+        expect(refusedAtCall<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"connect_timeout_ms", gr::Size_t{0U}}})) << "a zero connect timeout abandons every attempt before it can be answered";
+        expect(!refusedAtCall<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}}));
+        expect(!refusedAtCall<TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}, {"idle_timeout_ms", gr::Size_t{0U}}})) << "an idle deadline of 0 disables it";
     };
 
     // Criterion 8: the byte transport is transparent, in either role assignment, including a second peer refused.
@@ -635,8 +631,7 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
 
         // driven without a graph, so nothing drains the receive queue and `overflow` is the only thing acting on it
         TcpByteSource source({{"endpoint", endpointFor(port)}, {"bind", true}, {"queue_bytes", gr::Size_t{static_cast<std::uint32_t>(kQueueBytes)}}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         RawStream peer;
@@ -774,8 +769,7 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
 
         {
             TcpByteSource source({{"endpoint", endpointFor(blocked.port)}, {"bind", false}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{10U}}, {"connect_timeout_ms", gr::Size_t{60000U}}});
-            source.settings().init();
-            std::ignore = source.settings().applyStagedParameters();
+            boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
             source.start();
 
             std::vector<std::uint16_t> first;
@@ -797,8 +791,7 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
 
         // and the deadline does end it: a short one closes the socket and the next attempt is a different socket
         TcpByteSource impatient({{"endpoint", endpointFor(blocked.port)}, {"bind", false}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{10U}}, {"connect_timeout_ms", gr::Size_t{150U}}});
-        impatient.settings().init();
-        std::ignore = impatient.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(impatient.check({}).has_value()));
         impatient.start();
 
         std::vector<std::uint16_t> initial;
@@ -828,8 +821,7 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
         const std::uint16_t port = ::ntohs(address.sin_port);
 
         TcpByteSource source({{"endpoint", endpointFor(port)}, {"bind", false}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{10U}}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         expect(waitFor([listener] {
@@ -856,8 +848,7 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
 
         // driven without a graph, so nothing drains the receive queue and the read loop meets a full one
         TcpByteSource source({{"endpoint", endpointFor(port)}, {"bind", true}, {"overflow", std::string("backpressure")}, {"queue_bytes", gr::Size_t{static_cast<std::uint32_t>(kQueueBytes)}}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         RawStream peer;
@@ -954,8 +945,7 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
         const std::uint16_t port = ::ntohs(address.sin_port);
 
         TcpByteSource source({{"endpoint", endpointFor(port)}, {"bind", false}, {"queue_bytes", gr::Size_t{4096U}}, {"reconnect_ms", gr::Size_t{10U}}, {"idle_timeout_ms", gr::Size_t{static_cast<std::uint32_t>(kIdle.count())}}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         ::pollfd item{.fd = listener, .events = POLLIN, .revents = 0};
@@ -1002,6 +992,20 @@ const boost::ut::suite<"TcpByteIo"> tcpByteIoTests = [] {
         expect(eq(source.counters().idleDrops, std::uint64_t{0ULL})) << "a peer that sent within every deadline was dropped";
         expect(eq(source.counters().disconnects, std::uint64_t{0ULL}));
         expect(eq(collector.count(), kSends));
+    };
+};
+
+const boost::ut::suite<"network blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "TcpByteSink"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::TcpByteSink>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}}, {{"overflow", std::string("backpressure")}, {"connect_timeout_ms", gr::Size_t{1000U}}});
+        expect(failures.empty()) << report(failures);
+    };
+    "TcpByteSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::TcpByteSource>({{"endpoint", std::string("127.0.0.1:5555")}, {"queue_bytes", gr::Size_t{4096U}}}, {{"overflow", std::string("backpressure")}, {"idle_timeout_ms", gr::Size_t{1000U}}});
+        expect(failures.empty()) << report(failures);
     };
 };
 

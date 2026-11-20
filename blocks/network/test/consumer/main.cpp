@@ -11,5 +11,5 @@
 
 int main() {
     const gr::blocks::network::ZmqPacketSink<std::uint8_t> sink;
-    return sink.endpoint.value.empty() ? 0 : 1;
+    return sink.settings.endpoint.value.empty() ? 0 : 1;
 }

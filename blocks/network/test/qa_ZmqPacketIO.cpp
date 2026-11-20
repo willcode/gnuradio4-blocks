@@ -25,6 +25,7 @@
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/network/ZmqPacketIO.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // A transport is only proved by a peer it did not build. So the assertions below meet the blocks at a socket rather
 // than at a span: a raw ZeroMQ socket in the test stands in for the far process, the golden envelope is compared
@@ -626,13 +627,8 @@ const boost::ut::suite<"ZmqPacketSink"> zmqPacketSinkTests = [] {
 
     "validation and lifecycle"_test = [] {
         const Endpoint endpoint;
-        // the block refuses to start rather than binding to nothing: a block constructed with no settings at all is
-        // never passed through settingsChanged, so start() is the gate that has to hold
-        const auto refuses = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<ZmqPacketSink<std::uint8_t>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        // an empty endpoint holds the block not ready, so no start binds to nothing
+        const auto refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<ZmqPacketSink<std::uint8_t>>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}, {"pattern", std::string("req")}}, "an unknown pattern");
         refuses({{"endpoint", endpoint.uri}, {"overflow", std::string("block")}}, "an unknown overflow policy");
@@ -666,15 +662,13 @@ const boost::ut::suite<"ZmqPacketSink"> zmqPacketSinkTests = [] {
 
         GraphRunner runner(std::move(graph));
         expect(waitFor([&source] { return source._emitted.load() > 0ULL; }));
-        std::string message;
-        try {
-            sink.endpoint.value = other.uri;
-            sink.rebuild();
-        } catch (const gr::exception& error) {
-            message = error.message;
-        }
+        const auto refused = sink.set({{"endpoint", other.uri}}, gr::settings::noWait);
         runner.stop();
-        expect(message.contains("endpoint")) << "a live endpoint change was not refused by name: " << message;
+        expect(!refused.has_value()) << "a live endpoint change was not refused";
+        if (!refused.has_value()) {
+            expect(std::ranges::any_of(refused.error(), [](const gr::settings::Rejection& entry) { return entry.key == "endpoint"; })) << "the refusal names the setting";
+        }
+        expect(eq(sink.settings.endpoint.value, endpoint.uri)) << "the running sink keeps its endpoint";
     };
 
     // A stalled peer must not make teardown unbounded: the queue is discarded, counted, and the graph comes down.
@@ -1170,11 +1164,7 @@ const boost::ut::suite<"ZmqPacketSource"> zmqPacketSourceTests = [] {
 
     "validation and lifecycle"_test = [] {
         const Endpoint endpoint;
-        const auto     refuses = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<ZmqPacketSource<std::uint8_t>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        const auto     refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<ZmqPacketSource<std::uint8_t>>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}, {"max_message_bytes", kBound}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}}, "an unset max_message_bytes");
         refuses({{"endpoint", endpoint.uri}, {"max_message_bytes", static_cast<std::uint64_t>(0)}}, "a zero max_message_bytes");
@@ -1192,18 +1182,18 @@ const boost::ut::suite<"ZmqPacketSource"> zmqPacketSourceTests = [] {
         }
         expect(message.contains("names no transport")) << "the missing-prefix hint is missing: " << message;
 
-        gr::Graph   second;
-        auto&       running = second.emplaceBlock<ZmqPacketSource<std::uint8_t>>({{"endpoint", endpoint.uri}, {"bind", true}, {"pattern", std::string("pull")}, {"max_message_bytes", kBound}});
-        std::string refusal;
-        running.start();
-        try {
-            running.max_message_bytes.value = 4096ULL;
-            running.rebuild();
-        } catch (const gr::exception& error) {
-            refusal = error.message;
+        using gr::lifecycle::State;
+        ZmqPacketSource<std::uint8_t> running({{"endpoint", endpoint.uri}, {"bind", true}, {"pattern", std::string("pull")}, {"max_message_bytes", kBound}});
+        expect(fatal(running.check({}).has_value()));
+        expect(fatal(running.changeStateTo(State::INITIALISED).has_value() && running.changeStateTo(State::RUNNING).has_value())); // start() opens the socket
+        const auto refused = running.set({{"max_message_bytes", std::uint64_t{4096ULL}}}, gr::settings::noWait);
+        expect(!refused.has_value()) << "a live change to a socket setting was not refused";
+        if (!refused.has_value()) {
+            expect(std::ranges::any_of(refused.error(), [](const gr::settings::Rejection& entry) { return entry.key == "max_message_bytes"; })) << "the refusal names the setting";
         }
-        running.stop();
-        expect(refusal.contains("max_message_bytes")) << "a live change to a socket setting was not refused by name: " << refusal;
+        // the reader thread reads the refusal copy's bound, so it too waits for a stop
+        expect(!running.set({{"max_reject_bytes", gr::Size_t{64U}}}, gr::settings::noWait).has_value()) << "a live change to max_reject_bytes was not refused";
+        expect(running.changeStateTo(State::REQUESTED_STOP).has_value() && running.changeStateTo(State::STOPPED).has_value());
     };
 
     // The receive queue keeps the same bound, and states it the way a source states every other loss: the arrival is
@@ -1214,8 +1204,7 @@ const boost::ut::suite<"ZmqPacketSource"> zmqPacketSourceTests = [] {
 
         // driven without a graph, so nothing drains the receive queue and the queue itself is what the test reads
         ZmqPacketSource<std::uint8_t> source({{"endpoint", endpoint.uri}, {"bind", true}, {"pattern", std::string("pull")}, {"max_message_bytes", kBound}, {"queue_bytes", kQueueBytes}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         RawSender                       peer(endpoint.uri);
@@ -1259,6 +1248,22 @@ const boost::ut::suite<"ZmqPacketSource"> zmqPacketSourceTests = [] {
             expect(nothrow([&source] { source.start(); })) << "start" << i;
             expect(nothrow([&source] { source.stop(); })) << "stop" << i;
         }
+    };
+};
+
+// Each block initializes at its defaults and with each setting alone off its default: its check and its hook run at
+// every initialization with every setting changed, before any socket opens.
+const boost::ut::suite<"network blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "ZmqPacketSink"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::ZmqPacketSink<std::uint8_t>>({{"endpoint", std::string("tcp://127.0.0.1:5555")}}, {{"bind", false}, {"pattern", std::string("push")}, {"overflow", std::string("backpressure")}, {"queue_messages", gr::Size_t{8U}}, {"max_message_bytes", std::uint64_t{4096ULL}}});
+        expect(failures.empty()) << report(failures);
+    };
+    "ZmqPacketSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::ZmqPacketSource<std::uint8_t>>({{"endpoint", std::string("tcp://127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{4096ULL}}}, {{"pattern", std::string("pull")}, {"max_reject_bytes", gr::Size_t{64U}}, {"max_tracked_sources", gr::Size_t{2U}}});
+        expect(failures.empty()) << report(failures);
     };
 };
 

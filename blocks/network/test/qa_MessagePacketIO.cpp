@@ -24,6 +24,7 @@
 #include <gnuradio-4.0/YamlPmt.hpp>
 
 #include <gnuradio-4.0/network/MessagePacketIO.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // The blocks are driven here without a scheduler, because what they do is not stream work: the sink's whole job is
 // what happens when the message plane hands it a span, and the source's is what happens when the scheduler calls
@@ -65,8 +66,7 @@ struct Endpoint {
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> started(gr::property_map settings) {
     auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    boost::ut::expect(boost::ut::fatal(block->check({}).has_value()));
     block->start();
     return block;
 }
@@ -197,10 +197,8 @@ const boost::ut::suite<"MessagePacketSink"> messagePacketSinkTests = [] {
 
     "the settings that gate start() are checked before any socket opens"_test = [] {
         const Endpoint endpoint;
-        const auto     refuses = [](gr::property_map settings, std::string_view what) {
-            MessagePacketSink block(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        // a rule on the values, an empty endpoint among them, refuses the block at its first use, before it starts
+        const auto refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<MessagePacketSink>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}, {"pattern", std::string("sub")}}, "a pattern no sink runs");
         refuses({{"endpoint", endpoint.uri}, {"max_message_bytes", std::uint64_t{0ULL}}}, "a zero message bound");
@@ -217,7 +215,7 @@ const boost::ut::suite<"MessagePacketSink"> messagePacketSinkTests = [] {
         gr::Message mine;
         mine.cmd         = gr::message::Command::Get;
         mine.serviceName = sink->unique_name;
-        mine.endpoint    = gr::block::property::kHeartbeat;
+        mine.endpoint    = gr::block::property::kEcho;
         mine.data        = gr::property_map{};
 
         const gr::Message theirs = richMessage("far/endpoint", 0ULL);
@@ -251,6 +249,21 @@ const boost::ut::suite<"MessagePacketSink"> messagePacketSinkTests = [] {
         expect(eq(counted.messagesRejected, std::uint64_t{0ULL})) << "the message is inside max_message_bytes; the queue is what refused it";
         expect(eq(counted.droppedOnOverflow, std::uint64_t{0ULL})) << "nothing queued was shed to make room for what cannot fit";
     };
+
+    // start() alone sizes the send queue and picks its overflow rule, so a running sink refuses a change to them
+    // rather than taking one that does nothing until the next start
+    "a running sink refuses a change to its queue settings"_test = [] {
+        using gr::lifecycle::State;
+        const Endpoint    endpoint;
+        MessagePacketSink sink({{"endpoint", endpoint.uri}, {"pattern", std::string("push")}});
+        expect(fatal(sink.check({}).has_value()));
+        expect(fatal(sink.changeStateTo(State::INITIALISED).has_value() && sink.changeStateTo(State::RUNNING).has_value()));
+        for (const gr::property_map& change : {gr::property_map{{"overflow", std::string("backpressure")}}, gr::property_map{{"queue_messages", gr::Size_t{8U}}}, gr::property_map{{"queue_bytes", std::uint64_t{4096ULL}}}}) {
+            expect(!sink.set(change, gr::settings::noWait).has_value()) << std::format("{} was taken while the sink ran", change.begin()->first);
+        }
+        expect(sink.settings.overflow == gr::blocks::network::Overflow::drop_oldest) << "the running sink keeps its overflow rule";
+        expect(sink.changeStateTo(State::REQUESTED_STOP).has_value() && sink.changeStateTo(State::STOPPED).has_value());
+    };
 };
 
 const boost::ut::suite<"MessagePacketSource"> messagePacketSourceTests = [] {
@@ -258,10 +271,7 @@ const boost::ut::suite<"MessagePacketSource"> messagePacketSourceTests = [] {
 
     "the settings that gate start() are checked before any socket opens"_test = [] {
         const Endpoint endpoint;
-        const auto     refuses = [](gr::property_map settings, std::string_view what) {
-            MessagePacketSource block(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        const auto     refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<MessagePacketSource>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}, {"max_message_bytes", kBound}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}, {"max_message_bytes", kBound}, {"pattern", std::string("pub")}}, "a pattern no source runs");
         refuses({{"endpoint", endpoint.uri}}, "a zero message bound");
@@ -427,6 +437,20 @@ const boost::ut::suite<"MessagePacketSource"> messagePacketSourceTests = [] {
         expect(eq(counted.overQueueBytes, std::uint64_t{1ULL}));
         expect(eq(counted.droppedByBackpressure, std::uint64_t{0ULL})) << "a message that cannot fit is not an overflow";
         expect(eq(counted.messagesRefused, std::uint64_t{0ULL})) << "the message is inside max_message_bytes; the queue is what refused it";
+    };
+};
+
+const boost::ut::suite<"network blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "MessagePacketSink"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::MessagePacketSink>({{"endpoint", std::string("tcp://127.0.0.1:5555")}}, {{"pattern", std::string("push")}, {"overflow", std::string("backpressure")}, {"max_message_bytes", std::uint64_t{4096ULL}}});
+        expect(failures.empty()) << report(failures);
+    };
+    "MessagePacketSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::MessagePacketSource>({{"endpoint", std::string("tcp://127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{4096ULL}}}, {{"pattern", std::string("pull")}, {"queue_messages", gr::Size_t{8U}}});
+        expect(failures.empty()) << report(failures);
     };
 };
 

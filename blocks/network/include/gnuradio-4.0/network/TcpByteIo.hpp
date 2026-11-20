@@ -9,7 +9,9 @@
 #include <cstring>
 #include <expected>
 #include <format>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -34,6 +36,7 @@
 #include <gnuradio-4.0/Port.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/network/ByteRing.hpp>
+#include <gnuradio-4.0/network/Overflow.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
 /**
@@ -317,19 +320,25 @@ At teardown the queue is offered to the peer for one bounded write; whatever the
 end.
 
 The socket is owned end to end by a dedicated I/O thread; `processBulk` only enqueues.
+
+`endpoint` is written 'host:port', such as 127.0.0.1:5555 or [::1]:5555. A sink normally listens. A connection attempt
+unanswered for `connect_timeout_ms` is abandoned and another made.
 )"">;
 
     PortIn<std::uint8_t> in;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default">> endpoint{};
-    Annotated<bool, "bind", Doc<"listen on the endpoint rather than connect to it; a sink normally listens">>                         bind         = true;
-    Annotated<std::string, "overflow", Doc<"'drop_oldest' or 'backpressure', applied when the in-process byte queue is full">>        overflow     = std::string("drop_oldest");
-    Annotated<gr::Size_t, "queue_bytes", Unit<"byte">, Doc<"the in-process byte queue's bound; required, there is no default">>       queue_bytes  = 0U;
-    Annotated<gr::Size_t, "reconnect_ms", Unit<"ms">, Doc<"interval between connection attempts while connecting">>                   reconnect_ms = 100U;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                              endpoint{};
+        Annotated<bool, Doc<"listening endpoint">, StoppedOnly>                                    bind               = true;
+        Annotated<Overflow, Doc<"full-queue policy">, StoppedOnly>                                 overflow           = Overflow::drop_oldest;
+        Annotated<gr::Size_t, Unit<"byte">, Doc<"byte queue size">, StoppedOnly>                   queue_bytes        = 0U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"reconnect interval">, StoppedOnly, Limits<Min<1U>>> reconnect_ms       = 100U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"connect timeout">, StoppedOnly, Limits<Min<1U>>>    connect_timeout_ms = 5000U;
 
-    Annotated<gr::Size_t, "connect_timeout_ms", Unit<"ms">, Doc<"how long one connection attempt may go unanswered before it is abandoned and another made; default 5000">> connect_timeout_ms = 5000U;
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, overflow, queue_bytes, reconnect_ms, connect_timeout_ms);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(TcpByteSink, in, endpoint, bind, overflow, queue_bytes, reconnect_ms, connect_timeout_ms);
+    GR_MAKE_REFLECTABLE(TcpByteSink, in, settings);
 
     // Counted, stated drops and refusals. Plain members, printed once by stop(); nothing here is on the sample path.
     std::uint64_t nBytes        = 0ULL; ///< bytes written whole to a peer
@@ -352,7 +361,6 @@ The socket is owned end to end by a dedicated I/O thread; `processBulk` only enq
     std::size_t   _queueBytes       = 0UZ;
     std::uint32_t _reconnectMs      = 100U;
     std::uint32_t _connectTimeoutMs = 5000U;
-    bool          _backpressure     = false;
     bool          _socketOpen       = false;
     bool          _everConnected    = false;
     std::size_t   _addressCursor    = 0UZ; ///< which resolved address the next connection attempt takes; the I/O thread's alone
@@ -373,10 +381,17 @@ The socket is owned end to end by a dedicated I/O thread; `processBulk` only enq
     };
     IoThreadGuard _ioGuard{this};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.queue_bytes == 0U) {
+            return gr::Refused(s.queue_bytes, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         freezeSocketSettings();
         {
             std::lock_guard lock(_mutex);
@@ -406,15 +421,6 @@ The socket is owned end to end by a dedicated I/O thread; `processBulk` only enq
         report();
     }
 
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange(); // every setting is read once when the socket opens, so nothing is recomputed here
-            return;
-        }
-        _backpressure = overflow.value == "backpressure";
-    }
-
     /// @brief The counters as one set, taken under the lock the I/O thread writes them behind.
     [[nodiscard]] detail::bytesockio::Counters counters() {
         std::lock_guard lock(_mutex);
@@ -427,7 +433,7 @@ The socket is owned end to end by a dedicated I/O thread; `processBulk` only enq
             std::unique_lock lock(_mutex);
             // `backpressure` takes only what fits, so the stall propagates upstream by the framework's own path;
             // `drop_oldest` takes the span whole and the ring sheds the stalest bytes to make room for it
-            consumed = _backpressure ? std::min(inSpan.size(), _ring.capacity() - _ring.size()) : inSpan.size();
+            consumed = settings.overflow == Overflow::backpressure ? std::min(inSpan.size(), _ring.capacity() - _ring.size()) : inSpan.size();
             if (consumed > 0UZ) {
                 const std::size_t held = _ring.size();
                 _ring.push(std::as_bytes(std::span<const std::uint8_t>(inSpan).first(consumed)));
@@ -448,54 +454,12 @@ The socket is owned end to end by a dedicated I/O thread; `processBulk` only enq
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport sink has no default endpoint and will not bind to nothing");
-        }
-        if (overflow.value != "drop_oldest" && overflow.value != "backpressure") {
-            throw gr::exception(std::format("overflow is '{}'; it must be 'drop_oldest' (shed the stalest bytes, count them) or 'backpressure' (consume fewer input items)", overflow.value));
-        }
-        if (queue_bytes.value == 0U) {
-            throw gr::exception("queue_bytes is 0 or unset; the in-process byte queue must hold at least one byte, and the peer's send rate is not the graph's to choose without a stated bound");
-        }
-        if (reconnect_ms.value == 0U) {
-            throw gr::exception("reconnect_ms is 0; a connecting sink would retry without pause and spend the thread on nothing else");
-        }
-        if (connect_timeout_ms.value == 0U) {
-            throw gr::exception("connect_timeout_ms is 0; an attempt abandoned before the peer can answer never reaches one further away than the round trip it allows");
-        }
-    }
-
-    /// @brief Refuse a change to a setting the running socket was built from, naming it.
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        if (endpoint.value != _endpoint) {
-            refuse("endpoint");
-        }
-        if (bind.value != _bind) {
-            refuse("bind");
-        }
-        if ((overflow.value == "backpressure") != _backpressure) {
-            refuse("overflow");
-        }
-        if (static_cast<std::size_t>(queue_bytes.value) != _queueBytes) {
-            refuse("queue_bytes");
-        }
-        if (reconnect_ms.value != _reconnectMs) {
-            refuse("reconnect_ms");
-        }
-        if (connect_timeout_ms.value != _connectTimeoutMs) {
-            refuse("connect_timeout_ms");
-        }
-    }
-
     void freezeSocketSettings() {
-        _endpoint         = endpoint.value;
-        _bind             = bind.value;
-        _backpressure     = overflow.value == "backpressure";
-        _queueBytes       = static_cast<std::size_t>(queue_bytes.value);
-        _reconnectMs      = reconnect_ms.value;
-        _connectTimeoutMs = connect_timeout_ms.value;
+        _endpoint         = settings.endpoint;
+        _bind             = settings.bind;
+        _queueBytes       = settings.queue_bytes;
+        _reconnectMs      = settings.reconnect_ms;
+        _connectTimeoutMs = settings.connect_timeout_ms;
         _addressCursor    = 0UZ;
     }
 
@@ -857,20 +821,26 @@ sporadic producer needs a longer deadline or 0. A connection the source made is 
 connection carries `SO_KEEPALIVE`: a probe after 30 s of silence, then two more 10 s apart. The connection ends when
 the third probe goes unanswered. A host that lost power leaves a half-open connection, and keepalive ends it about a
 minute later. A platform without those timer options keeps the system's own.
+
+`endpoint` is written 'host:port', such as 127.0.0.1:5555 or [::1]:5555. A source normally connects. A connection
+attempt unanswered for `connect_timeout_ms` is abandoned and another made.
 )"">;
 
     PortOut<std::uint8_t> out;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default">> endpoint{};
-    Annotated<bool, "bind", Doc<"listen on the endpoint rather than connect to it; a source normally connects">>                      bind         = false;
-    Annotated<std::string, "overflow", Doc<"'drop_oldest' or 'backpressure', applied when the in-process byte queue is full">>        overflow     = std::string("drop_oldest");
-    Annotated<gr::Size_t, "queue_bytes", Unit<"byte">, Doc<"the in-process byte queue's bound; required, there is no default">>       queue_bytes  = 0U;
-    Annotated<gr::Size_t, "reconnect_ms", Unit<"ms">, Doc<"interval between connection attempts while connecting">>                   reconnect_ms = 100U;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                              endpoint{};
+        Annotated<bool, Doc<"listening endpoint">, StoppedOnly>                                    bind               = false;
+        Annotated<Overflow, Doc<"full-queue policy">, StoppedOnly>                                 overflow           = Overflow::drop_oldest;
+        Annotated<gr::Size_t, Unit<"byte">, Doc<"byte queue size">, StoppedOnly>                   queue_bytes        = 0U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"reconnect interval">, StoppedOnly, Limits<Min<1U>>> reconnect_ms       = 100U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"connect timeout">, StoppedOnly, Limits<Min<1U>>>    connect_timeout_ms = 5000U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"idle timeout (0 = off)">, StoppedOnly>              idle_timeout_ms    = 30000U;
 
-    Annotated<gr::Size_t, "connect_timeout_ms", Unit<"ms">, Doc<"how long one connection attempt may go unanswered before it is abandoned and another made; default 5000">> connect_timeout_ms = 5000U;
-    Annotated<gr::Size_t, "idle_timeout_ms", Unit<"ms">, Doc<"time since the last byte before the peer is dropped; 0 disables">>                                            idle_timeout_ms    = 30000U;
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, overflow, queue_bytes, reconnect_ms, connect_timeout_ms, idle_timeout_ms);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(TcpByteSource, out, endpoint, bind, overflow, queue_bytes, reconnect_ms, connect_timeout_ms, idle_timeout_ms);
+    GR_MAKE_REFLECTABLE(TcpByteSource, out, settings);
 
     std::uint64_t nBytes            = 0ULL; ///< bytes taken off the socket
     std::uint64_t nBytesDropped     = 0ULL; ///< queued bytes discarded on overflow
@@ -897,7 +867,6 @@ minute later. A platform without those timer options keeps the system's own.
     std::uint32_t _reconnectMs      = 100U;
     std::uint32_t _connectTimeoutMs = 5000U;
     std::uint32_t _idleTimeoutMs    = 30000U;
-    bool          _backpressure     = false;
     bool          _socketOpen       = false;
     bool          _everConnected    = false;
     std::size_t   _addressCursor    = 0UZ; ///< which resolved address the next connection attempt takes; the I/O thread's alone
@@ -917,10 +886,17 @@ minute later. A platform without those timer options keeps the system's own.
     };
     IoThreadGuard _ioGuard{this};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.queue_bytes == 0U) {
+            return gr::Refused(s.queue_bytes, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         freezeSocketSettings();
         {
             std::lock_guard lock(_mutex);
@@ -951,15 +927,6 @@ minute later. A platform without those timer options keeps the system's own.
         requestStopAndJoin();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange(); // every setting is read once when the socket opens, so nothing is recomputed here
-            return;
-        }
-        _backpressure = overflow.value == "backpressure";
     }
 
     /// @brief The counters as one set, taken under the lock the I/O thread writes them behind.
@@ -997,57 +964,13 @@ minute later. A platform without those timer options keeps the system's own.
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport source has no default endpoint and will not connect to nothing");
-        }
-        if (overflow.value != "drop_oldest" && overflow.value != "backpressure") {
-            throw gr::exception(std::format("overflow is '{}'; it must be 'drop_oldest' (shed the stalest bytes, count them) or 'backpressure' (stop reading the socket until there is room)", overflow.value));
-        }
-        if (queue_bytes.value == 0U) {
-            throw gr::exception("queue_bytes is 0 or unset; a byte stream states no lengths of its own, so a source must state a queue bound before a peer's send rate sizes anything");
-        }
-        if (reconnect_ms.value == 0U) {
-            throw gr::exception("reconnect_ms is 0; a connecting source would retry without pause and spend the thread on nothing else");
-        }
-        if (connect_timeout_ms.value == 0U) {
-            throw gr::exception("connect_timeout_ms is 0; an attempt abandoned before the peer can answer never reaches one further away than the round trip it allows");
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        if (endpoint.value != _endpoint) {
-            refuse("endpoint");
-        }
-        if (bind.value != _bind) {
-            refuse("bind");
-        }
-        if ((overflow.value == "backpressure") != _backpressure) {
-            refuse("overflow");
-        }
-        if (static_cast<std::size_t>(queue_bytes.value) != _queueBytes) {
-            refuse("queue_bytes");
-        }
-        if (reconnect_ms.value != _reconnectMs) {
-            refuse("reconnect_ms");
-        }
-        if (connect_timeout_ms.value != _connectTimeoutMs) {
-            refuse("connect_timeout_ms");
-        }
-        if (idle_timeout_ms.value != _idleTimeoutMs) {
-            refuse("idle_timeout_ms");
-        }
-    }
-
     void freezeSocketSettings() {
-        _endpoint         = endpoint.value;
-        _bind             = bind.value;
-        _backpressure     = overflow.value == "backpressure";
-        _queueBytes       = static_cast<std::size_t>(queue_bytes.value);
-        _reconnectMs      = reconnect_ms.value;
-        _connectTimeoutMs = connect_timeout_ms.value;
-        _idleTimeoutMs    = idle_timeout_ms.value;
+        _endpoint         = settings.endpoint;
+        _bind             = settings.bind;
+        _queueBytes       = settings.queue_bytes;
+        _reconnectMs      = settings.reconnect_ms;
+        _connectTimeoutMs = settings.connect_timeout_ms;
+        _idleTimeoutMs    = settings.idle_timeout_ms;
         _addressCursor    = 0UZ;
     }
 
@@ -1235,9 +1158,10 @@ private:
             }
 
             // under backpressure the read is cut to the room the queue has, so what does not fit stays in the kernel's
-            // receive buffer and the peer is slowed by TCP's own flow control instead of losing bytes here
+            // receive buffer and the peer is slowed by TCP's own flow control instead of losing bytes here; `overflow`
+            // changes only while the block is stopped, so this thread reads the setting itself
             std::size_t wanted = chunk.size();
-            if (_backpressure) {
+            if (settings.overflow == Overflow::backpressure) {
                 const std::size_t room = queueRoom();
                 if (room == 0UZ) {
                     waitBounded(detail::bytesockio::kPollMs); // the socket is not read again until the graph makes room

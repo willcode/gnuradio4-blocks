@@ -69,7 +69,7 @@ int           main() {
         source.out.max_samples = 3; // every four-sample packet crosses multiple work calls
         auto& sink             = graph.emplaceBlock<Collector>();
         check(graph.connect<"out", "in">(source, sink).has_value(), "connection");
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> scheduler;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> scheduler;
         check(scheduler.exchange(std::move(graph)).has_value(), "graph exchange");
         bool         ok = false;
         std::jthread runner([&] { ok = scheduler.runAndWait().has_value(); });

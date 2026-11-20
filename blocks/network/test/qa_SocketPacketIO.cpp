@@ -32,6 +32,7 @@
 #include <gnuradio-4.0/Tag.hpp>
 
 #include <gnuradio-4.0/network/SocketPacketIO.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // A transport is only proved by a peer it did not build, so the assertions below meet the blocks at a socket rather
 // than at a span: a raw TCP connection and a raw UDP socket in the test stand in for the far process, and the framing
@@ -725,8 +726,7 @@ const boost::ut::suite<"TcpPacketIO"> tcpPacketIoTests = [] {
 
         // driven without a graph, so nothing drains the receive queue and the queue itself is what the test reads
         TcpPacketSource<std::uint8_t> source({{"endpoint", endpointFor(port)}, {"bind", true}, {"max_message_bytes", kBound}, {"queue_bytes", kQueueBytes}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         RawStream peer;
@@ -950,8 +950,7 @@ const boost::ut::suite<"UdpPacketIO"> udpPacketIoTests = [] {
 
         // driven without a graph, so nothing drains the receive queue and the queue itself is what the test reads
         UdpPacketSource<std::uint8_t> source({{"endpoint", endpointFor(port)}, {"max_message_bytes", kBound}, {"queue_bytes", kQueueBytes}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         const RawDatagram               peer;
@@ -1123,29 +1122,22 @@ const boost::ut::suite<"SocketPacketIOLifecycle"> socketLifecycleTests = [] {
             auto&     block = graph.emplaceBlock<TcpPacketSource<std::uint8_t>>(std::move(settings));
             expect(throws<gr::exception>([&block] { block.start(); })) << what;
         };
-        refusesTcpSource({{"endpoint", std::string("")}, {"max_message_bytes", kBound}}, "an empty endpoint");
-        refusesTcpSource({{"endpoint", std::string("127.0.0.1:5555")}}, "an unset max_message_bytes");
+        const auto refusesTcpSourceAtCall = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<TcpPacketSource<std::uint8_t>>(std::move(settings))) << what; };
+        refusesTcpSourceAtCall({{"endpoint", std::string("")}, {"max_message_bytes", kBound}}, "an empty endpoint");
+        refusesTcpSourceAtCall({{"endpoint", std::string("127.0.0.1:5555")}}, "an unset max_message_bytes");
         refusesTcpSource({{"endpoint", std::string("127.0.0.1")}, {"max_message_bytes", kBound}}, "an endpoint with no port");
         refusesTcpSource({{"endpoint", std::string("no.such.host.invalid:5555")}, {"max_message_bytes", kBound}}, "an endpoint that does not resolve");
-        refusesTcpSource({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", static_cast<std::uint64_t>(64)}, {"max_reject_bytes", static_cast<gr::Size_t>(256)}}, "a refusal copy larger than a message");
+        refusesTcpSourceAtCall({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", static_cast<std::uint64_t>(64)}, {"max_reject_bytes", static_cast<gr::Size_t>(256)}}, "a refusal copy larger than a message");
 
-        const auto refusesUdpSink = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<UdpPacketSink<std::uint8_t>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
-        refusesUdpSink({{"endpoint", std::string("")}}, "an empty endpoint");
-        refusesUdpSink({{"endpoint", std::string("127.0.0.1:5555")}, {"max_datagram_bytes", static_cast<std::uint64_t>(0)}}, "a zero datagram bound");
-        refusesUdpSink({{"endpoint", std::string("127.0.0.1:5555")}, {"max_datagram_bytes", static_cast<std::uint64_t>(70000)}}, "a datagram bound above what IPv4 can carry");
+        const auto refusesUdpSinkAtCall = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<UdpPacketSink<std::uint8_t>>(std::move(settings))) << what; };
+        refusesUdpSinkAtCall({{"endpoint", std::string("")}}, "an empty endpoint");
+        refusesUdpSinkAtCall({{"endpoint", std::string("127.0.0.1:5555")}, {"max_datagram_bytes", static_cast<std::uint64_t>(0)}}, "a zero datagram bound");
+        refusesUdpSinkAtCall({{"endpoint", std::string("127.0.0.1:5555")}, {"max_datagram_bytes", static_cast<std::uint64_t>(70000)}}, "a datagram bound above what IPv4 can carry");
 
-        const auto refusesTcpSink = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<TcpPacketSink<std::uint8_t>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
-        refusesTcpSink({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", static_cast<std::uint64_t>(0)}}, "a zero message bound");
+        const auto refusesTcpSinkAtCall = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<TcpPacketSink<std::uint8_t>>(std::move(settings))) << what; };
+        refusesTcpSinkAtCall({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", static_cast<std::uint64_t>(0)}}, "a zero message bound");
         // the bound is what keeps item_count, payload_bytes and meta_bytes inside the 32 bits each has on the wire
-        refusesTcpSink({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{1ULL} << 32U}}, "a message bound above what the envelope's length fields can state");
+        refusesTcpSinkAtCall({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{1ULL} << 32U}}, "a message bound above what the envelope's length fields can state");
 
         // a bracketed IPv6 literal parses, which is what the last-colon split exists for
         gr::Graph graph;
@@ -1155,18 +1147,23 @@ const boost::ut::suite<"SocketPacketIOLifecycle"> socketLifecycleTests = [] {
     };
 
     "a socket setting cannot change under a running block"_test = [] {
-        gr::Graph   graph;
-        auto&       source = graph.emplaceBlock<TcpPacketSource<std::uint8_t>>({{"endpoint", endpointFor(reservePort(SOCK_STREAM))}, {"bind", true}, {"max_message_bytes", kBound}});
-        std::string refusal;
-        source.start();
-        try {
-            source.max_message_bytes.value = 4096ULL;
-            source.rebuild();
-        } catch (const gr::exception& error) {
-            refusal = error.message;
+        using gr::lifecycle::State;
+        TcpPacketSource<std::uint8_t> source({{"endpoint", endpointFor(reservePort(SOCK_STREAM))}, {"bind", true}, {"max_message_bytes", kBound}});
+        expect(fatal(source.check({}).has_value()));
+        expect(fatal(source.changeStateTo(State::INITIALISED).has_value() && source.changeStateTo(State::RUNNING).has_value())); // start() opens the socket
+
+        const auto refused = source.set({{"max_message_bytes", std::uint64_t{4096ULL}}}, gr::settings::noWait);
+        expect(!refused.has_value()) << "a live change to a socket setting was not refused";
+        if (!refused.has_value()) {
+            expect(std::ranges::any_of(refused.error(), [](const gr::settings::Rejection& entry) { return entry.key == "max_message_bytes"; })) << "the refusal names the setting";
         }
-        source.stop();
-        expect(refusal.contains("max_message_bytes")) << "a live change to a socket setting was not refused by name: " << refusal;
+        expect(eq(source.settings.max_message_bytes.value, kBound)) << "the open socket keeps its bound";
+        // the I/O thread reads the refusal copy's bound, so it too waits for a stop
+        expect(!source.set({{"max_reject_bytes", gr::Size_t{64U}}}, gr::settings::noWait).has_value()) << "a live change to max_reject_bytes was not refused";
+
+        expect(source.changeStateTo(State::REQUESTED_STOP).has_value() && source.changeStateTo(State::STOPPED).has_value()); // stop() closes it
+        expect(source.set({{"max_message_bytes", std::uint64_t{4096ULL}}}).has_value()) << "a stopped block takes the change";
+        expect(eq(source.get<std::uint64_t>("max_message_bytes").value_or(0ULL), 4096ULL));
     };
 
     "start, stop and start again leave nothing behind"_test = [] {
@@ -1348,8 +1345,7 @@ const boost::ut::suite<"SocketPacketIOLifecycle"> socketLifecycleTests = [] {
         const RawListener server;
 
         TcpPacketSource<std::uint8_t> source({{"endpoint", server.endpoint()}, {"bind", false}, {"max_message_bytes", kBound}, {"reconnect_ms", gr::Size_t{10U}}, {"idle_timeout_ms", gr::Size_t{static_cast<std::uint32_t>(kIdle.count())}}, {"body_timeout_ms", gr::Size_t{static_cast<std::uint32_t>(kIdle.count())}}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         const RawStream accepted(server.acceptOne());
@@ -1427,8 +1423,7 @@ const boost::ut::suite<"SocketPacketIOLifecycle"> socketLifecycleTests = [] {
         // the second shape, driven without a scheduler: what the reader records is the whole of what is under test
         const std::uint16_t           blindPort = reservePort(SOCK_STREAM);
         TcpPacketSource<std::uint8_t> blindSource({{"endpoint", endpointFor(blindPort)}, {"bind", true}, {"max_message_bytes", kBound}});
-        blindSource.settings().init();
-        std::ignore = blindSource.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(blindSource.check({}).has_value()));
         blindSource.start();
 
         int replaced = -1;
@@ -1528,8 +1523,7 @@ const boost::ut::suite<"SocketPacketIOLifecycle"> socketLifecycleTests = [] {
         // the second shape, driven without a scheduler: a read that can never succeed again, met at the block
         const std::uint16_t           blindPort = reservePort(SOCK_DGRAM);
         UdpPacketSource<std::uint8_t> blindSource({{"endpoint", endpointFor(blindPort)}, {"max_message_bytes", kBound}});
-        blindSource.settings().init();
-        std::ignore = blindSource.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(blindSource.check({}).has_value()));
         blindSource.start();
 
         int replaced = -1;
@@ -1550,6 +1544,28 @@ const boost::ut::suite<"SocketPacketIOLifecycle"> socketLifecycleTests = [] {
         expect(blindReason.starts_with("receiving a datagram failed")) << "the reader did not name the read that refused it: " << blindReason;
         expect(blindReason.contains("socket")) << "the reason drops the system's own wording: " << blindReason;
         expect(eq(blindSource.nReaderFailures, std::uint64_t{1ULL})) << "one reader ended on a fault, so one failure is counted";
+    };
+};
+
+const boost::ut::suite<"network blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "TcpPacketSink"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::TcpPacketSink<std::uint8_t>>({{"endpoint", std::string("127.0.0.1:5555")}}, {{"overflow", std::string("backpressure")}, {"max_message_bytes", std::uint64_t{4096ULL}}, {"reconnect_ms", gr::Size_t{50U}}});
+        expect(failures.empty()) << report(failures);
+    };
+    "TcpPacketSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::TcpPacketSource<std::uint8_t>>({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{4096ULL}}}, {{"max_reject_bytes", gr::Size_t{64U}}, {"idle_timeout_ms", gr::Size_t{1000U}}});
+        expect(failures.empty()) << report(failures);
+    };
+    "UdpPacketSink"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::UdpPacketSink<std::uint8_t>>({{"endpoint", std::string("127.0.0.1:5555")}}, {{"overflow", std::string("backpressure")}, {"max_datagram_bytes", std::uint64_t{1400ULL}}});
+        expect(failures.empty()) << report(failures);
+    };
+    "UdpPacketSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::UdpPacketSource<std::uint8_t>>({{"endpoint", std::string("127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{1400ULL}}}, {{"max_reject_bytes", gr::Size_t{64U}}, {"max_tracked_sources", gr::Size_t{2U}}});
+        expect(failures.empty()) << report(failures);
     };
 };
 

@@ -27,6 +27,7 @@
 #include <gnuradio-4.0/YamlPmt.hpp>
 
 #include <gnuradio-4.0/network/StreamPacketIO.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // A transport is only proved by a peer it did not build, so the wire-shape assertions below meet the blocks at a
 // socket: a raw ZeroMQ socket in the test reads what the sink published and writes what the source has to read,
@@ -324,11 +325,7 @@ const boost::ut::suite<"StreamPacketSink"> streamPacketSinkTests = [] {
 
     "the settings that gate start() are checked before any socket opens"_test = [] {
         const Endpoint endpoint;
-        const auto     refuses = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<StreamPacketSink<Sample>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        const auto     refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<StreamPacketSink<Sample>>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}, {"pattern", std::string("sub")}}, "a pattern no sink runs");
         refuses({{"endpoint", endpoint.uri}, {"overflow", std::string("wait")}}, "an overflow rule that is neither");
@@ -508,11 +505,7 @@ const boost::ut::suite<"StreamPacketSource"> streamPacketSourceTests = [] {
 
     "the settings that gate start() are checked before any socket opens"_test = [] {
         const Endpoint endpoint;
-        const auto     refuses = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<StreamPacketSource<Sample>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        const auto     refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<StreamPacketSource<Sample>>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}, {"max_message_bytes", kBound}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}, {"max_message_bytes", kBound}, {"pattern", std::string("pub")}}, "a pattern no source runs");
         refuses({{"endpoint", endpoint.uri}}, "a zero message bound");
@@ -731,8 +724,7 @@ const boost::ut::suite<"StreamPacketSource"> streamPacketSourceTests = [] {
         const Endpoint endpoint;
         // driven without a graph, so nothing drains the receive queue and the queue itself is what the test reads
         StreamPacketSource<Sample> source({{"endpoint", endpoint.uri}, {"pattern", std::string("pull")}, {"max_message_bytes", kBound}, {"queue_bytes", kQueueBytes}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
 
         RawPeer peer(zmq::socket_type::push, endpoint.uri, true);
@@ -765,6 +757,20 @@ const boost::ut::suite<"StreamPacketSource"> streamPacketSourceTests = [] {
         expect(eq(counted.overQueueBytes, std::uint64_t{1ULL}));
         expect(eq(counted.droppedByBackpressure, std::uint64_t{0ULL})) << "a message that cannot fit is not an overflow";
         expect(eq(counted.messagesRefused, std::uint64_t{0ULL})) << "the message is inside max_message_bytes; the queue is what refused it";
+    };
+};
+
+const boost::ut::suite<"network blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "StreamPacketSink"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::StreamPacketSink<Sample>>({{"endpoint", std::string("tcp://127.0.0.1:5555")}}, {{"pattern", std::string("push")}, {"max_items", gr::Size_t{64U}}, {"sample_rate", 1000.f}, {"initial_position", std::uint64_t{8ULL}}, {"stream_id", std::string("run")}});
+        expect(failures.empty()) << report(failures);
+    };
+    "StreamPacketSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::StreamPacketSource<Sample>>({{"endpoint", std::string("tcp://127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{4096ULL}}}, {{"pattern", std::string("pull")}, {"publish_positions", true}});
+        expect(failures.empty()) << report(failures);
     };
 };
 

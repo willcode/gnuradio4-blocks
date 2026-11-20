@@ -28,6 +28,7 @@
 #include <gnuradio-4.0/YamlPmt.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
+#include <gnuradio-4.0/network/Overflow.hpp>
 #include <gnuradio-4.0/network/PacketEnvelope.hpp>
 #include <gnuradio-4.0/network/RecordVocabulary.hpp>
 #include <gnuradio-4.0/network/ZmqEnvelopeIo.hpp>
@@ -152,28 +153,37 @@ stall the graph.
 For an indexed upstream stream, set `initial_position` to the exact first input index, `stream_origin` to its true
 origin, and `stream_id` to an execution identity. These are fixed for a run and repeated in the existing metadata
 frame, so a late subscriber does not depend on receiving an origin tag. Defaults retain the local zero-based count.
+
+`endpoint` is a libzmq endpoint such as tcp://127.0.0.1:5555. The producer is normally the end that binds. pattern pub
+fans out, and push is a lossless round-robin. `topic` is frame 0, the subscription prefix. libzmq's own send high-water
+mark of 1000 is up to 64 MiB of buffer this graph cannot see. A linger time of 0 discards pending messages at close.
+`initial_position` is fixed for a run, and `stream_origin` lies at or before it; change `stream_id` when the producer
+restarts.
 )"">;
 
     PortIn<T> in;
 
-    Annotated<std::uint64_t, "initial_position", Doc<"absolute upstream position of the first input sample; fixed for a run">> initial_position = 0ULL;
-    Annotated<std::uint64_t, "stream_origin", Doc<"true origin of the upstream stream, at or before initial_position">>        stream_origin    = 0ULL;
-    Annotated<std::string, "stream_id", Doc<"identity of this upstream execution; change it when the producer restarts">>      stream_id        = std::string("");
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                                             endpoint{};
+        Annotated<bool, Doc<"bound endpoint">, StoppedOnly>                                                                       bind              = true;
+        Annotated<SendPattern, Doc<"socket pattern">, StoppedOnly>                                                                pattern           = SendPattern::pub;
+        Annotated<std::string, Doc<"topic (empty = all)">, StoppedOnly>                                                           topic             = std::string("");
+        Annotated<gr::Size_t, Doc<"samples per packet (0 = per work call)">>                                                      max_items         = 0U;
+        Annotated<float, Unit<"Hz">, Doc<"fallback sample rate (0 = unstated)">>                                                  sample_rate       = 0.0f;
+        Annotated<Overflow, Doc<"full-queue policy">, StoppedOnly>                                                                overflow          = Overflow::drop_oldest;
+        Annotated<gr::Size_t, Doc<"send queue depth">, StoppedOnly, Limits<Min<1U>>>                                              queue_messages    = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"send queue size">, StoppedOnly, Limits<Min<1ULL>>>                            queue_bytes       = 16777216ULL;
+        Annotated<gr::Size_t, Doc<"send high-water mark">, StoppedOnly>                                                           send_hwm          = 16U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, Limits<Min<1ULL>, Max<gr::network::kMaxEnvelopeBytes>>> max_message_bytes = 16777216ULL;
+        Annotated<std::int32_t, Unit<"ms">, Doc<"linger time (0 = discard)">, StoppedOnly>                                        linger_ms         = 0;
+        Annotated<std::uint64_t, Doc<"initial position">, StoppedOnly>                                                            initial_position  = 0ULL;
+        Annotated<std::uint64_t, Doc<"stream origin">, StoppedOnly>                                                               stream_origin     = 0ULL;
+        Annotated<std::string, Doc<"stream identity">, StoppedOnly>                                                               stream_id         = std::string("");
 
-    Annotated<std::string, "endpoint", Visible, Doc<"libzmq endpoint, e.g. tcp://127.0.0.1:5555; required, there is no default">> endpoint{};
-    Annotated<bool, "bind", Doc<"bind the endpoint rather than connect to it; the producer is normally the stable end">>          bind              = true;
-    Annotated<std::string, "pattern", Doc<"'pub' (fan out) or 'push' (round-robin, lossless, one consumer)">>                     pattern           = std::string("pub");
-    Annotated<std::string, "topic", Doc<"frame 0, the subscription prefix; empty publishes to every subscriber">>                 topic             = std::string("");
-    Annotated<gr::Size_t, "max_items", Doc<"samples per packet; 0 emits one packet per work call">>                               max_items         = 0U;
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"rate to state where the stream states none; 0 states none">>                 sample_rate       = 0.0f;
-    Annotated<std::string, "overflow", Doc<"'drop_oldest' or 'backpressure', applied when the in-process send queue is full">>    overflow          = std::string("drop_oldest");
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process send queue depth">>                                                   queue_messages    = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process send queue size">>                                      queue_bytes       = 16777216ULL;
-    Annotated<gr::Size_t, "send_hwm", Doc<"ZMQ_SNDHWM; libzmq's own 1000 is up to 64 MiB of buffer this graph cannot see">>       send_hwm          = 16U;
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"a chunk whose envelope would exceed this is refused">>       max_message_bytes = 16777216ULL;
-    Annotated<std::int32_t, "linger_ms", Unit<"ms">, Doc<"ZMQ_LINGER; 0 discards pending messages immediately on close">>         linger_ms         = 0;
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, pattern, topic, max_items, sample_rate, overflow, queue_messages, queue_bytes, send_hwm, max_message_bytes, linger_ms, initial_position, stream_origin, stream_id);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(StreamPacketSink, in, endpoint, bind, pattern, topic, max_items, sample_rate, overflow, queue_messages, queue_bytes, send_hwm, max_message_bytes, linger_ms, initial_position, stream_origin, stream_id);
+    GR_MAKE_REFLECTABLE(StreamPacketSink, in, settings);
 
     /// @brief The block's counters and its transport's, as one set.
     ///
@@ -211,10 +221,7 @@ frame, so a late subscriber does not depend on receiving an origin tag. Defaults
     std::vector<detail::streampacket::CarriedTag> _spanTags{};            ///< one work call's tags, kept to spare an allocation
 
     bool          _socketOpen      = false;
-    bool          _backpressure    = false;
-    std::uint64_t _maxMessageBytes = 16777216ULL;
     std::uint64_t _queueBytes      = 16777216ULL; ///< frozen beside the transport's copy, which start() configures
-    std::size_t   _maxItems        = 0UZ;
     std::uint64_t _initialPosition = 0ULL;
     std::uint64_t _streamOrigin    = 0ULL;
     std::string   _streamId;
@@ -222,17 +229,26 @@ frame, so a late subscriber does not depend on receiving an origin tag. Defaults
     detail::zmqenvelope::SocketConfig _frozen{}; ///< the socket settings, read once when the socket opens
     detail::zmqenvelope::SendQueue    _sender{}; ///< joins its own thread however the block dies
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.stream_origin > s.initial_position) {
+            return gr::Refused(s.stream_origin, "must be <= initial_position");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) { _statedRate = s.sample_rate > 0.0f ? std::optional<float>(s.sample_rate) : std::nullopt; }
 
     void start() {
-        validate();
         _frozen     = frozenSocketConfig();
-        _queueBytes = queue_bytes.value;
-        _sender.configure(static_cast<std::size_t>(queue_messages.value), _queueBytes, _backpressure);
+        _queueBytes = settings.queue_bytes;
+        _sender.configure(settings.queue_messages, _queueBytes, settings.overflow == Overflow::backpressure);
         _sequence        = 0ULL; // a restarted sink restarts its stream, which the far end reads as a producer reset
-        _initialPosition = initial_position.value;
-        _streamOrigin    = stream_origin.value;
-        _streamId        = stream_id.value;
+        _initialPosition = settings.initial_position;
+        _streamOrigin    = settings.stream_origin;
+        _streamId        = settings.stream_id;
         _streamPosition  = _initialPosition;
         _sampleRate.reset();
         _sender.start(_frozen, this->name.value);
@@ -243,17 +259,6 @@ frame, so a late subscriber does not depend on receiving an origin tag. Defaults
         _sender.stop();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange();
-        }
-        _backpressure    = overflow.value == "backpressure";
-        _maxMessageBytes = max_message_bytes.value;
-        _maxItems        = static_cast<std::size_t>(max_items.value);
-        _statedRate      = sample_rate.value > 0.0f ? std::optional<float>(sample_rate.value) : std::nullopt;
     }
 
     [[nodiscard]] Counters counters() const {
@@ -268,7 +273,7 @@ frame, so a late subscriber does not depend on receiving an origin tag. Defaults
         }
         collectTags(inSpan, available);
 
-        const std::size_t chunkItems = _maxItems == 0UZ ? available : _maxItems;
+        const std::size_t chunkItems = settings.max_items.value == 0U ? available : static_cast<std::size_t>(settings.max_items.value);
         std::size_t       consumed   = 0UZ;
         std::size_t       nextTag    = 0UZ; // _spanTags is ordered by offset, so one cursor walks it
         while (consumed < available) {
@@ -285,7 +290,7 @@ frame, so a late subscriber does not depend on receiving an origin tag. Defaults
             envelope.metadata                = pmt::yaml::serialize(buildMetadata(consumed, first, nextTag));
             const std::uint64_t payloadBytes = static_cast<std::uint64_t>(items) * sizeof(T);
             const std::uint64_t total        = gr::network::kHeaderBytesV1 + envelope.metadata.size() + payloadBytes;
-            if (total > _maxMessageBytes) {
+            if (total > settings.max_message_bytes) {
                 rejectChunk(nPacketsRejected, items, nextTag - first);
                 consumed += items;
                 continue; // both counters advance, so the far end reads the hole as one lost packet of exactly these samples
@@ -326,68 +331,7 @@ frame, so a late subscriber does not depend on receiving an origin tag. Defaults
     }
 
 private:
-    void validate() {
-        if (stream_origin.value > initial_position.value) {
-            throw gr::exception("stream_origin exceeds initial_position");
-        }
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport sink has no default endpoint and will not bind to nothing");
-        }
-        std::ignore = detail::zmqio::sendPatternFromName(pattern.value);
-        if (overflow.value != "drop_oldest" && overflow.value != "backpressure") {
-            throw gr::exception(std::format("overflow is '{}'; it must be 'drop_oldest' (shed the stalest envelope, count it) or 'backpressure' (consume fewer input samples)", overflow.value));
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0; every chunk would be refused");
-        }
-        if (max_message_bytes.value > gr::network::kMaxEnvelopeBytes) {
-            throw gr::exception(std::format("max_message_bytes is {}; {} is the largest envelope the header's 32-bit length fields can state", max_message_bytes.value, gr::network::kMaxEnvelopeBytes));
-        }
-    }
-
-    /// @brief Refuse a change to a setting the running socket was built from, naming it.
-    ///
-    /// Re-creating a socket under a running graph means tearing down and restarting the I/O thread mid-flight, which
-    /// is a teardown race; the graph rebuild the framework already supports is the supported way to move an endpoint.
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        if (initial_position.value != _initialPosition) {
-            refuse("initial_position");
-        }
-        if (stream_origin.value != _streamOrigin) {
-            refuse("stream_origin");
-        }
-        if (stream_id.value != _streamId) {
-            refuse("stream_id");
-        }
-        const auto wanted = frozenSocketConfig();
-        if (wanted.endpoint != _frozen.endpoint) {
-            refuse("endpoint");
-        }
-        if (wanted.topic != _frozen.topic) {
-            refuse("topic");
-        }
-        if (wanted.bind != _frozen.bind) {
-            refuse("bind");
-        }
-        if (wanted.pattern != _frozen.pattern) {
-            refuse("pattern");
-        }
-        if (wanted.hwm != _frozen.hwm) {
-            refuse("send_hwm");
-        }
-        if (wanted.lingerMs != _frozen.lingerMs) {
-            refuse("linger_ms");
-        }
-    }
-
-    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = endpoint.value, .topic = topic.value, .pattern = detail::zmqio::sendPatternFromName(pattern.value), .bind = bind.value, .hwm = static_cast<std::int32_t>(send_hwm.value), .lingerMs = linger_ms.value, .maxMessageBytes = 0ULL}; }
+    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = settings.endpoint, .topic = settings.topic, .pattern = detail::zmqio::socketPattern(settings.pattern), .bind = settings.bind, .hwm = static_cast<std::int32_t>(settings.send_hwm.value), .lingerMs = settings.linger_ms, .maxMessageBytes = 0ULL}; }
 
     /// @brief This work call's tags, in offset order, and the rate the last of them states.
     ///
@@ -519,26 +463,34 @@ sequence gaps). Legacy n_dropped_samples saturates at Size_t's maximum. Initial 
 unobserved history, not measured packet loss. A rewind/reset changes placement and must never be treated as loss.
 No terminal envelope or disconnect-cause detector is provided: a silent wire alone cannot prove a final missing
 interval. Applications may obtain an authoritative terminal index through their existing control plane.
+
+`endpoint` is a libzmq endpoint such as tcp://127.0.0.1:5555; a consumer normally connects. pattern sub subscribes by
+prefix and pull is fair-queued; `topic` is the ZMQ_SUBSCRIBE prefix under sub. `max_message_bytes` is ZMQ_MAXMSGSIZE and
+the block's own bound. A linger time of 0 discards pending messages at close. `publish_positions` publishes exact packet
+placement, identity and discontinuity as stream_packet tags.
 )"">;
 
     PortOut<T> out;
 
-    // Opt-in preserves the legacy tag surface. Each packet starts with a nested
-    // stream_packet tag; its position always names a retained sample, whereas
-    // the legacy top-level stream_position on a gap names the first MISSING one.
-    Annotated<bool, "publish_positions", Doc<"publish exact packet placement, identity and discontinuity as stream_packet tags">> publish_positions = false;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                     endpoint{};
+        Annotated<bool, Doc<"bound endpoint">, StoppedOnly>                                               bind              = false;
+        Annotated<ReceivePattern, Doc<"socket pattern">, StoppedOnly>                                     pattern           = ReceivePattern::sub;
+        Annotated<std::string, Doc<"topic (empty = all)">, StoppedOnly>                                   topic             = std::string("");
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, StoppedOnly>                    max_message_bytes = 0ULL;
+        Annotated<gr::Size_t, Doc<"receive queue depth">, StoppedOnly, Limits<Min<1U>>>                   queue_messages    = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"receive queue size">, StoppedOnly, Limits<Min<1ULL>>> queue_bytes       = 16777216ULL;
+        Annotated<gr::Size_t, Doc<"receive high-water mark">, StoppedOnly>                                recv_hwm          = 16U;
+        Annotated<std::int32_t, Unit<"ms">, Doc<"linger time (0 = discard)">, StoppedOnly>                linger_ms         = 0;
+        // Opt-in preserves the legacy tag surface. Each packet starts with a nested
+        // stream_packet tag; its position always names a retained sample, whereas
+        // the legacy top-level stream_position on a gap names the first MISSING one.
+        Annotated<bool, Doc<"position tags">> publish_positions = false;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"libzmq endpoint; required, there is no default">>                                   endpoint{};
-    Annotated<bool, "bind", Doc<"bind the endpoint rather than connect to it; a consumer normally connects">>                            bind              = false;
-    Annotated<std::string, "pattern", Doc<"'sub' (prefix subscription) or 'pull' (fair-queued)">>                                        pattern           = std::string("sub");
-    Annotated<std::string, "topic", Doc<"ZMQ_SUBSCRIBE prefix, 'sub' only; empty accepts everything and refuses it observably">>         topic             = std::string("");
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"ZMQ_MAXMSGSIZE and this block's own bound; required, must be > 0">> max_message_bytes = 0ULL;
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process receive queue depth">>                                                       queue_messages    = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process receive queue size">>                                          queue_bytes       = 16777216ULL;
-    Annotated<gr::Size_t, "recv_hwm", Doc<"ZMQ_RCVHWM, libzmq's own inbound queue bound">>                                               recv_hwm          = 16U;
-    Annotated<std::int32_t, "linger_ms", Unit<"ms">, Doc<"ZMQ_LINGER; 0 discards pending messages immediately on close">>                linger_ms         = 0;
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, pattern, topic, max_message_bytes, queue_messages, queue_bytes, recv_hwm, linger_ms, publish_positions);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(StreamPacketSource, out, endpoint, bind, pattern, topic, max_message_bytes, queue_messages, queue_bytes, recv_hwm, linger_ms, publish_positions);
+    GR_MAKE_REFLECTABLE(StreamPacketSource, out, settings);
 
     /// @brief The counters as one set, taken under the lock the reader thread writes most of them behind.
     struct Counters {
@@ -628,15 +580,22 @@ interval. Applications may obtain an authoritative terminal index through their 
     /// and the counters its decoder writes into.
     detail::zmqenvelope::Receiver _receiver{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.max_message_bytes == 0U) {
+            return gr::Refused(s.max_message_bytes, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         _sourceRestarted = _everStarted;
         _everStarted     = true;
         _frozen          = frozenSocketConfig();
-        _queueMessages   = static_cast<std::size_t>(queue_messages.value);
-        _queueBytes      = queue_bytes.value;
+        _queueMessages   = settings.queue_messages;
+        _queueBytes      = settings.queue_bytes;
         {
             std::lock_guard lock(_mutex);
             _queue.clear();
@@ -659,13 +618,6 @@ interval. Applications may obtain an authoritative terminal index through their 
         _receiver.stop();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange(); // every setting is read once when the socket opens, so nothing is recomputed here
-        }
     }
 
     [[nodiscard]] Counters counters() const {
@@ -704,49 +656,7 @@ interval. Applications may obtain an authoritative terminal index through their 
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport source has no default endpoint and will not connect to nothing");
-        }
-        std::ignore = detail::zmqio::receivePatternFromName(pattern.value);
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0 or unset; libzmq's own default is no limit, so a source must state a bound before a peer's claimed length sizes anything");
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process receive queue must hold at least one packet");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process receive queue must hold at least one packet");
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        const auto wanted = frozenSocketConfig();
-        if (wanted.endpoint != _frozen.endpoint) {
-            refuse("endpoint");
-        }
-        if (wanted.topic != _frozen.topic) {
-            refuse("topic");
-        }
-        if (wanted.bind != _frozen.bind) {
-            refuse("bind");
-        }
-        if (wanted.pattern != _frozen.pattern) {
-            refuse("pattern");
-        }
-        if (wanted.maxMessageBytes != _frozen.maxMessageBytes) {
-            refuse("max_message_bytes");
-        }
-        if (wanted.hwm != _frozen.hwm) {
-            refuse("recv_hwm");
-        }
-        if (wanted.lingerMs != _frozen.lingerMs) {
-            refuse("linger_ms");
-        }
-    }
-
-    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = endpoint.value, .topic = topic.value, .pattern = detail::zmqio::receivePatternFromName(pattern.value), .bind = bind.value, .hwm = static_cast<std::int32_t>(recv_hwm.value), .lingerMs = linger_ms.value, .maxMessageBytes = max_message_bytes.value}; }
+    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = settings.endpoint, .topic = settings.topic, .pattern = detail::zmqio::socketPattern(settings.pattern), .bind = settings.bind, .hwm = static_cast<std::int32_t>(settings.recv_hwm.value), .lingerMs = settings.linger_ms, .maxMessageBytes = settings.max_message_bytes}; }
 
     /// @brief Take the next packet off the queue and work out what has to be said at its first sample.
     [[nodiscard]] bool takeNextPacket() {
@@ -827,7 +737,7 @@ private:
         if (arrival.sampleRate) {
             placement["sample_rate"] = *arrival.sampleRate;
         }
-        if (publish_positions.value) {
+        if (settings.publish_positions) {
             _prologue["stream_packet"] = std::move(placement);
         }
         _publishedStreamId = arrival.streamId;
@@ -853,7 +763,7 @@ private:
             // A stream may have crossed another transport already. Its carried
             // placement tags must not impersonate this boundary's placement.
             property_map carried = tag.map;
-            if (publish_positions.value) {
+            if (settings.publish_positions) {
                 carried.erase("stream_packet");
             }
             if (tag.offset == 0UZ && !_prologue.empty()) {

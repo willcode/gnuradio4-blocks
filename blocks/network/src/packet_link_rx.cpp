@@ -286,7 +286,7 @@ int main(int argc, char** argv) {
     report(text, "unconverted_recorded", unconverted._samples.size());
     report(text, "crc_ok_records", okRecords._samples.size());
     report(text, "crc_failed_records", failed._samples.size());
-    report(text, "crc_verified_bytes", static_cast<std::uint64_t>(verified.count));
+    report(text, "crc_verified_bytes", static_cast<std::uint64_t>(verified.status.count));
     for (std::size_t i = 0UZ; i < refusals._samples.size(); ++i) {
         const gr::Packet<std::uint8_t>& refused = refusals._samples[i];
         const gr::property_map&         map     = refused.meta_information.empty() ? gr::property_map{} : refused.meta_information[0UZ];

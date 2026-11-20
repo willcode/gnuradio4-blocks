@@ -11,6 +11,7 @@
 #include <deque>
 #include <expected>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <print>
@@ -42,6 +43,7 @@
 #include <gnuradio-4.0/meta/utils.hpp>
 #include <gnuradio-4.0/thread/thread_pool.hpp>
 
+#include <gnuradio-4.0/network/Overflow.hpp>
 #include <gnuradio-4.0/network/PacketEnvelope.hpp>
 #include <gnuradio-4.0/network/RecordVocabulary.hpp>
 
@@ -318,20 +320,26 @@ descriptor. Teardown is bounded and discards what is still queued, counted in `n
 drain against a stalled peer is a graph that will not tear down; an envelope lost part-written when a peer disappears
 is counted in `nSendErrors` and dropped rather than retried, since the receiver would have to resynchronize past its
 truncated prefix either way.
+
+`endpoint` is written 'host:port', such as 127.0.0.1:5555 or [::1]:5555. The producer is normally the end that listens.
 )"">;
 
     PortIn<Packet<T>>                   in;
     PortOut<Packet<T>, Async, Optional> reject;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default">> endpoint{};
-    Annotated<bool, "bind", Doc<"listen on the endpoint rather than connect to it; the producer is normally the stable end">>         bind              = true;
-    Annotated<std::string, "overflow", Doc<"'drop_oldest' or 'backpressure', applied when the in-process send queue is full">>        overflow          = std::string("drop_oldest");
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process send queue depth">>                                                       queue_messages    = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process send queue size">>                                          queue_bytes       = 16777216ULL;
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"a packet whose envelope would exceed this is rejected">>         max_message_bytes = 16777216ULL;
-    Annotated<gr::Size_t, "reconnect_ms", Unit<"ms">, Doc<"interval between connection attempts while connecting">>                   reconnect_ms      = 100U;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                                             endpoint{};
+        Annotated<bool, Doc<"listening endpoint">, StoppedOnly>                                                                   bind              = true;
+        Annotated<Overflow, Doc<"full-queue policy">>                                                                             overflow          = Overflow::drop_oldest;
+        Annotated<gr::Size_t, Doc<"send queue depth">, StoppedOnly, Limits<Min<1U>>>                                              queue_messages    = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"send queue size">, StoppedOnly, Limits<Min<1ULL>>>                            queue_bytes       = 16777216ULL;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, Limits<Min<1ULL>, Max<gr::network::kMaxEnvelopeBytes>>> max_message_bytes = 16777216ULL;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"reconnect interval">, StoppedOnly, Limits<Min<1U>>>                                reconnect_ms      = 100U;
 
-    GR_MAKE_REFLECTABLE(TcpPacketSink, in, reject, endpoint, bind, overflow, queue_messages, queue_bytes, max_message_bytes, reconnect_ms);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, overflow, queue_messages, queue_bytes, max_message_bytes, reconnect_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TcpPacketSink, in, reject, settings);
 
     // Counted, stated drops and refusals. Plain members, printed once by stop(); nothing here is on the sample path.
     std::uint64_t nPacketsSent          = 0ULL; ///< envelopes written whole to a peer
@@ -361,15 +369,13 @@ truncated prefix either way.
 
     std::uint64_t _sequence = 0ULL; ///< the value the sink writes when a packet states none
     std::string   _endpoint{};      ///< the socket settings, frozen for the duration of one run
-    bool          _bind            = true;
-    std::size_t   _queueMessages   = 1024UZ;
-    std::uint64_t _queueBytes      = 16777216ULL;
-    std::uint32_t _reconnectMs     = 100U;
-    bool          _socketOpen      = false;
-    bool          _backpressure    = false;
-    std::uint64_t _maxMessageBytes = 16777216ULL;
-    bool          _everConnected   = false;
-    std::size_t   _addressCursor   = 0UZ; ///< which resolved address the next connection attempt takes; the I/O thread's alone
+    bool          _bind          = true;
+    std::size_t   _queueMessages = 1024UZ;
+    std::uint64_t _queueBytes    = 16777216ULL;
+    std::uint32_t _reconnectMs   = 100U;
+    bool          _socketOpen    = false;
+    bool          _everConnected = false;
+    std::size_t   _addressCursor = 0UZ; ///< which resolved address the next connection attempt takes; the I/O thread's alone
 
     /// @brief Joins the I/O thread however the block dies.
     ///
@@ -387,10 +393,14 @@ truncated prefix either way.
     };
     IoThreadGuard _ioGuard{this};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         freezeSocketSettings();
         {
             std::lock_guard lock(_mutex);
@@ -421,15 +431,6 @@ truncated prefix either way.
         report();
     }
 
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange();
-        }
-        _backpressure    = overflow.value == "backpressure";
-        _maxMessageBytes = max_message_bytes.value;
-    }
-
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& rejectSpan) {
         const bool  rejectConnected = rejectSpan.isConnected; // read once, so the room test and the store cannot disagree
         std::size_t consumed        = 0UZ;
@@ -448,7 +449,7 @@ truncated prefix either way.
             // the two size bounds, in the order they bind: what the wire will not carry, then what the queue cannot
             // hold. A queue cannot shed its way to room for an envelope larger than the whole of it, so such an
             // envelope is refused here rather than admitted over the bound the graph set.
-            const bool overMax   = total > _maxMessageBytes;
+            const bool overMax   = total > settings.max_message_bytes;
             const bool overQueue = !overMax && total > _queueBytes;
             if (overMax || overQueue) {
                 if (rejectConnected && onReject >= rejectSpan.size()) {
@@ -487,59 +488,12 @@ truncated prefix either way.
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport sink has no default endpoint and will not bind to nothing");
-        }
-        if (overflow.value != "drop_oldest" && overflow.value != "backpressure") {
-            throw gr::exception(std::format("overflow is '{}'; it must be 'drop_oldest' (shed the stalest envelope, count it) or 'backpressure' (consume fewer input items)", overflow.value));
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0; every packet would be rejected");
-        }
-        if (max_message_bytes.value > gr::network::kMaxEnvelopeBytes) {
-            throw gr::exception(std::format("max_message_bytes is {}; {} is the largest envelope the header's 32-bit length fields can state", max_message_bytes.value, gr::network::kMaxEnvelopeBytes));
-        }
-        if (reconnect_ms.value == 0U) {
-            throw gr::exception("reconnect_ms is 0; a connecting sink would retry without pause and spend the thread on nothing else");
-        }
-    }
-
-    /// @brief Refuse a change to a setting the running socket was built from, naming it.
-    ///
-    /// Re-creating a socket under a running graph means tearing down and restarting the I/O thread mid-flight, which
-    /// is a teardown race; the graph rebuild the framework already supports is the supported way to move an endpoint.
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view name) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", name)); };
-        if (endpoint.value != _endpoint) {
-            refuse("endpoint");
-        }
-        if (bind.value != _bind) {
-            refuse("bind");
-        }
-        if (static_cast<std::size_t>(queue_messages.value) != _queueMessages) {
-            refuse("queue_messages");
-        }
-        if (queue_bytes.value != _queueBytes) {
-            refuse("queue_bytes");
-        }
-        if (reconnect_ms.value != _reconnectMs) {
-            refuse("reconnect_ms");
-        }
-    }
-
     void freezeSocketSettings() {
-        _endpoint      = endpoint.value;
-        _bind          = bind.value;
-        _queueMessages = static_cast<std::size_t>(queue_messages.value);
-        _queueBytes    = queue_bytes.value;
-        _reconnectMs   = reconnect_ms.value;
+        _endpoint      = settings.endpoint;
+        _bind          = settings.bind;
+        _queueMessages = settings.queue_messages;
+        _queueBytes    = settings.queue_bytes;
+        _reconnectMs   = settings.reconnect_ms;
         _addressCursor = 0UZ;
     }
 
@@ -598,10 +552,10 @@ private:
         const std::uint64_t bytes = envelope.size();
         std::unique_lock    lock(_mutex);
         while (_queue.size() >= _queueMessages || _queuedBytes + bytes > _queueBytes) {
-            if (_backpressure) {
+            if (settings.overflow == Overflow::backpressure) {
                 return false;
             }
-            _queuedBytes -= _queue.front().size(); // the newest packets are what a live consumer wants
+            _queuedBytes -= _queue.front().size(); // a live consumer wants the newest packets
             _queue.pop_front();
             ++nDroppedOnOverflow;
         }
@@ -954,23 +908,30 @@ counts the reader threads that ended on a fault and `lastReaderError()` names th
 Validation happens on the block's own reader thread, so a flood of malformed bytes costs that thread and never the
 scheduler, and the queue the graph drains holds only objects whose shape is established. `max_message_bytes` is
 required and has no default: it is the bound that decides what a peer's claimed length is allowed to size.
+
+`endpoint` is written 'host:port', such as 127.0.0.1:5555 or [::1]:5555. A consumer normally connects.
+`max_reject_bytes` raw bytes of a refused envelope are kept for inspection.
 )"">;
 
     PortOut<Packet<T>, Async>                      out;
     PortOut<Packet<std::uint8_t>, Async, Optional> reject;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default">>       endpoint{};
-    Annotated<bool, "bind", Doc<"listen on the endpoint rather than connect to it; a consumer normally connects">>                          bind                = false;
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"the largest envelope this reader will buffer; required, must be > 0">> max_message_bytes   = 0ULL;
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process receive queue depth">>                                                          queue_messages      = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process receive queue size">>                                             queue_bytes         = 16777216ULL;
-    Annotated<gr::Size_t, "max_reject_bytes", Unit<"byte">, Doc<"raw bytes of a refused envelope kept for inspection">>                     max_reject_bytes    = 256U;
-    Annotated<gr::Size_t, "max_tracked_sources", Doc<"distinct source_id values whose sequence is tracked">>                                max_tracked_sources = 8U;
-    Annotated<gr::Size_t, "reconnect_ms", Unit<"ms">, Doc<"interval between connection attempts while connecting">>                         reconnect_ms        = 100U;
-    Annotated<gr::Size_t, "idle_timeout_ms", Unit<"ms">, Doc<"time since framing progress before the peer is dropped; 0 disables">>         idle_timeout_ms     = 30000U;
-    Annotated<gr::Size_t, "body_timeout_ms", Unit<"ms">, Doc<"time to complete an envelope before the peer is dropped; 0 disables">>        body_timeout_ms     = 20000U;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                     endpoint{};
+        Annotated<bool, Doc<"listening endpoint">, StoppedOnly>                                           bind                = false;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, StoppedOnly>                    max_message_bytes   = 0ULL;
+        Annotated<gr::Size_t, Doc<"receive queue depth">, StoppedOnly, Limits<Min<1U>>>                   queue_messages      = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"receive queue size">, StoppedOnly, Limits<Min<1ULL>>> queue_bytes         = 16777216ULL;
+        Annotated<gr::Size_t, Unit<"byte">, Doc<"refused envelope bytes kept">, StoppedOnly>              max_reject_bytes    = 256U;
+        Annotated<gr::Size_t, Doc<"tracked source limit">, StoppedOnly, Limits<Min<1U>>>                  max_tracked_sources = 8U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"reconnect interval">, StoppedOnly, Limits<Min<1U>>>        reconnect_ms        = 100U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"idle timeout (0 = off)">, StoppedOnly>                     idle_timeout_ms     = 30000U;
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"envelope timeout (0 = off)">, StoppedOnly>                 body_timeout_ms     = 20000U;
 
-    GR_MAKE_REFLECTABLE(TcpPacketSource, out, reject, endpoint, bind, max_message_bytes, queue_messages, queue_bytes, max_reject_bytes, max_tracked_sources, reconnect_ms, idle_timeout_ms, body_timeout_ms);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, max_message_bytes, queue_messages, queue_bytes, max_reject_bytes, max_tracked_sources, reconnect_ms, idle_timeout_ms, body_timeout_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TcpPacketSource, out, reject, settings);
 
     std::uint64_t nEnvelopesReceived = 0ULL; ///< headers that decoded, each of which identifies one envelope
     std::uint64_t nPacketsPublished  = 0ULL; ///< packets published on out
@@ -1080,10 +1041,20 @@ required and has no default: it is the bound that decides what a peer's claimed 
     };
     IoThreadGuard _ioGuard{this};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.max_message_bytes == 0U) {
+            return gr::Refused(s.max_message_bytes, "required");
+        }
+        if (s.max_reject_bytes > s.max_message_bytes) {
+            return gr::Refused(s.max_reject_bytes, "must be <= max_message_bytes");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         freezeSocketSettings();
         {
             std::lock_guard lock(_mutex);
@@ -1119,14 +1090,6 @@ required and has no default: it is the bound that decides what a peer's claimed 
         requestStopAndJoin();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange();
-        }
-        _maxRejectBytes = static_cast<std::size_t>(max_reject_bytes.value);
     }
 
     /// @brief What ended the reader thread, or empty while it runs and after a stop it was asked for.
@@ -1187,72 +1150,17 @@ required and has no default: it is the bound that decides what a peer's claimed 
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport source has no default endpoint and will not connect to nothing");
-        }
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0 or unset; a byte stream states its own lengths, so a source must state a bound before a peer's claimed length sizes anything");
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process receive queue must hold at least one envelope");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process receive queue must hold at least one envelope");
-        }
-        if (max_tracked_sources.value == 0U) {
-            throw gr::exception("max_tracked_sources is 0; no source_id would be tracked and no loss would be detected");
-        }
-        if (static_cast<std::uint64_t>(max_reject_bytes.value) > max_message_bytes.value) {
-            throw gr::exception(std::format("max_reject_bytes {} exceeds max_message_bytes {}; a refusal cannot keep more than a message may hold", max_reject_bytes.value, max_message_bytes.value));
-        }
-        if (reconnect_ms.value == 0U) {
-            throw gr::exception("reconnect_ms is 0; a connecting source would retry without pause and spend the thread on nothing else");
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view name) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", name)); };
-        if (endpoint.value != _endpoint) {
-            refuse("endpoint");
-        }
-        if (bind.value != _bind) {
-            refuse("bind");
-        }
-        if (max_message_bytes.value != _maxMessageBytes) {
-            refuse("max_message_bytes");
-        }
-        if (static_cast<std::size_t>(queue_messages.value) != _queueMessages) {
-            refuse("queue_messages");
-        }
-        if (queue_bytes.value != _queueBytes) {
-            refuse("queue_bytes");
-        }
-        if (static_cast<std::size_t>(max_tracked_sources.value) != _maxTrackedSources) {
-            refuse("max_tracked_sources");
-        }
-        if (reconnect_ms.value != _reconnectMs) {
-            refuse("reconnect_ms");
-        }
-        if (idle_timeout_ms.value != _idleTimeoutMs) {
-            refuse("idle_timeout_ms");
-        }
-        if (body_timeout_ms.value != _bodyTimeoutMs) {
-            refuse("body_timeout_ms");
-        }
-    }
-
     void freezeSocketSettings() {
-        _endpoint          = endpoint.value;
-        _bind              = bind.value;
-        _maxMessageBytes   = max_message_bytes.value;
-        _queueMessages     = static_cast<std::size_t>(queue_messages.value);
-        _queueBytes        = queue_bytes.value;
-        _maxTrackedSources = static_cast<std::size_t>(max_tracked_sources.value);
-        _maxRejectBytes    = static_cast<std::size_t>(max_reject_bytes.value);
-        _reconnectMs       = reconnect_ms.value;
-        _idleTimeoutMs     = idle_timeout_ms.value;
-        _bodyTimeoutMs     = body_timeout_ms.value;
+        _endpoint          = settings.endpoint;
+        _bind              = settings.bind;
+        _maxMessageBytes   = settings.max_message_bytes;
+        _queueMessages     = settings.queue_messages;
+        _queueBytes        = settings.queue_bytes;
+        _maxTrackedSources = settings.max_tracked_sources;
+        _maxRejectBytes    = settings.max_reject_bytes;
+        _reconnectMs       = settings.reconnect_ms;
+        _idleTimeoutMs     = settings.idle_timeout_ms;
+        _bodyTimeoutMs     = settings.body_timeout_ms;
         _addressCursor     = 0UZ;
     }
 
@@ -1937,18 +1845,24 @@ which this block states rather than probes, because path MTU is a property of a 
 
 A send that fails costs one envelope and never the thread: the error is counted in `nSendErrors`, logged once per
 distinct cause, and the next packet is attempted normally.
+
+`endpoint` is written 'host:port', such as 127.0.0.1:5555 or [::1]:5555.
 )"">;
 
     PortIn<Packet<T>>                   in;
     PortOut<Packet<T>, Async, Optional> reject;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"'host:port', e.g. 127.0.0.1:5555 or [::1]:5555; required, there is no default">>               endpoint{};
-    Annotated<std::string, "overflow", Doc<"'drop_oldest' or 'backpressure', applied when the in-process send queue is full">>                      overflow           = std::string("drop_oldest");
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process send queue depth">>                                                                     queue_messages     = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process send queue size">>                                                        queue_bytes        = 16777216ULL;
-    Annotated<std::uint64_t, "max_datagram_bytes", Unit<"byte">, Doc<"a packet whose envelope would exceed one datagram of this size is rejected">> max_datagram_bytes = 65507ULL;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                        endpoint{};
+        Annotated<Overflow, Doc<"full-queue policy">>                                                        overflow           = Overflow::drop_oldest;
+        Annotated<gr::Size_t, Doc<"send queue depth">, StoppedOnly, Limits<Min<1U>>>                         queue_messages     = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"send queue size">, StoppedOnly, Limits<Min<1ULL>>>       queue_bytes        = 16777216ULL;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"datagram size limit">, Limits<Min<1ULL>, Max<65507ULL>>> max_datagram_bytes = 65507ULL;
 
-    GR_MAKE_REFLECTABLE(UdpPacketSink, in, reject, endpoint, overflow, queue_messages, queue_bytes, max_datagram_bytes);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, overflow, queue_messages, queue_bytes, max_datagram_bytes);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(UdpPacketSink, in, reject, settings);
 
     std::uint64_t nPacketsSent          = 0ULL; ///< datagrams handed to the kernel
     std::uint64_t nBytesSent            = 0ULL; ///< envelope bytes handed to the kernel
@@ -1974,11 +1888,9 @@ distinct cause, and the next packet is attempted normally.
 
     std::uint64_t    _sequence = 0ULL;
     std::string      _endpoint{};
-    std::size_t      _queueMessages    = 1024UZ;
-    std::uint64_t    _queueBytes       = 16777216ULL;
-    bool             _socketOpen       = false;
-    bool             _backpressure     = false;
-    std::uint64_t    _maxDatagramBytes = 65507ULL;
+    std::size_t      _queueMessages = 1024UZ;
+    std::uint64_t    _queueBytes    = 16777216ULL;
+    bool             _socketOpen    = false;
     std::vector<int> _loggedSendErrors{}; ///< one log line per distinct cause, so a dead peer cannot flood
 
     struct IoThreadGuard { // must be last member — destroyed first, so the sender is gone before the queue it drains
@@ -1992,10 +1904,14 @@ distinct cause, and the next packet is attempted normally.
     };
     IoThreadGuard _ioGuard{this};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         freezeSocketSettings();
         {
             std::lock_guard lock(_mutex);
@@ -2026,15 +1942,6 @@ distinct cause, and the next packet is attempted normally.
         report();
     }
 
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange();
-        }
-        _backpressure     = overflow.value == "backpressure";
-        _maxDatagramBytes = max_datagram_bytes.value;
-    }
-
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& rejectSpan) {
         const bool  rejectConnected = rejectSpan.isConnected;
         std::size_t consumed        = 0UZ;
@@ -2053,7 +1960,7 @@ distinct cause, and the next packet is attempted normally.
             // the two size bounds, in the order they bind: what one datagram will carry, then what the queue cannot
             // hold. A queue cannot shed its way to room for an envelope larger than the whole of it, so such an
             // envelope is refused here rather than admitted over the bound the graph set.
-            const bool overDatagram = total > _maxDatagramBytes;
+            const bool overDatagram = total > settings.max_datagram_bytes;
             const bool overQueue    = !overDatagram && total > _queueBytes;
             if (overDatagram || overQueue) {
                 if (rejectConnected && onReject >= rejectSpan.size()) {
@@ -2092,44 +1999,10 @@ distinct cause, and the next packet is attempted normally.
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport sink has no default endpoint and will not send to nothing");
-        }
-        if (overflow.value != "drop_oldest" && overflow.value != "backpressure") {
-            throw gr::exception(std::format("overflow is '{}'; it must be 'drop_oldest' (shed the stalest envelope, count it) or 'backpressure' (consume fewer input items)", overflow.value));
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (max_datagram_bytes.value == 0ULL) {
-            throw gr::exception("max_datagram_bytes is 0; every packet would be rejected");
-        }
-        if (max_datagram_bytes.value > 65507ULL) {
-            throw gr::exception(std::format("max_datagram_bytes is {}; 65507 is the largest payload an IPv4 UDP datagram can carry", max_datagram_bytes.value));
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view name) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", name)); };
-        if (endpoint.value != _endpoint) {
-            refuse("endpoint");
-        }
-        if (static_cast<std::size_t>(queue_messages.value) != _queueMessages) {
-            refuse("queue_messages");
-        }
-        if (queue_bytes.value != _queueBytes) {
-            refuse("queue_bytes");
-        }
-    }
-
     void freezeSocketSettings() {
-        _endpoint      = endpoint.value;
-        _queueMessages = static_cast<std::size_t>(queue_messages.value);
-        _queueBytes    = queue_bytes.value;
+        _endpoint      = settings.endpoint;
+        _queueMessages = settings.queue_messages;
+        _queueBytes    = settings.queue_bytes;
     }
 
     [[nodiscard]] property_map buildMetadata(const Packet<T>& packet) {
@@ -2184,10 +2057,10 @@ private:
         const std::uint64_t bytes = envelope.size();
         std::unique_lock    lock(_mutex);
         while (_queue.size() >= _queueMessages || _queuedBytes + bytes > _queueBytes) {
-            if (_backpressure) {
+            if (settings.overflow == Overflow::backpressure) {
                 return false;
             }
-            _queuedBytes -= _queue.front().size(); // the newest packets are what a live consumer wants
+            _queuedBytes -= _queue.front().size(); // a live consumer wants the newest packets
             _queue.pop_front();
             ++nDroppedOnOverflow;
         }
@@ -2378,19 +2251,26 @@ rather than one datagram's. A peer that cannot be reached, a datagram that arriv
 with an ICMP refusal are all counted and read past, because a datagram socket outlives any one datagram; a shortage of
 descriptors or memory is retried a bounded number of times before it counts as permanent. `nReaderFailures` counts the
 reader threads that ended on a fault and `lastReaderError()` names the last one.
+
+`endpoint` is the 'host:port' to bind, such as 0.0.0.0:5555 or [::]:5555. `max_reject_bytes` raw bytes of a refused
+datagram are kept for inspection.
 )"">;
 
     PortOut<Packet<T>, Async>                      out;
     PortOut<Packet<std::uint8_t>, Async, Optional> reject;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"'host:port' to bind, e.g. 0.0.0.0:5555 or [::]:5555; required, there is no default">>  endpoint{};
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"the largest datagram this reader will accept; required, must be > 0">> max_message_bytes   = 0ULL;
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process receive queue depth">>                                                          queue_messages      = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process receive queue size">>                                             queue_bytes         = 16777216ULL;
-    Annotated<gr::Size_t, "max_reject_bytes", Unit<"byte">, Doc<"raw bytes of a refused datagram kept for inspection">>                     max_reject_bytes    = 256U;
-    Annotated<gr::Size_t, "max_tracked_sources", Doc<"distinct source_id values whose sequence is tracked">>                                max_tracked_sources = 8U;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                     endpoint{};
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"datagram size limit">, StoppedOnly>                   max_message_bytes   = 0ULL;
+        Annotated<gr::Size_t, Doc<"receive queue depth">, StoppedOnly, Limits<Min<1U>>>                   queue_messages      = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"receive queue size">, StoppedOnly, Limits<Min<1ULL>>> queue_bytes         = 16777216ULL;
+        Annotated<gr::Size_t, Unit<"byte">, Doc<"refused datagram bytes kept">, StoppedOnly>              max_reject_bytes    = 256U;
+        Annotated<gr::Size_t, Doc<"tracked source limit">, StoppedOnly, Limits<Min<1U>>>                  max_tracked_sources = 8U;
 
-    GR_MAKE_REFLECTABLE(UdpPacketSource, out, reject, endpoint, max_message_bytes, queue_messages, queue_bytes, max_reject_bytes, max_tracked_sources);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, max_message_bytes, queue_messages, queue_bytes, max_reject_bytes, max_tracked_sources);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(UdpPacketSource, out, reject, settings);
 
     std::uint64_t nEnvelopesReceived = 0ULL; ///< datagrams taken off the socket
     std::uint64_t nPacketsPublished  = 0ULL; ///< packets published on out
@@ -2471,10 +2351,20 @@ reader threads that ended on a fault and `lastReaderError()` names the last one.
     };
     IoThreadGuard _ioGuard{this};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.max_message_bytes == 0U) {
+            return gr::Refused(s.max_message_bytes, "required");
+        }
+        if (s.max_reject_bytes > s.max_message_bytes) {
+            return gr::Refused(s.max_reject_bytes, "must be <= max_message_bytes");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         freezeSocketSettings();
         {
             std::lock_guard lock(_mutex);
@@ -2508,14 +2398,6 @@ reader threads that ended on a fault and `lastReaderError()` names the last one.
         requestStopAndJoin();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange();
-        }
-        _maxRejectBytes = static_cast<std::size_t>(max_reject_bytes.value);
     }
 
     /// @brief What ended the reader thread, or empty while it runs and after a stop it was asked for.
@@ -2574,53 +2456,13 @@ reader threads that ended on a fault and `lastReaderError()` names the last one.
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport source has no default endpoint and will not bind to nothing");
-        }
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0 or unset; a datagram states its own lengths, so a source must state a bound before a peer's claimed length sizes anything");
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process receive queue must hold at least one envelope");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process receive queue must hold at least one envelope");
-        }
-        if (max_tracked_sources.value == 0U) {
-            throw gr::exception("max_tracked_sources is 0; no source_id would be tracked and no loss would be detected");
-        }
-        if (static_cast<std::uint64_t>(max_reject_bytes.value) > max_message_bytes.value) {
-            throw gr::exception(std::format("max_reject_bytes {} exceeds max_message_bytes {}; a refusal cannot keep more than a message may hold", max_reject_bytes.value, max_message_bytes.value));
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view name) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", name)); };
-        if (endpoint.value != _endpoint) {
-            refuse("endpoint");
-        }
-        if (max_message_bytes.value != _maxMessageBytes) {
-            refuse("max_message_bytes");
-        }
-        if (static_cast<std::size_t>(queue_messages.value) != _queueMessages) {
-            refuse("queue_messages");
-        }
-        if (queue_bytes.value != _queueBytes) {
-            refuse("queue_bytes");
-        }
-        if (static_cast<std::size_t>(max_tracked_sources.value) != _maxTrackedSources) {
-            refuse("max_tracked_sources");
-        }
-    }
-
     void freezeSocketSettings() {
-        _endpoint          = endpoint.value;
-        _maxMessageBytes   = max_message_bytes.value;
-        _queueMessages     = static_cast<std::size_t>(queue_messages.value);
-        _queueBytes        = queue_bytes.value;
-        _maxTrackedSources = static_cast<std::size_t>(max_tracked_sources.value);
-        _maxRejectBytes    = static_cast<std::size_t>(max_reject_bytes.value);
+        _endpoint          = settings.endpoint;
+        _maxMessageBytes   = settings.max_message_bytes;
+        _queueMessages     = settings.queue_messages;
+        _queueBytes        = settings.queue_bytes;
+        _maxTrackedSources = settings.max_tracked_sources;
+        _maxRejectBytes    = settings.max_reject_bytes;
     }
 
     void requestStopAndJoin() {

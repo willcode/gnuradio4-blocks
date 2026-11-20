@@ -16,35 +16,29 @@
  * user-facing text — the drift these blocks exist to avoid — and because a block carrying a raw sample stream has
  * no business including the packet envelope to learn what 'sub' means.
  */
+namespace gr::blocks::network {
+
+/// @brief The `pattern` of a sink: pub fans out, never blocks and drops in mute state; push deals round-robin to one
+/// consumer at a time, blocks in mute state and discards nothing.
+enum class SendPattern : std::uint8_t { pub, push };
+
+/// @brief The `pattern` of a source: sub subscribes to a prefix, pull fair-queues.
+enum class ReceivePattern : std::uint8_t { sub, pull };
+
+} // namespace gr::blocks::network
+
 namespace gr::blocks::network::detail::zmqio {
 
-/// @brief The socket pattern a block runs, resolved from its `pattern` setting once at configure time.
+/// @brief The socket pattern the transport opens, whichever role the block has.
 enum class Pattern : std::uint8_t { Pub, Push, Sub, Pull };
+
+[[nodiscard]] constexpr Pattern socketPattern(SendPattern pattern) noexcept { return pattern == SendPattern::pub ? Pattern::Pub : Pattern::Push; }
+[[nodiscard]] constexpr Pattern socketPattern(ReceivePattern pattern) noexcept { return pattern == ReceivePattern::sub ? Pattern::Sub : Pattern::Pull; }
 
 /// @brief The one endpoint diagnostic worth stating rather than leaving to be rediscovered.
 ///
 /// libzmq answers an endpoint with no transport prefix with a bare `EINVAL`, and that is the common typo.
 [[nodiscard]] inline std::string endpointHint(std::string_view endpoint) { return endpoint.find("://") == std::string_view::npos ? std::format(" — '{}' names no transport; a libzmq endpoint begins with a prefix such as tcp://, ipc:// or inproc://", endpoint) : std::string{}; }
-
-[[nodiscard]] inline Pattern sendPatternFromName(std::string_view name) {
-    if (name == "pub") {
-        return Pattern::Pub;
-    }
-    if (name == "push") {
-        return Pattern::Push;
-    }
-    throw gr::exception(std::format("pattern is '{}'; a sink takes 'pub' (fan out, never blocks, drops in mute state) or 'push' (round-robin, blocks in mute state, discards nothing)", name));
-}
-
-[[nodiscard]] inline Pattern receivePatternFromName(std::string_view name) {
-    if (name == "sub") {
-        return Pattern::Sub;
-    }
-    if (name == "pull") {
-        return Pattern::Pull;
-    }
-    throw gr::exception(std::format("pattern is '{}'; a source takes 'sub' (subscribes to a prefix) or 'pull' (fair-queued)", name));
-}
 
 } // namespace gr::blocks::network::detail::zmqio
 

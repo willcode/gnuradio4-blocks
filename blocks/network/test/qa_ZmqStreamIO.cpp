@@ -24,6 +24,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/network/ZmqStreamIO.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // The block exists to hear a publisher it did not build, so the assertions below meet it at a socket rather than at
 // a span: a raw ZeroMQ publisher in the test sends exactly what a GR 3.10 `zmq_pub_sink` sends, and what the graph
@@ -191,13 +192,8 @@ const boost::ut::suite<"ZmqStreamSource"> zmqStreamSourceTests = [] {
 
     "the settings that gate start() are checked before any socket opens"_test = [] {
         const Endpoint endpoint;
-        // a block constructed with no settings at all never passes through settingsChanged, so start() is the gate
-        // that has to hold
-        const auto refuses = [](gr::property_map settings, std::string_view what) {
-            gr::Graph graph;
-            auto&     block = graph.emplaceBlock<ZmqStreamSource<Sample>>(std::move(settings));
-            expect(throws<gr::exception>([&block] { block.start(); })) << what;
-        };
+        // the two required settings hold the block not ready, so no start opens a socket without them
+        const auto refuses = [](gr::property_map settings, std::string_view what) { expect(gr::testing::initRefused<ZmqStreamSource<Sample>>(std::move(settings))) << what; };
         refuses({{"endpoint", std::string("")}, {"max_message_bytes", kBound}}, "an empty endpoint");
         refuses({{"endpoint", endpoint.uri}, {"max_message_bytes", kBound}, {"pattern", std::string("pub")}}, "a pattern no source runs");
         refuses({{"endpoint", endpoint.uri}}, "a zero message bound");
@@ -311,8 +307,7 @@ const boost::ut::suite<"ZmqStreamSource"> zmqStreamSourceTests = [] {
 
         // driven without a graph, so nothing drains the queue and the overflow rule is the only thing acting on it
         ZmqStreamSource<Sample> source({{"endpoint", endpoint.uri}, {"max_message_bytes", kBound}, {"queue_bytes", std::uint64_t{kQueueSamples * kSampleBytes}}});
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
+        boost::ut::expect(boost::ut::fatal(source.check({}).has_value()));
         source.start();
         expect(publisher.awaitSubscriber()) << "the block never subscribed";
 
@@ -335,6 +330,16 @@ const boost::ut::suite<"ZmqStreamSource"> zmqStreamSourceTests = [] {
         expect(eq(counted.samplesDropped, std::uint64_t{sent.size() - kQueueSamples})) << "each sample past the bound displaced one";
         expect(std::ranges::equal(survivors, std::span(sent).last(kQueueSamples))) << "what survived is not the newest samples";
         expect(eq(counted.messagesRefused, std::uint64_t{0ULL})) << "a shed sample is not a refused message";
+    };
+};
+
+const boost::ut::suite<"network blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "ZmqStreamSource"_test = [&report] {
+        const auto failures = gr::testing::requiredInitFailures<gr::blocks::network::ZmqStreamSource<Sample>>({{"endpoint", std::string("tcp://127.0.0.1:5555")}, {"max_message_bytes", std::uint64_t{4096ULL}}}, {{"pattern", std::string("pull")}, {"queue_bytes", std::uint64_t{4096ULL}}});
+        expect(failures.empty()) << report(failures);
     };
 };
 

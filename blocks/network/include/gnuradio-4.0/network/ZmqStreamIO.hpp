@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <mutex>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -69,20 +71,28 @@ phase shift. `nSamplesDropped` counts them.
 A reader that dies other than by request is not a quiet wire, and `processBulk` reports `work::Status::ERROR` once
 its queue has drained rather than an endless stream of empty work: `OK` would leave the graph running behind a
 permanently flat input with nothing to tell a dead endpoint from an idle one.
+
+`endpoint` is a libzmq endpoint such as tcp://127.0.0.1:5555; a consumer normally connects. pattern sub subscribes by
+prefix and pull is fair-queued; `topic` is the ZMQ_SUBSCRIBE prefix under sub. `max_message_bytes` is ZMQ_MAXMSGSIZE and
+the block's own bound. A linger time of 0 discards pending messages at close. `topic` is the publisher's key.
 )"">;
 
     PortOut<T> out;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"libzmq endpoint, e.g. tcp://127.0.0.1:5555; required, there is no default">>        endpoint{};
-    Annotated<bool, "bind", Doc<"bind the endpoint rather than connect to it; a consumer normally connects">>                            bind              = false;
-    Annotated<std::string, "pattern", Doc<"'sub' (prefix subscription) or 'pull' (fair-queued)">>                                        pattern           = std::string("sub");
-    Annotated<std::string, "topic", Doc<"ZMQ_SUBSCRIBE prefix, 'sub' only; the publisher's 'key', empty where it has none">>             topic             = std::string("");
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"ZMQ_MAXMSGSIZE and this block's own bound; required, must be > 0">> max_message_bytes = 0ULL;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process sample queue size, rounded down to whole samples">>            queue_bytes       = 16777216ULL;
-    Annotated<gr::Size_t, "recv_hwm", Doc<"ZMQ_RCVHWM, libzmq's own inbound queue bound">>                                               recv_hwm          = 16U;
-    Annotated<std::int32_t, "linger_ms", Unit<"ms">, Doc<"ZMQ_LINGER; 0 discards pending messages immediately on close">>                linger_ms         = 0;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                                                                                  endpoint{};
+        Annotated<bool, Doc<"bound endpoint">, StoppedOnly>                                                                                                            bind              = false;
+        Annotated<ReceivePattern, Doc<"socket pattern">, StoppedOnly>                                                                                                  pattern           = ReceivePattern::sub;
+        Annotated<std::string, Doc<"topic">, StoppedOnly>                                                                                                              topic             = std::string("");
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, StoppedOnly>                                                                                 max_message_bytes = 0ULL;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"in-process sample queue size, rounded down to whole samples">, StoppedOnly, Limits<Min<std::uint64_t{sizeof(T)}>>> queue_bytes       = 16777216ULL;
+        Annotated<gr::Size_t, Doc<"receive high-water mark">, StoppedOnly>                                                                                             recv_hwm          = 16U;
+        Annotated<std::int32_t, Unit<"ms">, Doc<"linger time (0 = discard)">, StoppedOnly>                                                                             linger_ms         = 0;
 
-    GR_MAKE_REFLECTABLE(ZmqStreamSource, out, endpoint, bind, pattern, topic, max_message_bytes, queue_bytes, recv_hwm, linger_ms);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, pattern, topic, max_message_bytes, queue_bytes, recv_hwm, linger_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ZmqStreamSource, out, settings);
 
     static constexpr std::size_t kSampleBytes = sizeof(T);
 
@@ -118,10 +128,17 @@ permanently flat input with nothing to tell a dead endpoint from an idle one.
     /// `~Block()` cannot stand in because derived members are destroyed before it runs.
     detail::zmqenvelope::Receiver _receiver{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.max_message_bytes == 0U) {
+            return gr::Refused(s.max_message_bytes, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         _frozen     = frozenSocketConfig();
         _queueBytes = queueCapacity();
         {
@@ -137,13 +154,6 @@ permanently flat input with nothing to tell a dead endpoint from an idle one.
         _receiver.stop();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange(); // every setting is read once when the socket opens, so nothing is recomputed here
-        }
     }
 
     [[nodiscard]] Counters counters() {
@@ -176,48 +186,6 @@ permanently flat input with nothing to tell a dead endpoint from an idle one.
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport source has no default endpoint and will not connect to nothing");
-        }
-        std::ignore = detail::zmqio::receivePatternFromName(pattern.value);
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0 or unset; libzmq's own default is no limit, so a source must state a bound before a peer's claimed length sizes anything");
-        }
-        if (queue_bytes.value < kSampleBytes) {
-            throw gr::exception(std::format("queue_bytes is {}; the in-process queue must hold at least one sample of {} bytes", queue_bytes.value, kSampleBytes));
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        const auto wanted = frozenSocketConfig();
-        if (wanted.endpoint != _frozen.endpoint) {
-            refuse("endpoint");
-        }
-        if (wanted.topic != _frozen.topic) {
-            refuse("topic");
-        }
-        if (wanted.bind != _frozen.bind) {
-            refuse("bind");
-        }
-        if (wanted.pattern != _frozen.pattern) {
-            refuse("pattern");
-        }
-        if (wanted.maxMessageBytes != _frozen.maxMessageBytes) {
-            refuse("max_message_bytes");
-        }
-        if (queueCapacity() != _queueBytes) {
-            refuse("queue_bytes");
-        }
-        if (wanted.hwm != _frozen.hwm) {
-            refuse("recv_hwm");
-        }
-        if (wanted.lingerMs != _frozen.lingerMs) {
-            refuse("linger_ms");
-        }
-    }
-
     /// @brief A 64-bit byte count narrowed to an index; a template, so the cast stands where `std::size_t` is
     /// 32 bits and is not a useless cast where the two are the same 64-bit type. A private member because the
     /// module's ZMQ detail namespace is shared with the packet transport's header.
@@ -228,10 +196,10 @@ private:
 
     /// @brief `queue_bytes` as the ring is actually sized: whole samples, so that shedding the oldest of them can
     /// never leave the stream half a sample out of step.
-    [[nodiscard]] std::size_t queueCapacity() const noexcept { return narrowIndex<std::size_t>(queue_bytes.value / kSampleBytes * kSampleBytes); }
+    [[nodiscard]] std::size_t queueCapacity() const noexcept { return narrowIndex<std::size_t>(settings.queue_bytes / kSampleBytes * kSampleBytes); }
 
     /// @brief The socket settings as the transport reads them; `start()` freezes the result for the run.
-    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = endpoint.value, .topic = topic.value, .pattern = detail::zmqio::receivePatternFromName(pattern.value), .bind = bind.value, .hwm = static_cast<std::int32_t>(recv_hwm.value), .lingerMs = linger_ms.value, .maxMessageBytes = max_message_bytes.value}; }
+    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = settings.endpoint, .topic = settings.topic, .pattern = detail::zmqio::socketPattern(settings.pattern), .bind = settings.bind, .hwm = static_cast<std::int32_t>(settings.recv_hwm.value), .lingerMs = settings.linger_ms, .maxMessageBytes = settings.max_message_bytes}; }
 
     void report() {
         std::string report;

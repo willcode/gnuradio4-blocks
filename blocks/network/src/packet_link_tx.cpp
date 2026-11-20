@@ -235,7 +235,7 @@ int main(int argc, char** argv) {
     report(text, "records_rejected", packets.nRejectedRecords);
     report(text, "meta_keys_dropped", packets.nMetaKeysDropped);
     report(text, "timing_events_dropped", packets.nDroppedTimingEvents);
-    report(text, "stream_bytes", counted.count);
+    report(text, "stream_bytes", counted.status.count);
     report(text, "stopped_by", signaled ? std::string_view("signal") : (timedOut ? std::string_view("deadline") : std::string_view("end_of_stream")));
     report(text, "scheduler_error", failure.empty() ? std::string_view("none") : std::string_view(failure));
     std::print("{}", text);

@@ -24,6 +24,7 @@
 #include <gnuradio-4.0/YamlPmt.hpp>
 #include <gnuradio-4.0/annotated.hpp>
 
+#include <gnuradio-4.0/network/Overflow.hpp>
 #include <gnuradio-4.0/network/PacketEnvelope.hpp>
 #include <gnuradio-4.0/network/ZmqEnvelopeIo.hpp>
 #include <gnuradio-4.0/network/ZmqTransport.hpp>
@@ -194,20 +195,28 @@ inside the peer, its message and its function. A `std::source_location` cannot b
 and one manufactured at the far end would name the receiving file as if it were the sender's.
 
 The transport is the module's, with the same settings, patterns and defaults as the other two pairs.
+
+`endpoint` is a libzmq endpoint such as tcp://127.0.0.1:5555. The producer is normally the end that binds. pattern pub
+fans out, and push is a lossless round-robin. `topic` is frame 0, the subscription prefix. libzmq's own send high-water
+mark of 1000 is up to 64 MiB of buffer this graph cannot see. A linger time of 0 discards pending messages at close.
 )"">;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"libzmq endpoint, e.g. tcp://127.0.0.1:5555; required, there is no default">> endpoint{};
-    Annotated<bool, "bind", Doc<"bind the endpoint rather than connect to it; the producer is normally the stable end">>          bind              = true;
-    Annotated<std::string, "pattern", Doc<"'pub' (fan out) or 'push' (round-robin, lossless, one consumer)">>                     pattern           = std::string("pub");
-    Annotated<std::string, "topic", Doc<"frame 0, the subscription prefix; empty publishes to every subscriber">>                 topic             = std::string("");
-    Annotated<std::string, "overflow", Doc<"'drop_oldest' or 'backpressure', applied when the in-process send queue is full">>    overflow          = std::string("drop_oldest");
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process send queue depth">>                                                   queue_messages    = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process send queue size">>                                      queue_bytes       = 16777216ULL;
-    Annotated<gr::Size_t, "send_hwm", Doc<"ZMQ_SNDHWM; libzmq's own 1000 is up to 64 MiB of buffer this graph cannot see">>       send_hwm          = 16U;
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"a message whose envelope would exceed this is refused">>     max_message_bytes = 16777216ULL;
-    Annotated<std::int32_t, "linger_ms", Unit<"ms">, Doc<"ZMQ_LINGER; 0 discards pending messages immediately on close">>         linger_ms         = 0;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                                             endpoint{};
+        Annotated<bool, Doc<"bound endpoint">, StoppedOnly>                                                                       bind              = true;
+        Annotated<SendPattern, Doc<"socket pattern">, StoppedOnly>                                                                pattern           = SendPattern::pub;
+        Annotated<std::string, Doc<"topic (empty = all)">, StoppedOnly>                                                           topic             = std::string("");
+        Annotated<Overflow, Doc<"full-queue policy">, StoppedOnly>                                                                overflow          = Overflow::drop_oldest;
+        Annotated<gr::Size_t, Doc<"send queue depth">, StoppedOnly, Limits<Min<1U>>>                                              queue_messages    = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"send queue size">, StoppedOnly, Limits<Min<1ULL>>>                            queue_bytes       = 16777216ULL;
+        Annotated<gr::Size_t, Doc<"send high-water mark">, StoppedOnly>                                                           send_hwm          = 16U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, Limits<Min<1ULL>, Max<gr::network::kMaxEnvelopeBytes>>> max_message_bytes = 16777216ULL;
+        Annotated<std::int32_t, Unit<"ms">, Doc<"linger time (0 = discard)">, StoppedOnly>                                        linger_ms         = 0;
 
-    GR_MAKE_REFLECTABLE(MessagePacketSink, endpoint, bind, pattern, topic, overflow, queue_messages, queue_bytes, send_hwm, max_message_bytes, linger_ms);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, pattern, topic, overflow, queue_messages, queue_bytes, send_hwm, max_message_bytes, linger_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(MessagePacketSink, settings);
 
     /// @brief The block's counters and its transport's, as one set.
     struct Counters {
@@ -227,22 +236,24 @@ The transport is the module's, with the same settings, patterns and defaults as 
     std::uint64_t nMessagesRejected  = 0ULL; ///< messages refused for exceeding max_message_bytes
     std::uint64_t nOverQueueBytes    = 0ULL; ///< messages refused because one envelope exceeds queue_bytes
 
-    std::uint64_t _sequence        = 0ULL; ///< messages this sink has published
-    bool          _socketOpen      = false;
-    bool          _backpressure    = false;
-    std::uint64_t _maxMessageBytes = 16777216ULL;
-    std::uint64_t _queueBytes      = 16777216ULL; ///< frozen beside the transport's copy, which start() configures
+    std::uint64_t _sequence   = 0ULL; ///< messages this sink has published
+    bool          _socketOpen = false;
+    std::uint64_t _queueBytes = 16777216ULL; ///< frozen beside the transport's copy, which start() configures
 
     detail::zmqenvelope::SocketConfig _frozen{}; ///< the socket settings, read once when the socket opens
     detail::zmqenvelope::SendQueue    _sender{}; ///< joins its own thread however the block dies
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         _frozen     = frozenSocketConfig();
-        _queueBytes = queue_bytes.value;
-        _sender.configure(static_cast<std::size_t>(queue_messages.value), _queueBytes, _backpressure);
+        _queueBytes = settings.queue_bytes;
+        _sender.configure(settings.queue_messages, _queueBytes, settings.overflow == Overflow::backpressure);
         _sequence = 0ULL; // a restarted sink restarts its stream, which the far end reads as a producer reset
         _sender.start(_frozen, this->name.value);
         _socketOpen = true;
@@ -252,15 +263,6 @@ The transport is the module's, with the same settings, patterns and defaults as 
         _sender.stop();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange();
-        }
-        _backpressure    = overflow.value == "backpressure";
-        _maxMessageBytes = max_message_bytes.value;
     }
 
     [[nodiscard]] Counters counters() const {
@@ -299,56 +301,11 @@ The transport is the module's, with the same settings, patterns and defaults as 
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport sink has no default endpoint and will not bind to nothing");
-        }
-        std::ignore = detail::zmqio::sendPatternFromName(pattern.value);
-        if (overflow.value != "drop_oldest" && overflow.value != "backpressure") {
-            throw gr::exception(std::format("overflow is '{}'; it must be 'drop_oldest' (shed the stalest envelope, count it) or 'backpressure' (leave the message on the plane)", overflow.value));
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process send queue must hold at least one envelope");
-        }
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0; every message would be refused");
-        }
-        if (max_message_bytes.value > gr::network::kMaxEnvelopeBytes) {
-            throw gr::exception(std::format("max_message_bytes is {}; {} is the largest envelope the header's 32-bit length fields can state", max_message_bytes.value, gr::network::kMaxEnvelopeBytes));
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        const auto wanted = frozenSocketConfig();
-        if (wanted.endpoint != _frozen.endpoint) {
-            refuse("endpoint");
-        }
-        if (wanted.topic != _frozen.topic) {
-            refuse("topic");
-        }
-        if (wanted.bind != _frozen.bind) {
-            refuse("bind");
-        }
-        if (wanted.pattern != _frozen.pattern) {
-            refuse("pattern");
-        }
-        if (wanted.hwm != _frozen.hwm) {
-            refuse("send_hwm");
-        }
-        if (wanted.lingerMs != _frozen.lingerMs) {
-            refuse("linger_ms");
-        }
-    }
-
-    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = endpoint.value, .topic = topic.value, .pattern = detail::zmqio::sendPatternFromName(pattern.value), .bind = bind.value, .hwm = static_cast<std::int32_t>(send_hwm.value), .lingerMs = linger_ms.value, .maxMessageBytes = 0ULL}; }
+    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = settings.endpoint, .topic = settings.topic, .pattern = detail::zmqio::socketPattern(settings.pattern), .bind = settings.bind, .hwm = static_cast<std::int32_t>(settings.send_hwm.value), .lingerMs = settings.linger_ms, .maxMessageBytes = 0ULL}; }
 
     void publish(const Message& message) {
         detail::zmqenvelope::Outgoing envelope = detail::messagepacket::envelopeOf(detail::messagepacket::encode(message, _sequence));
-        if (envelope.bytes() > _maxMessageBytes) {
+        if (envelope.bytes() > settings.max_message_bytes) {
             ++nMessagesRejected;
             ++_sequence; // the far end reads the hole as one lost message, which is exactly what happened
             return;
@@ -416,19 +373,27 @@ the Majordomo protocol's, and a block acting on a value outside it would be acti
 Decoding runs on the block's own reader thread, so a flood of malformed packets costs that thread and never the
 scheduler. The queue the plane drains is bounded and sheds its oldest message when the plane cannot keep up, which
 the far end's next packet then reports as a gap like any other loss.
+
+`endpoint` is a libzmq endpoint such as tcp://127.0.0.1:5555; a consumer normally connects. pattern sub subscribes by
+prefix and pull is fair-queued; `topic` is the ZMQ_SUBSCRIBE prefix under sub. `max_message_bytes` is ZMQ_MAXMSGSIZE and
+the block's own bound. A linger time of 0 discards pending messages at close.
 )"">;
 
-    Annotated<std::string, "endpoint", Visible, Doc<"libzmq endpoint; required, there is no default">>                                   endpoint{};
-    Annotated<bool, "bind", Doc<"bind the endpoint rather than connect to it; a consumer normally connects">>                            bind              = false;
-    Annotated<std::string, "pattern", Doc<"'sub' (prefix subscription) or 'pull' (fair-queued)">>                                        pattern           = std::string("sub");
-    Annotated<std::string, "topic", Doc<"ZMQ_SUBSCRIBE prefix, 'sub' only; empty accepts everything and refuses it observably">>         topic             = std::string("");
-    Annotated<std::uint64_t, "max_message_bytes", Unit<"byte">, Doc<"ZMQ_MAXMSGSIZE and this block's own bound; required, must be > 0">> max_message_bytes = 0ULL;
-    Annotated<gr::Size_t, "queue_messages", Doc<"in-process receive queue depth">>                                                       queue_messages    = 1024U;
-    Annotated<std::uint64_t, "queue_bytes", Unit<"byte">, Doc<"in-process receive queue size">>                                          queue_bytes       = 16777216ULL;
-    Annotated<gr::Size_t, "recv_hwm", Doc<"ZMQ_RCVHWM, libzmq's own inbound queue bound">>                                               recv_hwm          = 16U;
-    Annotated<std::int32_t, "linger_ms", Unit<"ms">, Doc<"ZMQ_LINGER; 0 discards pending messages immediately on close">>                linger_ms         = 0;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"endpoint">, StoppedOnly>                                     endpoint{};
+        Annotated<bool, Doc<"bound endpoint">, StoppedOnly>                                               bind              = false;
+        Annotated<ReceivePattern, Doc<"socket pattern">, StoppedOnly>                                     pattern           = ReceivePattern::sub;
+        Annotated<std::string, Doc<"topic (empty = all)">, StoppedOnly>                                   topic             = std::string("");
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"message size limit">, StoppedOnly>                    max_message_bytes = 0ULL;
+        Annotated<gr::Size_t, Doc<"receive queue depth">, StoppedOnly, Limits<Min<1U>>>                   queue_messages    = 1024U;
+        Annotated<std::uint64_t, Unit<"byte">, Doc<"receive queue size">, StoppedOnly, Limits<Min<1ULL>>> queue_bytes       = 16777216ULL;
+        Annotated<gr::Size_t, Doc<"receive high-water mark">, StoppedOnly>                                recv_hwm          = 16U;
+        Annotated<std::int32_t, Unit<"ms">, Doc<"linger time (0 = discard)">, StoppedOnly>                linger_ms         = 0;
 
-    GR_MAKE_REFLECTABLE(MessagePacketSource, endpoint, bind, pattern, topic, max_message_bytes, queue_messages, queue_bytes, recv_hwm, linger_ms);
+        GR_MAKE_REFLECTABLE(Settings, endpoint, bind, pattern, topic, max_message_bytes, queue_messages, queue_bytes, recv_hwm, linger_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(MessagePacketSource, settings);
 
     /// @brief The counters as one set, taken under the lock the reader thread writes most of them behind.
     struct Counters {
@@ -490,13 +455,20 @@ the far end's next packet then reports as a gap like any other loss.
     /// and the counters its decoder writes into.
     detail::zmqenvelope::Receiver _receiver{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.endpoint.value.empty()) {
+            return gr::Refused(s.endpoint, "required");
+        }
+        if (s.max_message_bytes == 0U) {
+            return gr::Refused(s.max_message_bytes, "required");
+        }
+        return {};
+    }
 
     void start() {
-        validate();
         _frozen        = frozenSocketConfig();
-        _queueMessages = static_cast<std::size_t>(queue_messages.value);
-        _queueBytes    = queue_bytes.value;
+        _queueMessages = settings.queue_messages;
+        _queueBytes    = settings.queue_bytes;
         {
             std::lock_guard lock(_mutex);
             _queue.clear();
@@ -515,13 +487,6 @@ the far end's next packet then reports as a gap like any other loss.
         _receiver.stop();
         _socketOpen = false;
         report();
-    }
-
-    void rebuild() {
-        validate();
-        if (_socketOpen) {
-            refuseFrozenChange(); // every setting is read once when the socket opens, so nothing is recomputed here
-        }
     }
 
     [[nodiscard]] Counters counters() const {
@@ -559,49 +524,7 @@ the far end's next packet then reports as a gap like any other loss.
     }
 
 private:
-    void validate() {
-        if (endpoint.value.empty()) {
-            throw gr::exception("endpoint is empty; a transport source has no default endpoint and will not connect to nothing");
-        }
-        std::ignore = detail::zmqio::receivePatternFromName(pattern.value);
-        if (max_message_bytes.value == 0ULL) {
-            throw gr::exception("max_message_bytes is 0 or unset; libzmq's own default is no limit, so a source must state a bound before a peer's claimed length sizes anything");
-        }
-        if (queue_messages.value == 0U) {
-            throw gr::exception("queue_messages is 0; the in-process receive queue must hold at least one message");
-        }
-        if (queue_bytes.value == 0ULL) {
-            throw gr::exception("queue_bytes is 0; the in-process receive queue must hold at least one message");
-        }
-    }
-
-    void refuseFrozenChange() const {
-        const auto refuse = [](std::string_view setting) { throw gr::exception(std::format("setting '{}' is read once when the socket opens and cannot change while the block is running; rebuild the graph instead", setting)); };
-        const auto wanted = frozenSocketConfig();
-        if (wanted.endpoint != _frozen.endpoint) {
-            refuse("endpoint");
-        }
-        if (wanted.topic != _frozen.topic) {
-            refuse("topic");
-        }
-        if (wanted.bind != _frozen.bind) {
-            refuse("bind");
-        }
-        if (wanted.pattern != _frozen.pattern) {
-            refuse("pattern");
-        }
-        if (wanted.maxMessageBytes != _frozen.maxMessageBytes) {
-            refuse("max_message_bytes");
-        }
-        if (wanted.hwm != _frozen.hwm) {
-            refuse("recv_hwm");
-        }
-        if (wanted.lingerMs != _frozen.lingerMs) {
-            refuse("linger_ms");
-        }
-    }
-
-    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = endpoint.value, .topic = topic.value, .pattern = detail::zmqio::receivePatternFromName(pattern.value), .bind = bind.value, .hwm = static_cast<std::int32_t>(recv_hwm.value), .lingerMs = linger_ms.value, .maxMessageBytes = max_message_bytes.value}; }
+    [[nodiscard]] detail::zmqenvelope::SocketConfig frozenSocketConfig() const { return {.endpoint = settings.endpoint, .topic = settings.topic, .pattern = detail::zmqio::socketPattern(settings.pattern), .bind = settings.bind, .hwm = static_cast<std::int32_t>(settings.recv_hwm.value), .lingerMs = settings.linger_ms, .maxMessageBytes = settings.max_message_bytes}; }
 
     /// @brief Emit what has arrived, stopping at the first message the plane has no room for.
     ///
