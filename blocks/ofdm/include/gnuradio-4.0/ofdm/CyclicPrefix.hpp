@@ -2,13 +2,14 @@
 #define GNURADIO_OFDM_CYCLIC_PREFIX_HPP
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -65,41 +66,36 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::CpInsert)
  * sets both to 0 and restarts the cycle.
  */
 struct CpInsert : Block<CpInsert, NoTagPropagation> {
-    using Description = Doc<"Turns DataSet<complex<float>> symbol records into a time-domain complex stream. The block takes the inverse transform of each record, scaled by 1/N for a record of N values, and puts a cyclic prefix in front of it. cp_len holds one length or a cycle read at the record's symbol_in_frame. Optional window_len raised-cosine samples smooth the symbol edges, and the first sample of each frame carries a trigger tag">;
+    using Description = Doc<"Turns DataSet<complex<float>> symbol records into a time-domain complex stream. The block takes the inverse transform of each record, scaled by 1/N for a record of N values, and puts a cyclic prefix in front of it. cp_len holds one length or a cycle read at the record's symbol_in_frame. Optional window_len raised-cosine samples smooth the symbol edges, and the first sample of each frame carries a trigger tag. `window_len` raised-cosine edge samples are shared with the next symbol. With `emit_trigger`, the first sample of every frame carries `trigger_label` under gr:trigger_name">;
 
     PortIn<DataSet<Complex>, Async> in;
     PortOut<Complex>                out;
 
-    Annotated<std::vector<gr::Size_t>, "cp_len", Visible, Doc<"prefix samples, constant or a per-symbol cycle">>            cp_len        = std::vector<gr::Size_t>{16U};
-    Annotated<gr::Size_t, "window_len", Visible, Doc<"raised-cosine edge samples shared with the next symbol; 0 disables">> window_len    = 0U;
-    Annotated<bool, "emit_trigger", Doc<"tag the first sample of every frame with gr:trigger_name">>                        emit_trigger  = true;
-    Annotated<std::string, "trigger_label", Doc<"gr:trigger_name of the emitted tags">>                                     trigger_label = std::string("ofdm_frame");
+    struct Settings {
+        Annotated<std::vector<gr::Size_t>, Unit<"samples">, Visible, Doc<"prefix length">>   cp_len        = std::vector<gr::Size_t>{16U};
+        Annotated<gr::Size_t, Unit<"samples">, Visible, Doc<"edge window length (0 = off)">> window_len    = 0U;
+        Annotated<bool, Doc<"frame trigger tags">>                                           emit_trigger  = true;
+        Annotated<std::string, Doc<"emitted trigger name">>                                  trigger_label = std::string("ofdm_frame");
 
-    GR_MAKE_REFLECTABLE(CpInsert, in, out, cp_len, window_len, emit_trigger, trigger_label);
+        GR_MAKE_REFLECTABLE(Settings, cp_len, window_len, emit_trigger, trigger_label);
+    } settings;
 
-    /// The settings the block computes on, and the longest prefix they give.
-    struct Accepted {
-        std::vector<gr::Size_t> prefixes{};
-        std::size_t             windowLength  = 0UZ;
-        std::size_t             longestPrefix = 0UZ;
-        bool                    emitTrigger   = true;
-        std::string             label{};
-    };
+    GR_MAKE_REFLECTABLE(CpInsert, in, out, settings);
 
     gr::algorithm::FFT<Complex, Complex, gr::algorithm::Direction::Backward> _inverse{};
 
-    Accepted             _accepted = settingsAfter(Accepted{}, [](std::string_view) { return true; });
     std::vector<Complex> _time{};    ///< one symbol, transformed, before the prefix is put in front of it
     std::vector<Complex> _out{};     ///< the symbol as a stream, with prefix, symbol and the windowed head
     std::vector<Complex> _overlap{}; ///< the previous symbol's falling extension, added into the next symbol's head
-    std::vector<float>   _ramp{};    ///< the rising raised-cosine edge of `_accepted.windowLength` samples
+    std::vector<float>   _ramp{};    ///< the rising raised-cosine edge of `window_len` samples
 
-    std::size_t   _fftLength    = 0UZ;
-    std::size_t   _outAt        = 0UZ;  ///< samples of `_out` already published
-    std::uint64_t _cyclePos     = 0ULL; ///< the prefix cycle's position, which is the symbol's index in its frame
-    std::uint64_t _unmarked     = 0ULL; ///< records that named no `symbol_in_frame`
-    std::uint64_t _malformed    = 0ULL; ///< records too short to hold their prefix
-    bool          _triggerReady = false;
+    std::size_t   _fftLength     = 0UZ;
+    std::size_t   _longestPrefix = 0UZ;  ///< the longest entry of `cp_len`
+    std::size_t   _outAt         = 0UZ;  ///< samples of `_out` already published
+    std::uint64_t _cyclePos      = 0ULL; ///< the prefix cycle's position, which is the symbol's index in its frame
+    std::uint64_t _unmarked      = 0ULL; ///< records that named no `symbol_in_frame`
+    std::uint64_t _malformed     = 0ULL; ///< records too short to hold their prefix
+    bool          _triggerReady  = false;
 
     /// @brief Records that carried no `symbol_in_frame`.
     [[nodiscard]] std::uint64_t nUnmarked() const noexcept { return _unmarked; }
@@ -107,12 +103,21 @@ struct CpInsert : Block<CpInsert, NoTagPropagation> {
     /// @brief Records shorter than their prefix. The block drops them.
     [[nodiscard]] std::uint64_t nMalformed() const noexcept { return _malformed; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        Accepted next = settingsAfter(_accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); });
-        if (next.windowLength != _accepted.windowLength) {
-            buildRamp(next.windowLength);
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.cp_len.value.empty()) {
+            return gr::Refused(s.cp_len, "required");
         }
-        _accepted = std::move(next);
+        if (s.window_len > std::ranges::min(s.cp_len.value)) {
+            return gr::Refused(s.window_len, "must be <= min(cp_len)");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.window_len.changed()) {
+            buildRamp(s.window_len);
+        }
+        _longestPrefix = std::ranges::max(s.cp_len.value);
     }
 
     void start() {
@@ -141,7 +146,7 @@ struct CpInsert : Block<CpInsert, NoTagPropagation> {
                     break;
                 }
                 if (_outAt == 0UZ && _triggerReady) {
-                    outSpan.publishTag(property_map{{gr::tag::TRIGGER_NAME.key(), _accepted.label}, {gr::tag::TRIGGER_OFFSET.key(), 0.f}}, written);
+                    outSpan.publishTag(property_map{{gr::tag::TRIGGER_NAME.key(), settings.trigger_label.value}, {gr::tag::TRIGGER_OFFSET.key(), 0.f}}, written);
                     _triggerReady = false;
                 }
                 const std::size_t take = std::min(_out.size() - _outAt, outSpan.size() - written);
@@ -171,33 +176,6 @@ struct CpInsert : Block<CpInsert, NoTagPropagation> {
     }
 
 private:
-    /// @brief Copies the named members into @p next. Throws for an empty `cp_len` or a `window_len` longer than the
-    /// shortest entry.
-    template<typename Moved>
-    [[nodiscard]] Accepted settingsAfter(Accepted next, Moved moved) const {
-        if (moved("cp_len")) {
-            if (cp_len.value.empty()) {
-                throw gr::exception("cp_len is the prefix length, a scalar or a per-symbol cycle, and must hold at least one entry");
-            }
-            next.prefixes = cp_len.value;
-        }
-        if (moved("window_len")) {
-            next.windowLength = static_cast<std::size_t>(window_len.value);
-        }
-        if (moved("emit_trigger")) {
-            next.emitTrigger = emit_trigger.value;
-        }
-        if (moved("trigger_label")) {
-            next.label = trigger_label.value;
-        }
-        const auto shortest = static_cast<std::size_t>(*std::ranges::min_element(next.prefixes));
-        if (next.windowLength > shortest) {
-            throw gr::exception(std::format("window_len is {} and the shortest cp_len is {}: an edge longer than the prefix it overlaps would reach past the symbol it belongs to", next.windowLength, shortest));
-        }
-        next.longestPrefix = static_cast<std::size_t>(*std::ranges::max_element(next.prefixes));
-        return next;
-    }
-
     void buildRamp(std::size_t edge) {
         _ramp.resize(edge);
         for (std::size_t n = 0UZ; n < edge; ++n) {
@@ -210,7 +188,7 @@ private:
     /// @brief Builds one record's samples: the inverse transform, the prefix and the windowed edges.
     void build(const DataSet<Complex>& record) {
         const std::size_t fftLength = record.signal_values.size();
-        if (fftLength < _accepted.longestPrefix || fftLength == 0UZ) {
+        if (fftLength < _longestPrefix || fftLength == 0UZ) {
             // A record shorter than its prefix is dropped and counted.
             ++_malformed;
             _out.clear();
@@ -228,7 +206,7 @@ private:
         } else {
             _cyclePos = marker;
         }
-        if (_cyclePos == 0ULL && _accepted.emitTrigger) {
+        if (_cyclePos == 0ULL && settings.emit_trigger.value) {
             _triggerReady = true;
         }
 
@@ -238,7 +216,7 @@ private:
             value *= scale;
         }
 
-        const std::size_t prefix = detail::cyclicPrefixLength(std::span<const gr::Size_t>(_accepted.prefixes), _cyclePos);
+        const std::size_t prefix = detail::cyclicPrefixLength(std::span<const gr::Size_t>(settings.cp_len.value), _cyclePos);
         const std::size_t edge   = _ramp.size();
 
         _out.resize(prefix + fftLength);
@@ -295,35 +273,27 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::CpRemove)
  * `nDiscarded()` counts the discarded samples. `start()` sets it and the indices to 0.
  */
 struct CpRemove : Block<CpRemove, NoTagPropagation> {
-    using Description = Doc<"Cuts a complex stream into one DataSet<complex<float>> record of fft_len bins per symbol and takes its forward transform. A frame starts at a tag whose gr:trigger_name equals trigger_label, on the first prefix sample of its first symbol. The block skips each prefix, cuts fft_len samples moved by timing_offset and discards the samples between frames">;
+    using Description = Doc<"Cuts a complex stream into one DataSet<complex<float>> record of fft_len bins per symbol and takes its forward transform. A frame starts at a tag whose gr:trigger_name equals trigger_label, on the first prefix sample of its first symbol. The block skips each prefix, cuts fft_len samples moved by timing_offset and discards the samples between frames. `cp_len` is one length or a per-symbol cycle. The `n_sync` sync symbols at a frame's head are cut like data symbols. `timing_offset` is the signed bias of the cut">;
 
     PortIn<Complex>                  in;
     PortOut<DataSet<Complex>, Async> out;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"bins per record, a power of two">, detail::FftLengthLimits>                                                                                 fft_len       = 64U;
-    Annotated<std::vector<gr::Size_t>, "cp_len", Visible, Doc<"prefix samples, constant or a per-symbol cycle">>                                                                               cp_len        = std::vector<gr::Size_t>{16U};
-    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head, cut like data symbols">>                                                                                     n_sync        = 0U;
-    Annotated<gr::Size_t, "frame_len", Visible, Doc<"data symbols per frame; 0 cuts until the next trigger">>                                                                                  frame_len     = 0U;
-    Annotated<std::int32_t, "timing_offset", Visible, Unit<"samples">, Doc<"signed bias of the cut, in [-min(cp_len), 0]">, Limits<std::numeric_limits<std::int32_t>::min(), std::int32_t{0}>> timing_offset = 0;
-    Annotated<std::string, "trigger_label", Doc<"gr:trigger_name that starts a frame; empty accepts any trigger">>                                                                             trigger_label = std::string("ofdm_frame");
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                                                             signal_name   = std::string("ofdm_symbol");
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"FFT length">, detail::FftLengthLimits>                  fft_len       = 64U;
+        Annotated<std::vector<gr::Size_t>, Unit<"samples">, Visible, Doc<"prefix length">>          cp_len        = std::vector<gr::Size_t>{16U};
+        Annotated<gr::Size_t, Visible, Doc<"sync symbols per frame">>                               n_sync        = 0U;
+        Annotated<gr::Size_t, Visible, Doc<"data symbols per frame (0 = to next trigger)">>         frame_len     = 0U;
+        Annotated<std::int32_t, Visible, Unit<"samples">, Doc<"cut timing offset">, Limits<Max<0>>> timing_offset = 0;
+        Annotated<std::string, Doc<"frame trigger name (empty = any)">>                             trigger_label = std::string("ofdm_frame");
+        Annotated<std::string, Doc<"signal name">>                                                  signal_name   = std::string("ofdm_symbol");
 
-    GR_MAKE_REFLECTABLE(CpRemove, in, out, fft_len, cp_len, n_sync, frame_len, timing_offset, trigger_label, signal_name);
+        GR_MAKE_REFLECTABLE(Settings, fft_len, cp_len, n_sync, frame_len, timing_offset, trigger_label, signal_name);
+    } settings;
 
-    /// The settings the block computes on.
-    struct Accepted {
-        gr::Size_t              fftLength = 0U;
-        std::vector<gr::Size_t> prefixes{};
-        std::size_t             nSync       = 0UZ;
-        std::size_t             frameLength = 0UZ;
-        std::int32_t            offset      = 0;
-        std::string             label{};
-        std::string             signalName{};
-    };
+    GR_MAKE_REFLECTABLE(CpRemove, in, out, settings);
 
     gr::algorithm::FFT<Complex, Complex, gr::algorithm::Direction::Forward> _forward{};
 
-    Accepted                                              _accepted = settingsAfter(Accepted{}, [](std::string_view) { return true; });
     std::vector<Complex, gr::allocator::Aligned<Complex>> _cut{};         ///< the samples of the cut collected so far
     std::vector<Complex, gr::allocator::Aligned<Complex>> _spectrum{};    ///< the transform's output
     std::vector<int>                                      _binCarriers{}; ///< the signed carrier each bin holds, which is the record's axis
@@ -341,22 +311,35 @@ struct CpRemove : Block<CpRemove, NoTagPropagation> {
     /// @brief Samples discarded between frames, over the whole run.
     [[nodiscard]] std::uint64_t nDiscarded() const noexcept { return _discarded; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        Accepted   next   = settingsAfter(_accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); });
-        const bool newCut = next.fftLength != _accepted.fftLength || next.prefixes != _accepted.prefixes || next.offset != _accepted.offset;
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.fft_len.value)) {
+            return gr::Refused(s.fft_len, "must be a power of 2");
+        }
+        if (s.cp_len.value.empty()) {
+            return gr::Refused(s.cp_len, "required");
+        }
+        const gr::Size_t shortest = std::ranges::min(s.cp_len.value);
+        if (std::ranges::max(s.cp_len.value) > s.fft_len) {
+            return gr::Refused(s.cp_len, "must be <= fft_len");
+        }
+        if (s.timing_offset < -static_cast<std::int32_t>(shortest)) {
+            return gr::Refused(s.timing_offset, "must be >= -min(cp_len)");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        const bool newCut = s.fft_len.changed() || s.cp_len.changed() || s.timing_offset.changed();
         if (newCut && _collecting) { // the open frame's cadence and its partial cut belong to the old settings
             endFrame();
         }
-        const bool newShape = newCut || next.signalName != _accepted.signalName;
-        _accepted           = std::move(next);
-        prepare(newShape);
-        if (_collecting && _accepted.frameLength > 0UZ && _symbolInFrame >= std::uint64_t{_accepted.nSync} + _accepted.frameLength) {
+        prepare(newCut || s.signal_name.changed());
+        if (_collecting && s.frame_len > 0U && _symbolInFrame >= std::uint64_t{s.n_sync} + s.frame_len) {
             endFrame();
         }
     }
 
     void start() {
-        prepare(false);
         _collecting    = false;
         _have          = 0UZ;
         _symbolInFrame = 0ULL;
@@ -470,50 +453,16 @@ private:
         if (entry == tagMap.end()) {
             return false;
         }
-        if (_accepted.label.empty()) {
+        if (settings.trigger_label.value.empty()) {
             return true;
         }
         const auto* label = entry->second.get_if<std::pmr::string>();
-        return label != nullptr && std::string_view(label->data(), label->size()) == std::string_view(_accepted.label);
+        return label != nullptr && std::string_view(label->data(), label->size()) == std::string_view(settings.trigger_label.value);
     }
 
-    /// @brief Copies the named members into @p next. Throws for an empty `cp_len`, an entry longer than `fft_len` or a
-    /// `timing_offset` below minus the shortest entry.
-    template<typename Moved>
-    [[nodiscard]] Accepted settingsAfter(Accepted next, Moved moved) const {
-        if (moved("fft_len")) {
-            next.fftLength = fft_len.value;
-        }
-        if (moved("cp_len")) {
-            next.prefixes = cp_len.value;
-        }
-        if (moved("n_sync")) {
-            next.nSync = static_cast<std::size_t>(n_sync.value);
-        }
-        if (moved("frame_len")) {
-            next.frameLength = static_cast<std::size_t>(frame_len.value);
-        }
-        if (moved("timing_offset")) {
-            next.offset = timing_offset.value;
-        }
-        if (moved("trigger_label")) {
-            next.label = trigger_label.value;
-        }
-        if (moved("signal_name")) {
-            next.signalName = signal_name.value;
-        }
-        detail::requireCyclicPrefix(std::span<const gr::Size_t>(next.prefixes), next.fftLength);
-        const auto shortest = static_cast<std::int32_t>(*std::ranges::min_element(next.prefixes));
-        if (next.offset < -shortest) {
-            throw gr::exception(std::format("timing_offset is {} and must lie in [{}, 0]: outside it the cut leaves the symbol whose prefix it is biased into", next.offset, -shortest));
-        }
-        return next;
-    }
-
-    /// @brief Sizes the cut and the transform buffers for the accepted `fft_len`. Builds the record shape when
-    /// @p newShape is set or the block holds none.
+    /// @brief Sizes the cut and the transform buffers for `fft_len`, and builds the record shape when @p newShape is set.
     void prepare(bool newShape) {
-        const auto fftLength = static_cast<std::size_t>(_accepted.fftLength);
+        const std::size_t fftLength = settings.fft_len;
         if (fftLength != _cut.size()) {
             _cut.assign(fftLength, Complex{});
             _spectrum.assign(fftLength, Complex{});
@@ -522,7 +471,7 @@ private:
                 _binCarriers[bin] = detail::carrierAt(fftLength, bin);
             }
         }
-        if (newShape || !_shape.built()) {
+        if (newShape) {
             buildShape();
         }
     }
@@ -547,19 +496,19 @@ private:
     }
 
     [[nodiscard]] std::uint64_t windowOf(std::uint64_t symbolStart, std::uint64_t symbolInFrame) const {
-        const std::size_t prefix = detail::cyclicPrefixLength(std::span<const gr::Size_t>(_accepted.prefixes), symbolInFrame);
-        return symbolStart + static_cast<std::uint64_t>(static_cast<std::int64_t>(prefix) + _accepted.offset);
+        const std::size_t prefix = detail::cyclicPrefixLength(std::span<const gr::Size_t>(settings.cp_len.value), symbolInFrame);
+        return symbolStart + static_cast<std::uint64_t>(static_cast<std::int64_t>(prefix) + settings.timing_offset.value);
     }
 
     /// @brief Steps the cadence to the next symbol, or ends the frame after its last symbol.
     void advance() {
-        const std::size_t prefix = detail::cyclicPrefixLength(std::span<const gr::Size_t>(_accepted.prefixes), _symbolInFrame);
+        const std::size_t prefix = detail::cyclicPrefixLength(std::span<const gr::Size_t>(settings.cp_len.value), _symbolInFrame);
         _symbolStart += prefix + _cut.size();
         ++_symbolInFrame;
         ++_symbolIndex;
         _have = 0UZ;
 
-        if (_accepted.frameLength > 0UZ && _symbolInFrame >= std::uint64_t{_accepted.nSync} + _accepted.frameLength) {
+        if (settings.frame_len.value > 0U && _symbolInFrame >= std::uint64_t{settings.n_sync.value} + settings.frame_len.value) {
             _collecting = false;
             return;
         }
@@ -568,7 +517,7 @@ private:
 
     void emit(DataSet<Complex>& target) {
         _forward.compute(_cut, std::span<Complex>(_spectrum));
-        const std::string_view kind                     = _symbolInFrame < _accepted.nSync ? detail::kKindSync : detail::kKindData;
+        const std::string_view kind                     = _symbolInFrame < settings.n_sync.value ? detail::kKindSync : detail::kKindData;
         property_map&          meta                     = _shape.emitInto(target, std::span<const Complex>(_spectrum), kind);
         meta[std::pmr::string(detail::kSymbolIndexKey)] = pmt::Value(_symbolIndex);
         meta[std::pmr::string(detail::kFrameIndexKey)]  = pmt::Value(_frameIndex);
@@ -579,9 +528,9 @@ private:
 
     void buildShape() {
         const std::uint64_t fftLength = _cut.size();
-        _shape.build(std::span<const int>(_binCarriers), _accepted.signalName,
+        _shape.build(std::span<const int>(_binCarriers), settings.signal_name.value,
             property_map{{std::pmr::string(detail::kFftLenKey), pmt::Value(fftLength)}, //
-                {std::pmr::string(detail::kTimingOffsetKey), pmt::Value(static_cast<std::int64_t>(_accepted.offset))}});
+                {std::pmr::string(detail::kTimingOffsetKey), pmt::Value(static_cast<std::int64_t>(settings.timing_offset.value))}});
     }
 };
 

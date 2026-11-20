@@ -3,6 +3,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <numbers>
@@ -23,6 +24,7 @@
 #include <gnuradio-4.0/ofdm/CarrierAllocator.hpp>
 #include <gnuradio-4.0/ofdm/ChannelEqualizer.hpp>
 #include <gnuradio-4.0/ofdm/CyclicPrefix.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace qa_ofdm_equalizer {
@@ -44,10 +46,31 @@ constexpr std::size_t kFrame = 20UZ;
 constexpr std::size_t kSplit = 12UZ; ///< the two sync symbols and ten data symbols ahead of a change
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     if constexpr (requires { block.start(); }) {
         block.start();
     }
@@ -56,12 +79,12 @@ template<typename TBlock>
 
 /// @brief Stages and applies @p settings. Returns the refusal, or an empty string.
 [[nodiscard]] std::string apply(ChannelEqualizer& block, const gr::property_map& settings) {
-    std::ignore = block.settings().setStaged(settings);
     try {
-        return block.settings().applyStagedParameters().refusal;
+        applyOrThrow(block, settings);
     } catch (const gr::exception& e) {
         return std::string(e.what());
     }
+    return {};
 }
 
 [[nodiscard]] std::vector<std::int32_t> pilotCarriers() { return {-21, -7, 7, 21}; }
@@ -471,9 +494,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             ChannelEqualizer                       block = make<ChannelEqualizer>(equalizerSettings("cpe"));
             const std::span<const gr::DataSet<CF>> all(records);
             Equalized                              got = equalize(block, all.first(kSplit));
-            std::ignore                                = block.settings().setStaged(change);
-            const auto applied                         = block.settings().applyStagedParameters();
-            expect(applied.failedParameters.empty()) << applied.refusal;
+            expect(apply(block, change).empty()) << "the change applies";
             const Equalized rest = equalize(block, all.subspan(kSplit));
             got.symbols.insert(got.symbols.end(), rest.symbols.begin(), rest.symbols.end());
             return Outcome{symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(sent.payload)), block.nUntrained()};
@@ -513,9 +534,8 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         ChannelEqualizer                       block = make<ChannelEqualizer>(equalizerSettings("cpe"));
 
         const Equalized before = equalize(block, all.first(static_cast<std::size_t>(kSync) + 1UZ));
-        std::ignore            = block.settings().setStaged({{"signal_name", std::string("renamed")}});
-        std::ignore            = block.settings().applyStagedParameters();
-        const Equalized after  = equalize(block, all.subspan(static_cast<std::size_t>(kSync) + 1UZ));
+        applyOrThrow(block, {{"signal_name", std::string("renamed")}});
+        const Equalized after = equalize(block, all.subspan(static_cast<std::size_t>(kSync) + 1UZ));
 
         expect(eq(before.symbols.size(), 1UZ));
         expect(eq(after.symbols.size(), kFrame - 1UZ));
@@ -536,6 +556,19 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             settings["sync_word"]                              = interleave(word);
             std::ignore                                        = make<ChannelEqualizer>(settings);
         })) << "a sync word silent on an occupied carrier";
+        for (const float bad : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()}) {
+            std::string message;
+            try {
+                gr::property_map settings                          = equalizerSettings("cpe");
+                std::vector<CF>  word                              = channelSounding();
+                word[gr::ofdm::CarrierMap::binOf(kFft, 3).value()] = CF(bad, 0.f);
+                settings["sync_word"]                              = interleave(word);
+                std::ignore                                        = make<ChannelEqualizer>(settings);
+            } catch (const gr::exception& e) {
+                message = e.what();
+            }
+            expect(message.contains("sync_word") && message.contains("must be finite on data carrier 3")) << std::format("a sync word holding {} on an occupied carrier is refused: '{}'", bad, message);
+        }
         expect(throws([] {
             gr::property_map settings = equalizerSettings("cpe");
             settings["sync_index"]    = gr::Size_t{4U};
@@ -545,15 +578,17 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             gr::property_map settings = equalizerSettings("wander");
             std::ignore               = make<ChannelEqualizer>(settings);
         })) << "a tracking mode the block has no rule for";
-        std::string limits;
-        try {
-            gr::property_map settings = equalizerSettings("cpe");
-            settings["alpha"]         = 0.f;
-            std::ignore               = make<ChannelEqualizer>(settings);
-        } catch (const gr::exception& e) {
-            limits = e.what();
+        for (const float alpha : {0.f, 1.5f}) {
+            std::string limits;
+            try {
+                gr::property_map settings = equalizerSettings("cpe");
+                settings["alpha"]         = alpha;
+                std::ignore               = make<ChannelEqualizer>(settings);
+            } catch (const gr::exception& e) {
+                limits = e.what();
+            }
+            expect(limits.contains("alpha") && limits.contains("must be > 0 and <= 1")) << std::format("the check refuses an alpha of {}: '{}'", alpha, limits);
         }
-        expect(limits.contains("alpha") && limits.contains("outside the limits")) << std::format("the limits of alpha refuse zero: '{}'", limits);
         for (const std::string tracking : {"cpe", "cpe_interp", "none"}) {
             expect(throws([&tracking] {
                 gr::property_map settings = equalizerSettings(tracking);
@@ -599,7 +634,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             }
             const Equalized rest = equalize(block, all.subspan(kSplit));
             got.symbols.insert(got.symbols.end(), rest.symbols.begin(), rest.symbols.end());
-            return Outcome{std::move(got.symbols), block.nEstimates(), block.alpha.value};
+            return Outcome{std::move(got.symbols), block.nEstimates(), block.settings.alpha.value};
         };
 
         const Outcome reference = run({}, {});
@@ -617,7 +652,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             {"alpha 2, outside its limits", "alpha", {{"alpha", 2.f}}},
             {"alpha 0, outside its limits", "alpha", {{"alpha", 0.f}}},
             {"a NaN alpha, outside its limits", "alpha", {{"alpha", std::numeric_limits<float>::quiet_NaN()}}},
-            {"fft_len 100, outside its limits", "fft_len", {{"fft_len", gr::Size_t{100U}}}},
+            {"fft_len 100, no power of two", "fft_len", {{"fft_len", gr::Size_t{100U}}}},
         };
         for (const auto& [name, key, change] : refused) {
             const Outcome outcome = run(change, key);
@@ -657,11 +692,9 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
                 ChannelEqualizer block = make<ChannelEqualizer>(equalizerSettings("cpe_interp"));
                 Equalized        got   = equalize(block, all.first(kSplit));
                 if (refuseFirst) {
-                    std::ignore = block.settings().setStaged(arm.refused);
-                    expect(throws([&block] { std::ignore = block.settings().applyStagedParameters(); })) << std::format("{}: the first application is refused", arm.name);
+                    expect(throws([&] { applyOrThrow(block, arm.refused); })) << std::format("{}: the first application is refused", arm.name);
                 }
-                std::ignore = block.settings().setStaged(arm.valid);
-                expect(nothrow([&block] { std::ignore = block.settings().applyStagedParameters(); })) << std::format("{}: the valid change applies", arm.name);
+                expect(nothrow([&] { applyOrThrow(block, arm.valid); })) << std::format("{}: the valid change applies", arm.name);
                 const Equalized rest = equalize(block, all.subspan(kSplit));
                 got.symbols.insert(got.symbols.end(), rest.symbols.begin(), rest.symbols.end());
                 return std::move(got.symbols);
@@ -675,13 +708,13 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
             }
         }
 
-        // A NaN is outside the limits of alpha, and the framework refuses it each time it is sent.
+        // The limits refuse a NaN alpha, each time it is sent.
         ChannelEqualizer block = make<ChannelEqualizer>(equalizerSettings("cpe_interp"));
         for (int attempt = 0; attempt < 2; ++attempt) {
             const std::string message = apply(block, {{"alpha", std::numeric_limits<float>::quiet_NaN()}});
-            expect(message.contains("alpha") && message.contains("outside the limits")) << std::format("attempt {}: '{}'", attempt, message);
+            expect(message.contains("alpha") && message.contains("must be > 0 and <= 1")) << std::format("attempt {}: '{}'", attempt, message);
         }
-        expect(eq(block.alpha.value, 0.1f)) << "the member keeps the accepted value";
+        expect(eq(block.settings.alpha.value, 0.1f)) << "the member keeps the accepted value";
     };
 
     "the counters count the whole run across a new sync word"_test = [] {
@@ -695,8 +728,7 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         expect(eq(block.nEstimates(), std::uint64_t{1}));
         std::vector<CF> word = channelSounding();
         word[gr::ofdm::CarrierMap::binOf(kFft, 1).value()] *= -1.f;
-        std::ignore          = block.settings().setStaged({{"sync_word", interleave(std::span<const CF>(word))}});
-        std::ignore          = block.settings().applyStagedParameters();
+        applyOrThrow(block, {{"sync_word", interleave(std::span<const CF>(word))}});
         const Equalized rest = equalize(block, all.subspan(kFirst));
 
         expect(eq(got.symbols.size() + rest.symbols.size(), 2UZ * kFrame));
@@ -705,29 +737,11 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         expect(eq(block.nUntrained(), std::uint64_t{0})) << "the change falls between frames";
     };
 
-    "a block left at its default settings starts, and its first call reports the missing numerology"_test = [] {
-        ChannelEqualizer block(gr::property_map{});
-        block.settings().init();
-        std::ignore  = block.settings().applyStagedParameters();
-        bool started = true;
-        try {
-            block.start();
-        } catch (const gr::exception&) {
-            started = false;
-        }
-        expect(started) << "start() throws nothing";
-        if (!started) {
-            return;
-        }
-
-        const Modulated                      sent = modulate();
-        std::vector<gr::DataSet<CF>>         scratch(4UZ);
-        shim::InputSpan<gr::DataSet<CF>>     inSpan(std::span<const gr::DataSet<CF>>(sent.records), 0UZ);
-        shim::OutputSpan<gr::DataSet<CF>>    outSpan{std::span<gr::DataSet<CF>>(scratch)};
-        shim::OutputSpan<gr::DataSet<float>> channelSpan(std::span<gr::DataSet<float>>{}, 0UZ, nullptr, false);
-        expect(block.processBulk(inSpan, outSpan, channelSpan) == gr::work::Status::ERROR);
-        expect(eq(inSpan.consumed, 0UZ));
-        expect(eq(outSpan.count, 0UZ));
+    "a block left at its default settings is not ready, and its check names data_carriers"_test = [] {
+        ChannelEqualizer                                  block(gr::property_map{});
+        const std::expected<void, gr::settings::Rejected> ready = block.check({});
+        expect(fatal(!ready.has_value())) << "a block with no data carriers is ready";
+        expect(std::ranges::any_of(ready.error(), [](const gr::settings::Rejection& entry) { return entry.key == "data_carriers"; })) << "the refusal names data_carriers";
     };
 
     "a record whose length is not fft_len is dropped and counted"_test = [] {
@@ -744,13 +758,12 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         expect(eq(block.nEstimates(), std::uint64_t{0}));
     };
 
-    "a block without a numerology takes fft_len alone, and the carriers then build a numerology of that length"_test = [] {
+    "a block that is not ready takes fft_len with the carriers, and builds a numerology of that length"_test = [] {
         constexpr gr::Size_t kWide = 128U;
-        ChannelEqualizer     block = make<ChannelEqualizer>({});
-        std::ignore                = block.settings().setStaged({{"fft_len", kWide}});
-        expect(nothrow([&block] { std::ignore = block.settings().applyStagedParameters(); })) << "fft_len alone";
-        std::ignore = block.settings().setStaged({{"data_carriers", dataCarriers()}, {"pilot_carriers", pilotCarriers()}, {"pilot_symbols", interleave(pilotCycle())}, {"sync_word", interleave(channelSounding(kWide))}});
-        expect(nothrow([&block] { std::ignore = block.settings().applyStagedParameters(); })) << "the carriers and a sync word of 128 bins";
+        ChannelEqualizer     block(gr::property_map{});
+        expect(throws([&] { applyOrThrow(block, {{"fft_len", kWide}}); })) << "fft_len alone leaves the block without data carriers";
+        expect(nothrow([&] { applyOrThrow(block, {{"fft_len", kWide}, {"data_carriers", dataCarriers()}, {"pilot_carriers", pilotCarriers()}, {"pilot_symbols", interleave(pilotCycle())}, {"sync_word", interleave(channelSounding(kWide))}}); })) << "fft_len, the carriers and a sync word of 128 bins";
+        block.start();
 
         // A frame of the known symbol and three data symbols at 128 bins, on an ideal channel.
         std::vector<CF> payload(3UZ * dataCarriers().size());
@@ -766,43 +779,6 @@ const boost::ut::suite<"OFDM channel equalizer"> _equalizer = [] {
         expect(eq(block.nMalformed(), std::uint64_t{0})) << "every record has the block's 128 bins";
         expect(eq(got.symbols.size(), 3UZ));
         expect(eq(symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(payload)), 0UZ));
-    };
-
-    "a sync word with a non-finite value on an occupied carrier is refused"_test = [] {
-        ChannelEqualizer block = make<ChannelEqualizer>(equalizerSettings("cpe"));
-
-        std::vector<CF> onData                                = channelSounding();
-        onData[gr::ofdm::CarrierMap::binOf(kFft, 3).value()]  = CF(std::numeric_limits<float>::quiet_NaN(), 0.f);
-        std::vector<CF> onPilot                               = channelSounding();
-        onPilot[gr::ofdm::CarrierMap::binOf(kFft, 7).value()] = CF(0.f, std::numeric_limits<float>::infinity());
-        // The core writes the accepted word back after each refusal, so the same word sent again is refused again.
-        const std::vector<std::pair<std::string, std::vector<CF>>> words{{"a NaN on data carrier 3", onData}, {"the same NaN sent again", onData}, {"an infinity on pilot carrier 7", onPilot}};
-        for (const auto& [name, word] : words) {
-            std::ignore = block.settings().setStaged({{"sync_word", interleave(std::span<const CF>(word))}});
-            expect(throws([&block] { std::ignore = block.settings().applyStagedParameters(); })) << name;
-        }
-    };
-
-    "a sync word with a NaN on a guard bin keeps the channel estimate across an alpha change"_test = [] {
-        const Modulated                        sent    = modulate();
-        const auto                             records = toRecords(throughMultipath(std::span<const gr::DataSet<CF>>(sent.records)));
-        const std::span<const gr::DataSet<CF>> all(records);
-
-        std::vector<CF> word                                = channelSounding();
-        word[gr::ofdm::CarrierMap::binOf(kFft, 30).value()] = CF(std::numeric_limits<float>::quiet_NaN(), 0.f); // a guard
-        gr::property_map settings                           = equalizerSettings("cpe");
-        settings["sync_word"]                               = interleave(std::span<const CF>(word));
-        ChannelEqualizer block                              = make<ChannelEqualizer>(settings);
-
-        Equalized got = equalize(block, all.first(kSplit));
-        std::ignore   = block.settings().setStaged({{"alpha", 0.2f}});
-        expect(nothrow([&block] { std::ignore = block.settings().applyStagedParameters(); })) << "the alpha change applies";
-        const Equalized rest = equalize(block, all.subspan(kSplit));
-        got.symbols.insert(got.symbols.end(), rest.symbols.begin(), rest.symbols.end());
-
-        expect(eq(got.symbols.size(), kFrame));
-        expect(eq(block.nUntrained(), std::uint64_t{0})) << "the alpha change keeps the estimate";
-        expect(eq(symbolErrors(std::span<const gr::DataSet<CF>>(got.symbols), std::span<const CF>(sent.payload)), 0UZ));
     };
 
     /**

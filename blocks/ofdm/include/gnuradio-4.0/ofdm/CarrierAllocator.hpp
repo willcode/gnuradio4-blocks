@@ -2,9 +2,12 @@
 #define GNURADIO_OFDM_CARRIER_ALLOCATOR_HPP
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
 #include <string>
@@ -73,33 +76,25 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::CarrierAllocator)
  * `start()` sets the counters and the indices to 0.
  */
 struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
-    using Description = Doc<"Places a stream of complex data symbols onto OFDM symbol records of fft_len values in FFT bin order. The block fills the data carriers in list order and the pilot carriers from the pilot_symbols cycle. With frame_len above 0, the sync_words open each frame. At end of stream the block zero-fills the open symbol and frame">;
+    using Description = Doc<"Places a stream of complex data symbols onto OFDM symbol records of fft_len values in FFT bin order. The block fills the data carriers in list order and the pilot carriers from the pilot_symbols cycle. With frame_len above 0, the sync_words open each frame. At end of stream the block zero-fills the open symbol and frame. `data_carriers` and `pilot_carriers` hold signed logical carrier indices, the data in order. `pilot_symbols` is the pilot cycle, interleaved re, im, of nonzero values. `sync_words` holds symbols of fft_len carriers, interleaved re, im, emitted when `frame_len` is above 0">;
 
     PortIn<Complex>                  in;
     PortOut<DataSet<Complex>, Async> out;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"bins per record, a power of two">, detail::FftLengthLimits>                            fft_len = 64U;
-    Annotated<std::vector<std::int32_t>, "data_carriers", Visible, Doc<"signed logical carrier indices the data stream fills, in order">> data_carriers{};
-    Annotated<std::vector<std::int32_t>, "pilot_carriers", Visible, Doc<"signed logical carrier indices the pilot cycle fills">>          pilot_carriers{};
-    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im pilot cycle of nonzero values">>                                pilot_symbols{};
-    Annotated<std::vector<float>, "sync_words", Doc<"interleaved re,im, a whole number of fft_len-carrier symbols, emitted verbatim">>    sync_words{};
-    Annotated<gr::Size_t, "frame_len", Visible, Doc<"data symbols per frame; 0 means unframed">>                                          frame_len   = 0U;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                        signal_name = std::string("ofdm_symbol");
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"FFT length">, detail::FftLengthLimits>   fft_len = 64U;
+        Annotated<std::vector<std::int32_t>, Visible, Doc<"data carriers">>          data_carriers{};
+        Annotated<std::vector<std::int32_t>, Visible, Doc<"pilot carriers">>         pilot_carriers{};
+        Annotated<std::vector<float>, Doc<"pilot cycle">>                            pilot_symbols{};
+        Annotated<std::vector<float>, Doc<"sync words">>                             sync_words{};
+        Annotated<gr::Size_t, Visible, Doc<"data symbols per frame (0 = unframed)">> frame_len   = 0U;
+        Annotated<std::string, Doc<"signal name">>                                   signal_name = std::string("ofdm_symbol");
 
-    GR_MAKE_REFLECTABLE(CarrierAllocator, in, out, fft_len, data_carriers, pilot_carriers, pilot_symbols, sync_words, frame_len, signal_name);
+        GR_MAKE_REFLECTABLE(Settings, fft_len, data_carriers, pilot_carriers, pilot_symbols, sync_words, frame_len, signal_name);
+    } settings;
 
-    /// The settings the block computes on.
-    struct Accepted {
-        gr::Size_t                fftLength = 0U;
-        std::vector<std::int32_t> dataCarriers{};
-        std::vector<std::int32_t> pilotCarriers{};
-        std::vector<float>        pilotSymbols{};
-        std::vector<float>        syncWords{};
-        gr::Size_t                frameLength = 0U;
-        std::string               signalName{};
-    };
+    GR_MAKE_REFLECTABLE(CarrierAllocator, in, out, settings);
 
-    Accepted                            _accepted = settingsAfter(Accepted{}, [](std::string_view) { return true; });
     std::optional<gr::ofdm::CarrierMap> _map{};
     std::vector<Complex>                _pilots{};      ///< `pilot_symbols` as complex values
     std::vector<std::vector<Complex>>   _syncWords{};   ///< the sync words, one symbol each
@@ -109,7 +104,6 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
     detail::SymbolRecordShape           _shape{};       ///< the invariant part of a record
 
     std::size_t   _nData         = 0UZ;
-    std::size_t   _frameLength   = 0UZ;  ///< the accepted `frame_len`
     std::size_t   _syncLeft      = 0UZ;  ///< sync words still owed to the frame being opened
     std::uint64_t _symbolIndex   = 0ULL; ///< records emitted since the last `reset()`
     std::uint64_t _frameIndex    = 0ULL;
@@ -121,6 +115,7 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
     std::uint64_t _truncated     = 0ULL; ///< records the final frame lacked for want of output room
     std::uint64_t _dropped       = 0ULL; ///< data samples dropped by changes of numerology and by resets
     std::size_t   _padThisSymbol = 0UZ;
+    std::size_t   _frameLength   = 0UZ; ///< the `frame_len` the open frame follows
     bool          _flushed       = false;
 
     /// @brief The data-carrier slots zero-filled at end of stream, over the whole run.
@@ -132,8 +127,77 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
     /// @brief The data samples dropped by changes of numerology and by resets to defaults, over the whole run.
     [[nodiscard]] std::uint64_t nDropped() const noexcept { return _dropped; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        take(settingsAfter(_accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); }));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.fft_len.value)) {
+            return gr::Refused(s.fft_len, "must be a power of 2");
+        }
+        const std::vector<float> words = s.sync_words;
+        if (s.data_carriers.value.empty()) {
+            return gr::Refused(s.data_carriers, "required");
+        }
+        if (s.pilot_symbols.value.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.pilot_symbols, "must have an even length");
+        }
+        if (s.frame_len == 0U && !words.empty()) {
+            return gr::Refused(s.sync_words, "must be empty while frame_len is 0: a sync word opens a frame, and an unframed stream has none");
+        }
+        if (words.size() % (2UZ * s.fft_len) != 0UZ) {
+            return gr::Refused(s.sync_words, "must be a multiple of fft_len symbols");
+        }
+        for (std::size_t i = 0UZ; i < words.size(); ++i) {
+            if (!std::isfinite(words[i])) {
+                const std::size_t carrier = i / 2UZ;
+                return gr::Refused(s.sync_words, std::format("must be finite, and holds {} in bin {} of word {}", words[i], carrier % s.fft_len, carrier / s.fft_len));
+            }
+        }
+        const gr::ofdm::CarrierMap           map        = detail::buildMap(s.fft_len, s.data_carriers.value, s.pilot_carriers.value);
+        const std::vector<Complex>           pilots     = detail::complexFrom(s.pilot_symbols.value);
+        const std::expected<void, gr::Error> pilotCycle = map.validatePilotCycle(pilots);
+        if (!pilotCycle) {
+            return gr::Refused(s.pilot_symbols, pilotCycle.error().message);
+        }
+        return {};
+    }
+
+    /// @brief Rebuilds the layout where the numerology changes, and moves the open frame to match the settings.
+    void applySettings(const Settings& s) {
+        const std::size_t syncSent       = _syncWords.size() - _syncLeft;
+        const std::size_t oldFrameLength = _frameLength;
+        const std::size_t frameLength    = s.frame_len;
+        _pilots                          = detail::complexFrom(s.pilot_symbols.value);
+        _syncWords                       = frameLength > 0UZ ? detail::syncWordsFrom(s.sync_words.value, s.fft_len) : std::vector<std::vector<Complex>>{}; // unframed, no sync word is read
+
+        // The pending samples and the open frame follow the new s. Before `start()` both are empty, and
+        // `start()` clears them.
+        const bool newNumerology = s.fft_len.changed() || s.data_carriers.changed() || s.pilot_carriers.changed();
+        bool       newFrame      = false;
+        if (newNumerology) {
+            _map.emplace(detail::buildMap(s.fft_len, s.data_carriers.value, s.pilot_carriers.value));
+            const std::size_t fftLength = _map->fftLength();
+            _binCarriers.resize(fftLength);
+            for (std::size_t bin = 0UZ; bin < fftLength; ++bin) {
+                _binCarriers[bin] = detail::carrierAt(fftLength, bin);
+            }
+            _symbol.assign(fftLength, Complex{});
+            _nData = _map->nData();
+            buildShape();
+            if (_pending.size() > _nData) {
+                _dropped += _pending.size();
+                _pending.clear();
+            }
+            newFrame = oldFrameLength > 0UZ || frameLength > 0UZ;
+        } else {
+            if (s.signal_name.changed()) {
+                buildShape();
+            }
+            newFrame = s.frame_len.changed() && (oldFrameLength == 0UZ || frameLength == 0UZ || _dataInFrame >= frameLength);
+        }
+        if (newFrame) {
+            openNextFrame();
+        } else if (_dataInFrame == 0UZ) { // the open frame's sync words continue with the new ones
+            _syncLeft = _syncWords.size() > syncSent ? _syncWords.size() - syncSent : 0UZ;
+        }
+        _frameLength = frameLength;
     }
 
     /// @brief Restarts the indices and the open frame. Drops the data samples not yet placed and counts them in
@@ -166,9 +230,6 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
      * The sample that completes a symbol stays in the input until the output has taken every record of that symbol.
      */
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_map.has_value()) {
-            return reportNoNumerology("processBulk", inSpan, outSpan);
-        }
         Progress tally = fold(inSpan, inSpan.size(), outSpan);
         if (tally.outputFull && tally.taken > 0UZ && _pending.size() == _nData) {
             _pending.pop_back(); // the next call takes this sample again
@@ -184,9 +245,6 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
 
     /// @brief Folds the trailing samples at end of stream, then zero-fills the open symbol and any open frame.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_map.has_value()) {
-            return reportNoNumerology("processEpilogue", inSpan, outSpan);
-        }
         Progress tally = fold(inSpan, inSpan.size(), outSpan);
         if (!_flushed) {
             flush(tally, outSpan);
@@ -196,103 +254,6 @@ struct CarrierAllocator : Block<CarrierAllocator, NoTagPropagation> {
     }
 
 private:
-    /// @brief Copies the named members into @p next.
-    template<typename Moved>
-    [[nodiscard]] Accepted settingsAfter(Accepted next, Moved moved) const {
-        if (moved("fft_len")) {
-            next.fftLength = fft_len.value;
-        }
-        if (moved("data_carriers")) {
-            next.dataCarriers = data_carriers.value;
-        }
-        if (moved("pilot_carriers")) {
-            next.pilotCarriers = pilot_carriers.value;
-        }
-        if (moved("pilot_symbols")) {
-            next.pilotSymbols = pilot_symbols.value;
-        }
-        if (moved("sync_words")) {
-            next.syncWords = sync_words.value;
-        }
-        if (moved("frame_len")) {
-            next.frameLength = frame_len.value;
-        }
-        if (moved("signal_name")) {
-            next.signalName = signal_name.value;
-        }
-        return next;
-    }
-
-    /// @brief Checks @p next, then rebuilds the layout and moves the open frame to match it. A block without a layout
-    /// builds none while @p next names no data carriers.
-    void take(Accepted next) {
-        const bool                          newNumerology = next.fftLength != _accepted.fftLength || next.dataCarriers != _accepted.dataCarriers || next.pilotCarriers != _accepted.pilotCarriers;
-        std::optional<gr::ofdm::CarrierMap> built{};
-        if (newNumerology && (_map.has_value() || !next.dataCarriers.empty())) {
-            built.emplace(detail::buildMap(next.fftLength, std::span<const std::int32_t>(next.dataCarriers), std::span<const std::int32_t>(next.pilotCarriers)));
-        }
-        const gr::ofdm::CarrierMap* map = built.has_value() ? &*built : (_map.has_value() ? &*_map : nullptr);
-
-        std::vector<Complex> pilots = detail::complexFrom(std::span<const float>(next.pilotSymbols), "pilot_symbols");
-        if (map != nullptr) {
-            detail::requireValid(map->validatePilotCycle(std::span<const Complex>(pilots)));
-        }
-        std::vector<std::vector<Complex>> words = detail::syncWordsFrom(std::span<const float>(next.syncWords), static_cast<std::size_t>(next.fftLength));
-        if (next.frameLength == 0U && !words.empty()) {
-            throw gr::exception(std::format("frame_len is 0, which is unframed, but sync_words holds {} symbols: a sync word marks a frame's start and an unframed stream has none", words.size()));
-        }
-
-        // Every check has passed. The block changes from here.
-        const std::size_t oldFrameLength = _frameLength;
-        const std::size_t syncSent       = _syncWords.size() - _syncLeft;
-        const bool        renamed        = next.signalName != _accepted.signalName;
-        _accepted                        = std::move(next);
-        _pilots                          = std::move(pilots);
-        _syncWords                       = std::move(words);
-        _frameLength                     = static_cast<std::size_t>(_accepted.frameLength);
-
-        // The pending samples and the open frame follow the new settings. Before `start()` both are empty, and
-        // `start()` clears them.
-        if (built.has_value()) {
-            const std::size_t fftLength = built->fftLength();
-            _binCarriers.resize(fftLength);
-            for (std::size_t bin = 0UZ; bin < fftLength; ++bin) {
-                _binCarriers[bin] = detail::carrierAt(fftLength, bin);
-            }
-            _symbol.assign(fftLength, Complex{});
-            _nData = built->nData();
-            _map.emplace(std::move(*built));
-            buildShape();
-            if (_pending.size() > _nData) {
-                _dropped += _pending.size();
-                _pending.clear();
-            }
-            if (oldFrameLength > 0UZ || _frameLength > 0UZ) {
-                openNextFrame();
-                return;
-            }
-        } else {
-            if (renamed && _map.has_value()) {
-                buildShape();
-            }
-            if (_frameLength != oldFrameLength && (oldFrameLength == 0UZ || _frameLength == 0UZ || _dataInFrame >= _frameLength)) {
-                openNextFrame();
-                return;
-            }
-        }
-        if (_dataInFrame == 0UZ) { // the open frame's sync words continue with the new ones
-            _syncLeft = _syncWords.size() > syncSent ? _syncWords.size() - syncSent : 0UZ;
-        }
-    }
-
-    /// @brief Emits the error of a block that holds no numerology, and takes and makes nothing.
-    [[nodiscard]] work::Status reportNoNumerology(std::string_view call, InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        this->emitErrorMessage(call, gr::Error("gr::blocks::ofdm::CarrierAllocator: the block holds no numerology. Its default settings name no data carriers, and no settings application has built one"));
-        std::ignore = inSpan.consume(0UZ);
-        outSpan.publish(0UZ);
-        return work::Status::ERROR;
-    }
-
     /// @brief The samples taken and the records made by one call.
     struct Progress {
         std::size_t taken      = 0UZ;
@@ -336,14 +297,14 @@ private:
     /// @brief Zero-fills what the stream did not deliver, into the room the output has, and counts what has no room.
     void flush(Progress& tally, OutputSpanLike auto& outSpan) {
         _flushed             = true;
-        const bool framed    = _frameLength > 0UZ;
+        const bool framed    = settings.frame_len.value > 0U;
         const bool frameOpen = framed && (_dataInFrame > 0UZ || !_pending.empty());
         if (_pending.empty() && !frameOpen) {
             return;
         }
 
         // the sync words still owed, the open symbol, and the zero-filled symbols that complete the frame
-        std::uint64_t owed = std::uint64_t{_syncLeft} + 1ULL + (framed ? _frameLength - _dataInFrame - 1UZ : 0UZ);
+        std::uint64_t owed = std::uint64_t{_syncLeft} + 1ULL + (framed ? std::size_t{settings.frame_len.value} - _dataInFrame - 1UZ : 0UZ);
         _padThisSymbol     = _nData - _pending.size();
         _pending.resize(_nData, Complex{});
 
@@ -397,7 +358,7 @@ private:
         ++_symbolInFrame;
         ++_dataInFrame;
         ++_pilotPhase;
-        if (_frameLength > 0UZ && _dataInFrame >= _frameLength) {
+        if (settings.frame_len.value > 0U && _dataInFrame >= std::size_t{settings.frame_len.value}) {
             openNextFrame();
         }
     }
@@ -415,7 +376,7 @@ private:
 
     void buildShape() {
         const std::uint64_t fftLength = _symbol.size();
-        _shape.build(std::span<const int>(_binCarriers), _accepted.signalName, property_map{{std::pmr::string(detail::kFftLenKey), pmt::Value(fftLength)}});
+        _shape.build(std::span<const int>(_binCarriers), settings.signal_name.value, property_map{{std::pmr::string(detail::kFftLenKey), pmt::Value(fftLength)}});
     }
 
     void stamp(DataSet<Complex>& target, const std::vector<Complex>& values, std::string_view kind, std::size_t padCarriers) const {

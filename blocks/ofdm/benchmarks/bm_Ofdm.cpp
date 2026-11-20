@@ -36,8 +36,7 @@ constexpr std::size_t kRepeats = 9UZ;
 
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     block.start();
 }
 

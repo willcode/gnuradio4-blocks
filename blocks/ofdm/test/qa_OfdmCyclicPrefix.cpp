@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/algorithm/fourier/fft.hpp>
 #include <gnuradio-4.0/ofdm/CarrierAllocator.hpp>
 #include <gnuradio-4.0/ofdm/CyclicPrefix.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -126,10 +127,31 @@ struct Stream {
 [[nodiscard]] std::vector<gr::DataSet<CF>> remove(CpRemove& block, const Stream& input, std::size_t chunk, std::size_t outRoom = 64UZ) { return remove(block, input, 0UZ, input.samples.size(), chunk, outRoom); }
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     block.start();
     return block;
 }
@@ -137,8 +159,7 @@ template<typename TBlock>
 /// @brief Applies @p settings between two calls.
 template<typename TBlock>
 void change(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
+    applyOrThrow(block, settings);
 }
 
 /// @brief The refusal's message, or an empty string.
@@ -470,7 +491,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
         };
         names("timing_offset", [] { std::ignore = make<CpRemove>({{"fft_len", gr::Size_t{kFft}}, {"cp_len", std::vector<gr::Size_t>{16U}}, {"timing_offset", std::int32_t{-17}}}); });
         const std::string limits = refusal([] { std::ignore = make<CpRemove>({{"fft_len", gr::Size_t{kFft}}, {"cp_len", std::vector<gr::Size_t>{16U}}, {"timing_offset", std::int32_t{1}}}); });
-        expect(limits.contains("timing_offset") && limits.contains("outside the limits")) << std::format("the limits of timing_offset refuse 1: '{}'", limits);
+        expect(limits.contains("timing_offset") && limits.contains("must be <= 0")) << std::format("the limits of timing_offset refuse 1: '{}'", limits);
         names("cp_len", [] { std::ignore = make<CpRemove>({{"fft_len", gr::Size_t{kFft}}, {"cp_len", std::vector<gr::Size_t>{}}}); });
         names("cp_len", [] { std::ignore = make<CpRemove>({{"fft_len", gr::Size_t{kFft}}, {"cp_len", std::vector<gr::Size_t>{80U}}}); });
         names("window_len", [] { std::ignore = make<CpInsert>({{"cp_len", std::vector<gr::Size_t>{4U}}, {"window_len", gr::Size_t{8U}}}); });
@@ -736,10 +757,10 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
                 CpRemove block = make<CpRemove>(framing);
                 auto     out   = remove(block, stream, 0UZ, 100UZ, 4096UZ);
                 if (refuseFirst) {
-                    const std::int32_t accepted = block.timing_offset.value;
+                    const std::int32_t accepted = block.settings.timing_offset.value;
                     expect(refusal([&block, &arm] { change(block, arm.refused); }).contains("timing_offset")) << std::format("{}: the first application is refused", arm.name);
-                    const std::optional<gr::pmt::Value> reported = block.settings().get("timing_offset");
-                    expect(eq(block.timing_offset.value, accepted) && reported.has_value() && reported->get_if<std::int32_t>() != nullptr && *reported->get_if<std::int32_t>() == accepted) << "the member and settings().get() return the accepted value";
+                    const std::int32_t reported = block.get<std::int32_t>("timing_offset").value_or(std::numeric_limits<std::int32_t>::min());
+                    expect(eq(block.settings.timing_offset.value, accepted) && reported == accepted) << "the member and get() return the accepted value";
                     expect(refusal([&block] { change(block, {{"timing_offset", std::int32_t{-20}}}); }).contains("timing_offset")) << "the refused value sent again alone is refused again";
                 }
                 expect(refusal([&block, &arm] { change(block, arm.valid); }).empty()) << std::format("{}: the valid change applies", arm.name);
@@ -912,7 +933,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
         gr::scheduler::Simple scheduler;
         expect(scheduler.exchange(std::move(graph)).has_value());
         expect(scheduler.runAndWait().has_value());
-        expect(eq(sink.count.value, std::uint64_t{2})) << "two whole symbols";
+        expect(eq(sink.status.count.value, std::uint64_t{2})) << "two whole symbols";
         expect(eq(cut.nDiscarded(), std::uint64_t{kTrigger + kPartial})) << "the samples before the trigger and the partial cut";
     };
 
@@ -946,19 +967,18 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
             // `timing_offset` and stays 0 until the tag sets it.
             auto& cut  = graph.emplaceBlock<CpRemove>(gr::property_map{});
             auto& sink = graph.emplaceBlock<gr::blocks::testing::CountingSink<gr::DataSet<CF>>>({});
-            cut.settings().setTagCouplings({{"timing_offset", std::string("timing_offset")}});
+            expect(cut.setTagCouplings({{"timing_offset", std::string("timing_offset")}}).has_value());
             expect(graph.connect<"out", "in">(source, cut).has_value());
             expect(graph.connect<"out", "in">(cut, sink).has_value());
 
             gr::scheduler::Simple scheduler;
             expect(scheduler.exchange(std::move(graph)).has_value());
             Run result;
-            result.completed                             = scheduler.runAndWait().has_value();
-            result.records                               = sink.count.value;
-            result.discarded                             = cut.nDiscarded();
-            result.member                                = cut.timing_offset.value;
-            const std::optional<gr::pmt::Value> reported = cut.settings().get("timing_offset");
-            result.reported                              = reported.has_value() && reported->get_if<std::int32_t>() != nullptr ? *reported->get_if<std::int32_t>() : 99;
+            result.completed = scheduler.runAndWait().has_value();
+            result.records   = sink.status.count.value;
+            result.discarded = cut.nDiscarded();
+            result.member    = cut.settings.timing_offset.value;
+            result.reported  = cut.get<std::int32_t>("timing_offset").value_or(99);
             return result;
         };
 
@@ -969,7 +989,7 @@ const boost::ut::suite<"OFDM cyclic prefix"> _cyclicPrefix = [] {
         const Run refused = run(std::int32_t{1});
         expect(refused.completed) << "the refusal ends no run";
         expect(eq(refused.member, std::int32_t{0})) << "the member keeps the accepted value";
-        expect(eq(refused.reported, std::int32_t{0})) << "settings().get() returns the accepted value";
+        expect(eq(refused.reported, std::int32_t{0})) << "get() returns the accepted value";
         expect(eq(refused.records, reference.records)) << "the frame runs on with the accepted timing_offset";
         expect(eq(refused.discarded, reference.discarded));
 

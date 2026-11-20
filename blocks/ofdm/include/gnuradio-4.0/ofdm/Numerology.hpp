@@ -2,13 +2,11 @@
 #define GNURADIO_OFDM_NUMEROLOGY_HPP
 
 #include <algorithm>
-#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <format>
 #include <span>
 #include <string>
 #include <string_view>
@@ -36,11 +34,9 @@ namespace detail {
 inline constexpr std::size_t kMinFftLength = 8UZ;
 inline constexpr std::size_t kMaxFftLength = gr::ofdm::CarrierMap::kMaxFftLength;
 
-/// @brief The validator of `fft_len`: true for a power of two.
-inline constexpr auto kPowerOfTwo = [](gr::Size_t value) { return std::has_single_bit(value); };
-
-/// @brief The limits of every block's `fft_len`: a power of two from `kMinFftLength` to `kMaxFftLength`.
-using FftLengthLimits = Limits<static_cast<gr::Size_t>(kMinFftLength), static_cast<gr::Size_t>(kMaxFftLength), kPowerOfTwo>;
+/// @brief The limits of every block's `fft_len`, from `kMinFftLength` to `kMaxFftLength`; each block's check refuses a
+/// length in range that is no power of two.
+using FftLengthLimits = Limits<Min<static_cast<gr::Size_t>(kMinFftLength)>, Max<static_cast<gr::Size_t>(kMaxFftLength)>>;
 
 /// @brief The meta keys a symbol record carries.
 inline constexpr std::string_view kFftLenKey       = "fft_len";
@@ -85,13 +81,6 @@ inline constexpr std::string_view kKindEqualized = "equalized";
     return gr::ofdm::CarrierMap(static_cast<std::size_t>(fftLength), std::span<const int>(data), std::span<const int>(pilots));
 }
 
-/// @brief Throws a failed numerology check as `gr::exception`.
-inline void requireValid(const std::expected<void, gr::Error>& checked) {
-    if (!checked) {
-        throw gr::exception(checked.error().message, checked.error().sourceLocation);
-    }
-}
-
 /// @brief The signed carrier of FFT bin @p bin. A bin outside the transform throws the carrier map's message.
 [[nodiscard]] inline int carrierAt(std::size_t fftLength, std::size_t bin) {
     const auto carrier = gr::ofdm::CarrierMap::carrierOf(fftLength, bin);
@@ -110,11 +99,8 @@ inline void requireValid(const std::expected<void, gr::Error>& checked) {
     return *bin;
 }
 
-/// @brief Converts an interleaved re,im setting to complex values. An odd length throws and names the setting.
-[[nodiscard]] inline std::vector<Complex> complexFrom(std::span<const float> interleaved, std::string_view setting) {
-    if (interleaved.size() % 2UZ != 0UZ) {
-        throw gr::exception(std::format("{} is a list of interleaved re,im pairs and must have an even length, got {}", setting, interleaved.size()));
-    }
+/// @brief Converts an interleaved re,im setting of even length to complex values.
+[[nodiscard]] inline std::vector<Complex> complexFrom(std::span<const float> interleaved) {
     std::vector<Complex> values(interleaved.size() / 2UZ);
     for (std::size_t k = 0UZ; k < values.size(); ++k) {
         values[k] = Complex(interleaved[2UZ * k], interleaved[2UZ * k + 1UZ]);
@@ -125,20 +111,11 @@ inline void requireValid(const std::expected<void, gr::Error>& checked) {
 /**
  * @brief The sync words a setting holds, one whole symbol each.
  *
- * The setting holds the words as one concatenation of interleaved re,im pairs, and its length gives the word count. A
- * length that is not a whole number of symbols throws. A short final word would otherwise go out as a symbol with
- * silent carriers. A value that is not finite throws and names its word and bin.
+ * The setting holds the words as one concatenation of interleaved re,im pairs, and its length, a whole number of
+ * symbols, gives the word count.
  */
 [[nodiscard]] inline std::vector<std::vector<Complex>> syncWordsFrom(std::span<const float> interleaved, std::size_t fftLength) {
-    const std::vector<Complex> flat = complexFrom(interleaved, "sync_words");
-    if (flat.size() % fftLength != 0UZ) {
-        throw gr::exception(std::format("sync_words holds {} carriers, which is not a whole number of {}-carrier symbols", flat.size(), fftLength));
-    }
-    for (std::size_t k = 0UZ; k < flat.size(); ++k) {
-        if (!std::isfinite(flat[k].real()) || !std::isfinite(flat[k].imag())) {
-            throw gr::exception(std::format("sync_words holds ({}, {}) in bin {} of word {}, and every value of a sync word must be finite", flat[k].real(), flat[k].imag(), k % fftLength, k / fftLength));
-        }
-    }
+    const std::vector<Complex>        flat = complexFrom(interleaved);
     std::vector<std::vector<Complex>> words(flat.size() / fftLength);
     for (std::size_t w = 0UZ; w < words.size(); ++w) {
         words[w].assign(flat.begin() + static_cast<std::ptrdiff_t>(w * fftLength), flat.begin() + static_cast<std::ptrdiff_t>((w + 1UZ) * fftLength));
@@ -154,18 +131,6 @@ inline void requireValid(const std::expected<void, gr::Error>& checked) {
 [[nodiscard]] inline std::size_t cyclicPrefixLength(std::span<const gr::Size_t> cycle, std::uint64_t symbolInFrame) noexcept {
     const std::uint64_t entry = symbolInFrame % cycle.size();
     return static_cast<std::size_t>(cycle[static_cast<std::size_t>(entry)]);
-}
-
-/// @brief Refuses an empty prefix cycle and any entry longer than `fft_len`.
-inline void requireCyclicPrefix(std::span<const gr::Size_t> cycle, gr::Size_t fftLength) {
-    if (cycle.empty()) {
-        throw gr::exception("cp_len is the prefix length, a scalar or a per-symbol cycle, and must hold at least one entry");
-    }
-    for (const gr::Size_t length : cycle) {
-        if (length > fftLength) {
-            throw gr::exception(std::format("cp_len entry {} exceeds fft_len {}: a prefix is a copy of the symbol's own tail and cannot be longer than the symbol", length, fftLength));
-        }
-    }
 }
 
 /**

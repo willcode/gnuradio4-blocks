@@ -2,10 +2,12 @@
 #define GNURADIO_OFDM_CHANNEL_EQUALIZER_HPP
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <numbers>
 #include <optional>
@@ -27,14 +29,10 @@
 
 namespace gr::blocks::ofdm {
 
+/// @brief How ChannelEqualizer's pilots refine the estimate on each data symbol.
+enum class PhaseTracking : std::uint8_t { cpe, cpe_interp, none };
+
 GR_REGISTER_BLOCK(gr::blocks::ofdm::ChannelEqualizer)
-
-namespace detail {
-
-/// @brief The validator of `alpha`: true above 0.
-inline constexpr auto kAlphaPositive = [](float value) { return value > 0.f; };
-
-} // namespace detail
 
 /**
  * @brief Equalizes OFDM symbol records against a known sync symbol and emits their data carriers.
@@ -76,8 +74,8 @@ inline constexpr auto kAlphaPositive = [](float value) { return value > 0.f; };
  * `cpe` and `cpe_interp` need at least one pilot carrier. `fft_len` is a power of two from 8 to 65536, the carrier
  * lists name distinct carriers in range, and, once the block holds a layout, `data_carriers` names at least one. Each
  * pilot value is finite and nonzero, and a layout with pilot carriers needs at least one pilot value. `sync_word` is
- * finite and nonzero on every occupied carrier, and `sync_index` is below `n_sync`. `tracking` is `cpe`, `cpe_interp`
- * or `none`. The constellation settings name a valid point set. The block refuses a change that breaks one of these
+ * finite and nonzero on every occupied carrier, and `sync_index` is below `n_sync`. The constellation settings name a valid
+ * point set. The block refuses a change that breaks one of these
  * rules. Settings that meet the rules only together go in one application.
  *
  * A change of `fft_len`, `data_carriers`, `pilot_carriers` or `sync_word` resets the estimate to 1 on every carrier
@@ -92,31 +90,34 @@ inline constexpr auto kAlphaPositive = [](float value) { return value > 0.f; };
  * the dropped records. `start()` sets the counters to 0 and resets the estimate.
  */
 struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
-    using Description = Doc<"Equalizes OFDM symbol records against the frame's known sync symbol and emits the data carriers in data_carriers order. The block estimates the channel by least squares, tracks the common phase error on the pilots with an optional interpolated per-carrier update, and equalizes by zero forcing. Records carry cpe_rad, evm_db and frame_evm_db, and the optional channel port carries the estimate">;
+    using Description = Doc<"Equalizes OFDM symbol records against the frame's known sync symbol and emits the data carriers in data_carriers order. The block estimates the channel by least squares, tracks the common phase error on the pilots with an optional interpolated per-carrier update, and equalizes by zero forcing. Records carry cpe_rad, evm_db and frame_evm_db, and the optional channel port carries the estimate. `data_carriers` and `pilot_carriers` hold signed logical carrier indices, the data in output order. `pilot_symbols` holds the cycle of nonzero pilot values, interleaved re, im. `sync_word` is the known symbol of fft_len carriers, interleaved re, im, at index `sync_index` among the frame's `n_sync` head symbols. `alpha` is the single-pole coefficient of the cpe_interp update. `arity` is read by psk and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom">;
 
     PortIn<DataSet<Complex>, Async>          in;
     PortOut<DataSet<Complex>, Async>         out;
     PortOut<DataSet<float>, Optional, Async> channel;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"bins per record, a power of two">, detail::FftLengthLimits>                                         fft_len = 64U;
-    Annotated<std::vector<std::int32_t>, "data_carriers", Visible, Doc<"signed logical carrier indices the output holds, in order">>                   data_carriers{};
-    Annotated<std::vector<std::int32_t>, "pilot_carriers", Visible, Doc<"signed logical carrier indices the tracking reads">>                          pilot_carriers{};
-    Annotated<std::vector<float>, "pilot_symbols", Doc<"interleaved re,im pilot cycle of nonzero values">>                                             pilot_symbols{};
-    Annotated<std::vector<float>, "sync_word", Doc<"interleaved re,im known symbol of fft_len carriers">>                                              sync_word{};
-    Annotated<gr::Size_t, "n_sync", Visible, Doc<"sync symbols at a frame's head">>                                                                    n_sync      = 1U;
-    Annotated<gr::Size_t, "sync_index", Doc<"index of the known symbol among the frame's sync symbols">>                                               sync_index  = 0U;
-    Annotated<std::string, "tracking", Visible, Doc<"phase tracking mode: 'cpe', 'cpe_interp' or 'none'">>                                             tracking    = std::string("cpe");
-    Annotated<float, "alpha", Visible, Doc<"single-pole coefficient of the 'cpe_interp' update, in (0, 1]">, Limits<0.f, 1.f, detail::kAlphaPositive>> alpha       = 0.1f;
-    Annotated<std::string, "signal_name", Doc<"the emitted record's signal name">>                                                                     signal_name = std::string("ofdm_equalized");
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"FFT length">, detail::FftLengthLimits>                          fft_len = 64U;
+        Annotated<std::vector<std::int32_t>, Visible, Doc<"data carriers">>                                 data_carriers{};
+        Annotated<std::vector<std::int32_t>, Visible, Doc<"pilot carriers">>                                pilot_carriers{};
+        Annotated<std::vector<float>, Doc<"pilot cycle">>                                                   pilot_symbols{};
+        Annotated<std::vector<float>, Doc<"known sync symbol">>                                             sync_word{};
+        Annotated<gr::Size_t, Visible, Doc<"sync symbols per frame">>                                       n_sync        = 1U;
+        Annotated<gr::Size_t, Doc<"known symbol index">>                                                    sync_index    = 0U;
+        Annotated<PhaseTracking, Visible, Doc<"phase tracking">>                                            tracking      = PhaseTracking::cpe;
+        Annotated<float, Visible, Doc<"cpe_interp coefficient">, Limits<Over<0.f>, Max<1.f>>>               alpha         = 0.1f;
+        Annotated<std::string, Doc<"signal name">>                                                          signal_name   = std::string("ofdm_equalized");
+        Annotated<gr::digital::ConstellationFamily, gr::blocks::digital::ConstellationSettingsDoc, Visible> constellation = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>                                  arity         = 4U;
+        Annotated<float, Unit<"rad">, Doc<"psk rotation">>                                                  phase_offset  = 0.f;
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                                      label_xor     = 0U;
+        Annotated<std::vector<float>, Doc<"custom points">>                                                 points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                                   normalization = gr::digital::Normalization::Power;
 
-    Annotated<std::string, "constellation", gr::blocks::digital::ConstellationSettingsDoc, Visible> constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">>              arity         = 4U;
-    Annotated<float, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>           phase_offset  = 0.f;
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>                  label_xor     = 0U;
-    Annotated<std::vector<float>, "points", Doc<"interleaved re,im points of 'custom'">>            points{};
-    Annotated<std::string, "normalization", Doc<"point scaling: 'power', 'amplitude' or 'none'">>   normalization = std::string("power");
+        GR_MAKE_REFLECTABLE(Settings, fft_len, data_carriers, pilot_carriers, pilot_symbols, sync_word, n_sync, sync_index, tracking, alpha, signal_name, constellation, arity, phase_offset, label_xor, points, normalization);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(ChannelEqualizer, in, out, channel, fft_len, data_carriers, pilot_carriers, pilot_symbols, sync_word, n_sync, sync_index, tracking, alpha, signal_name, constellation, arity, phase_offset, label_xor, points, normalization);
+    GR_MAKE_REFLECTABLE(ChannelEqualizer, in, out, channel, settings);
 
     /// The two pilots around an occupied carrier and the carrier's interpolation weight between them. The table
     /// depends on the numerology alone.
@@ -126,27 +127,6 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
         float       weight{0.f};
     };
 
-    /// The settings the block computes on.
-    struct Accepted {
-        gr::Size_t                fftLength = 0U;
-        std::vector<std::int32_t> dataCarriers{};
-        std::vector<std::int32_t> pilotCarriers{};
-        std::vector<float>        pilotSymbols{};
-        std::vector<float>        syncWord{};
-        std::uint64_t             nSync     = 0ULL;
-        std::uint64_t             syncIndex = 0ULL;
-        std::string               tracking{};
-        float                     alpha = 0.f;
-        std::string               signalName{};
-        std::string               constellation{};
-        gr::Size_t                arity       = 0U;
-        float                     phaseOffset = 0.f;
-        gr::Size_t                labelXor    = 0U;
-        std::vector<float>        points{};
-        std::string               normalization{};
-    };
-
-    Accepted                            _accepted = settingsAfter(Accepted{}, [](std::string_view) { return true; });
     std::optional<gr::ofdm::CarrierMap> _map{};
     gr::digital::Constellation<float>   _constellation = gr::digital::Constellation<float>::qpsk();
 
@@ -184,9 +164,53 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
     /// @brief Records whose length is not `fft_len`. The block drops them.
     [[nodiscard]] std::uint64_t nMalformed() const noexcept { return _malformed; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        take(settingsAfter(_accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); }));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.fft_len.value)) {
+            return gr::Refused(s.fft_len, "must be a power of 2");
+        }
+        if (s.data_carriers.value.empty()) {
+            return gr::Refused(s.data_carriers, "required");
+        }
+        if (s.pilot_symbols.value.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.pilot_symbols, "must have an even length");
+        }
+        if (s.sync_word.value.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.sync_word, "must have an even length");
+        }
+        if (s.sync_index >= s.n_sync) {
+            return gr::Refused(s.sync_index, "must be < n_sync");
+        }
+        std::ignore                    = constellationOf(s);
+        const gr::ofdm::CarrierMap map = detail::buildMap(s.fft_len, s.data_carriers.value, s.pilot_carriers.value);
+        return checkNumerology(s, map);
     }
+
+    void applySettings(const Settings& s) {
+        const bool newNumerology = s.fft_len.changed() || s.data_carriers.changed() || s.pilot_carriers.changed();
+        if (newNumerology) {
+            _map.emplace(detail::buildMap(s.fft_len, s.data_carriers.value, s.pilot_carriers.value));
+            const std::size_t fftLength = _map->fftLength();
+            _dataAxis.assign(_map->dataCarriers().begin(), _map->dataCarriers().end());
+            buildInterpolation(*_map);
+            _h.assign(fftLength, Complex{1.f, 0.f});
+            _hInv.assign(fftLength, Complex{1.f, 0.f});
+            _corrected.assign(fftLength, Complex{});
+            _values.assign(_map->nData(), Complex{});
+            _pilotMagnitude.assign(_map->nPilots(), 1.f);
+            _pilotAngle.assign(_map->nPilots(), 0.f);
+        }
+        _pilots        = detail::complexFrom(s.pilot_symbols.value);
+        _sync          = detail::complexFrom(s.sync_word.value);
+        _constellation = constellationOf(s);
+        _interp        = s.tracking == PhaseTracking::cpe_interp;
+        _track         = s.tracking != PhaseTracking::none;
+        _shape.build(std::span<const int>(_dataAxis), s.signal_name, property_map{{std::pmr::string(detail::kFftLenKey), pmt::Value(std::uint64_t{_map->fftLength()})}});
+        if (newNumerology || s.sync_word.changed()) {
+            resetEstimate();
+        }
+    }
+
+    [[nodiscard]] gr::digital::Constellation<float> constellationOf(const Settings& s) const { return gr::blocks::digital::constellationFromSettings<float>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
 
     void start() { resetState(); }
 
@@ -204,13 +228,6 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
 
     /// @brief One record in, at most one record out, taking nothing the output has no room for.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& channelSpan) {
-        if (!_map.has_value()) {
-            this->emitErrorMessage("processBulk", gr::Error("gr::blocks::ofdm::ChannelEqualizer: the block holds no numerology. Its default settings name no data carriers, and no settings application has built one"));
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            channelSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
         const bool        wantEstimate = channelSpan.isConnected;
         const std::size_t fftLength    = _map->fftLength();
         std::size_t       consumed     = 0UZ;
@@ -220,12 +237,12 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
         while (consumed < inSpan.size()) {
             const DataSet<Complex>& record     = inSpan[consumed];
             const std::uint64_t     position   = detail::metaCount(record, detail::kSymbolInFrame, _symbolInFrame);
-            const bool              isSync     = position < _accepted.nSync;
+            const bool              isSync     = position < settings.n_sync.value;
             const bool              wellFormed = record.signal_values.size() == fftLength;
             if (wellFormed && !isSync && made == outSpan.size()) {
                 break; // no room for its equalized record, which leaves it on the input
             }
-            if (wellFormed && isSync && position == _accepted.syncIndex && wantEstimate && estimates == channelSpan.size()) {
+            if (wellFormed && isSync && position == settings.sync_index.value && wantEstimate && estimates == channelSpan.size()) {
                 break; // no room for its channel record
             }
 
@@ -236,7 +253,7 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
             if (!wellFormed) {
                 ++_malformed;
             } else if (isSync) {
-                if (position == _accepted.syncIndex) {
+                if (position == settings.sync_index.value) {
                     estimate(record);
                     if (wantEstimate) {
                         channelSpan[estimates] = channelRecord(record);
@@ -246,7 +263,7 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
                     ++_skipped;
                 }
             } else {
-                equalize(outSpan[made], record, position - _accepted.nSync);
+                equalize(outSpan[made], record, position - settings.n_sync.value);
                 ++made;
             }
             _symbolInFrame = position + 1ULL;
@@ -263,142 +280,48 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
     }
 
 private:
-    /// @brief Copies the named members into @p next.
-    template<typename Moved>
-    [[nodiscard]] Accepted settingsAfter(Accepted next, Moved moved) const {
-        if (moved("fft_len")) {
-            next.fftLength = fft_len.value;
+    /// @brief The fault in the pilots, the sync word and the tracking mode against the numerology @p map, under the
+    /// setting at fault.
+    [[nodiscard]] std::optional<gr::Refused> checkNumerology(const Settings& s, const gr::ofdm::CarrierMap& map) const {
+        const std::vector<Complex>           pilots     = detail::complexFrom(s.pilot_symbols.value);
+        const std::expected<void, gr::Error> pilotCycle = map.validatePilotCycle(pilots);
+        if (!pilotCycle) {
+            return gr::Refused(s.pilot_symbols, pilotCycle.error().message);
         }
-        if (moved("data_carriers")) {
-            next.dataCarriers = data_carriers.value;
+        const std::vector<Complex>           known    = detail::complexFrom(s.sync_word.value);
+        const std::expected<void, gr::Error> syncWord = map.validateSyncWord(known);
+        if (!syncWord) {
+            return gr::Refused(s.sync_word, syncWord.error().message);
         }
-        if (moved("pilot_carriers")) {
-            next.pilotCarriers = pilot_carriers.value;
-        }
-        if (moved("pilot_symbols")) {
-            next.pilotSymbols = pilot_symbols.value;
-        }
-        if (moved("sync_word")) {
-            next.syncWord = sync_word.value;
-        }
-        if (moved("n_sync")) {
-            next.nSync = n_sync.value;
-        }
-        if (moved("sync_index")) {
-            next.syncIndex = sync_index.value;
-        }
-        if (moved("tracking")) {
-            next.tracking = tracking.value;
-        }
-        if (moved("alpha")) {
-            next.alpha = alpha.value;
-        }
-        if (moved("signal_name")) {
-            next.signalName = signal_name.value;
-        }
-        if (moved("constellation")) {
-            next.constellation = constellation.value;
-        }
-        if (moved("arity")) {
-            next.arity = arity.value;
-        }
-        if (moved("phase_offset")) {
-            next.phaseOffset = phase_offset.value;
-        }
-        if (moved("label_xor")) {
-            next.labelXor = label_xor.value;
-        }
-        if (moved("points")) {
-            next.points = points.value;
-        }
-        if (moved("normalization")) {
-            next.normalization = normalization.value;
-        }
-        return next;
-    }
-
-    /// @brief Checks @p next, then rebuilds the layout and resets the estimate where they change. With no layout and
-    /// no data carriers in @p next, the block builds none.
-    void take(Accepted next) {
-        const bool                          newNumerology = next.fftLength != _accepted.fftLength || next.dataCarriers != _accepted.dataCarriers || next.pilotCarriers != _accepted.pilotCarriers;
-        std::optional<gr::ofdm::CarrierMap> built{};
-        if (newNumerology && (_map.has_value() || !next.dataCarriers.empty())) {
-            built.emplace(detail::buildMap(next.fftLength, std::span<const std::int32_t>(next.dataCarriers), std::span<const std::int32_t>(next.pilotCarriers)));
-        }
-        const gr::ofdm::CarrierMap* map = built.has_value() ? &*built : (_map.has_value() ? &*_map : nullptr);
-
-        std::vector<Complex> pilots = detail::complexFrom(std::span<const float>(next.pilotSymbols), "pilot_symbols");
-        std::vector<Complex> known  = detail::complexFrom(std::span<const float>(next.syncWord), "sync_word");
-        if (next.syncIndex >= next.nSync) {
-            throw gr::exception(std::format("sync_index is {} and n_sync is {}: the known symbol has to be one of the frame's sync symbols", next.syncIndex, next.nSync));
-        }
-        if (next.tracking != "cpe" && next.tracking != "cpe_interp" && next.tracking != "none") {
-            throw gr::exception(std::format("tracking must be 'cpe', 'cpe_interp' or 'none', got '{}'", next.tracking));
-        }
-        gr::digital::Constellation<float> decisions = gr::blocks::digital::constellationFromSettings<float>(next.constellation, next.arity, next.phaseOffset, next.labelXor, std::span<const float>(next.points), next.normalization);
-        if (map != nullptr) {
-            requireNumerology(*map, next, std::span<const Complex>(pilots), std::span<const Complex>(known));
-        }
-        const bool newEstimate = newNumerology || !sameValues(next.syncWord, _accepted.syncWord);
-
-        // Every check has passed. The block changes from here.
-        if (built.has_value()) {
-            const std::size_t fftLength = built->fftLength();
-            _dataAxis.assign(built->dataCarriers().begin(), built->dataCarriers().end());
-            buildInterpolation(*built);
-            _map.emplace(std::move(*built));
-            _h.assign(fftLength, Complex{1.f, 0.f});
-            _hInv.assign(fftLength, Complex{1.f, 0.f});
-            _corrected.assign(fftLength, Complex{});
-            _values.assign(_map->nData(), Complex{});
-            _pilotMagnitude.assign(_map->nPilots(), 1.f);
-            _pilotAngle.assign(_map->nPilots(), 0.f);
-        }
-        _pilots        = std::move(pilots);
-        _sync          = std::move(known);
-        _constellation = std::move(decisions);
-        _accepted      = std::move(next);
-        _interp        = _accepted.tracking == "cpe_interp";
-        _track         = _accepted.tracking != "none";
-        if (_map.has_value()) {
-            _shape.build(std::span<const int>(_dataAxis), _accepted.signalName, property_map{{std::pmr::string(detail::kFftLenKey), pmt::Value(std::uint64_t{_map->fftLength()})}});
-        }
-        if (newEstimate) {
-            resetEstimate();
-        }
-    }
-
-    /// @brief Checks the pilots, the sync word and the tracking mode of @p next against the numerology @p map.
-    static void requireNumerology(const gr::ofdm::CarrierMap& map, const Accepted& next, std::span<const Complex> pilots, std::span<const Complex> known) {
-        detail::requireValid(map.validatePilotCycle(pilots));
-        detail::requireValid(map.validateSyncWord(known));
-        if (next.tracking != "none" && map.nPilots() == 0UZ) {
-            throw gr::exception(std::format("tracking is '{}' but the numerology has no pilot carriers to track on", next.tracking));
+        if (s.tracking != PhaseTracking::none && map.nPilots() == 0UZ) {
+            return gr::Refused(s.tracking, "requires pilot carriers");
         }
         const std::size_t fftLength = map.fftLength();
         for (const std::size_t bin : map.dataBins()) {
-            requireKnown(known[bin], "data", fftLength, bin);
+            const std::optional<gr::Refused> refused = knownRefusal(known[bin], "data", fftLength, bin);
+            if (refused) {
+                return refused;
+            }
         }
         for (const std::size_t bin : map.pilotBins()) {
-            requireKnown(known[bin], "pilot", fftLength, bin);
+            const std::optional<gr::Refused> refused = knownRefusal(known[bin], "pilot", fftLength, bin);
+            if (refused) {
+                return refused;
+            }
         }
+        return {};
     }
 
     /// @brief Refuses a zero or non-finite known value on the occupied carrier in @p bin. Least squares cannot estimate
     /// the channel against it. @p role names the carrier's role in the message.
-    static void requireKnown(Complex value, std::string_view role, std::size_t fftLength, std::size_t bin) {
+    [[nodiscard]] std::optional<gr::Refused> knownRefusal(Complex value, std::string_view role, std::size_t fftLength, std::size_t bin) const {
         if (value == Complex{}) {
-            throw gr::exception(std::format("sync_word carries nothing on {} carrier {}, so the channel cannot be estimated there", role, detail::carrierAt(fftLength, bin)));
+            return gr::Refused(settings.sync_word, std::format("must be nonzero on {} carrier {}", role, detail::carrierAt(fftLength, bin)));
         }
         if (!std::isfinite(value.real()) || !std::isfinite(value.imag())) {
-            throw gr::exception(std::format("sync_word carries ({}, {}) on {} carrier {}, and the channel can be estimated only against a finite value", value.real(), value.imag(), role, detail::carrierAt(fftLength, bin)));
+            return gr::Refused(settings.sync_word, std::format("must be finite on {} carrier {}, and holds ({}, {})", role, detail::carrierAt(fftLength, bin), value.real(), value.imag()));
         }
-    }
-
-    /// @brief True when @p a and @p b hold the same values. Two NaN values are the same value. `sync_word` can hold a
-    /// NaN on a guard bin.
-    [[nodiscard]] static bool sameValues(std::span<const float> a, std::span<const float> b) noexcept {
-        return std::ranges::equal(a, b, [](float x, float y) { return x == y || (std::isnan(x) && std::isnan(y)); });
+        return {};
     }
 
     /// @brief Builds the table of the pilots around each occupied carrier and its weight between them.
@@ -517,7 +440,7 @@ private:
         const double frameEvm  = _frameSignal > 0. ? 10. * std::log10(std::max(_frameError / _frameSignal, 1e-30)) : 0.;
 
         property_map& meta                             = _shape.emitInto(target, std::span<const Complex>(_values), detail::kKindEqualized);
-        meta[std::pmr::string(detail::kSymbolInFrame)] = pmt::Value(dataIndex + _accepted.nSync);
+        meta[std::pmr::string(detail::kSymbolInFrame)] = pmt::Value(dataIndex + std::uint64_t{settings.n_sync.value});
         meta[std::pmr::string(detail::kCpeRadKey)]     = pmt::Value(static_cast<float>(theta));
         meta[std::pmr::string(detail::kEvmDbKey)]      = pmt::Value(static_cast<float>(symbolEvm));
         meta[std::pmr::string(detail::kFrameEvmDbKey)] = pmt::Value(static_cast<float>(frameEvm));
@@ -542,7 +465,7 @@ private:
             _pilotAngle[p]          = std::arg(ratio);
         }
 
-        const float mix = _accepted.alpha;
+        const float mix = settings.alpha.value;
         for (std::size_t k = 0UZ; k < _occupied.size(); ++k) {
             const Between& where    = _between[k];
             const float    lowMag   = _pilotMagnitude[where.left];

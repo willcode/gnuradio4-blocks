@@ -37,12 +37,6 @@ GR_REGISTER_BLOCK(gr::blocks::ofdm::SchmidlCoxSync)
 
 namespace detail {
 
-/// @brief The validator of `threshold`: true strictly between 0 and 1.
-inline constexpr auto kThresholdInRange = [](float value) { return value > 0.f && value < 1.f; };
-
-/// @brief The validator of `r_floor`: true above 0.
-inline constexpr auto kRFloorPositive = [](float value) { return value > 0.f; };
-
 /// @brief Converts @p value to `std::size_t`. The caller has reduced or checked it below a `std::size_t` bound.
 template<std::unsigned_integral T>
 [[nodiscard]] constexpr std::size_t sizeFrom(T value) noexcept {
@@ -100,20 +94,24 @@ template<std::unsigned_integral T>
  * no trigger for either. `lastCfoFractional()` returns the most recent estimate. `start()` sets the counters to 0.
  */
 struct SchmidlCoxSync : Block<SchmidlCoxSync> {
-    using Description = Doc<"Detects OFDM frames by their repeated-half preamble and estimates the fractional carrier frequency offset. The block passes the complex stream through, delayed by delaySamples(), which is 3*fft_len/2 + cp_len - 1 samples. It tags the first sample of each frame with gr:trigger_name and with cfo_fractional in subcarrier spacings, and it can derotate the stream by that estimate">;
+    using Description = Doc<"Detects OFDM frames by their repeated-half preamble and estimates the fractional carrier frequency offset. The block passes the complex stream through, delayed by delaySamples(), which is 3*fft_len/2 + cp_len - 1 samples. It tags the first sample of each frame with gr:trigger_name and with cfo_fractional in subcarrier spacings, and it can derotate the stream by that estimate. `threshold` is the metric level that opens a plateau. `min_gap` counts symbols of cp_len + fft_len samples. With `correct_cfo`, the output is derotated by the estimate from the trigger onward">;
 
     PortIn<Complex>  in;
     PortOut<Complex> out;
 
-    Annotated<gr::Size_t, "fft_len", Visible, Doc<"transform length, a power of two">, detail::FftLengthLimits>                                             fft_len       = 64U;
-    Annotated<gr::Size_t, "cp_len", Visible, Doc<"prefix length of the preamble symbol">>                                                                   cp_len        = 16U;
-    Annotated<float, "threshold", Visible, Doc<"metric level that opens a plateau, in (0, 1)">, Limits<0.f, 1.f, detail::kThresholdInRange>>                threshold     = 0.6f;
-    Annotated<gr::Size_t, "min_gap", Visible, Unit<"symbols">, Doc<"dead time after a trigger, in cp_len + fft_len sample symbols">>                        min_gap       = 1U;
-    Annotated<bool, "correct_cfo", Visible, Doc<"derotate the output by the estimate from the trigger onward">>                                             correct_cfo   = true;
-    Annotated<float, "r_floor", Doc<"least received energy a trigger needs">, Limits<0.f, std::numeric_limits<float>::infinity(), detail::kRFloorPositive>> r_floor       = 1e-9f;
-    Annotated<std::string, "trigger_label", Doc<"gr:trigger_name of the emitted tags">>                                                                     trigger_label = std::string("ofdm_frame");
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"FFT length">, detail::FftLengthLimits>         fft_len       = 64U;
+        Annotated<gr::Size_t, Visible, Doc<"preamble prefix length">>                      cp_len        = 16U;
+        Annotated<float, Visible, Doc<"plateau threshold">, Limits<Over<0.f>, Under<1.f>>> threshold     = 0.6f;
+        Annotated<gr::Size_t, Visible, Unit<"symbols">, Doc<"dead time after trigger">>    min_gap       = 1U;
+        Annotated<bool, Visible, Doc<"carrier offset correction">>                         correct_cfo   = true;
+        Annotated<float, Doc<"trigger energy floor">, Limits<Over<0.f>>>                   r_floor       = 1e-9f;
+        Annotated<std::string, Doc<"emitted trigger name">>                                trigger_label = std::string("ofdm_frame");
 
-    GR_MAKE_REFLECTABLE(SchmidlCoxSync, in, out, fft_len, cp_len, threshold, min_gap, correct_cfo, r_floor, trigger_label);
+        GR_MAKE_REFLECTABLE(Settings, fft_len, cp_len, threshold, min_gap, correct_cfo, r_floor, trigger_label);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SchmidlCoxSync, in, out, settings);
 
     /// A tag held until the output reaches its sample. On the block's own detections, `increment` re-tunes the
     /// derotation at the trigger's sample, with `correct_cfo` set or not.
@@ -124,18 +122,6 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
         bool                  ownDetection{false};
     };
 
-    /// The settings the block computes on.
-    struct Accepted {
-        gr::Size_t  fftLength  = 0U;
-        gr::Size_t  cpLength   = 0U;
-        float       threshold  = 0.f;
-        gr::Size_t  minGap     = 0U;
-        bool        correctCfo = false;
-        float       rFloor     = 0.f;
-        std::string label{};
-    };
-
-    Accepted                  _accepted = settingsAfter(Accepted{}, [](std::string_view) { return true; });
     gr::signal::Phasor<float> _phasor{};
 
     std::vector<Complex>    _history{}; ///< the last `delaySamples()` inputs, which form the delay line
@@ -187,17 +173,27 @@ struct SchmidlCoxSync : Block<SchmidlCoxSync> {
     /// @brief The fractional offset of the most recent trigger, in subcarrier spacings.
     [[nodiscard]] double lastCfoFractional() const noexcept { return _lastCfo; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        take(settingsAfter(_accepted, [&newSettings](std::string_view key) { return newSettings.contains(key); }));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.fft_len.value)) {
+            return gr::Refused(s.fft_len, "must be a power of 2");
+        }
+        if (s.cp_len > s.fft_len) {
+            return gr::Refused(s.cp_len, "must be <= fft_len");
+        }
+        return {};
     }
 
-    /// @brief Resets the estimator, drops the held tags and restarts the counters. `settingsChanged()` builds the
-    /// estimator when a setting takes a value other than its default. For a block left at its defaults, `start()` builds
-    /// it.
-    void start() {
-        if (_history.empty()) {
-            take(_accepted);
+    /// @brief Derives the estimator's values from the settings and resizes the delay line when the lag changes.
+    void applySettings(const Settings& s) {
+        const std::size_t previousDelay = _delay;
+        derive(s);
+        if (_history.size() != _delay || _termRe.size() != _half) {
+            resize(previousDelay);
         }
+    }
+
+    /// @brief Resets the estimator, drops the held tags and restarts the counters.
+    void start() {
         _pending.clear();
         _triggers = 0ULL;
         _late     = 0ULL;
@@ -327,7 +323,7 @@ private:
     void dropOwnTrigger(property_map& map) const {
         const auto  entry = map.find(std::pmr::string(gr::tag::TRIGGER_NAME.key()));
         const auto* label = entry == map.end() ? nullptr : entry->second.get_if<std::pmr::string>();
-        if (label == nullptr || std::string_view(label->data(), label->size()) != std::string_view(_accepted.label)) {
+        if (label == nullptr || std::string_view(label->data(), label->size()) != std::string_view(settings.trigger_label.value)) {
             return;
         }
         for (const char* key : {gr::tag::TRIGGER_NAME.key(), gr::tag::TRIGGER_TIME.key(), gr::tag::TRIGGER_OFFSET.key(), gr::tag::TRIGGER_META_INFO.key()}) {
@@ -335,58 +331,17 @@ private:
         }
     }
 
-    /// @brief Copies the named members into @p next. Throws for a `cp_len` longer than `fft_len`.
-    template<typename Moved>
-    [[nodiscard]] Accepted settingsAfter(Accepted next, Moved moved) const {
-        if (moved("fft_len")) {
-            next.fftLength = fft_len.value;
-        }
-        if (moved("cp_len")) {
-            next.cpLength = cp_len.value;
-        }
-        if (moved("threshold")) {
-            next.threshold = threshold.value;
-        }
-        if (moved("min_gap")) {
-            next.minGap = min_gap.value;
-        }
-        if (moved("correct_cfo")) {
-            next.correctCfo = correct_cfo.value;
-        }
-        if (moved("r_floor")) {
-            next.rFloor = r_floor.value;
-        }
-        if (moved("trigger_label")) {
-            next.label = trigger_label.value;
-        }
-        if (next.cpLength > next.fftLength) {
-            throw gr::exception(std::format("cp_len is {} and fft_len is {}: a prefix is a copy of the symbol's own tail and cannot be longer than the symbol", next.cpLength, next.fftLength));
-        }
-        return next;
-    }
-
-    /// @brief Takes @p next as the settings the block computes on. Derives the estimator's values from them and resizes
-    /// the delay line when the lag changes.
-    void take(Accepted next) {
-        _accepted                       = std::move(next);
-        const std::size_t previousDelay = _delay;
-        derive();
-        if (_history.size() != _delay || _termRe.size() != _half) {
-            resize(previousDelay);
-        }
-    }
-
-    /// @brief Derives the lag, the dead time, the ring, the width bounds and the levels from the accepted settings.
-    void derive() noexcept {
-        const auto        fft      = static_cast<std::size_t>(_accepted.fftLength);
-        const auto        cp       = static_cast<std::size_t>(_accepted.cpLength);
+    /// @brief Derives the lag, the dead time, the ring, the width bounds and the levels from @p s.
+    void derive(const Settings& s) noexcept {
+        const std::size_t fft      = s.fft_len;
+        const std::size_t cp       = s.cp_len;
         const std::size_t maxWidth = cp + fft - 1UZ;
         _half                      = fft / 2UZ;
         _delay                     = 3UZ * _half + cp - 1UZ;
-        _deadTime                  = std::max(std::uint64_t{1}, std::uint64_t{_accepted.minGap} * (cp + fft));
+        _deadTime                  = std::max(std::uint64_t{1}, std::uint64_t{s.min_gap} * (cp + fft));
         _midShift                  = cp / 2UZ;
-        _level                     = static_cast<double>(_accepted.threshold);
-        _floor                     = static_cast<double>(_accepted.rFloor);
+        _level                     = static_cast<double>(s.threshold);
+        _floor                     = static_cast<double>(s.r_floor);
         // The falling edge reads P at the crossing's midpoint, at most half the widest accepted crossing back. The ring
         // holds that many values. A power-of-two size turns the per-sample index into a mask.
         _ring = std::bit_ceil(maxWidth / 2UZ + 1UZ);
@@ -527,8 +482,8 @@ private:
         _resumeAt = frameAt + _deadTime;
 
         _pending.emplace_back(frameAt + _delay,
-            property_map{{gr::tag::TRIGGER_NAME.key(), _accepted.label}, //
-                {gr::tag::TRIGGER_OFFSET.key(), 0.f},                    //
+            property_map{{gr::tag::TRIGGER_NAME.key(), settings.trigger_label.value}, //
+                {gr::tag::TRIGGER_OFFSET.key(), 0.f},                                 //
                 {gr::tag::TRIGGER_META_INFO.key(), property_map{{"cfo_fractional", static_cast<float>(eps)}, {"plateau_samples", static_cast<gr::Size_t>(width)}}}},
             std::optional<double>(-std::numbers::pi * eps / static_cast<double>(_half)), true);
     }
@@ -588,7 +543,7 @@ private:
 
     void write(const Complex* source, std::size_t count, std::size_t at, OutputSpanLike auto& outSpan) {
         const std::span<Complex> destination(outSpan.begin() + static_cast<std::ptrdiff_t>(at), count);
-        if (_accepted.correctCfo) {
+        if (settings.correct_cfo.value) {
             _phasor.mix(std::span<const Complex>(source, count), destination);
         } else {
             std::copy_n(source, count, destination.begin());

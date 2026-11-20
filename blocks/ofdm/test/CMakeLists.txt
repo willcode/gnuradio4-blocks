@@ -22,6 +22,11 @@ target_link_libraries(
           gnuradio4::gr-filter
           gnuradio4::gr-testing)
 
+add_ut_test(qa_OfdmSettingsInit)
+# Reaches SimdFFT and the phasor, whose always_inline helpers need the inliner depth -O2 provides.
+gr_pin_test_optimization(qa_OfdmSettingsInit -O2)
+target_link_libraries(qa_OfdmSettingsInit PRIVATE gnuradio4::gr-ofdm gnuradio4::gr-testing)
+
 add_ut_test(qa_OfdmLoopback)
 # Reaches SimdFFT and the phasor, whose always_inline helpers need the inliner depth -O2 provides.
 gr_pin_test_optimization(qa_OfdmLoopback -O2)

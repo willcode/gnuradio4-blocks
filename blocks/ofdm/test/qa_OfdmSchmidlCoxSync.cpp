@@ -28,6 +28,7 @@
 #include <gnuradio-4.0/ofdm/CarrierAllocator.hpp>
 #include <gnuradio-4.0/ofdm/CyclicPrefix.hpp>
 #include <gnuradio-4.0/ofdm/SchmidlCoxSync.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
@@ -64,10 +65,31 @@ constexpr std::uint64_t kWrap = std::uint64_t{1} << 32U; ///< the stream index w
 }
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     if constexpr (requires { block.start(); }) {
         block.start();
     }
@@ -76,12 +98,12 @@ template<typename TBlock>
 
 /// @brief Stages and applies @p settings. Returns the refusal, or an empty string.
 [[nodiscard]] std::string apply(SchmidlCoxSync& block, const gr::property_map& settings) {
-    std::ignore = block.settings().setStaged(settings);
     try {
-        return block.settings().applyStagedParameters().refusal;
+        applyOrThrow(block, settings);
     } catch (const gr::exception& e) {
         return std::string(e.what());
     }
+    return {};
 }
 
 /// @brief The transform, the preamble's prefix, the occupied carriers `-edge..edge` without DC, and the pilots among them.
@@ -600,8 +622,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
             Run result;
             result.triggersAtSplit = block.nTriggers();
             if (!change.empty()) {
-                std::ignore = block.settings().setStaged(change);
-                std::ignore = block.settings().applyStagedParameters();
+                applyOrThrow(block, change);
             }
             drive.to(clean.size(), 64UZ);
             drive.finish();
@@ -690,9 +711,9 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
             return std::string{};
         };
         expect(refusal({{"fft_len", kFft}, {"cp_len", gr::Size_t{80U}}}).contains("cp_len")) << "a prefix longer than the symbol";
-        for (const auto& [key, settings] : {std::pair{"threshold", gr::property_map{{"threshold", 1.f}}}, std::pair{"r_floor", gr::property_map{{"r_floor", 0.f}}}, std::pair{"fft_len", gr::property_map{{"fft_len", gr::Size_t{100U}}}}}) {
+        for (const auto& [key, settings, reason] : {std::tuple{"threshold", gr::property_map{{"threshold", 1.f}}, "must be > 0 and < 1"}, std::tuple{"r_floor", gr::property_map{{"r_floor", 0.f}}, "must be > 0"}, std::tuple{"fft_len", gr::property_map{{"fft_len", gr::Size_t{100U}}}, "must be a power of 2"}}) {
             const std::string message = refusal(settings);
-            expect(message.contains(key) && message.contains("outside the limits")) << std::format("the limits of {} refuse it: '{}'", key, message);
+            expect(message.contains(key) && message.contains(reason)) << std::format("{} is refused: '{}'", key, message);
         }
     };
 
@@ -734,7 +755,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
         const std::vector<Refused> refused{
             {"threshold 1.5, outside its limits", "threshold", {{"threshold", 1.5f}}},
             {"a NaN threshold, outside its limits", "threshold", {{"threshold", std::numeric_limits<float>::quiet_NaN()}}},
-            {"fft_len 100, outside its limits", "fft_len", {{"fft_len", gr::Size_t{100U}}}},
+            {"fft_len 100, no power of two", "fft_len", {{"fft_len", gr::Size_t{100U}}}},
             {"r_floor 0, outside its limits", "r_floor", {{"r_floor", 0.f}}},
             {"cp_len 80 with correct_cfo", "cp_len", {{"cp_len", gr::Size_t{80U}}, {"correct_cfo", false}}},
         };
@@ -775,11 +796,9 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
                 Drive          drive{block, input, shim::TagCursor(std::span<const gr::Tag>{})};
                 drive.to(split, 64UZ);
                 if (refuseFirst) {
-                    std::ignore = block.settings().setStaged(arm.refused);
-                    expect(throws([&block] { std::ignore = block.settings().applyStagedParameters(); })) << std::format("{}: the first application is refused", arm.name);
+                    expect(throws([&] { applyOrThrow(block, arm.refused); })) << std::format("{}: the first application is refused", arm.name);
                 }
-                std::ignore = block.settings().setStaged(arm.valid);
-                expect(nothrow([&block] { std::ignore = block.settings().applyStagedParameters(); })) << std::format("{}: the valid change applies", arm.name);
+                expect(nothrow([&] { applyOrThrow(block, arm.valid); })) << std::format("{}: the valid change applies", arm.name);
                 drive.to(input.size(), 64UZ);
                 return std::pair{std::move(drive.out), block.nTriggers()};
             };
@@ -793,22 +812,22 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
         // A refused value is written back, and sent again alone it is refused again.
         SchmidlCoxSync block = make<SchmidlCoxSync>({{"fft_len", kFft}, {"cp_len", kCp}, {"r_floor", floor}});
         expect(apply(block, {{"cp_len", gr::Size_t{80U}}}).contains("cp_len"));
-        const std::optional<gr::pmt::Value> reported = block.settings().get("cp_len");
-        expect(eq(block.cp_len.value, kCp) && reported.has_value() && reported->get_if<gr::Size_t>() != nullptr && *reported->get_if<gr::Size_t>() == kCp) << "the member and settings().get() return the accepted value";
+        expect(eq(block.settings.cp_len.value, kCp) && block.get<gr::Size_t>("cp_len").value_or(gr::Size_t{0U}) == kCp) << "the member and get() return the accepted value";
         expect(apply(block, {{"cp_len", gr::Size_t{80U}}}).contains("cp_len")) << "the refused value sent again alone is refused again";
 
-        // A NaN is outside the limits of threshold, and the framework refuses it each time it is sent.
+        // The limits refuse a NaN threshold, each time it is sent.
         for (int attempt = 0; attempt < 2; ++attempt) {
             const std::string message = apply(block, {{"threshold", std::numeric_limits<float>::quiet_NaN()}});
-            expect(message.contains("threshold") && message.contains("outside the limits")) << std::format("attempt {}: '{}'", attempt, message);
+            expect(message.contains("threshold") && message.contains("must be > 0 and < 1")) << std::format("attempt {}: '{}'", attempt, message);
         }
-        expect(eq(block.threshold.value, 0.6f)) << "the member keeps the accepted value";
+        expect(eq(block.settings.threshold.value, 0.6f)) << "the member keeps the accepted value";
 
-        // The framework refuses the value outside its limits alone, and the other settings of the application apply.
+        // The framework refuses a call that holds a value outside its limits whole, so the call's other settings keep
+        // their values too.
         const std::string mixed = apply(block, {{"trigger_label", std::string("other")}, {"r_floor", 0.f}});
         expect(mixed.contains("r_floor") && !mixed.contains("trigger_label")) << mixed;
-        expect(eq(block.trigger_label.value, std::string("other")));
-        expect(eq(block.r_floor.value, floor));
+        expect(eq(block.settings.trigger_label.value, std::string("ofdm_frame")));
+        expect(eq(block.settings.r_floor.value, floor));
     };
 
     /**
@@ -825,9 +844,8 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
             Drive          drive{block, std::span<const CF>(clean), shim::TagCursor(std::span<const gr::Tag>(inTags))};
             drive.to(kSplit, 64UZ);
             const std::size_t before = block.delaySamples();
-            std::ignore              = block.settings().setStaged({{"cp_len", prefix}});
-            std::ignore              = block.settings().applyStagedParameters();
-            const std::size_t after  = block.delaySamples();
+            applyOrThrow(block, {{"cp_len", prefix}});
+            const std::size_t after = block.delaySamples();
             drive.to(clean.size(), 64UZ);
             drive.finish();
 
@@ -856,8 +874,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
         Drive          drive{block, std::span<const CF>(twice), shim::TagCursor(std::span<const gr::Tag>{})};
         drive.to(clean.size(), 64UZ);
         expect(eq(block.nTriggers(), std::uint64_t{1})) << "the first frame";
-        std::ignore = block.settings().setStaged({{"cp_len", gr::Size_t{15U}}});
-        std::ignore = block.settings().applyStagedParameters();
+        applyOrThrow(block, {{"cp_len", gr::Size_t{15U}}});
         drive.to(twice.size(), 64UZ);
         expect(eq(block.nTriggers(), std::uint64_t{2})) << "the second frame adds to the first";
         expect(eq(std::ranges::count_if(drive.out.tags, [](const gr::Tag& tag) { return tag.map.contains(std::pmr::string(gr::tag::TRIGGER_NAME.key())); }), std::ptrdiff_t{2})) << "both triggers are output";
@@ -901,7 +918,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
             // threshold stays out of the constructor's settings, at its default of 0.6. It follows the tag key
             // `threshold`, and the tag sets it.
             auto& detect = graph.emplaceBlock<SchmidlCoxSync>({{"r_floor", floor}});
-            detect.settings().setTagCouplings({{"threshold", std::string("threshold")}});
+            expect(detect.setTagCouplings({{"threshold", std::string("threshold")}}).has_value());
             auto& sink = graph.emplaceBlock<gr::blocks::testing::TagSink<CF, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}, {"log_tags", true}});
             expect(graph.connect<"out", "in">(source, detect).has_value());
             expect(graph.connect<"out", "in">(detect, sink).has_value());
@@ -916,9 +933,8 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
                     result.triggers.push_back(tag.index);
                 }
             }
-            result.member                                = detect.threshold.value;
-            const std::optional<gr::pmt::Value> reported = detect.settings().get("threshold");
-            result.reported                              = reported.has_value() && reported->get_if<float>() != nullptr ? *reported->get_if<float>() : 0.f;
+            result.member   = detect.settings.threshold.value;
+            result.reported = detect.get<float>("threshold").value_or(0.f);
             return result;
         };
 
@@ -929,7 +945,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
         const Run refused = run(1.5f);
         expect(refused.completed) << "the refusal ends no run";
         expect(eq(refused.member, 0.6f)) << "the member keeps the accepted value";
-        expect(eq(refused.reported, 0.6f)) << "settings().get() returns the accepted value";
+        expect(eq(refused.reported, 0.6f)) << "get() returns the accepted value";
         expect(refused.samples == reference.samples) << "the delayed stream";
         expect(refused.triggers == reference.triggers) << std::format("the trigger: {} against {}", refused.triggers, reference.triggers);
 
@@ -960,7 +976,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
         drive.to(kSplit, 64UZ);
         expect(eq(block.nTriggers(), std::uint64_t{1})) << "the first frame is confirmed";
         expect(drive.out.tags.empty()) << "and the block holds its trigger and the input tag";
-        expect(nothrow([&block] { block.settings().resetDefaults(); })) << "the reset moves no setting";
+        expect(nothrow([&block] { std::ignore = block.resetDefaults(); })) << "the reset moves no setting";
         expect(eq(block.nTriggers(), std::uint64_t{1})) << "the counters continue";
         expect(eq(block.nLate(), std::uint64_t{1})) << "the held detection is late";
         drive.to(twice.size(), 64UZ);
@@ -994,7 +1010,7 @@ const boost::ut::suite<"OFDM Schmidl-Cox sync"> _sync = [] {
         Drive drive{block, std::span<const CF>(clean), shim::TagCursor(std::span<const gr::Tag>(inTags))};
         drive.to(kSplit, 64UZ);
         expect(drive.out.tags.empty()) << "the block holds the input tag";
-        expect(nothrow([&block] { block.settings().resetDefaults(); }));
+        expect(nothrow([&block] { std::ignore = block.resetDefaults(); }));
         expect(apply(block, {{"cp_len", gr::Size_t{8U}}}).empty()) << "the shorter lag applies";
         expect(eq(block.delaySamples(), 3UZ * static_cast<std::size_t>(kFft) / 2UZ + 8UZ - 1UZ));
         drive.to(clean.size(), 64UZ);

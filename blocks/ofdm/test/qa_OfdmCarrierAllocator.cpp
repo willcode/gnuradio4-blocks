@@ -2,6 +2,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <memory>
@@ -19,6 +20,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/ofdm/CarrierAllocator.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -116,19 +118,37 @@ struct Driver {
     return std::move(driver.records);
 }
 
+template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
 [[nodiscard]] CarrierAllocator make(gr::property_map settings) {
     CarrierAllocator block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     block.start();
     return block;
 }
 
 /// @brief Applies @p settings between two calls.
-void change(CarrierAllocator& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
-}
+void change(CarrierAllocator& block, gr::property_map settings) { applyOrThrow(block, settings); }
 
 /// @brief The refusal's message, or an empty string.
 template<typename TFunction>
@@ -157,7 +177,7 @@ template<typename TFunction>
     gr::scheduler::Simple scheduler;
     boost::ut::expect(scheduler.exchange(std::move(graph)).has_value());
     boost::ut::expect(scheduler.runAndWait().has_value());
-    return {static_cast<std::size_t>(counter.count.value), allocate.nTruncated()};
+    return {static_cast<std::size_t>(counter.status.count.value), allocate.nTruncated()};
 }
 
 [[nodiscard]] std::uint64_t meta(const gr::DataSet<CF>& record, std::string_view key) {
@@ -335,7 +355,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         };
 
         const std::string limits = refusal([&data] { std::ignore = make({{"fft_len", gr::Size_t{63U}}, {"data_carriers", data}}); });
-        expect(limits.contains("fft_len") && limits.contains("outside the limits")) << std::format("the limits of fft_len refuse 63: '{}'", limits);
+        expect(limits.contains("fft_len") && limits.contains("must be a power of 2")) << std::format("the check of fft_len refuses 63: '{}'", limits);
         names("data_carriers", [&data] {
             CarrierAllocator block = make({{"fft_len", kFft}, {"data_carriers", data}});
             change(block, {{"data_carriers", std::vector<std::int32_t>{}}});
@@ -344,7 +364,29 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         names("pilot_symbols", [&data] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"pilot_carriers", pilotCarriers()}}); });
         names("pilot_symbols", [&data] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"pilot_carriers", pilotCarriers()}, {"pilot_symbols", std::vector<float>{1.f, 0.f, 0.f, 0.f}}}); });
         names("sync_words", [&data] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", std::vector<float>(2UZ * kFft - 4UZ, 0.f)}, {"frame_len", gr::Size_t{2U}}}); });
-        names("sync_words", [&data] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", std::vector<float>(2UZ * kFft, 0.f)}}); });
+    };
+
+    "sync_words while unframed, or holding a value that is not finite, is refused by name"_test = [] {
+        const auto        data     = dataCarriers();
+        const std::string unframed = refusal([&data] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", std::vector<float>(2UZ * kFft, 0.5f)}}); });
+        expect(unframed.contains("sync_words") && unframed.contains("must be empty while frame_len is 0")) << std::format("a sync word without framing is refused: '{}'", unframed);
+
+        for (const float bad : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()}) {
+            std::vector<float> word(2UZ * kFft, 0.5f);
+            word[5UZ]                 = bad; // the imaginary part of bin 2
+            const std::string message = refusal([&data, &word] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", word}, {"frame_len", gr::Size_t{1U}}}); });
+            expect(message.contains("sync_words") && message.contains("must be finite") && message.contains("bin 2 of word 0")) << std::format("a sync word holding {} is refused by its place: '{}'", bad, message);
+        }
+
+        const std::vector<CF> word(kFft, CF(0.5f, 0.5f));
+        CarrierAllocator      block   = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", interleave(word)}, {"frame_len", gr::Size_t{1U}}});
+        std::vector<float>    withNaN = interleave(word);
+        withNaN[0UZ]                  = std::numeric_limits<float>::quiet_NaN();
+        const std::string changed     = refusal([&block, &withNaN] { change(block, {{"sync_words", withNaN}}); });
+        expect(changed.contains("must be finite")) << std::format("a change to a sync word holding a NaN is refused: '{}'", changed);
+        const std::vector<CF> input   = ramp(data.size());
+        const auto            records = drive(block, std::span<const CF>(input), 4096UZ);
+        expect(!records.empty() && std::ranges::equal(records[0UZ].signal_values, word)) << "the frame opens with the accepted sync word";
     };
 
     "processBulk takes the whole span, and the epilogue alone pads"_test = [] {
@@ -527,7 +569,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         const std::vector<CF> input = ramp(4UZ * data.size());
 
         CarrierAllocator block = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", interleave(word)}, {"frame_len", gr::Size_t{2U}}});
-        expect(refusal([&block] { change(block, {{"frame_len", gr::Size_t{0U}}}); }).contains("sync_words")) << "an unframed stream with sync words";
+        expect(refusal([&block] { change(block, {{"pilot_symbols", std::vector<float>{1.f}}}); }).contains("pilot_symbols")) << "a pilot cycle of an odd length";
         const auto records = drive(block, std::span<const CF>(input), 4096UZ);
         expect(eq(records.size(), 6UZ)) << "two frames of a sync word and two data symbols";
         for (const std::size_t at : {0UZ, 3UZ}) {
@@ -553,7 +595,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
             gr::property_map valid;
         };
         const std::vector<Arm> arms{
-            {"frame_len 0 with sync words, then an empty sync_words", {{"frame_len", gr::Size_t{0U}}, {"signal_name", std::string("refused")}}, {{"sync_words", std::vector<float>{}}}},
+            {"a pilot cycle of an odd length, then an empty sync_words", {{"pilot_symbols", std::vector<float>{1.f}}, {"signal_name", std::string("refused")}}, {{"sync_words", std::vector<float>{}}}},
             {"an empty data_carriers, then frame_len 3", {{"data_carriers", std::vector<std::int32_t>{}}, {"signal_name", std::string("refused")}}, {{"frame_len", gr::Size_t{3U}}}},
         };
         for (const Arm& arm : arms) {
@@ -636,40 +678,19 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         }
     };
 
-    "a block left at its default settings starts, and its calls report the missing numerology"_test = [] {
-        CarrierAllocator block(gr::property_map{});
-        block.settings().init();
-        std::ignore  = block.settings().applyStagedParameters();
-        bool started = true;
-        try {
-            block.start();
-        } catch (const gr::exception&) {
-            started = false;
-        }
-        expect(started) << "start() throws nothing";
-        if (!started) {
-            return;
-        }
-
-        const std::vector<CF>             input = ramp(100UZ);
-        std::vector<gr::DataSet<CF>>      scratch(4UZ);
-        shim::InputSpan<CF>               inSpan(std::span<const CF>(input), 0UZ);
-        shim::OutputSpan<gr::DataSet<CF>> outSpan{std::span<gr::DataSet<CF>>(scratch)};
-        expect(block.processBulk(inSpan, outSpan) == gr::work::Status::ERROR);
-        expect(eq(inSpan.consumed, 0UZ));
-        expect(eq(outSpan.count, 0UZ));
-
-        shim::InputSpan<CF>               tail(std::span<const CF>(input), 0UZ);
-        shim::OutputSpan<gr::DataSet<CF>> outTail{std::span<gr::DataSet<CF>>(scratch)};
-        expect(block.processEpilogue(tail, outTail) == gr::work::Status::ERROR);
-        expect(eq(outTail.count, 0UZ));
+    "a block left at its default settings is not ready, and its check names data_carriers"_test = [] {
+        CarrierAllocator                                  block(gr::property_map{});
+        const std::expected<void, gr::settings::Rejected> ready = block.check({});
+        expect(fatal(!ready.has_value())) << "a block with no data carriers is ready";
+        expect(std::ranges::any_of(ready.error(), [](const gr::settings::Rejection& entry) { return entry.key == "data_carriers"; })) << "the refusal names data_carriers";
     };
 
-    "a block without a numerology takes signal_name alone, and its first records carry that name"_test = [] {
-        const auto       data  = dataCarriers();
-        CarrierAllocator block = make({});
-        expect(refusal([&block] { change(block, {{"signal_name", std::string("named")}}); }).empty()) << "signal_name alone";
-        expect(refusal([&block, &data] { change(block, {{"data_carriers", data}}); }).empty()) << "the data carriers build a numerology";
+    "a block that is not ready refuses signal_name alone, and takes it with its data carriers"_test = [] {
+        const auto       data = dataCarriers();
+        CarrierAllocator block(gr::property_map{});
+        expect(refusal([&block] { change(block, {{"signal_name", std::string("named")}}); }).contains("data_carriers")) << "signal_name alone";
+        expect(refusal([&block, &data] { change(block, {{"signal_name", std::string("named")}, {"data_carriers", data}}); }).empty()) << "signal_name with the data carriers";
+        block.start();
 
         const std::vector<CF> input   = ramp(2UZ * data.size());
         const auto            records = drive(block, std::span<const CF>(input), 4096UZ);
@@ -679,12 +700,12 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         }
     };
 
-    "a block without a numerology takes fft_len alone, and the data carriers then build a numerology of that length"_test = [] {
+    "a block that is not ready takes fft_len with its data carriers, and builds a numerology of that length"_test = [] {
         static constexpr gr::Size_t kWide = 128U;
         const auto                  data  = dataCarriers();
-        CarrierAllocator            block = make({});
-        expect(refusal([&block] { change(block, {{"fft_len", kWide}}); }).empty()) << "fft_len alone";
-        expect(refusal([&block, &data] { change(block, {{"data_carriers", data}}); }).empty()) << "the data carriers build a numerology";
+        CarrierAllocator            block(gr::property_map{});
+        expect(refusal([&block, &data] { change(block, {{"fft_len", kWide}, {"data_carriers", data}}); }).empty()) << "fft_len with the data carriers";
+        block.start();
 
         const std::vector<CF> input   = ramp(data.size());
         const auto            records = drive(block, std::span<const CF>(input), 4096UZ);
@@ -720,29 +741,12 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         }
     };
 
-    "a sync word that holds a value that is not finite is refused by name, and again when it is sent again"_test = [] {
-        const auto data = dataCarriers();
-        for (const CF bad : {CF(std::numeric_limits<float>::quiet_NaN(), 0.f), CF(0.f, std::numeric_limits<float>::infinity())}) {
-            std::vector<CF> word(kFft, CF(0.5f, 0.5f));
-            word[5UZ]                 = bad;
-            const std::string message = refusal([&data, &word] { std::ignore = make({{"fft_len", kFft}, {"data_carriers", data}, {"sync_words", interleave(word)}, {"frame_len", gr::Size_t{2U}}}); });
-            expect(message.contains("sync_words") && message.contains("bin 5 of word 0")) << std::format("({}, {}): '{}'", bad.real(), bad.imag(), message);
-        }
-
-        CarrierAllocator block = make({{"fft_len", kFft}, {"data_carriers", data}, {"frame_len", gr::Size_t{2U}}});
-        std::vector<CF>  word(kFft, CF(0.5f, 0.5f));
-        word[5UZ] = CF(std::numeric_limits<float>::quiet_NaN(), 0.f);
-        for (int attempt = 0; attempt < 2; ++attempt) {
-            expect(refusal([&block, &word] { change(block, {{"sync_words", interleave(word)}}); }).contains("sync_words")) << std::format("attempt {}", attempt);
-        }
-    };
-
     /**
-     * A tag sets `fft_len` mid-run. The framework refuses 63, a value outside its limits, and the run completes with the
+     * A tag sets `fft_len` mid-run. The block refuses 63, no power of two, and the run completes with the
      * records of a run without the tag. In a third run the block takes 128 from the tag, and the records after the tag
      * hold 128 bins.
      */
-    "an fft_len outside its limits on a tag is refused, and the run goes on"_test = [] {
+    "an fft_len the block refuses on a tag is refused, and the run goes on"_test = [] {
         using gr::blocks::testing::ProcessFunction;
         const auto            data   = dataCarriers();
         const std::vector<CF> input  = ramp(6UZ * data.size());
@@ -763,7 +767,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
             // fft_len stays out of the constructor's settings, at its default of 64. It follows the tag key `fft_len`,
             // and the tag sets it.
             auto& allocate = graph.emplaceBlock<CarrierAllocator>({{"data_carriers", data}});
-            allocate.settings().setTagCouplings({{"fft_len", std::string("fft_len")}});
+            expect(allocate.setTagCouplings({{"fft_len", std::string("fft_len")}}).has_value());
             auto& sink = graph.emplaceBlock<gr::blocks::testing::TagSink<gr::DataSet<CF>, ProcessFunction::USE_PROCESS_BULK>>({{"log_samples", true}, {"log_tags", false}});
             expect(graph.connect<"out", "in">(source, allocate).has_value());
             expect(graph.connect<"out", "in">(allocate, sink).has_value());
@@ -773,9 +777,8 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
             Run result;
             result.completed = scheduler.runAndWait().has_value();
             result.records.assign(sink._samples.begin(), sink._samples.end());
-            result.member                                = allocate.fft_len.value;
-            const std::optional<gr::pmt::Value> reported = allocate.settings().get("fft_len");
-            result.reported                              = reported.has_value() && reported->get_if<gr::Size_t>() != nullptr ? *reported->get_if<gr::Size_t>() : 0U;
+            result.member   = allocate.settings.fft_len.value;
+            result.reported = allocate.get<gr::Size_t>("fft_len").value_or(gr::Size_t{0U});
             return result;
         };
 
@@ -786,7 +789,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         const Run refused = run(gr::Size_t{63U});
         expect(refused.completed) << "the refusal ends no run";
         expect(eq(refused.member, kFft)) << "the member keeps the accepted value";
-        expect(eq(refused.reported, kFft)) << "settings().get() returns the accepted value";
+        expect(eq(refused.reported, kFft)) << "get() returns the accepted value";
         expect(eq(refused.records.size(), reference.records.size()));
         for (std::size_t r = 0UZ; r < std::min(refused.records.size(), reference.records.size()); ++r) {
             expect(std::ranges::equal(refused.records[r].signal_values, reference.records[r].signal_values)) << std::format("record {} on 64 bins", r);
@@ -816,7 +819,7 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         Driver driver{block};
         expect(eq(driver.feed(std::span<const CF>(input).first(split), 4096UZ), split));
         expect(eq(driver.records.size(), 2UZ)) << "the sync word and the first data symbol";
-        expect(nothrow([&block] { block.settings().resetDefaults(); })) << "the reset moves no setting";
+        expect(nothrow([&block] { std::ignore = block.resetDefaults(); })) << "the reset moves no setting";
         expect(eq(block.nDropped(), std::uint64_t{20})) << "the samples the block held";
         std::ignore = driver.feed(std::span<const CF>(input).subspan(split), 4096UZ);
         driver.end({}, 128UZ);
@@ -857,8 +860,8 @@ const boost::ut::suite<"OFDM carrier allocator"> _allocator = [] {
         Driver driver{block};
         expect(eq(driver.feed(std::span<const CF>(input), 4096UZ), held));
         expect(driver.records.empty()) << "a symbol of all the data carriers is not yet whole";
-        expect(nothrow([&block] { block.settings().resetDefaults(); }));
-        expect(block.data_carriers.value == half) << "the reset restores the defaults";
+        expect(nothrow([&block] { std::ignore = block.resetDefaults(); }));
+        expect(block.settings.data_carriers.value == half) << "the reset restores the defaults";
         expect(eq(block.nDropped(), std::uint64_t{held})) << "the samples the change of numerology dropped";
     };
 };
