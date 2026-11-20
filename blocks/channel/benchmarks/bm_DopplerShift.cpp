@@ -24,9 +24,8 @@ constexpr double      kDriftHzPerS    = 50.0;
 /// Built in place. A block with a measurement slot is not movable and lives behind a pointer.
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> make(gr::property_map settings) {
-    auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    auto block  = std::make_unique<TBlock>(std::move(settings));
+    std::ignore = block->check({});
     if constexpr (requires { block->start(); }) { // DopplerShift takes its origin in start(), and FrequencyOffset has none
         block->start();
     }

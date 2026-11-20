@@ -39,48 +39,8 @@ namespace detail {
 /// The direction of the schedule. `apply` puts the trajectory's shift on a clean signal. `correct` removes it.
 enum class DopplerDirection : std::uint8_t { Apply = 0, Correct };
 
-/// The direction @p name selects. A refusal message starts with @p block.
-[[nodiscard]] inline DopplerDirection parseDopplerDirection(std::string_view name, std::string_view block) {
-    if (name == "apply") {
-        return DopplerDirection::Apply;
-    }
-    if (name == "correct") {
-        return DopplerDirection::Correct;
-    }
-    throw gr::exception(std::format("{}: 'direction' must be 'apply' or 'correct', got '{}'", block, name));
-}
-
-/// The name of @p seat, as the `direction` setting spells it.
-[[nodiscard]] inline constexpr std::string_view dopplerDirectionName(DopplerDirection seat) noexcept { return seat == DopplerDirection::Apply ? "apply" : "correct"; }
-
-/// The anchor mode @p name selects. A refusal names the three modes.
-[[nodiscard]] inline gr::timing::AnchorSource parseAnchorSource(std::string_view name, std::string_view block) {
-    const std::optional<gr::timing::AnchorSource> source = gr::timing::anchorSourceFrom(name);
-    if (!source.has_value()) {
-        throw gr::exception(std::format("{}: 'anchor_source' must be 'setting', 'first_trigger' or 'every_trigger', got '{}'", block, name));
-    }
-    return *source;
-}
-
-/// @brief The validator of `sample_rate`: true for a rate inside the range `gr::timing::clockForRateHz` takes.
-inline constexpr auto kClockRateHz = [](float rate) {
-    const double hz = static_cast<double>(rate);
-    return hz >= gr::timing::SampleClock::kMinRateHz && hz <= gr::timing::SampleClock::kMaxRateHz;
-};
-
-/// The anchor settings of a block, as last accepted.
-struct AnchorSettings {
-    gr::timing::AnchorSource source{gr::timing::AnchorSource::setting};
-    std::uint64_t            index{0ULL};
-    std::int64_t             ns{0LL};
-    bool                     honorOffset{true};
-};
-
-/// The limits of `sample_rate`.
-using ClockRateLimits = Limits<0.f, std::numeric_limits<float>::max(), kClockRateHz>;
-
 /// The limits of `anchor_ns`, the bound `gr::timing::ScheduleAnchor` holds.
-using AnchorNsLimits = Limits<-gr::timing::ScheduleAnchor::kMaxAnchorNs, gr::timing::ScheduleAnchor::kMaxAnchorNs>;
+using AnchorNsLimits = Limits<Min<-gr::timing::ScheduleAnchor::kMaxAnchorNs>, Max<gr::timing::ScheduleAnchor::kMaxAnchorNs>>;
 
 /// The `Doc` texts of the settings that blocks reading a trajectory table share.
 inline constexpr gr::meta::fixed_string kScheduleTimesDoc      = "strictly increasing knot times on the SampleClock axis, two or more";
@@ -90,19 +50,6 @@ inline constexpr gr::meta::fixed_string kAnchorIndexDoc        = "the stream sam
 inline constexpr gr::meta::fixed_string kAnchorNsDoc           = "schedule time of anchor_index under anchor_source 'setting'";
 inline constexpr gr::meta::fixed_string kAnchorSourceDoc       = "'setting', 'first_trigger' or 'every_trigger'";
 inline constexpr gr::meta::fixed_string kHonorTriggerOffsetDoc = "move a trigger anchor by the tag's own gr:trigger_offset seconds";
-
-/// The table settings a block last accepted. A change loads the table again when it names one of them.
-struct TableSettings {
-    std::vector<std::int64_t> times{};
-    std::vector<double>       values{};
-    std::string               file{};
-
-    [[nodiscard]] bool operator==(const TableSettings&) const = default;
-};
-
-/// @brief True when a change moves @p key. Before the first accepted change every key moves. After it, a key moves
-/// when @p newSettings holds it or when @p differs says its member is not the value last accepted.
-[[nodiscard]] inline bool moves(const property_map& newSettings, bool configured, std::string_view key, bool differs) { return !configured || differs || newSettings.contains(std::pmr::string(key)); }
 
 /// A trigger tag's time and offset, read with the reserved keys' types. A tag without a time is no anchor event.
 struct TriggerRead {
@@ -174,31 +121,32 @@ A `gr:frequency` tag passes unchanged. `currentOffsetHz()` reads the offset at t
 where that sample stands against the knots, and `position()` its index from the stream's start. `nIgnoredAnchors()`
 counts the trigger tags the mode ignores, `nReanchors()` the moves under 'every_trigger', and `nRefusedAnchors()` the
 tags whose time is unreadable or past the anchor's bound. Each reads from any thread.
+
+`schedule_offsets_hz` holds one offset per time, and the end values hold outside the schedule. `schedule_file` names a
+'#!gr4-trajectory 1' file with a frequency column.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::vector<std::int64_t>, "schedule_times_ns", Visible, Unit<"ns">, Doc<detail::kScheduleTimesDoc>>                                schedule_times_ns{};
-    Annotated<std::vector<double>, "schedule_offsets_hz", Visible, Unit<"Hz">, Doc<"knot offsets, one per time, held at the end values outside">> schedule_offsets_hz{};
-    Annotated<std::string, "schedule_file", Doc<"#!gr4-trajectory 1 file with a frequency column">>                                               schedule_file{};
-    Annotated<std::string, "direction", Visible, Doc<detail::kDirectionDoc>>                                                                      direction            = std::string("apply");
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<detail::kSampleRateDoc>, detail::ClockRateLimits>                                    sample_rate          = 1.f;
-    Annotated<std::uint64_t, "anchor_index", Doc<detail::kAnchorIndexDoc>>                                                                        anchor_index         = 0ULL;
-    Annotated<std::int64_t, "anchor_ns", Unit<"ns">, Doc<detail::kAnchorNsDoc>, detail::AnchorNsLimits>                                           anchor_ns            = 0LL;
-    Annotated<std::string, "anchor_source", Doc<detail::kAnchorSourceDoc>>                                                                        anchor_source        = std::string("setting");
-    Annotated<bool, "honor_trigger_offset", Doc<detail::kHonorTriggerOffsetDoc>>                                                                  honor_trigger_offset = true;
+    struct Settings {
+        Annotated<std::vector<std::int64_t>, Visible, Unit<"ns">, Doc<detail::kScheduleTimesDoc>> schedule_times_ns{};
+        Annotated<std::vector<double>, Visible, Unit<"Hz">, Doc<"scheduled frequency offsets">>   schedule_offsets_hz{};
+        Annotated<std::string, Doc<"frequency trajectory file">>                                  schedule_file{};
+        Annotated<detail::DopplerDirection, Visible, Doc<detail::kDirectionDoc>>                  direction            = detail::DopplerDirection::Apply;
+        Annotated<float, Visible, Unit<"Hz">, Doc<detail::kSampleRateDoc>>                        sample_rate          = 1.f;
+        Annotated<std::uint64_t, Doc<detail::kAnchorIndexDoc>>                                    anchor_index         = 0ULL;
+        Annotated<std::int64_t, Unit<"ns">, Doc<detail::kAnchorNsDoc>, detail::AnchorNsLimits>    anchor_ns            = 0LL;
+        Annotated<gr::timing::AnchorSource, Doc<detail::kAnchorSourceDoc>>                        anchor_source        = gr::timing::AnchorSource::setting;
+        Annotated<bool, Doc<detail::kHonorTriggerOffsetDoc>>                                      honor_trigger_offset = true;
 
-    GR_MAKE_REFLECTABLE(DopplerShift, in, out, schedule_times_ns, schedule_offsets_hz, schedule_file, direction, sample_rate, anchor_index, anchor_ns, anchor_source, honor_trigger_offset);
+        GR_MAKE_REFLECTABLE(Settings, schedule_times_ns, schedule_offsets_hz, schedule_file, direction, sample_rate, anchor_index, anchor_ns, anchor_source, honor_trigger_offset);
+    } settings;
 
-    // The accepted settings. A refused change leaves all of them as they were.
-    std::shared_ptr<const gr::timing::FrequencySchedule> _table{};         ///< the knots as configured, before the direction's sign
-    std::shared_ptr<const gr::timing::FrequencySchedule> _schedule{};      ///< the knots in the direction's sign
-    detail::TableSettings                                _tableSettings{}; ///< the table settings as last accepted
-    detail::DopplerDirection                             _direction{detail::DopplerDirection::Apply};
-    float                                                _rate{1.f};
-    detail::AnchorSettings                               _anchorSettings{};
-    bool                                                 _configured{false}; ///< a settings change has been accepted
+    GR_MAKE_REFLECTABLE(DopplerShift, in, out, settings);
+
+    std::shared_ptr<const gr::timing::FrequencySchedule> _table{};    ///< the knots as configured, before the direction's sign
+    std::shared_ptr<const gr::timing::FrequencySchedule> _schedule{}; ///< the knots in the direction's sign
 
     gr::timing::SampleClock    _clock{};
     gr::timing::ScheduleAnchor _anchor{};
@@ -216,42 +164,56 @@ tags whose time is unreadable or past the anchor's bound. Each reads from any th
     std::atomic<std::uint64_t>            _nReanchors{0ULL};
     std::atomic<std::uint64_t>            _nRefusedAnchors{0ULL};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const auto moved = [&](std::string_view key, bool differs) { return detail::moves(newSettings, _configured, key, differs); };
-
-        const float                    rate = moved("sample_rate", sample_rate.value != _rate) ? sample_rate.value : _rate;
-        const detail::DopplerDirection seat = moved("direction", direction.value != detail::dopplerDirectionName(_direction)) ? detail::parseDopplerDirection(direction.value, "DopplerShift") : _direction;
-        const detail::TableSettings    tableNamed{schedule_times_ns.value, schedule_offsets_hz.value, schedule_file.value};
-        const bool                     tableDiffers = tableNamed != _tableSettings;
-        const bool                     tableMoved   = moved("schedule_times_ns", tableDiffers) || moved("schedule_offsets_hz", tableDiffers) || moved("schedule_file", tableDiffers);
-        const auto                     table        = tableMoved ? loadTable() : _table;
-        const bool                     anchorMoved  = moved("anchor_source", anchor_source.value != gr::timing::anchorSourceName(_anchorSettings.source)) || moved("anchor_index", anchor_index.value != _anchorSettings.index) || moved("anchor_ns", anchor_ns.value != _anchorSettings.ns) || moved("honor_trigger_offset", honor_trigger_offset.value != _anchorSettings.honorOffset);
-        detail::AnchorSettings         anchorConfig = _anchorSettings;
-        if (anchorMoved) {
-            anchorConfig = {detail::parseAnchorSource(anchor_source.value, "DopplerShift"), anchor_index.value, anchor_ns.value, honor_trigger_offset.value};
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const bool tableGiven = !s.schedule_times_ns.value.empty() || !s.schedule_offsets_hz.value.empty();
+        if (!s.schedule_file.value.empty() && tableGiven) {
+            return gr::Refused("schedule_file is incompatible with schedule lists");
         }
-        if (table) {
-            requireBelowNyquist(table->offsets(), rate);
+        if (tableGiven) {
+            std::ignore = gr::timing::FrequencySchedule(s.schedule_times_ns.value, s.schedule_offsets_hz.value);
+            if (const auto knot = knotAboveNyquist(s.schedule_offsets_hz.value, s.sample_rate)) {
+                return gr::Refused(s.schedule_offsets_hz, *knot);
+            }
         }
-
-        const gr::timing::ScheduleAnchor anchor = anchorMoved ? gr::timing::ScheduleAnchor(anchorConfig.source, anchorConfig.index, anchorConfig.ns, anchorConfig.honorOffset) : _anchor;
-        // An unarmed anchor keeps the old clock. The rate is still checked against the time axis.
-        const auto clock = clockAt(rate, anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
+        // a trigger anchor is placed by the stream, so its clock is checked when its tag arrives
+        const bool fromSetting = s.anchor_source == gr::timing::AnchorSource::setting;
+        const auto clock       = clockAt(s.sample_rate, fromSetting ? s.anchor_index.value : 0ULL, fromSetting ? s.anchor_ns.value : 0LL);
         if (!clock) {
-            throw gr::exception(clock.error().message, clock.error().sourceLocation);
+            return gr::Refused(s.sample_rate, clock.error().message);
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        const bool                       anchorMoved = s.anchor_source.changed() || s.anchor_index.changed() || s.anchor_ns.changed() || s.honor_trigger_offset.changed();
+        const gr::timing::ScheduleAnchor anchor      = anchorMoved ? gr::timing::ScheduleAnchor(s.anchor_source, s.anchor_index, s.anchor_ns, s.honor_trigger_offset) : _anchor;
+        // an anchor a trigger armed keeps its place when the rate moves, and the check cannot see that place
+        const auto clock = clockAt(s.sample_rate, anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
+        if (!clock) {
+            this->fail(s.sample_rate, clock.error().message);
+            return;
+        }
+        const bool tableMoved = s.schedule_times_ns.changed() || s.schedule_offsets_hz.changed() || s.schedule_file.changed();
+        const auto table      = tableMoved ? loadTable(s) : _table;
+        if (!table) {
+            this->fail(s.schedule_file, table.error()); // only a file fails here: the check refuses a table of the vectors
+            return;
+        }
+        if (*table && !s.schedule_file.value.empty()) { // a file's knots are known only once it is read
+            if (const auto knot = knotAboveNyquist((*table)->offsets(), s.sample_rate)) {
+                this->fail(s.schedule_file, *knot);
+                return;
+            }
         }
 
-        _schedule       = (tableMoved || seat != _direction || !_configured) ? signedSchedule(table, seat) : _schedule;
-        _table          = table;
-        _tableSettings  = tableNamed;
-        _direction      = seat;
-        _rate           = rate;
-        _anchorSettings = anchorConfig;
-        _anchor         = anchor;
+        if (tableMoved || s.direction.changed()) {
+            _schedule = signedSchedule(*table, s.direction);
+        }
+        _table  = *table;
+        _anchor = anchor;
         if (anchor.armed()) {
             _clock = *clock;
         }
-        _configured = true;
         publishMeasurements();
     }
 
@@ -324,7 +286,7 @@ tags whose time is unreadable or past the anchor's bound. Each reads from any th
 
             const gr::timing::ScheduleAnchor::Response response = read.readable ? _anchor.onTrigger(_position, read.timeNs, read.offsetSeconds) : _anchor.onUnreadableTrigger();
             if (response == gr::timing::ScheduleAnchor::Response::armed || response == gr::timing::ScheduleAnchor::Response::reanchored) {
-                const auto clock = clockAt(_rate, _anchor.anchorIndex(), _anchor.anchorNs());
+                const auto clock = clockAt(settings.sample_rate, _anchor.anchorIndex(), _anchor.anchorNs());
                 if (!clock) {
                     std::ignore = inSpan.consume(done);
                     outSpan.publish(done);
@@ -349,24 +311,20 @@ tags whose time is unreadable or past the anchor's bound. Each reads from any th
 
 private:
     /// The schedule's time axis at @p rate, with sample @p index at @p timeNs.
-    [[nodiscard]] static std::expected<gr::timing::SampleClock, gr::Error> clockAt(float rate, std::uint64_t index, std::int64_t timeNs) {
-        return gr::timing::clockForRateHz(static_cast<double>(rate), index, timeNs).transform_error([](const gr::Error& refusal) { return gr::Error(std::format("DopplerShift: 'sample_rate': {}", refusal.message), refusal.sourceLocation); });
-    }
+    [[nodiscard]] static std::expected<gr::timing::SampleClock, gr::Error> clockAt(float rate, std::uint64_t index, std::int64_t timeNs) { return gr::timing::clockForRateHz(static_cast<double>(rate), index, timeNs); }
 
-    /// The table the settings name, before the direction's sign, or none for a stream that passes through.
-    [[nodiscard]] std::shared_ptr<const gr::timing::FrequencySchedule> loadTable() const {
-        const std::vector<std::int64_t>& times   = schedule_times_ns.value;
-        const std::vector<double>&       offsets = schedule_offsets_hz.value;
-        if (!schedule_file.value.empty() && !(times.empty() && offsets.empty())) {
-            throw gr::exception("DopplerShift: 'schedule_file' and 'schedule_times_ns'/'schedule_offsets_hz' are both set; set one");
-        }
-        if (!schedule_file.value.empty()) {
-            auto loaded = gr::timing::loadTrajectoryFile(schedule_file.value);
+    /// The table @p s names, before the direction's sign, or none for a stream that passes through; the reason when
+    /// the file does not give one.
+    [[nodiscard]] static std::expected<std::shared_ptr<const gr::timing::FrequencySchedule>, std::string> loadTable(const Settings& s) {
+        const std::vector<std::int64_t>& times   = s.schedule_times_ns.value;
+        const std::vector<double>&       offsets = s.schedule_offsets_hz.value;
+        if (!s.schedule_file.value.empty()) {
+            auto loaded = gr::timing::loadTrajectoryFile(s.schedule_file.value);
             if (!loaded) {
-                throw gr::exception(std::format("DopplerShift: 'schedule_file': {}", loaded.error().message));
+                return std::unexpected(loaded.error().message);
             }
             if (!loaded->frequency.has_value()) {
-                throw gr::exception(std::format("DopplerShift: '{}' has no frequency column; it names neither offset_hz nor range_rate_m_s", schedule_file.value));
+                return std::unexpected("must name a file with a frequency column");
             }
             return std::make_shared<const gr::timing::FrequencySchedule>(std::move(*loaded->frequency));
         }
@@ -376,14 +334,15 @@ private:
         return std::make_shared<const gr::timing::FrequencySchedule>(std::span<const std::int64_t>(times), std::span<const double>(offsets));
     }
 
-    /// Refuses an offset at or past half of @p rate, naming its knot.
-    static void requireBelowNyquist(std::span<const double> offsets, float rate) {
+    /// The refusal of an offset at or past half of @p rate, naming its knot.
+    [[nodiscard]] static std::optional<std::string> knotAboveNyquist(std::span<const double> offsets, float rate) {
         const double limit = 0.5 * static_cast<double>(rate);
         for (std::size_t i = 0UZ; i < offsets.size(); ++i) {
             if (std::abs(offsets[i]) >= limit) {
-                throw gr::exception(std::format("DopplerShift: knot {} offset {} Hz is at or past the {} Hz limit of a {} Hz stream", i, offsets[i], limit, static_cast<double>(rate)));
+                return std::format("knot {}: must be < sample_rate / 2", i);
             }
         }
+        return std::nullopt;
     }
 
     /// @p table in the sign of @p seat. 'correct' negates it once here, and the sample path is the same in both.

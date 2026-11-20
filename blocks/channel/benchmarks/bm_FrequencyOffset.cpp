@@ -23,8 +23,7 @@ constexpr double      kDriftHzPerS    = 50.0;
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

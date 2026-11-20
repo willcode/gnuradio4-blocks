@@ -46,25 +46,26 @@ the impairment does not move what the stream is centered on, it moves the signal
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                           sample_rate      = 1.f;
-    Annotated<double, "frequency_offset", Visible, Unit<"Hz">, Doc<"constant carrier offset">>                frequency_offset = 0.0;
-    Annotated<double, "drift", Visible, Unit<"Hz/s">, Doc<"linear frequency drift, 0 for none">>              drift            = 0.0;
-    Annotated<double, "phase_offset", Visible, Unit<"rad">, Doc<"constant phase offset at the stream start">> phase_offset     = 0.0;
+    struct Settings {
+        Annotated<float, Visible, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>> sample_rate      = 1.f;
+        Annotated<double, Visible, Unit<"Hz">, Doc<"frequency offset">>              frequency_offset = 0.0;
+        Annotated<double, Visible, Unit<"Hz/s">, Doc<"frequency drift">>             drift            = 0.0;
+        Annotated<double, Visible, Unit<"rad">, Doc<"initial phase offset">>         phase_offset     = 0.0;
 
-    GR_MAKE_REFLECTABLE(FrequencyOffset, in, out, sample_rate, frequency_offset, drift, phase_offset);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, frequency_offset, drift, phase_offset);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(FrequencyOffset, in, out, settings);
 
     gr::signal::Phasor<float> _phasor{};
     std::uint64_t             _position{0ULL};  ///< stream-absolute sample index, the drift's time base
     bool                      _chirping{false}; ///< the drift schedule has been handed to the phasor
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (sample_rate <= 0.f) {
-            throw gr::exception(std::format("FrequencyOffset: 'sample_rate' must be positive, got {}", sample_rate.value));
-        }
-        _phasor.setIncrement(2. * std::numbers::pi_v<double> * frequency_offset / static_cast<double>(sample_rate));
+    void applySettings(const Settings& s) {
+        _phasor.setIncrement(2. * std::numbers::pi_v<double> * s.frequency_offset / static_cast<double>(s.sample_rate));
         _chirping = false;
-        if (newSettings.contains("phase_offset")) {
-            _phasor.setPhase(phase_offset);
+        if (s.phase_offset.changed()) {
+            _phasor.setPhase(s.phase_offset);
             _position = 0ULL;
         }
     }
@@ -73,18 +74,18 @@ the impairment does not move what the stream is centered on, it moves the signal
         const std::size_t  nSamples = std::min(input.size(), output.size());
         const std::span<T> written  = output.first(nSamples);
 
-        if (drift == 0.0) {
+        if (settings.drift == 0.0) {
             _phasor.mix(input.first(nSamples), written);
         } else {
             // Exact per-sample increment for a linearly swept frequency: integrating 2*pi*(f0 + rate*t) over one
             // sample is the midpoint rule, which is exact for a linear integrand. That schedule is arithmetic -
             // inc(k) = inc(0) + k*step - so it is a chirp, and the phasor advances it by multiplication rather
             // than evaluating a sine and a cosine per sample.
-            const double fs    = static_cast<double>(sample_rate);
+            const double fs    = static_cast<double>(settings.sample_rate);
             const double twoPi = 2. * std::numbers::pi_v<double>;
-            const double step  = twoPi * drift / (fs * fs);
+            const double step  = twoPi * settings.drift / (fs * fs);
             if (!_chirping) {
-                _phasor.setIncrement(twoPi * frequency_offset / fs + 0.5 * step + static_cast<double>(_position) * step);
+                _phasor.setIncrement(twoPi * settings.frequency_offset / fs + 0.5 * step + static_cast<double>(_position) * step);
                 _chirping = true;
             }
             _phasor.mixChirp(step, input.first(nSamples), written);
@@ -116,43 +117,35 @@ struct PhaseNoise : gr::Block<PhaseNoise<T>, gr::DroppedTagKeys<"phase_est">> {
 
 Multiplies by `exp(j*theta)` where theta random-walks with per-sample variance `2*pi*linewidth/fs`, giving a
 Lorentzian line of the stated width. Deterministic from `seed`; `seed` is a staged-restart setting.
+
+`linewidth` is the Lorentzian full width at half maximum.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                                          sample_rate = 1.f;
-    Annotated<double, "linewidth", Visible, Unit<"Hz">, Doc<"Lorentzian full width at half maximum; 0 disables">>            linewidth   = 0.0;
-    Annotated<std::uint64_t, "seed", Visible, Doc<"PRNG seed; 0 is a fixed default. Staged restart: refused while running">> seed        = 0ULL;
+    struct Settings {
+        Annotated<float, Visible, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>           sample_rate = 1.f;
+        Annotated<double, Visible, Unit<"Hz">, Doc<"linewidth (0 = off)">, Limits<Min<0.0>>>   linewidth   = 0.0;
+        Annotated<std::uint64_t, Visible, Doc<"random seed (0 = fixed default)">, StoppedOnly> seed        = 0ULL;
 
-    GR_MAKE_REFLECTABLE(PhaseNoise, in, out, sample_rate, linewidth, seed);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, linewidth, seed);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PhaseNoise, in, out, settings);
 
     gr::signal::NoiseGenerator<float> _generator{};
     double                            _phase{0.};
     double                            _sigma{0.};
-    bool                              _running{false};
     std::vector<float>                _steps{};
 
-    void start() {
-        _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, seed.value);
-        _running = true;
-    }
+    void start() { _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, settings.seed); }
 
-    void stop() { _running = false; }
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (sample_rate <= 0.f) {
-            throw gr::exception(std::format("PhaseNoise: 'sample_rate' must be positive, got {}", sample_rate.value));
-        }
-        if (linewidth < 0.0) {
-            throw gr::exception(std::format("PhaseNoise: 'linewidth' must be non-negative, got {}", linewidth.value));
-        }
-        if (_running && newSettings.contains("seed")) {
-            throw gr::exception("PhaseNoise: 'seed' is a staged-restart setting — a mid-stream reseed is a new realization, not a parameter change. Stop the graph to restart it.");
-        }
-        _sigma = std::sqrt(2. * std::numbers::pi_v<double> * linewidth / static_cast<double>(sample_rate));
-        if (!_running) {
-            _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, seed.value);
+    // a reseed restarts the phase walk
+    void applySettings(const Settings& s) {
+        _sigma = std::sqrt(2. * std::numbers::pi_v<double> * s.linewidth / static_cast<double>(s.sample_rate));
+        if (s.seed.changed()) {
+            _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, s.seed);
         }
     }
 
@@ -161,7 +154,7 @@ Lorentzian line of the stated width. Deterministic from `seed`; `seed` is a stag
         const std::size_t  nSamples = std::min(input.size(), output.size());
         const std::span<T> written  = output.first(nSamples);
 
-        if (linewidth == 0.0) {
+        if (settings.linewidth == 0.0) {
             // with no walk there is nothing to draw, and a copy keeps the samples bit-exact
             std::ranges::copy(input.first(nSamples), written.begin());
             return work::Status::OK;
@@ -220,17 +213,21 @@ its image-rejection ratio is closed form.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<double, "amplitude_imbalance_db", Visible, Unit<"dB">, Doc<"gain difference between the I and Q arms">> amplitude_imbalance_db = 0.0;
-    Annotated<double, "phase_imbalance", Visible, Unit<"rad">, Doc<"quadrature phase error">>                         phase_imbalance        = 0.0;
+    struct Settings {
+        Annotated<double, Visible, Unit<"dB">, Doc<"I/Q gain imbalance">>      amplitude_imbalance_db = 0.0;
+        Annotated<double, Visible, Unit<"rad">, Doc<"quadrature phase error">> phase_imbalance        = 0.0;
 
-    GR_MAKE_REFLECTABLE(IqImbalance, in, out, amplitude_imbalance_db, phase_imbalance);
+        GR_MAKE_REFLECTABLE(Settings, amplitude_imbalance_db, phase_imbalance);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(IqImbalance, in, out, settings);
 
     std::complex<float> _alpha{1.f, 0.f};
     std::complex<float> _beta{0.f, 0.f};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        const double               gain    = std::pow(10., amplitude_imbalance_db / 20.);
-        const std::complex<double> rotated = std::polar(gain, phase_imbalance.value);
+    void applySettings(const Settings& s) {
+        const double               gain    = std::pow(10., s.amplitude_imbalance_db / 20.);
+        const std::complex<double> rotated = std::polar(gain, s.phase_imbalance.value);
         _alpha                             = static_cast<std::complex<float>>((1. + rotated) * 0.5);
         _beta                              = static_cast<std::complex<float>>((1. - rotated) * 0.5);
     }

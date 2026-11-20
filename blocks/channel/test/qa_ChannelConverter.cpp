@@ -6,12 +6,14 @@
 #include <numbers>
 #include <print>
 #include <span>
+#include <string>
 #include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/rng/Xoshiro256pp.hpp>
 #include <gnuradio-4.0/channel/Nonlinearity.hpp>
 #include <gnuradio-4.0/channel/Quantizer.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include "EstimateKeys.hpp"
@@ -23,8 +25,7 @@ using C = std::complex<float>;
 template<typename Block>
 [[nodiscard]] Block configured(gr::property_map settings) {
     Block block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -96,8 +97,8 @@ const boost::ut::suite<"converter models"> converterTests = [] {
     };
 
     "nonlinearity refuses a non-positive saturation or smoothness"_test = [] {
-        expect(throws([] { std::ignore = configured<Nonlinearity<C>>({{"saturation", 0.0}}); }));
-        expect(throws([] { std::ignore = configured<Nonlinearity<C>>({{"smoothness", -1.0}}); }));
+        expect(gr::testing::initRefused<Nonlinearity<C>>({{"saturation", 0.0}}));
+        expect(gr::testing::initRefused<Nonlinearity<C>>({{"smoothness", -1.0}}));
     };
 
     // split in two because the textbook SQNR formula and the property it rests on are not the
@@ -171,9 +172,9 @@ const boost::ut::suite<"converter models"> converterTests = [] {
     };
 
     "quantizer refuses an unusable word length or scale"_test = [] {
-        expect(throws([] { std::ignore = configured<Quantizer<float>>({{"bits", gr::Size_t(1)}}); }));
-        expect(throws([] { std::ignore = configured<Quantizer<float>>({{"bits", gr::Size_t(25)}}); }));
-        expect(throws([] { std::ignore = configured<Quantizer<float>>({{"full_scale", 0.0}}); }));
+        expect(gr::testing::initRefused<Quantizer<float>>({{"bits", gr::Size_t(1)}}));
+        expect(gr::testing::initRefused<Quantizer<float>>({{"bits", gr::Size_t(25)}}));
+        expect(gr::testing::initRefused<Quantizer<float>>({{"full_scale", 0.0}}));
     };
 
     "the nonlinearity drops phase_est and forwards an unrelated key"_test = [] {
@@ -182,6 +183,31 @@ const boost::ut::suite<"converter models"> converterTests = [] {
 
         expect(keysCrossing<gr::blocks::testing::Copy<C>>() == keysOtherThan({})) << "every test key crosses a block that drops none";
         expect(keysCrossing<Nonlinearity<C>>({{"model", "Saleh"}}) == keysOtherThan({"phase_est"}));
+    };
+};
+
+const boost::ut::suite<"ChannelConverter settings at the initialization"> converterInitTests = [] {
+    using namespace boost::ut;
+
+    "Nonlinearity initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::Nonlinearity<std::complex<float>>>({
+            {"model", std::string("Saleh")},
+            {"input_backoff_db", 3.0},
+            {"saturation", 0.8},
+            {"smoothness", 3.0},
+            {"saleh_alpha_a", 2.0},
+            {"saleh_beta_a", 1.0},
+            {"saleh_alpha_p", 4.0},
+            {"saleh_beta_p", 9.0},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "Quantizer initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::Quantizer<float>>({
+            {"bits", gr::Size_t{8U}},
+            {"full_scale", 2.0},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

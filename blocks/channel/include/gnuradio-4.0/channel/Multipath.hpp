@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <string_view>
@@ -53,22 +54,29 @@ struct FadingChannel : gr::Block<FadingChannel<T>, gr::DroppedTagKeys<"freq_est"
 
 Deterministic from `seed`: the arrival angles and phases are drawn once at configure time, so the whole
 realization is reproducible and independent of how the stream is chunked. `delays` are in samples.
+
+`k_factor` is the Rician K of the first tap, linear, and `los_doppler_ratio` the line-of-sight Doppler as a fraction of
+`max_doppler`. More sinusoids per tap are smoother and cost more.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<"stream sample rate">>                                          sample_rate       = 1.f;
-    Annotated<std::vector<gr::Size_t>, "delays", Visible, Doc<"tap delays in samples, ascending; the first may be 0">>       delays            = std::vector<gr::Size_t>{0U};
-    Annotated<std::vector<double>, "powers_db", Visible, Doc<"average power per tap, dB, one per delay">>                    powers_db         = std::vector<double>{0.0};
-    Annotated<double, "max_doppler", Visible, Unit<"Hz">, Doc<"maximum Doppler f_d; 0 freezes the channel">>                 max_doppler       = 0.0;
-    Annotated<double, "k_factor", Visible, Doc<"Rician K for tap 0, linear; 0 is pure Rayleigh">>                            k_factor          = 0.0;
-    Annotated<double, "los_doppler_ratio", Visible, Doc<"line-of-sight Doppler as a fraction of f_d">>                       los_doppler_ratio = 0.7;
-    Annotated<gr::Size_t, "n_sinusoids", Visible, Doc<"sinusoids per tap in the sum; more is smoother and dearer">>          n_sinusoids       = 16U;
-    Annotated<bool, "normalize", Visible, Doc<"scale the profile to unit total mean power">>                                 normalize         = true;
-    Annotated<std::uint64_t, "seed", Visible, Doc<"PRNG seed; 0 is a fixed default. Staged restart: refused while running">> seed              = 0ULL;
+    struct Settings {
+        Annotated<float, Visible, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>           sample_rate       = 1.f;
+        Annotated<std::vector<gr::Size_t>, Unit<"samples">, Visible, Doc<"tap delays">>        delays            = std::vector<gr::Size_t>{0U};
+        Annotated<std::vector<double>, Unit<"dB">, Visible, Doc<"tap powers">>                 powers_db         = std::vector<double>{0.0};
+        Annotated<double, Visible, Unit<"Hz">, Doc<"maximum Doppler (0 = static)">>            max_doppler       = 0.0;
+        Annotated<double, Visible, Doc<"first tap K-factor (0 = Rayleigh)">, Limits<Min<0.0>>> k_factor          = 0.0;
+        Annotated<double, Visible, Doc<"line-of-sight Doppler ratio">>                         los_doppler_ratio = 0.7;
+        Annotated<gr::Size_t, Visible, Doc<"sinusoids per tap">, Limits<Min<4U>>>              n_sinusoids       = 16U;
+        Annotated<bool, Visible, Doc<"unit power normalization">>                              normalize         = true;
+        Annotated<std::uint64_t, Visible, Doc<"random seed (0 = fixed default)">, StoppedOnly> seed              = 0ULL;
 
-    GR_MAKE_REFLECTABLE(FadingChannel, in, out, sample_rate, delays, powers_db, max_doppler, k_factor, los_doppler_ratio, n_sinusoids, normalize, seed);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, delays, powers_db, max_doppler, k_factor, los_doppler_ratio, n_sinusoids, normalize, seed);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(FadingChannel, in, out, settings);
 
     struct Tap {
         std::size_t         delay{0UZ};
@@ -94,30 +102,35 @@ realization is reproducible and independent of how the stream is chunked. `delay
     std::vector<T> _history{};
     std::size_t    _cursor{0UZ};
     std::uint64_t  _position{0ULL}; ///< samples since the last rebuild; the re-seed cadence is keyed on it
-    bool           _running{false};
 
     /// Samples between restorations of the phasors from exact phase. Repeated multiplication drifts in magnitude and
     /// angle; restoring from `psi + omega*k` on a fixed absolute cadence bounds both, and keys the correction to the
     /// stream position rather than to the call boundaries, so the realization stays independent of the chunking.
     static constexpr std::uint64_t kPhasorRestoreInterval = 256ULL;
 
-    void start() {
-        rebuild();
-        _running = true;
+    void start() { rebuild(); }
+
+    /// Every refusal that does not depend on what was drawn, so a retune refuses what a rebuild refuses.
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::vector<gr::Size_t> tapDelays = s.delays.value;
+        if (tapDelays.empty()) {
+            return gr::Refused(s.delays, "required");
+        }
+        if (std::ranges::adjacent_find(tapDelays, std::ranges::greater_equal{}) != tapDelays.end()) {
+            return gr::Refused(s.delays, "must be strictly ascending");
+        }
+        if (s.powers_db.value.size() != tapDelays.size()) {
+            return gr::Refused(s.powers_db, "must have the same length as delays");
+        }
+        return {};
     }
 
-    void stop() { _running = false; }
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (_running && newSettings.contains("seed")) {
-            throw gr::exception("FadingChannel: 'seed' is a staged-restart setting — a mid-stream reseed is a new realization, not a parameter change. Stop the graph to restart it.");
-        }
+    // a reseed starts a new fading realization
+    void applySettings(const Settings& s) {
         // Only a key that changes what is drawn, or how many draws there are, restarts the realization. Every other
         // physical parameter is retuned onto the taps already running, which leaves the delay line, the stream
         // position and the phase every oscillator has reached where they were.
-        static constexpr std::array kRedrawKeys{"seed", "delays", "n_sinusoids"};
-        validate();
-        if (!_running || std::ranges::any_of(kRedrawKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+        if (s.seed.changed() || s.delays.changed() || s.n_sinusoids.changed()) {
             rebuild();
         } else {
             retune();
@@ -194,47 +207,22 @@ private:
         }
     }
 
-    /// Every refusal that does not depend on what was drawn, so a retune refuses what a rebuild refuses.
-    void validate() const {
-        if (sample_rate <= 0.f) {
-            throw gr::exception(std::format("FadingChannel: 'sample_rate' must be positive, got {}", sample_rate.value));
-        }
-        if (delays.value.size() != powers_db.value.size()) {
-            throw gr::exception(std::format("FadingChannel: 'delays' has {} entries and 'powers_db' has {}; they must match", delays.value.size(), powers_db.value.size()));
-        }
-        if (delays.value.empty()) {
-            throw gr::exception("FadingChannel: at least one tap is required");
-        }
-        if (n_sinusoids < 4U) {
-            throw gr::exception(std::format("FadingChannel: 'n_sinusoids' must be at least 4, got {}", n_sinusoids.value));
-        }
-        if (k_factor < 0.0) {
-            throw gr::exception(std::format("FadingChannel: 'k_factor' must be non-negative, got {}", k_factor.value));
-        }
-        for (std::size_t m = 1UZ; m < delays.value.size(); ++m) {
-            if (delays.value[m] <= delays.value[m - 1UZ]) {
-                throw gr::exception("FadingChannel: 'delays' must be strictly ascending");
-            }
-        }
-    }
-
     /// Draws a realization: the arrival angles and the phases at sample 0, and the delay line they run in.
     void rebuild() {
-        validate();
         const double twoPi = 2. * std::numbers::pi_v<double>;
 
-        gr::rng::Xoshiro256pp rng(seed.value);
-        _taps.assign(delays.value.size(), Tap{});
+        gr::rng::Xoshiro256pp rng(settings.seed.value);
+        _taps.assign(settings.delays.value.size(), Tap{});
         for (std::size_t m = 0UZ; m < _taps.size(); ++m) {
             Tap& tap  = _taps[m];
-            tap.delay = static_cast<std::size_t>(delays.value[m]);
+            tap.delay = static_cast<std::size_t>(settings.delays.value[m]);
 
-            tap.theta.resize(n_sinusoids.value);
-            tap.omega.resize(n_sinusoids.value);
-            tap.psi.resize(n_sinusoids.value);
-            tap.phasor.resize(n_sinusoids.value);
-            tap.rotator.resize(n_sinusoids.value);
-            for (std::size_t i = 0UZ; i < static_cast<std::size_t>(n_sinusoids.value); ++i) {
+            tap.theta.resize(settings.n_sinusoids.value);
+            tap.omega.resize(settings.n_sinusoids.value);
+            tap.psi.resize(settings.n_sinusoids.value);
+            tap.phasor.resize(settings.n_sinusoids.value);
+            tap.rotator.resize(settings.n_sinusoids.value);
+            for (std::size_t i = 0UZ; i < static_cast<std::size_t>(settings.n_sinusoids.value); ++i) {
                 // arrival angles uniform on the circle: Clarke's isotropic scattering assumption
                 tap.theta[i] = twoPi * rng.uniform01<double>();
                 tap.psi[i]   = twoPi * rng.uniform01<double>() - std::numbers::pi_v<double>;
@@ -242,7 +230,7 @@ private:
             tap.losPsi = 0.;
         }
 
-        const std::size_t span = static_cast<std::size_t>(delays.value.back()) + 1UZ;
+        const std::size_t span = static_cast<std::size_t>(settings.delays.value.back()) + 1UZ;
         _history.assign(span, T{});
         _cursor   = span - 1UZ; // the next write wraps to 0, so an empty line reads as all zeros
         _position = 0ULL;
@@ -257,13 +245,13 @@ private:
     /// mid-stream had no rate to carry, so its phasor starts at phase 0 at that position.
     void retune() {
         double totalPower = 0.;
-        for (const double db : powers_db.value) {
+        for (const double db : settings.powers_db.value) {
             totalPower += std::pow(10., db / 10.);
         }
-        const double scale = (normalize && totalPower > 0.) ? 1. / totalPower : 1.;
+        const double scale = (settings.normalize && totalPower > 0.) ? 1. / totalPower : 1.;
 
-        const double fd    = max_doppler;
-        const double fs    = static_cast<double>(sample_rate);
+        const double fd    = settings.max_doppler;
+        const double fs    = static_cast<double>(settings.sample_rate);
         const double twoPi = 2. * std::numbers::pi_v<double>;
 
         // The phase at sample 0 that leaves a sinusoid pointing where it points now, once it turns at the new rate:
@@ -274,7 +262,7 @@ private:
 
         for (std::size_t m = 0UZ; m < _taps.size(); ++m) {
             Tap& tap      = _taps[m];
-            tap.amplitude = std::sqrt(std::pow(10., powers_db.value[m] / 10.) * scale);
+            tap.amplitude = std::sqrt(std::pow(10., settings.powers_db.value[m] / 10.) * scale);
             for (std::size_t i = 0UZ; i < tap.theta.size(); ++i) {
                 const double omega = twoPi * fd * std::cos(tap.theta[i]) / fs;
                 tap.psi[i]         = carried(tap.psi[i], tap.omega[i], omega);
@@ -283,10 +271,10 @@ private:
             }
 
             double losOmega = 0.;
-            if (m == 0UZ && k_factor > 0.0) {
-                tap.diffuseScale = std::sqrt(1. / (1. + k_factor));
-                tap.losScale     = std::sqrt(k_factor / (1. + k_factor));
-                losOmega         = twoPi * fd * los_doppler_ratio / fs;
+            if (m == 0UZ && settings.k_factor > 0.0) {
+                tap.diffuseScale = std::sqrt(1. / (1. + settings.k_factor));
+                tap.losScale     = std::sqrt(settings.k_factor / (1. + settings.k_factor));
+                losOmega         = twoPi * fd * settings.los_doppler_ratio / fs;
             } else {
                 tap.diffuseScale = 1.;
                 tap.losScale     = 0.;

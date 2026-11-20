@@ -46,33 +46,32 @@ struct Nonlinearity : gr::Block<Nonlinearity<T>, gr::DroppedTagKeys<"phase_est">
 
 Acts on the envelope only, so it is stateless and chunk safe by construction. `saturation` is in the same
 units as the input amplitude; `input_backoff_db` pre-scales so an operating point can be stated directly.
+
+rapp models a solid-state amplifier and saleh a traveling-wave tube with AM/PM. A positive `input_backoff_db` backs the
+drive off; a larger `smoothness` is a harder limit.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<NonlinearityModel, "model", Visible, Doc<"rapp (SSPA, no AM/PM) or saleh (TWTA, with AM/PM)">>         model            = NonlinearityModel::Rapp;
-    Annotated<double, "input_backoff_db", Visible, Unit<"dB">, Doc<"input pre-scale; positive backs the drive off">> input_backoff_db = 0.0;
-    Annotated<double, "saturation", Visible, Doc<"Rapp saturation amplitude A_sat">>                                 saturation       = 1.0;
-    Annotated<double, "smoothness", Visible, Doc<"Rapp knee sharpness p; larger is a harder limit">>                 smoothness       = 2.0;
-    Annotated<double, "saleh_alpha_a", Visible, Doc<"Saleh AM/AM numerator">>                                        saleh_alpha_a    = 2.1587;
-    Annotated<double, "saleh_beta_a", Visible, Doc<"Saleh AM/AM denominator">>                                       saleh_beta_a     = 1.1517;
-    Annotated<double, "saleh_alpha_p", Visible, Unit<"rad">, Doc<"Saleh AM/PM numerator">>                           saleh_alpha_p    = 4.0033;
-    Annotated<double, "saleh_beta_p", Visible, Doc<"Saleh AM/PM denominator">>                                       saleh_beta_p     = 9.1040;
+    struct Settings {
+        Annotated<NonlinearityModel, Visible, Doc<"amplifier model">>                   model            = NonlinearityModel::Rapp;
+        Annotated<double, Visible, Unit<"dB">, Doc<"input backoff">>                    input_backoff_db = 0.0;
+        Annotated<double, Visible, Doc<"Rapp saturation amplitude">, Limits<Over<0.0>>> saturation       = 1.0;
+        Annotated<double, Visible, Doc<"Rapp knee sharpness">, Limits<Over<0.0>>>       smoothness       = 2.0;
+        Annotated<double, Visible, Doc<"Saleh AM/AM numerator">>                        saleh_alpha_a    = 2.1587;
+        Annotated<double, Visible, Doc<"Saleh AM/AM denominator">>                      saleh_beta_a     = 1.1517;
+        Annotated<double, Visible, Unit<"rad">, Doc<"Saleh AM/PM numerator">>           saleh_alpha_p    = 4.0033;
+        Annotated<double, Visible, Doc<"Saleh AM/PM denominator">>                      saleh_beta_p     = 9.1040;
 
-    GR_MAKE_REFLECTABLE(Nonlinearity, in, out, model, input_backoff_db, saturation, smoothness, saleh_alpha_a, saleh_beta_a, saleh_alpha_p, saleh_beta_p);
+        GR_MAKE_REFLECTABLE(Settings, model, input_backoff_db, saturation, smoothness, saleh_alpha_a, saleh_beta_a, saleh_alpha_p, saleh_beta_p);
+    } settings;
 
-    double _drive = std::pow(10., -input_backoff_db.value / 20.); // derived from the member, so a block never called back still drives at its declared backoff
+    GR_MAKE_REFLECTABLE(Nonlinearity, in, out, settings);
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        if (saturation <= 0.0) {
-            throw gr::exception(std::format("Nonlinearity: 'saturation' must be positive, got {}", saturation.value));
-        }
-        if (smoothness <= 0.0) {
-            throw gr::exception(std::format("Nonlinearity: 'smoothness' must be positive, got {}", smoothness.value));
-        }
-        _drive = std::pow(10., -input_backoff_db / 20.);
-    }
+    double _drive{};
+
+    void applySettings(const Settings& s) { _drive = std::pow(10., -s.input_backoff_db / 20.); }
 
     /// The model's own equation, exposed so QA and consumers read the same curve the block runs.
     [[nodiscard]] std::complex<double> transferAt(double amplitude) const noexcept {
@@ -80,12 +79,12 @@ units as the input amplitude; `input_backoff_db` pre-scales so an operating poin
         if (driven == 0.) {
             return {0., 0.};
         }
-        if (model == NonlinearityModel::Rapp) {
-            const double ratio = std::pow(driven / saturation, 2. * smoothness);
-            return {driven / std::pow(1. + ratio, 1. / (2. * smoothness)), 0.};
+        if (settings.model == NonlinearityModel::Rapp) {
+            const double ratio = std::pow(driven / settings.saturation, 2. * settings.smoothness);
+            return {driven / std::pow(1. + ratio, 1. / (2. * settings.smoothness)), 0.};
         }
         const double squared = driven * driven;
-        return {saleh_alpha_a * driven / (1. + saleh_beta_a * squared), saleh_alpha_p * squared / (1. + saleh_beta_p * squared)};
+        return {settings.saleh_alpha_a * driven / (1. + settings.saleh_beta_a * squared), settings.saleh_alpha_p * squared / (1. + settings.saleh_beta_p * squared)};
     }
 
     [[nodiscard]] T processOne(T sample) const noexcept {

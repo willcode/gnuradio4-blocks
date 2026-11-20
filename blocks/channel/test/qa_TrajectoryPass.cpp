@@ -59,8 +59,7 @@ constexpr std::uint64_t kSeed           = 20260902ULL;
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> configured(gr::property_map settings) {
     auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    boost::ut::expect(block->check({}).has_value());
     block->start();
     return block;
 }

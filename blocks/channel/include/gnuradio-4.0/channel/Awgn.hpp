@@ -5,6 +5,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <type_traits>
 
@@ -43,39 +44,33 @@ struct AwgnChannel : gr::Block<AwgnChannel<T>> {
 `out[k] = in[k] + sqrt(noise_power) * n[k]`, with `noise_power` the mean power of the added noise. Complex
 noise uses the unit-mean-square convention, so the setting means the same for real and complex streams.
 Deterministic from `seed`, and bit-identical however the stream is split into calls.
+
+`noise_power` is the mean power of the added noise per sample, linear.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<double, "noise_power", Visible, Doc<"mean power of the added noise, linear per sample">>                       noise_power = 0.0;
-    Annotated<std::uint64_t, "seed", Visible, Doc<"PRNG seed; 0 is a fixed default. Staged restart: refused while running">> seed        = 0ULL;
+    struct Settings {
+        Annotated<double, Visible, Doc<"noise power">, Limits<Min<0.0>>>                       noise_power = 0.0;
+        Annotated<std::uint64_t, Visible, Doc<"random seed (0 = fixed default)">, StoppedOnly> seed        = 0ULL;
 
-    GR_MAKE_REFLECTABLE(AwgnChannel, in, out, noise_power, seed);
+        GR_MAKE_REFLECTABLE(Settings, noise_power, seed);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(AwgnChannel, in, out, settings);
 
     gr::signal::NoiseGenerator<float> _generator{};
-    bool                              _running{false};
 
-    [[nodiscard]] float amplitude() const noexcept { return static_cast<float>(std::sqrt(noise_power.value)); }
+    [[nodiscard]] float amplitude() const noexcept { return static_cast<float>(std::sqrt(settings.noise_power.value)); }
 
-    void start() {
-        _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, seed.value);
-        _running = true;
-    }
+    void start() { _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, settings.seed); }
 
-    void stop() { _running = false; }
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (noise_power < 0.0) {
-            throw gr::exception(std::format("AwgnChannel: 'noise_power' must be non-negative, got {}", noise_power.value));
-        }
-        if (_running && newSettings.contains("seed")) {
-            throw gr::exception("AwgnChannel: 'seed' is a staged-restart setting — a mid-stream reseed is a new realization, not a parameter change. Stop the graph to restart it.");
-        }
-        // The generator draws at unit amplitude and processBulk scales what it drew, so noise_power stays
-        // live-settable without the reconfigure that would reseed the generator and start a new realization.
-        if (!_running) {
-            _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, seed.value);
+    // The generator draws at unit amplitude and processBulk scales what it drew, so noise_power stays
+    // live-settable without the reconfigure that would reseed the generator and start a new realization.
+    void applySettings(const Settings& s) {
+        if (s.seed.changed()) {
+            _generator.configure(gr::signal::NoiseType::Gaussian, 1.f, 0.f, s.seed);
         }
     }
 
@@ -83,7 +78,7 @@ Deterministic from `seed`, and bit-identical however the stream is split into ca
         const std::size_t  nSamples = std::min(input.size(), output.size());
         const std::span<T> written  = output.first(nSamples);
 
-        if (noise_power == 0.0) {
+        if (settings.noise_power == 0.0) {
             // a copy preserves negative zero exactly, and with no noise there is no draw to make, so the
             // generator's state stands
             std::ranges::copy(input.first(nSamples), written.begin());

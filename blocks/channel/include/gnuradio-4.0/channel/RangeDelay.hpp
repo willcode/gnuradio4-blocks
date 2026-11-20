@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -36,43 +37,16 @@ namespace gr::blocks::channel {
 
 namespace detail {
 
-/// @brief The validator of `order`: true for every order but 2, inside the limits 0 to 3.
-inline constexpr auto kDelayLineOrder = [](int order) { return order != 2; };
-
-/// @brief The validator of `rolloff`: true strictly between 0 and 1.
-inline constexpr auto kOpenUnitInterval = [](double value) { return value > 0.0 && value < 1.0; };
-
-/// @brief The validator of `bank_size`: true for 0 or a power of two.
-inline constexpr auto kZeroOrPowerOfTwo = [](gr::Size_t size) { return (size & (size - 1U)) == 0U; };
-
-/// What to change when a bank cannot be designed. A derived bank is not set, so the advice names what it follows.
-[[nodiscard]] inline std::string designAdvice(bool derived) { return derived ? "'bank_size' 0 derives the bank, so set 'bank_size' to a smaller power of two, raise 'order' to 3, lower 'attenuation_db' or raise 'rolloff'" : "lower 'bank_size' or 'attenuation_db', or raise 'rolloff'"; }
-
 /// The refusal of a bank whose prototype would need more than the design allows, given before any design runs.
-[[nodiscard]] inline std::string tooManyTaps(std::size_t bank, bool derived, double rolloff, double attenuationDb) {
-    return std::format("RangeDelay: 'bank_size' {}{} with 'rolloff' {} and 'attenuation_db' {} needs about {} taps, past the {} the design allows; {}", //
-        bank, derived ? " (derived)" : "", rolloff, attenuationDb, gr::filter::fractionalDelayTapEstimate(bank, rolloff, attenuationDb), gr::filter::kFractionalDelayMaxTaps, designAdvice(derived));
-}
+[[nodiscard]] inline std::string tooManyTaps(std::size_t bank) { return std::format("bank {} needs more than {} taps", bank, gr::filter::kFractionalDelayMaxTaps); }
 
 /// The refusal of a design that missed its stopband or its ripple limit, or none where it met them.
-[[nodiscard]] inline std::optional<std::string> designShortfall(std::size_t bank, bool derived, double rolloff, double attenuationDb, const gr::filter::ResamplerDesign& design) {
+[[nodiscard]] inline std::optional<std::string> designShortfall(std::size_t bank, const gr::filter::ResamplerDesign& design) {
     if (design.ok) {
         return std::nullopt;
     }
-    return std::format("RangeDelay: 'bank_size' {}{} with 'rolloff' {} and 'attenuation_db' {} designs {} taps that deliver a stopband of {:.2f} dB and a ripple of {:.3f} dB, short of 'attenuation_db' or the ripple limit; {}", //
-        bank, derived ? " (derived)" : "", rolloff, attenuationDb, design.taps.size(), design.stopbandDb, design.rippleDb, designAdvice(derived));
+    return std::format("bank {} misses attenuation_db or the ripple limit", bank);
 }
-
-/// The settings a RangeDelay computes on, other than its table and anchor, as last accepted.
-struct RangeDelaySettings {
-    float            rate{1.f};
-    DopplerDirection direction{DopplerDirection::Apply};
-    double           bias{std::numeric_limits<double>::quiet_NaN()}; ///< `bias_s`, NaN to derive it
-    gr::Size_t       bankSize{0U};
-    int              order{1};
-    double           attenuationDb{60.0};
-    double           rolloff{0.2};
-};
 
 } // namespace detail
 
@@ -95,17 +69,17 @@ The delays come from `schedule_times_ns` and `schedule_delays_s`, or from the `r
 between knots and holds its end values outside them. With neither, the commanded delay is the bias alone.
 
 Under `direction` 'apply' the commanded delay is the schedule plus `bias_s`. Under 'correct' it is `bias_s` less the
-schedule. A NaN `bias_s`, the default, derives the bias: zero under 'apply' and the schedule's maximum under 'correct'.
+schedule. A `bias_s` of 0, the default, derives the bias: zero under 'apply' and the schedule's maximum under 'correct'.
 The commanded delay is then non-negative, and the corrected stream carries a constant delay of that maximum. A knot
 whose commanded delay is negative or past the line's reach is refused, and so is a segment whose slope reaches one
 sample per sample. The refusal names the knot or the segment.
 
-`bank_size`, `order`, `attenuation_db` and `rolloff` design the line. `bank_size` 0 derives the bank from the other
-three. A bank whose estimated prototype needs more than 65536 taps is refused before it is designed. The estimate
+`bank_size`, `interpolation`, `attenuation_db` and `rolloff` design the line. `bank_size` is 0 or a power of two, and 0
+derives the bank from the other three. A bank whose estimated prototype needs more than 65536 taps is refused before it is designed. The estimate
 follows `bank_size * (attenuation_db - 8) / rolloff`, and below 45 dB the ripple limit makes it longer, many times so
 for a rolloff up to 0.85. From 45 dB up no rolloff below one holds more than 8192 arms. Below 45 dB a rolloff above 0.7
 is estimated short, so the check can admit a bank the design cannot hold, and the block refuses it after the design. At
-`rolloff` 0.2 with `bank_size` 0, `order` 1 designs up to 110 dB and `order` 3 up to 140 dB. A design near the cap takes
+`rolloff` 0.2 with `bank_size` 0, `linear` designs up to 110 dB and `cubic` up to 140 dB. A design near the cap takes
 tens of seconds to a few minutes inside the settings change, and longer in a Debug build. A change to any of the four
 builds a new bank, drops the line's history and counts in `nBankRebuilds()`. A design that misses `attenuation_db` or
 its ripple limit is refused too, and the refusal gives the stopband and ripple it delivers. A change of table,
@@ -122,40 +96,42 @@ output sample whose whole read position has reached the tag's input index. A tag
 leaves at the end-of-stream index. `nTagsCoalesced()` counts the output samples that carry two or more such tags.
 `nDiscontinuities()` counts `gr:n_dropped_samples` tags, a gap the schedule does not bridge. `nRateDisagreements()`
 counts `gr:sample_rate` tags that differ from the accepted `sample_rate`. The schedule stays at that rate.
+
+`schedule_delays_s` holds one delay per time. `schedule_file` names a '#!gr4-trajectory 1' file with a range column.
+`bias_s` is a constant delay added to the schedule.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::vector<std::int64_t>, "schedule_times_ns", Visible, Unit<"ns">, Doc<detail::kScheduleTimesDoc>>                           schedule_times_ns{};
-    Annotated<std::vector<double>, "schedule_delays_s", Visible, Unit<"s">, Doc<"knot delays in seconds, one per time">>                     schedule_delays_s{};
-    Annotated<std::string, "schedule_file", Doc<"#!gr4-trajectory 1 file with a range column">>                                              schedule_file{};
-    Annotated<std::string, "direction", Visible, Doc<detail::kDirectionDoc>>                                                                 direction            = std::string("apply");
-    Annotated<double, "bias_s", Unit<"s">, Doc<"constant delay added to the schedule, NaN to derive it">>                                    bias_s               = std::numeric_limits<double>::quiet_NaN();
-    Annotated<float, "sample_rate", Visible, Unit<"Hz">, Doc<detail::kSampleRateDoc>, detail::ClockRateLimits>                               sample_rate          = 1.f;
-    Annotated<std::uint64_t, "anchor_index", Doc<detail::kAnchorIndexDoc>>                                                                   anchor_index         = 0ULL;
-    Annotated<std::int64_t, "anchor_ns", Unit<"ns">, Doc<detail::kAnchorNsDoc>, detail::AnchorNsLimits>                                      anchor_ns            = 0LL;
-    Annotated<std::string, "anchor_source", Doc<detail::kAnchorSourceDoc>>                                                                   anchor_source        = std::string("setting");
-    Annotated<bool, "honor_trigger_offset", Doc<detail::kHonorTriggerOffsetDoc>>                                                             honor_trigger_offset = true;
-    Annotated<gr::Size_t, "bank_size", Doc<"polyphase arms, 0 or a power of two, up to 8192">, Limits<0U, 8192U, detail::kZeroOrPowerOfTwo>> bank_size            = 0U;
-    Annotated<int, "order", Doc<"interpolation order between arms, 0, 1 or 3">, Limits<0, 3, detail::kDelayLineOrder>>                       order                = 1;
-    Annotated<double, "attenuation_db", Unit<"dB">, Doc<"prototype stopband attenuation, in [20, 140]">, Limits<20.0, 140.0>>                attenuation_db       = 60.0;
-    Annotated<double, "rolloff", Doc<"the design's excess bandwidth, in (0, 1)">, Limits<0.0, 1.0, detail::kOpenUnitInterval>>               rolloff              = 0.2;
+    struct Settings {
+        Annotated<std::vector<std::int64_t>, Visible, Unit<"ns">, Doc<detail::kScheduleTimesDoc>>           schedule_times_ns{};
+        Annotated<std::vector<double>, Visible, Unit<"s">, Doc<"scheduled delays">>                         schedule_delays_s{};
+        Annotated<std::string, Doc<"range trajectory file">>                                                schedule_file{};
+        Annotated<detail::DopplerDirection, Visible, Doc<detail::kDirectionDoc>>                            direction            = detail::DopplerDirection::Apply;
+        Annotated<double, Unit<"s">, Doc<"delay bias (0 = derived)">>                                       bias_s               = 0.0;
+        Annotated<float, Visible, Unit<"Hz">, Doc<detail::kSampleRateDoc>>                                  sample_rate          = 1.f;
+        Annotated<std::uint64_t, Doc<detail::kAnchorIndexDoc>>                                              anchor_index         = 0ULL;
+        Annotated<std::int64_t, Unit<"ns">, Doc<detail::kAnchorNsDoc>, detail::AnchorNsLimits>              anchor_ns            = 0LL;
+        Annotated<gr::timing::AnchorSource, Doc<detail::kAnchorSourceDoc>>                                  anchor_source        = gr::timing::AnchorSource::setting;
+        Annotated<bool, Doc<detail::kHonorTriggerOffsetDoc>>                                                honor_trigger_offset = true;
+        Annotated<gr::Size_t, Doc<"polyphase arm count (0 = derived)">, Limits<Max<8192U>>>                 bank_size            = 0U;
+        Annotated<gr::filter::ArmInterpolation, Doc<"interpolation between arms">>                          interpolation        = gr::filter::ArmInterpolation::linear;
+        Annotated<double, Unit<"dB">, Doc<"prototype stopband attenuation">, Limits<Min<20.0>, Max<140.0>>> attenuation_db       = 60.0;
+        Annotated<double, Doc<"excess bandwidth">, Limits<Over<0.0>, Under<1.0>>>                           rolloff              = 0.2;
 
-    GR_MAKE_REFLECTABLE(RangeDelay, in, out, schedule_times_ns, schedule_delays_s, schedule_file, direction, bias_s, sample_rate, anchor_index, anchor_ns, anchor_source, honor_trigger_offset, bank_size, order, attenuation_db, rolloff);
+        GR_MAKE_REFLECTABLE(Settings, schedule_times_ns, schedule_delays_s, schedule_file, direction, bias_s, sample_rate, anchor_index, anchor_ns, anchor_source, honor_trigger_offset, bank_size, interpolation, attenuation_db, rolloff);
+    } settings;
 
-    // The accepted settings. A refused change leaves all of them as they were.
+    GR_MAKE_REFLECTABLE(RangeDelay, in, out, settings);
+
     std::optional<gr::timing::DelaySchedule> _schedule{}; ///< the table as configured, before the direction's sign
-    detail::RangeDelaySettings               _accepted{};
-    detail::TableSettings                    _tableSettings{}; ///< the table settings as last accepted
-    detail::AnchorSettings                   _anchorSettings{};
-    bool                                     _configured{false}; ///< a settings change has been accepted
 
     std::optional<gr::filter::FractionalDelayLine<T>>   _line{};
     gr::timing::SampleClock                             _clock{};
     gr::timing::ScheduleAnchor                          _anchor{};
     std::uint64_t                                       _position{0ULL};
-    double                                              _bias{0.};        ///< the bias in force, derived when `bias_s` is NaN
+    double                                              _bias{0.};        ///< the bias in force, derived when `bias_s` asks for it
     std::int64_t                                        _latencyQ32{0LL}; ///< the line's own lag in the fixed point the tag map reads
     std::vector<double>                                 _delays{};        ///< one call's worth of commanded delays, grown not rebuilt
     std::vector<std::uint64_t>                          _delaysQ32{};
@@ -163,10 +139,10 @@ counts `gr:sample_rate` tags that differ from the accepted `sample_rate`. The sc
     std::vector<std::pair<std::uint64_t, property_map>> _tagsHeld{};   ///< the same, for the tags that leave on the sample they arrived on
 
     /// The design the line's bank was built from.
-    std::size_t _builtBank{0UZ};
-    int         _builtOrder{0};
-    double      _builtRolloff{0.};
-    double      _builtAttenuationDb{0.};
+    std::size_t                  _builtBank{0UZ};
+    gr::filter::ArmInterpolation _builtInterpolation{gr::filter::ArmInterpolation::nearest};
+    double                       _builtRolloff{0.};
+    double                       _builtAttenuationDb{0.};
 
     gr::measurement::MeasurementSlot<7UZ> _slot{}; ///< delay s, delay samples, bias s, latency, group delay, schedule position, history, with the stream position as fill count
     std::atomic<std::uint64_t>            _nTagsCoalesced{0ULL};
@@ -182,56 +158,61 @@ counts `gr:sample_rate` tags that differ from the accepted `sample_rate`. The sc
     std::atomic<std::uint64_t> _nReanchors{0ULL};
     std::atomic<std::uint64_t> _nRefusedAnchors{0ULL};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const auto moved = [&](std::string_view key, bool differs) { return detail::moves(newSettings, _configured, key, differs); };
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const bool tableGiven = !s.schedule_times_ns.value.empty() || !s.schedule_delays_s.value.empty();
+        if (!s.schedule_file.value.empty() && tableGiven) {
+            return gr::Refused("schedule_file is incompatible with schedule lists");
+        }
+        // a trigger anchor's clock is checked when its tag arrives
+        std::uint64_t anchorIndex = 0ULL;
+        std::int64_t  anchorNs    = 0LL;
+        if (s.anchor_source == gr::timing::AnchorSource::setting) {
+            anchorIndex = s.anchor_index;
+            anchorNs    = s.anchor_ns;
+        }
+        const auto clock = clockAt(s.sample_rate, anchorIndex, anchorNs);
+        if (!clock) {
+            return gr::Refused(s.sample_rate, clock.error().message);
+        }
+        if (s.schedule_file.value.empty()) { // a file's knots are known only once it is read
+            const std::optional<gr::timing::DelaySchedule> table  = tableOf(s.schedule_times_ns.value, s.schedule_delays_s.value);
+            const std::expected<Staged, std::string>       staged = stage(table, s.direction, s.bias_s, s.sample_rate);
+            if (!staged) {
+                return gr::Refused(staged.error());
+            }
+        }
+        if (s.bank_size != 0U && !std::has_single_bit(s.bank_size.value)) {
+            return gr::Refused(s.bank_size, "must be 0 or a power of 2");
+        }
+        const std::size_t bank = bankFor(s.bank_size, s.attenuation_db, s.rolloff, s.interpolation);
+        if (!gr::filter::fractionalDelayReachable(bank, s.rolloff, s.attenuation_db)) {
+            return gr::Refused(detail::tooManyTaps(bank));
+        }
+        return {};
+    }
 
-        detail::RangeDelaySettings next = _accepted;
-        if (moved("sample_rate", sample_rate.value != _accepted.rate)) {
-            next.rate = sample_rate.value;
-        }
-        if (moved("direction", direction.value != detail::dopplerDirectionName(_accepted.direction))) {
-            next.direction = detail::parseDopplerDirection(direction.value, "RangeDelay");
-        }
-        if (moved("bias_s", !sameDouble(bias_s.value, _accepted.bias))) {
-            next.bias = bias_s.value;
-        }
-        if (moved("bank_size", bank_size.value != _accepted.bankSize)) {
-            next.bankSize = bank_size.value;
-        }
-        if (moved("order", order.value != _accepted.order)) {
-            next.order = order.value;
-        }
-        if (moved("attenuation_db", attenuation_db.value != _accepted.attenuationDb)) {
-            next.attenuationDb = attenuation_db.value;
-        }
-        if (moved("rolloff", rolloff.value != _accepted.rolloff)) {
-            next.rolloff = rolloff.value;
-        }
-        const detail::TableSettings              tableNamed{schedule_times_ns.value, schedule_delays_s.value, schedule_file.value};
-        const bool                               tableDiffers = tableNamed != _tableSettings;
-        const bool                               tableMoved   = moved("schedule_times_ns", tableDiffers) || moved("schedule_delays_s", tableDiffers) || moved("schedule_file", tableDiffers);
-        std::optional<gr::timing::DelaySchedule> table        = tableMoved ? loadTable() : _schedule;
-
-        const bool             anchorMoved  = moved("anchor_source", anchor_source.value != gr::timing::anchorSourceName(_anchorSettings.source)) || moved("anchor_index", anchor_index.value != _anchorSettings.index) || moved("anchor_ns", anchor_ns.value != _anchorSettings.ns) || moved("honor_trigger_offset", honor_trigger_offset.value != _anchorSettings.honorOffset);
-        detail::AnchorSettings anchorConfig = _anchorSettings;
+    void applySettings(const Settings& s) {
+        const bool                 anchorMoved = s.anchor_source.changed() || s.anchor_index.changed() || s.anchor_ns.changed() || s.honor_trigger_offset.changed();
+        gr::timing::ScheduleAnchor anchor      = _anchor;
         if (anchorMoved) {
-            anchorConfig = {detail::parseAnchorSource(anchor_source.value, "RangeDelay"), anchor_index.value, anchor_ns.value, honor_trigger_offset.value};
+            anchor = gr::timing::ScheduleAnchor(s.anchor_source, s.anchor_index, s.anchor_ns, s.honor_trigger_offset);
         }
-        const gr::timing::ScheduleAnchor anchor = anchorMoved ? gr::timing::ScheduleAnchor(anchorConfig.source, anchorConfig.index, anchorConfig.ns, anchorConfig.honorOffset) : _anchor;
-
-        configure(next, std::move(table), anchor);
-        _tableSettings  = tableNamed;
-        _anchorSettings = anchorConfig;
+        const bool                               tableMoved = s.schedule_times_ns.changed() || s.schedule_delays_s.changed() || s.schedule_file.changed();
+        std::optional<gr::timing::DelaySchedule> table      = _schedule;
+        if (tableMoved) {
+            auto loaded = loadTable(s);
+            if (!loaded) {
+                this->fail(s.schedule_file, loaded.error());
+                return;
+            }
+            table = std::move(*loaded);
+        }
+        if (const std::optional<Failure> failure = configure(s, std::move(table), anchor)) {
+            this->fail(failure->key, failure->reason);
+        }
     }
 
     void start() {
-        if (!_line) { // no settings change has been accepted, and the defaults build the line
-            try {
-                configure(_accepted, _schedule, gr::timing::ScheduleAnchor(_anchorSettings.source, _anchorSettings.index, _anchorSettings.ns, _anchorSettings.honorOffset));
-            } catch (const gr::exception& refusal) {
-                this->emitErrorMessage("start", gr::Error(refusal.message, refusal.sourceLocation));
-            }
-        }
         _position = 0ULL;
         _anchor.reset();
         if (_line) {
@@ -325,7 +306,7 @@ counts `gr:sample_rate` tags that differ from the accepted `sample_rate`. The sc
 
             const gr::timing::ScheduleAnchor::Response response = read.readable ? _anchor.onTrigger(_position, read.timeNs, read.offsetSeconds) : _anchor.onUnreadableTrigger();
             if (response == gr::timing::ScheduleAnchor::Response::armed || response == gr::timing::ScheduleAnchor::Response::reanchored) {
-                const auto clock = clockAt(_accepted.rate, _anchor.anchorIndex(), _anchor.anchorNs());
+                const auto clock = clockAt(settings.sample_rate, _anchor.anchorIndex(), _anchor.anchorNs());
                 if (!clock) {
                     return refuse(inSpan, outSpan, done, clock.error());
                 }
@@ -394,60 +375,67 @@ counts `gr:sample_rate` tags that differ from the accepted `sample_rate`. The sc
     }
 
 private:
-    /// True when @p a and @p b are the same setting. Two NaN values are the same.
-    [[nodiscard]] static bool sameDouble(double a, double b) noexcept { return a == b || (std::isnan(a) && std::isnan(b)); }
-
     /// The bias and the history a table needs, kept apart from the block until every check has passed.
     struct Staged {
         double        bias{0.};
         std::uint64_t wholeDelaySamples{0ULL};
     };
 
-    [[nodiscard]] static std::expected<gr::timing::SampleClock, gr::Error> clockAt(float rate, std::uint64_t index, std::int64_t timeNs) {
-        return gr::timing::clockForRateHz(static_cast<double>(rate), index, timeNs).transform_error([](const gr::Error& refusal) { return gr::Error(std::format("RangeDelay: 'sample_rate': {}", refusal.message), refusal.sourceLocation); });
-    }
+    /// A setting the block could not put in force, and why.
+    struct Failure {
+        std::string_view key;
+        std::string      reason;
+    };
+
+    [[nodiscard]] static std::expected<gr::timing::SampleClock, gr::Error> clockAt(float rate, std::uint64_t index, std::int64_t timeNs) { return gr::timing::clockForRateHz(static_cast<double>(rate), index, timeNs); }
+
+    /// The polyphase arms `bank_size` names, or derives at 0.
+    [[nodiscard]] static std::size_t bankFor(gr::Size_t bankSize, double attenuationDb, double rolloff, gr::filter::ArmInterpolation interpolation) { return bankSize == 0U ? gr::filter::arbitraryBankSize(attenuationDb, rolloff, gr::filter::interpolationOrder(interpolation)) : static_cast<std::size_t>(bankSize); }
 
     /**
-     * @brief Checks @p next with @p table and @p anchor and puts all three in force.
+     * @brief Puts @p s in force with @p table and @p anchor, or returns the setting that failed.
      *
-     * Every check runs before anything changes. A new bank is built only when a design value differs from the
-     * line's. Otherwise the line keeps its history and grows to the reach the table needs.
+     * Every step that can fail runs before anything changes. A new bank is built only when a design value differs from
+     * the line's. Otherwise the line keeps its history and grows to the reach the table needs.
      */
-    void configure(const detail::RangeDelaySettings& next, std::optional<gr::timing::DelaySchedule> table, const gr::timing::ScheduleAnchor& anchor) {
-        // The clock of an unarmed anchor checks the rate and is not installed.
-        const auto clock = clockAt(next.rate, anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
+    [[nodiscard]] std::optional<Failure> configure(const Settings& s, std::optional<gr::timing::DelaySchedule> table, const gr::timing::ScheduleAnchor& anchor) {
+        // the place a trigger gave an armed anchor is known here alone
+        const auto clock = clockAt(s.sample_rate, anchor.armed() ? anchor.anchorIndex() : 0ULL, anchor.armed() ? anchor.anchorNs() : 0LL);
         if (!clock) {
-            throw gr::exception(clock.error().message, clock.error().sourceLocation);
+            return Failure{"sample_rate", clock.error().message};
         }
-        const std::size_t bank   = next.bankSize == 0U ? gr::filter::arbitraryBankSize(next.attenuationDb, next.rolloff, next.order) : static_cast<std::size_t>(next.bankSize);
-        const Staged      staged = stage(table, next);
+        const std::string_view                   delayKey = s.schedule_file.value.empty() ? "schedule_delays_s" : "schedule_file"; // the source of the table
+        const std::size_t                        bank     = bankFor(s.bank_size, s.attenuation_db, s.rolloff, s.interpolation);
+        const std::expected<Staged, std::string> staged   = stage(table, s.direction, s.bias_s, s.sample_rate); // a file's knots are checked here
+        if (!staged) {
+            return Failure{delayKey, staged.error()};
+        }
 
         const bool held    = _line.has_value();
-        const bool cutBank = !held || bank != _builtBank || next.order != _builtOrder || next.rolloff != _builtRolloff || next.attenuationDb != _builtAttenuationDb;
+        const bool cutBank = !held || bank != _builtBank || s.interpolation != _builtInterpolation || s.rolloff != _builtRolloff || s.attenuation_db != _builtAttenuationDb;
         if (cutBank) {
-            // The held samples do not line up with a new prototype's taps, and a new bank starts on silence.
-            if (!gr::filter::fractionalDelayReachable(bank, next.rolloff, next.attenuationDb)) {
-                throw gr::exception(detail::tooManyTaps(bank, next.bankSize == 0U, next.rolloff, next.attenuationDb));
-            }
-            const auto design = gr::filter::designFractionalDelay(bank, next.rolloff, next.attenuationDb);
+            // The held samples do not line up with a new prototype's taps, and a new bank starts on silence. The design
+            // runs here and not in the check, as it can take minutes near the cap.
+            const auto design = gr::filter::designFractionalDelay(bank, s.rolloff, s.attenuation_db);
             if (!design) {
-                throw gr::exception(std::format("RangeDelay: {}", design.error().message), design.error().sourceLocation);
+                return Failure{"attenuation_db", design.error().message};
             }
-            if (const std::optional<std::string> shortfall = detail::designShortfall(bank, next.bankSize == 0U, next.rolloff, next.attenuationDb, *design)) {
-                throw gr::exception(*shortfall);
+            if (const std::optional<std::string> shortfall = detail::designShortfall(bank, *design)) {
+                return Failure{"attenuation_db", *shortfall};
             }
-            gr::filter::FractionalDelayLine<T> built(bank, next.order, std::span<const float>(design->taps), staged.wholeDelaySamples);
+            gr::filter::FractionalDelayLine<T> built(bank, gr::filter::interpolationOrder(s.interpolation.value), std::span<const float>(design->taps), staged->wholeDelaySamples);
             _line               = std::move(built);
             _builtBank          = bank;
-            _builtOrder         = next.order;
-            _builtRolloff       = next.rolloff;
-            _builtAttenuationDb = next.attenuationDb;
+            _builtInterpolation = s.interpolation;
+            _builtRolloff       = s.rolloff;
+            _builtAttenuationDb = s.attenuation_db;
             if (held) { // the first bank drops no history and is not counted
                 _nBankRebuilds.fetch_add(1ULL, std::memory_order_relaxed);
             }
         } else {
-            if (const std::expected<void, gr::Error> grown = _line->growMaxDelay(staged.wholeDelaySamples); !grown) {
-                throw gr::exception(std::format("RangeDelay: {}", grown.error().message), grown.error().sourceLocation);
+            const std::expected<void, gr::Error> grown = _line->growMaxDelay(staged->wholeDelaySamples);
+            if (!grown) {
+                return Failure{delayKey, grown.error().message};
             }
         }
 
@@ -456,15 +444,14 @@ private:
             _line->reset();
         }
         _schedule = std::move(table);
-        _accepted = next;
-        _bias     = staged.bias;
+        _bias     = staged->bias;
         _anchor   = anchor;
         if (anchor.armed()) {
             _clock = *clock;
         }
         _latencyQ32 = static_cast<std::int64_t>(std::llround(_line->latencySamples() * static_cast<double>(gr::filter::kArbitraryOne)));
-        _configured = true;
         publishMeasurements();
+        return std::nullopt;
     }
 
     /// Publishes the samples before @p done and reports @p error as the call's result.
@@ -484,100 +471,93 @@ private:
     /// sample the fraction reaches into. `reachSeconds()` bounds it, and every path checks that bound before this call.
     [[nodiscard]] static std::uint64_t wholeDelayFor(double seconds, float rate) noexcept { return static_cast<std::uint64_t>(std::max(0., std::floor(seconds * static_cast<double>(rate)) + 1.)); }
 
-    /// The table the settings name, before the direction's sign, or none for a delay of the bias alone.
-    [[nodiscard]] std::optional<gr::timing::DelaySchedule> loadTable() const {
-        const std::vector<std::int64_t>& times  = schedule_times_ns.value;
-        const std::vector<double>&       delays = schedule_delays_s.value;
-        if (!schedule_file.value.empty() && !(times.empty() && delays.empty())) {
-            throw gr::exception("RangeDelay: 'schedule_file' and 'schedule_times_ns'/'schedule_delays_s' are both set; set one");
+    /// The table @p s names, before the direction's sign, or none for a delay of the bias alone; the reason when the
+    /// file does not give one.
+    [[nodiscard]] static std::expected<std::optional<gr::timing::DelaySchedule>, std::string> loadTable(const Settings& s) {
+        if (s.schedule_file.value.empty()) {
+            return tableOf(s.schedule_times_ns.value, s.schedule_delays_s.value);
         }
-        if (!schedule_file.value.empty()) {
-            auto loaded = gr::timing::loadTrajectoryFile(schedule_file.value);
-            if (!loaded) {
-                throw gr::exception(std::format("RangeDelay: 'schedule_file': {}", loaded.error().message));
-            }
-            if (!loaded->delay.has_value()) {
-                throw gr::exception(std::format("RangeDelay: '{}' has no delay column; it names no range_m", schedule_file.value));
-            }
-            return std::move(loaded->delay);
+        auto loaded = gr::timing::loadTrajectoryFile(s.schedule_file.value);
+        if (!loaded) {
+            return std::unexpected(loaded.error().message);
         }
+        if (!loaded->delay.has_value()) {
+            return std::unexpected("must name a file with a delay column");
+        }
+        return std::move(loaded->delay);
+    }
+
+    /// The table @p times and @p delays give, or none when both are empty. A table the schedule refuses throws.
+    [[nodiscard]] static std::optional<gr::timing::DelaySchedule> tableOf(std::span<const std::int64_t> times, std::span<const double> delays) {
         if (times.empty() && delays.empty()) {
             return std::nullopt;
         }
-        try {
-            return gr::timing::DelaySchedule(std::span<const std::int64_t>(times), std::span<const double>(delays));
-        } catch (const gr::exception& refusal) {
-            throw gr::exception(std::format("RangeDelay: 'schedule_times_ns'/'schedule_delays_s': {}", refusal.message));
-        }
+        return gr::timing::DelaySchedule(times, delays);
     }
 
-    /// The bias and the history @p table needs under @p next, or the refusal of a knot, a segment or the bias.
-    [[nodiscard]] static Staged stage(const std::optional<gr::timing::DelaySchedule>& table, const detail::RangeDelaySettings& next) {
-        const double reach = reachSeconds(next.rate);
+    /// The bias and the history @p table needs, or the refusal of a knot, a segment or the bias.
+    [[nodiscard]] static std::expected<Staged, std::string> stage(const std::optional<gr::timing::DelaySchedule>& table, detail::DopplerDirection direction, double bias, float rate) {
+        const double reach = reachSeconds(rate);
         if (!table) {
             // Without a table the delay is the bias alone. The same reach and causality limits apply.
             Staged staged;
-            staged.bias = std::isnan(next.bias) ? 0. : next.bias;
-            if (!std::isfinite(staged.bias) || staged.bias < 0.) {
-                throw gr::exception(std::format("RangeDelay: 'bias_s' is {} s with no table; set it finite and non-negative", staged.bias));
+            staged.bias = bias;
+            if (staged.bias < 0.) {
+                return std::unexpected("bias_s: must be >= 0");
             }
             if (!(staged.bias < reach)) {
-                throw gr::exception(std::format("RangeDelay: 'bias_s' is {} s, at or past the {} s the fixed-point delay carries at {} Hz", staged.bias, reach, static_cast<double>(next.rate)));
+                return std::unexpected(std::format("bias_s: must be < {} s", reach));
             }
-            staged.wholeDelaySamples = wholeDelayFor(staged.bias, next.rate);
+            staged.wholeDelaySamples = wholeDelayFor(staged.bias, rate);
             return staged;
         }
 
-        const double sign = next.direction == detail::DopplerDirection::Correct ? -1. : 1.;
-        const double bias = resolveBias(*table, next);
+        const double sign = direction == detail::DopplerDirection::Correct ? -1. : 1.;
+        if (direction == detail::DopplerDirection::Apply && bias < 0.) {
+            return std::unexpected("bias_s: must be >= 0 in apply mode");
+        }
+        const double resolved = resolveBias(*table, direction, bias);
 
         // The commanded delay is `sign * delay + bias`. It must stay in [0, the line's reach) at every knot. Its
         // slope must stay under one sample per sample, or the read position would run backwards.
         const auto knotTimes = table->times();
         const auto knotVals  = table->values();
         for (std::size_t i = 0UZ; i < knotVals.size(); ++i) {
-            const double commanded = sign * knotVals[i] + bias;
+            const double commanded = sign * knotVals[i] + resolved;
             if (!(commanded >= 0.)) {
-                throw gr::exception(std::format("RangeDelay: knot {} commands {} s; raise bias_s to make it non-negative", i, commanded));
+                return std::unexpected(std::format("knot {}: delay must be >= 0", i));
             }
             if (!(commanded < reach)) {
-                throw gr::exception(std::format("RangeDelay: knot {} commands {} s, at or past the {} s the fixed-point delay carries at {} Hz", i, commanded, reach, static_cast<double>(next.rate)));
+                return std::unexpected(std::format("knot {}: delay must be < {} s", i, reach));
             }
         }
         for (std::size_t i = 1UZ; i < knotVals.size(); ++i) {
             const double dtSeconds = static_cast<double>(knotTimes[i] - knotTimes[i - 1UZ]) * 1e-9;
             const double slope     = std::abs((knotVals[i] - knotVals[i - 1UZ]) / dtSeconds); // seconds of delay per second, dimensionless
             if (!(slope < 1.0)) {
-                throw gr::exception(std::format("RangeDelay: segment {} changes the delay by {} s per second, at or past one sample per sample", i, slope));
+                return std::unexpected(std::format("segment {}: slope must be < 1", i));
             }
         }
 
         Staged staged;
-        staged.bias = bias;
+        staged.bias = resolved;
         // The line holds history for the largest delay this table commands. A schedule holds its end values. The
         // maximum therefore depends on the table alone and not on the stream.
         double worst = 0.;
         for (const double value : knotVals) {
-            worst = std::max(worst, sign * value + bias);
+            worst = std::max(worst, sign * value + resolved);
         }
-        staged.wholeDelaySamples = wholeDelayFor(worst, next.rate);
+        staged.wholeDelaySamples = wholeDelayFor(worst, rate);
         return staged;
     }
 
-    [[nodiscard]] static double resolveBias(const gr::timing::DelaySchedule& schedule, const detail::RangeDelaySettings& next) {
-        if (!std::isnan(next.bias)) {
-            if (!std::isfinite(next.bias)) {
-                throw gr::exception(std::format("RangeDelay: 'bias_s' is {} s; set it finite, or NaN to derive it", next.bias));
-            }
-            if (next.direction == detail::DopplerDirection::Apply && next.bias < 0.) {
-                throw gr::exception(std::format("RangeDelay: 'bias_s' is {} s under 'apply'; set it non-negative", next.bias));
-            }
-            return next.bias;
+    [[nodiscard]] static double resolveBias(const gr::timing::DelaySchedule& schedule, detail::DopplerDirection direction, double bias) {
+        if (bias != 0.) {
+            return bias;
         }
-        // The default keeps the commanded delay causal. `apply` is already non-negative and takes zero. `correct`
-        // commands `-delay + bias`, least where the delay is greatest. The schedule's maximum lifts that least value
-        // to zero.
-        return next.direction == detail::DopplerDirection::Correct ? schedule.maxValue() : 0.;
+        // The default keeps the commanded delay causal. Apply is already non-negative and takes zero. Correct commands
+        // `-delay + bias`, least where the delay is greatest. The schedule's maximum lifts that least value to zero.
+        return direction == detail::DopplerDirection::Correct ? schedule.maxValue() : 0.;
     }
 
     void reserve(std::size_t nSamples) {
@@ -608,12 +588,12 @@ private:
         if (_schedule) {
             _schedule->valuesFor(_clock, _position, delays);
             for (double& value : delays) {
-                value = (_accepted.direction == detail::DopplerDirection::Correct ? -value : value) + _bias;
+                value = (settings.direction.value == detail::DopplerDirection::Correct ? -value : value) + _bias;
             }
         } else {
             std::ranges::fill(delays, _bias); // no table is a constant bias, which may be zero
         }
-        if (const auto converted = gr::filter::fractionalDelayQ32(std::span<const double>(delays), static_cast<double>(_accepted.rate), delaysQ32); !converted) {
+        if (const auto converted = gr::filter::fractionalDelayQ32(std::span<const double>(delays), static_cast<double>(settings.sample_rate.value), delaysQ32); !converted) {
             return std::unexpected(converted.error());
         }
         if (const auto ran = _line->process(input, std::span<const std::uint64_t>(delaysQ32), output); !ran) {
@@ -703,7 +683,7 @@ private:
             return;
         }
         const float* tagged   = rate->second.get_if<float>();
-        const double accepted = static_cast<double>(_accepted.rate);
+        const double accepted = static_cast<double>(settings.sample_rate.value);
         if (tagged == nullptr || !(std::abs(static_cast<double>(*tagged) - accepted) <= 1e-9 * accepted)) {
             _nRateDisagreements.fetch_add(1ULL, std::memory_order_relaxed);
         }
@@ -714,7 +694,7 @@ private:
             return _anchor.armed() ? _bias : 0.;
         }
         const double raw = _schedule->delayAt(_clock.timeOf(index));
-        return (_accepted.direction == detail::DopplerDirection::Correct ? -raw : raw) + _bias;
+        return (settings.direction.value == detail::DopplerDirection::Correct ? -raw : raw) + _bias;
     }
 
     [[nodiscard]] SchedulePosition positionAt(std::uint64_t index) const noexcept {
@@ -743,7 +723,7 @@ private:
         _nReanchors.store(_anchor.nReanchors(), std::memory_order_relaxed);
         _nRefusedAnchors.store(_anchor.nRefusedAnchors(), std::memory_order_relaxed);
         const double seconds = delaySecondsAt(_position);
-        _slot.publish({seconds, seconds * static_cast<double>(_accepted.rate), _bias, _line ? _line->latencySamples() : 0., _line ? _line->groupDelaySamples() : 0., static_cast<double>(static_cast<std::uint8_t>(positionAt(_position))), static_cast<double>(_line ? _line->historySamples() : 0UZ)}, _position);
+        _slot.publish({seconds, seconds * static_cast<double>(settings.sample_rate.value), _bias, _line ? _line->latencySamples() : 0., _line ? _line->groupDelaySamples() : 0., static_cast<double>(static_cast<std::uint8_t>(positionAt(_position))), static_cast<double>(_line ? _line->historySamples() : 0UZ)}, _position);
     }
 };
 

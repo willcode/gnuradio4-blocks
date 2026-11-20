@@ -7,6 +7,7 @@
 #include <numbers>
 #include <print>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include <gnuradio-4.0/channel/CarrierImpairments.hpp>
 #include <gnuradio-4.0/sync/LoopCommon.hpp>
 #include <gnuradio-4.0/sync/Pll.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -28,8 +30,7 @@ constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 template<typename Block>
 [[nodiscard]] Block configured(gr::property_map settings) {
     Block block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -184,8 +185,7 @@ const boost::ut::suite<"carrier impairments"> carrierTests = [] {
             auto           block = configured<FrequencyOffset<C>>({{"sample_rate", static_cast<float>(fs)}, {"frequency_offset", f0}, {"drift", rate}});
             std::vector<C> out(input.size());
             std::ignore = block.processBulk(std::span<const C>(input).first(kBefore), std::span<C>(out).first(kBefore));
-            std::ignore = block.settings().setStaged(change.settings);
-            std::ignore = block.settings().applyStagedParameters();
+            std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), change.settings);
             std::ignore = block.processBulk(std::span<const C>(input).subspan(kBefore), std::span<C>(out).subspan(kBefore));
 
             double      phase   = 0.;
@@ -216,8 +216,8 @@ const boost::ut::suite<"carrier impairments"> carrierTests = [] {
     };
 
     "the sample rate must be positive"_test = [] {
-        expect(throws([] { std::ignore = configured<FrequencyOffset<C>>({{"sample_rate", 0.f}}); }));
-        expect(throws([] { std::ignore = configured<PhaseNoise<C>>({{"sample_rate", -1.f}}); }));
+        expect(gr::testing::initRefused<FrequencyOffset<C>>({{"sample_rate", 0.f}}));
+        expect(gr::testing::initRefused<PhaseNoise<C>>({{"sample_rate", -1.f}}));
     };
 
     // the walk's step variance is what the stated linewidth means
@@ -385,6 +385,35 @@ const boost::ut::suite<"carrier impairments"> carrierTests = [] {
             worst = std::max(worst, std::abs(std::arg(sample)));
         }
         expect(lt(worst, 0.5f)) << "and tracks the noisy carrier";
+    };
+};
+
+const boost::ut::suite<"CarrierImpairments settings at the initialization"> carrierInitTests = [] {
+    using namespace boost::ut;
+
+    "FrequencyOffset initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::FrequencyOffset<std::complex<float>>>({
+            {"sample_rate", 1e6f},
+            {"frequency_offset", 100.0},
+            {"drift", 10.0},
+            {"phase_offset", 0.5},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "PhaseNoise initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::PhaseNoise<std::complex<float>>>({
+            {"sample_rate", 1e6f},
+            {"linewidth", 100.0},
+            {"seed", std::uint64_t{3U}},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "IqImbalance initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::IqImbalance<std::complex<float>>>({
+            {"amplitude_imbalance_db", 0.5},
+            {"phase_imbalance", 0.05},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

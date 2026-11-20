@@ -30,8 +30,7 @@ constexpr std::array<Row, 5UZ> kRows{Row{"1 tap, 8 sinusoids", 8U, 1UZ}, Row{"1 
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     block.start();
     return block;
 }

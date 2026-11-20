@@ -27,9 +27,8 @@ const std::vector<double>       kDelays{1.0e-4, 1.5e-4};
 
 /// The block carries a measurement slot, so it lives where it is built.
 [[nodiscard]] std::unique_ptr<RangeDelay<CF>> make(std::size_t bank, int order) {
-    auto block = std::make_unique<RangeDelay<CF>>(gr::property_map{{"schedule_times_ns", kTimes}, {"schedule_delays_s", kDelays}, {"sample_rate", kSampleRate}, {"order", order}, {"bank_size", gr::Size_t{static_cast<std::uint32_t>(bank)}}});
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    auto block  = std::make_unique<RangeDelay<CF>>(gr::property_map{{"schedule_times_ns", kTimes}, {"schedule_delays_s", kDelays}, {"sample_rate", kSampleRate}, {"interpolation", std::string(order == 3 ? "cubic" : order == 1 ? "linear" : "nearest")}, {"bank_size", gr::Size_t{static_cast<std::uint32_t>(bank)}}});
+    std::ignore = block->check({});
     block->start();
     return block;
 }

@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/algorithm/timing/FrequencySchedule.hpp>
 #include <gnuradio-4.0/channel/Awgn.hpp>
 #include <gnuradio-4.0/channel/DopplerShift.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -38,8 +39,7 @@ constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> configured(gr::property_map settings) {
     auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    boost::ut::expect(block->check({}).has_value());
     block->start();
     return block;
 }
@@ -73,24 +73,14 @@ template<typename TBlock>
 /// @brief Applies @p change to a running block and reports a refusal by the block or by the limits.
 template<typename TBlock>
 [[nodiscard]] bool refusedLive(TBlock& block, gr::property_map change) {
-    std::ignore = block.settings().setStaged(std::move(change));
-    try {
-        return !block.settings().applyStagedParameters().failedParameters.empty();
-    } catch (const std::exception&) {
-        return true;
-    }
+    return !gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(change)).empty();
 }
 
 /// @brief Applies @p change to a running block. Returns the block's refusal, empty when the block takes the change.
 template<typename TBlock>
 [[nodiscard]] std::string refusalLive(TBlock& block, gr::property_map change) {
-    std::ignore = block.settings().setStaged(std::move(change));
-    try {
-        std::ignore = block.settings().applyStagedParameters();
-    } catch (const gr::exception& refusal) {
-        return refusal.message;
-    }
-    return {};
+    const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(change));
+    return refused.empty() ? std::string{} : refused.front().reason;
 }
 
 /**
@@ -218,15 +208,10 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         const std::vector<std::int64_t> times{0LL, 1'000'000'000LL, 2'000'000'000LL};
         const std::vector<double>       offsets{1'000., 24'000., -500.}; // knot 1 sits exactly on fs/2
 
-        bool        threw = false;
-        std::string what;
-        try {
-            std::ignore = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}});
-        } catch (const std::exception& error) {
-            threw = true;
-            what  = error.what();
-        }
-        expect(threw) << "an aliased shift is refused rather than wrapped";
+        DopplerShift<C>   aliased({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}});
+        const auto        initialized = aliased.check({});
+        const std::string what        = initialized.has_value() || initialized.error().empty() ? std::string{} : initialized.error().front().reason;
+        expect(!initialized.has_value()) << "an aliased shift is refused rather than wrapped";
         expect(what.contains("knot 1")) << std::format("the message names the offending knot: {}", what);
 
         // one hertz inside the limit is a shift, not an alias
@@ -235,9 +220,9 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
 
         // and the kernel's own refusals still name their knot through the block
         const std::vector<std::int64_t> backwards{0LL, 2'000'000'000LL, 1'000'000'000LL};
-        expect(throws([&] { std::ignore = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", backwards}, {"schedule_offsets_hz", inside}}); }));
-        expect(throws([&] { std::ignore = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", std::vector<double>{1., 2.}}}); }));
-        expect(throws([&] { std::ignore = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}, {"direction", std::string("undo")}}); }));
+        expect(gr::testing::initRefused<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", backwards}, {"schedule_offsets_hz", inside}}));
+        expect(gr::testing::initRefused<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", std::vector<double>{1., 2.}}}));
+        expect(gr::testing::initRefused<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}, {"direction", std::string("undo")}}));
     };
 
     // A refused rate leaves the output of a running block as it was
@@ -263,7 +248,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         auto limited = configured<DopplerShift<C>>(table);
         for (const float refused : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN(), 1e30f}) {
             expect(refusedLive(*limited, {{"sample_rate", refused}})) << std::format("sample_rate {}", refused);
-            expect(that % (limited->sample_rate.value == fs)) << std::format("sample_rate {}: the member keeps {} Hz", refused, fs);
+            expect(that % (limited->settings.sample_rate.value == fs)) << std::format("sample_rate {}: the member keeps {} Hz", refused, fs);
         }
     };
 
@@ -275,10 +260,10 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         const auto     input = ones(n);
         std::vector<C> out(n);
         expect(refusedLive(*block, {{"sample_rate", 150.f}})) << "150 Hz puts the 100 Hz knot past half the rate";
-        expect(that % (block->sample_rate.value == 1'000.f)) << "and the accepted rate is written back to its member";
+        expect(that % (block->settings.sample_rate.value == 1'000.f)) << "and the accepted rate is written back to its member";
         expect(!refusedLive(*block, {{"sample_rate", 150.f}, {"schedule_offsets_hz", std::vector<double>{50., 50.}}})) << "the same rate beside a table that fits it";
         std::ignore = block->processBulk(std::span<const C>(input), std::span<C>(out));
-        expect(that % (block->sample_rate.value == 150.f));
+        expect(that % (block->settings.sample_rate.value == 150.f));
         expect(that % (std::abs(instantaneousFrequency(out, n / 2UZ, 64UZ, 150.) - 50.) < 1e-3)) << "the output is the 50 Hz knot at 150 Hz";
     };
 
@@ -287,11 +272,11 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         auto              block   = configured<DopplerShift<C>>({{"sample_rate", 1'000.f}, {"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_offsets_hz", std::vector<double>{100., 100.}}});
         const std::string refusal = refusalLive(*block, {{"sample_rate", 150.f}});
         expect(fatal(!refusal.empty())) << "150 Hz puts the 100 Hz knot past half the rate";
-        expect(that % (block->sample_rate.value == 1'000.f)) << "the accepted rate is written back to its member";
+        expect(that % (block->settings.sample_rate.value == 1'000.f)) << "the accepted rate is written back to its member";
 
         const std::string unrelated = refusalLive(*block, {{"anchor_ns", std::int64_t{7}}});
         expect(unrelated.empty()) << std::format("a new anchor time is taken; the refusal: {}", unrelated);
-        expect(that % (block->anchor_ns.value == 7LL && block->anchorNs() == 7LL)) << "the member and the block take the new anchor time";
+        expect(that % (block->settings.anchor_ns.value == 7LL && block->anchorNs() == 7LL)) << "the member and the block take the new anchor time";
     };
 
     // The chunk boundaries cannot change a sample
@@ -491,6 +476,22 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         std::println("[doppler] corrected pass: {} symbols over a {} s pass at {} Hz — BER {:.6f} corrected against {:.6f} with no pass, difference {:.2e}, one sigma {:.2e}, {:.2f} s", kSymbols, kSeconds, fs, withPass, clean, withPass - clean, sigma, elapsed);
         expect(gt(clean, 1e-3)) << "the reference run must actually be making errors for the comparison to mean anything";
         expect(lt(std::abs(withPass - clean), 5. * sigma)) << std::format("BER {:.6f} corrected against {:.6f}", withPass, clean);
+    };
+};
+
+const boost::ut::suite<"DopplerShift settings at the initialization"> dopplerInitTests = [] {
+    using namespace boost::ut;
+
+    "DopplerShift initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::DopplerShift<std::complex<float>>>({
+            {"direction", std::string("Correct")},
+            {"sample_rate", 1e6f},
+            {"anchor_index", std::uint64_t{10U}},
+            {"anchor_ns", std::int64_t{5}},
+            {"anchor_source", std::string("first_trigger")},
+            {"honor_trigger_offset", false},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

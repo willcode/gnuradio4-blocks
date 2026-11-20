@@ -7,10 +7,12 @@
 #include <numbers>
 #include <print>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/channel/DelayProfile.hpp>
 #include <gnuradio-4.0/channel/Multipath.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include "EstimateKeys.hpp"
@@ -22,8 +24,7 @@ using C = std::complex<float>;
 template<typename Block>
 [[nodiscard]] Block configured(gr::property_map settings) {
     Block block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -115,8 +116,7 @@ struct LiveChange {
     std::ignore = block.processBulk(std::span<const C>(ones.data(), before), std::span<C>(result.gains.data(), before));
 
     result.beforeUpdate = block.currentGains().front();
-    std::ignore         = block.settings().setStaged(change);
-    std::ignore         = block.settings().applyStagedParameters();
+    std::ignore         = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), change);
     result.afterUpdate  = block.currentGains().front();
 
     std::ignore = block.processBulk(std::span<const C>(ones.data(), after), std::span<C>(result.gains.data() + before, after));
@@ -301,8 +301,8 @@ const boost::ut::suite<"fading channel"> fadingTests = [] {
     };
 
     "delays are refused unless strictly ascending, and the tables must match"_test = [&] {
-        expect(throws([&] { std::ignore = configured<FadingChannel<C>>({{"delays", std::vector<gr::Size_t>{0U, 0U}}, {"powers_db", std::vector<double>{0.0, 0.0}}}); })) << "repeated delays";
-        expect(throws([&] { std::ignore = configured<FadingChannel<C>>({{"delays", std::vector<gr::Size_t>{0U, 1U}}, {"powers_db", std::vector<double>{0.0}}}); })) << "mismatched table lengths";
+        expect(gr::testing::initRefused<FadingChannel<C>>({{"delays", std::vector<gr::Size_t>{0U, 0U}}, {"powers_db", std::vector<double>{0.0, 0.0}}})) << "repeated delays";
+        expect(gr::testing::initRefused<FadingChannel<C>>({{"delays", std::vector<gr::Size_t>{0U, 1U}}, {"powers_db", std::vector<double>{0.0}}})) << "mismatched table lengths";
     };
 
     "tapsFromProfile places each path at its rounded delay"_test = [] {
@@ -353,6 +353,25 @@ const boost::ut::suite<"fading channel"> fadingTests = [] {
         const gr::property_map twoTaps{{"delays", std::vector<gr::Size_t>{0U, 3U}}, {"powers_db", std::vector<double>{0.0, -3.0}}, {"max_doppler", 0.01}, {"seed", std::uint64_t(9)}};
         expect(keysCrossing<gr::blocks::testing::Copy<C>>() == keysOtherThan({})) << "every test key crosses a block that drops none";
         expect(keysCrossing<FadingChannel<C>>(twoTaps) == keysOtherThan({"freq_est", "phase_est", "time_est", "clock_est"}));
+    };
+};
+
+const boost::ut::suite<"FadingChannel settings at the initialization"> fadingInitTests = [] {
+    using namespace boost::ut;
+
+    "FadingChannel initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::FadingChannel<std::complex<float>>>({
+            {"sample_rate", 1e6f},
+            {"delays", std::vector<gr::Size_t>{2U}},
+            {"powers_db", std::vector<double>{-3.0}},
+            {"max_doppler", 10.0},
+            {"k_factor", 2.0},
+            {"los_doppler_ratio", 0.5},
+            {"n_sinusoids", gr::Size_t{8U}},
+            {"normalize", false},
+            {"seed", std::uint64_t{3U}},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

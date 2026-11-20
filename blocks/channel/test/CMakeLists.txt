@@ -1,5 +1,5 @@
 add_ut_test(qa_Awgn)
-target_link_libraries(qa_Awgn PRIVATE gr-channel)
+target_link_libraries(qa_Awgn PRIVATE gr-channel gr-testing)
 add_ut_test(qa_CarrierImpairments)
 target_link_libraries(qa_CarrierImpairments PRIVATE gr-channel gr-sync gr-testing)
 add_ut_test(qa_ChannelConverter)

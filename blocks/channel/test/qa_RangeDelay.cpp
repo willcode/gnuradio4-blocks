@@ -26,6 +26,7 @@
 #include <gnuradio-4.0/algorithm/timing/FrequencySchedule.hpp>
 #include <gnuradio-4.0/channel/DopplerShift.hpp>
 #include <gnuradio-4.0/channel/RangeDelay.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/SettingsLimits.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -49,21 +50,25 @@ inline constexpr bool kSameDoc = !Left::documentation().empty() && Left::documen
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> configured(gr::property_map settings) {
     auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    boost::ut::expect(block->check({}).has_value());
     block->start();
     return block;
 }
 
-/// @brief The message a staging refusal carries, or empty where the settings were accepted.
+/// @brief The reason the initialization refuses @p settings with, or empty where it accepts them.
 template<typename TBlock>
 [[nodiscard]] std::string refusalOf(gr::property_map settings) {
-    try {
-        std::ignore = configured<TBlock>(std::move(settings));
-    } catch (const std::exception& refusal) {
-        return refusal.what();
-    }
-    return {};
+    TBlock     block(std::move(settings));
+    const auto initialized = block.check({});
+    return initialized.has_value() || initialized.error().empty() ? std::string{} : initialized.error().front().reason;
+}
+
+/// @brief The key the initialization refuses @p settings against, or empty where it accepts them.
+template<typename TBlock>
+[[nodiscard]] std::string refusedKeyOf(gr::property_map settings) {
+    TBlock     block(std::move(settings));
+    const auto initialized = block.check({});
+    return initialized.has_value() || initialized.error().empty() ? std::string{} : initialized.error().front().key;
 }
 
 //! One straight call over the whole input, the raw-span overload the anchor-free cases exercise.
@@ -270,24 +275,14 @@ template<typename T, typename TBlock>
 /// @brief Stages @p change on a running block and applies it. True when the block or the limits refused it.
 template<typename TBlock>
 [[nodiscard]] bool refusedLive(TBlock& block, gr::property_map change) {
-    std::ignore = block.settings().setStaged(std::move(change));
-    try {
-        return !block.settings().applyStagedParameters().failedParameters.empty();
-    } catch (const std::exception&) {
-        return true;
-    }
+    return !gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(change)).empty();
 }
 
 /// @brief The message with which a running block refuses @p change, or empty where it applies the change.
 template<typename TBlock>
 [[nodiscard]] std::string refusalLive(TBlock& block, gr::property_map change) {
-    std::ignore = block.settings().setStaged(std::move(change));
-    try {
-        std::ignore = block.settings().applyStagedParameters();
-    } catch (const gr::exception& refusal) {
-        return refusal.message;
-    }
-    return {};
+    const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(change));
+    return refused.empty() ? std::string{} : refused.front().reason;
 }
 
 /// @brief The samples of @p driven from @p from on.
@@ -349,6 +344,23 @@ struct EndSink : gr::Block<EndSink<T>> {
 int main() {
     using namespace boost::ut;
 
+    "RangeDelay initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::RangeDelay<std::complex<float>>>({
+            {"direction", std::string("Correct")},
+            {"bias_s", 0.001},
+            {"sample_rate", 1e6f},
+            {"anchor_index", std::uint64_t{10U}},
+            {"anchor_ns", std::int64_t{5}},
+            {"anchor_source", std::string("every_trigger")},
+            {"honor_trigger_offset", false},
+            {"bank_size", gr::Size_t{32U}},
+            {"interpolation", std::string("cubic")},
+            {"attenuation_db", 80.0},
+            {"rolloff", 0.3},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+
     // A constant delay at an integral total lag is a plain shift, to the interpolation bound
     "a constant delay reduces to an integer sample shift, latency included"_test = [] {
         // The line's own lag is fractional. A whole-sample compare after removing the group delay is not possible at
@@ -356,13 +368,13 @@ int main() {
         // The interpolator runs at a fraction of an arm. The comparison against `out[n] = in[n - delay]` is exact.
         // That formula is the integer shift that defines `SampleDelay`.
         constexpr std::size_t kBank = 32UZ;
-        const auto            probe = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1., 1.}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{kBank}}});
+        const auto            probe = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1., 1.}}, {"sample_rate", 1.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{kBank}}});
 
         const double latency   = probe->latencySamples();
         const double lag       = std::ceil(latency) + 7.; // an integer, and past the transient
         const double commanded = lag - latency;           // fractional, and the bank interpolates between arms
 
-        auto block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{commanded, commanded}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{kBank}}});
+        auto block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{commanded, commanded}}, {"sample_rate", 1.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{kBank}}});
 
         std::vector<float> signal(4096UZ);
         for (std::size_t k = 0UZ; k < signal.size(); ++k) {
@@ -401,7 +413,7 @@ int main() {
             double worstAll = 0.;
             for (std::size_t step = 0UZ; step < 33UZ; ++step) { // 33 fractional delays across one arm spacing and beyond
                 const double      delay   = 4. + static_cast<double>(step) / 32.;
-                auto              block   = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{delay, delay}}, {"sample_rate", 1.f}, {"order", arm.order}, {"bank_size", gr::Size_t{static_cast<std::uint32_t>(arm.bank)}}});
+                auto              block   = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{delay, delay}}, {"sample_rate", 1.f}, {"interpolation", std::string(arm.order == 3 ? "cubic" : arm.order == 1 ? "linear" : "nearest")}, {"bank_size", gr::Size_t{static_cast<std::uint32_t>(arm.bank)}}});
                 const double      latency = block->latencySamples();
                 const std::size_t nSkip   = block->historySamples() + 64UZ;
 
@@ -437,7 +449,7 @@ int main() {
 
         // The envelope's half. A linear range ramp of rate v is a delay ramp of rate v/c. A tone through it emerges
         // at f_b*(1 - v/c) exactly. The derivation is closed form, not first order.
-        auto       delayBlock = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, static_cast<std::int64_t>(seconds * 1e9)}}, {"schedule_delays_s", std::vector<double>{d0, d0 + slope * seconds}}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
+        auto       delayBlock = configured<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, static_cast<std::int64_t>(seconds * 1e9)}}, {"schedule_delays_s", std::vector<double>{d0, d0 + slope * seconds}}, {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{128U}}});
         const auto delayed    = runWhole<RangeDelay<C>, C>(*delayBlock, std::span<const C>(tone(fb / fs, n)));
 
         const std::size_t nSkip       = delayBlock->historySamples() + 1024UZ;
@@ -505,23 +517,21 @@ int main() {
 
         const std::string backwards = refusalOf<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 2'000'000'000LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3, 1e-3}}, {"sample_rate", 1.e6f}});
         expect(!backwards.empty() && backwards.contains("knot 2")) << std::format("times that do not increase name the knot that turned back: {}", backwards);
-        expect(backwards.contains("'schedule_times_ns'/'schedule_delays_s'")) << std::format("the schedule's refusal names the two settings: {}", backwards);
 
         const std::string unpaired = refusalOf<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3, 1e-3}}, {"sample_rate", 1.e6f}});
         expect(!unpaired.empty() && unpaired.contains("must be paired")) << std::format("a table with more delays than times is refused: {}", unpaired);
 
         const std::string both = refusalOf<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}});
-        expect(!both.empty() && both.contains("are both set")) << std::format("a file beside the vectors is refused: {}", both);
+        expect(!both.empty() && both.contains("schedule_file is incompatible with schedule lists")) << std::format("a file beside the vectors is refused: {}", both);
 
-        const std::string missing = refusalOf<RangeDelay<float>>({{"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}});
-        expect(missing.contains("RangeDelay: 'schedule_file': ") && missing.contains("/nonexistent.gr4traj")) << std::format("a file the loader refuses names the setting and the path: {}", missing);
-        const std::string missingShift = refusalOf<DopplerShift<C>>({{"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}});
-        expect(missingShift.contains("DopplerShift: 'schedule_file': ") && missingShift.contains("/nonexistent.gr4traj")) << std::format("the shift names the setting and the path too: {}", missingShift);
+        const gr::property_map missingFile{{"schedule_file", std::string("/nonexistent.gr4traj")}, {"sample_rate", 1.e6f}};
+        const std::string      missing = refusalOf<RangeDelay<float>>(missingFile);
+        expect(eq(refusedKeyOf<RangeDelay<float>>(missingFile), std::string("schedule_file")) && missing.contains("/nonexistent.gr4traj")) << std::format("a file the loader refuses names the setting and the path: {}", missing);
+        const std::string missingShift = refusalOf<DopplerShift<C>>(missingFile);
+        expect(eq(refusedKeyOf<DopplerShift<C>>(missingFile), std::string("schedule_file")) && missingShift.contains("/nonexistent.gr4traj")) << std::format("the shift names the setting and the path too: {}", missingShift);
 
-        const std::string offAxis = refusalOf<RangeDelay<float>>({{"sample_rate", 1.e30f}});
-        expect(offAxis.contains("RangeDelay") && offAxis.contains("sample_rate")) << std::format("a rate off the exact time axis names the block and the setting: {}", offAxis);
-        const std::string offAxisShift = refusalOf<DopplerShift<C>>({{"sample_rate", 1.e30f}});
-        expect(offAxisShift.contains("DopplerShift") && offAxisShift.contains("sample_rate")) << std::format("the shift names them too: {}", offAxisShift);
+        expect(eq(refusedKeyOf<RangeDelay<float>>({{"sample_rate", 1.e30f}}), std::string("sample_rate"))) << "a rate off the exact time axis is refused against the rate";
+        expect(eq(refusedKeyOf<DopplerShift<C>>({{"sample_rate", 1.e30f}}), std::string("sample_rate"))) << "the shift refuses it too";
 
         // and the settings that carry their own arithmetic
         expect(!refusalOf<RangeDelay<float>>([&] {
@@ -532,12 +542,12 @@ int main() {
                     .empty())
             << "a bank that is not a power of two";
         expect(!refusalOf<RangeDelay<float>>([&] {
-            auto s     = ramp(1e-3, 1e-3);
-            s["order"] = 2;
+            auto s             = ramp(1e-3, 1e-3);
+            s["interpolation"] = std::string("quadratic");
             return s;
         }())
                     .empty())
-            << "an interpolation order the line has no arm blend for";
+            << "an interpolation the line has no arm blend for";
         expect(!refusalOf<RangeDelay<float>>([&] {
             auto s             = ramp(1e-3, 1e-3);
             s["anchor_source"] = std::string("on_tuesdays");
@@ -569,7 +579,7 @@ int main() {
     // A combination whose prototype passes the design cap is refused from three numbers, before any design runs
     "a bank the design cap cannot hold is refused by name before it is designed"_test = [] {
         const auto settingsWith = [](gr::property_map extra) {
-            gr::property_map s{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"sample_rate", 1.e6f}, {"order", 1}};
+            gr::property_map s{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"sample_rate", 1.e6f}, {"interpolation", std::string("linear")}};
             for (auto& [key, value] : extra) {
                 s.insert_or_assign(key, value);
             }
@@ -578,36 +588,29 @@ int main() {
         const auto expectNamed = [](const std::string& refusal, std::size_t bank, double rolloff, double attenuationDb, std::string_view why) {
             const std::size_t estimate = gr::filter::fractionalDelayTapEstimate(bank, rolloff, attenuationDb);
             expect(that % (estimate > gr::filter::kFractionalDelayMaxTaps)) << std::format("{}: the estimate {} is past the cap", why, estimate);
-            expect(refusal.contains("RangeDelay") && refusal.contains("'bank_size'") && refusal.contains("'rolloff'") && refusal.contains("'attenuation_db'")) << std::format("{}: the refusal names the block and the three settings: {}", why, refusal);
-            expect(refusal.contains(std::format("needs about {} taps, past the {}", estimate, gr::filter::kFractionalDelayMaxTaps))) << std::format("{}: the refusal carries the estimate and the cap, so it came before the design: {}", why, refusal);
+            expect(refusal.contains(std::format("bank {} needs more than {} taps", bank, gr::filter::kFractionalDelayMaxTaps))) << std::format("{}: the refusal names the bank and the cap, so it came before the design: {}", why, refusal);
         };
 
         expectNamed(refusalOf<RangeDelay<float>>(settingsWith({{"bank_size", gr::Size_t{2048U}}})), 2048UZ, 0.2, 60.0, "2048 arms at the default");
         expectNamed(refusalOf<RangeDelay<float>>(settingsWith({{"bank_size", gr::Size_t{1024U}}, {"attenuation_db", 140.0}})), 1024UZ, 0.2, 140.0, "1024 arms at the top attenuation");
         expectNamed(refusalOf<RangeDelay<float>>(settingsWith({{"bank_size", gr::Size_t{32U}}, {"rolloff", 0.001}})), 32UZ, 0.001, 60.0, "a narrow transition on a small bank");
 
-        // bank_size 0 derives the bank, and the refusal says so
+        // bank_size 0 derives the bank, and the refusal names the derived bank
         const std::size_t derived = gr::filter::arbitraryBankSize(120.0, 0.2, 1);
         const std::string refusal = refusalOf<RangeDelay<float>>(settingsWith({{"attenuation_db", 120.0}}));
         expectNamed(refusal, derived, 0.2, 120.0, "a derived bank at 120 dB");
-        expect(refusal.contains(std::format("'bank_size' {} (derived)", derived))) << std::format("the derived bank is named as derived: {}", refusal);
 
         // the ripple limit makes a low attenuation long: Kaiser's estimate alone is 8559 taps, and the estimate is ten times that
         expectNamed(refusalOf<RangeDelay<float>>(settingsWith({{"bank_size", gr::Size_t{1024U}}, {"attenuation_db", 20.0}})), 1024UZ, 0.2, 20.0, "1024 arms at the lowest attenuation");
 
-        // an explicit bank is told to lower itself, a derived one to change what it follows
-        expect(!refusal.contains("lower 'bank_size'") && refusal.contains("raise 'order' to 3")) << std::format("a derived bank is advised through order: {}", refusal);
-        const std::string explicitBank = refusalOf<RangeDelay<float>>(settingsWith({{"bank_size", gr::Size_t{2048U}}}));
-        expect(explicitBank.contains("lower 'bank_size'") && !explicitBank.contains("raise 'order'")) << std::format("an explicit bank is advised to be smaller: {}", explicitBank);
-
         // no rolloff below one holds more than 8192 arms, so the limit of bank_size is 8192: the limit refuses 16384, not the cap check
         const std::string overLimit = refusalOf<RangeDelay<float>>(settingsWith({{"bank_size", gr::Size_t{16384U}}}));
-        expect(!overLimit.empty() && !overLimit.contains("needs about")) << std::format("16384 arms are refused by the setting's limits: {}", overLimit);
+        expect(!overLimit.empty() && !overLimit.contains("needs more than")) << std::format("16384 arms are refused by the setting's limits: {}", overLimit);
     };
 
     // A bank the design cannot hold, refused while the block runs, leaves the line and its samples as they were
     "a refused bank leaves the accepted bank and the samples as they were"_test = [] {
-        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}};
+        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}};
         std::vector<float>     impulses(512UZ, 0.f);
         impulses[100UZ] = 1.f;
         impulses[356UZ] = 1.f;
@@ -620,7 +623,7 @@ int main() {
         std::ignore               = block->processBulk(std::span<const float>(impulses).first(256UZ), std::span<float>(out).first(256UZ));
         const std::string refusal = refusalLive(*block, {{"bank_size", gr::Size_t{2048U}}});
         std::ignore               = block->processBulk(std::span<const float>(impulses).subspan(256UZ), std::span<float>(out).subspan(256UZ));
-        expect(refusal.contains("needs about")) << std::format("the combination is refused by the cap check: {}", refusal);
+        expect(refusal.contains("needs more than")) << std::format("the combination is refused by the cap check: {}", refusal);
         expect(std::ranges::equal(out, reference)) << "the samples are those of the unchanged block";
         expect(that % (block->nBankRebuilds() == 0ULL && block->currentDelaySamples() == unchanged->currentDelaySamples())) << "no bank was rebuilt and the delay is the accepted one";
     };
@@ -629,7 +632,7 @@ int main() {
     // and the accepted bank stays in force. 32 arms at 60 dB and a rolloff of 0.00352 need 65.9k taps and the estimate
     // reads 65.2k.
     "a design that misses its target on a running block leaves the accepted bank and the samples as they were"_test = [] {
-        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}};
+        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}};
         std::vector<float>     impulses(512UZ, 0.f);
         impulses[100UZ] = 1.f;
         impulses[356UZ] = 1.f;
@@ -640,44 +643,42 @@ int main() {
 
         auto               block = configured<RangeDelay<float>>(settings);
         std::vector<float> out(impulses.size());
-        std::ignore               = block->processBulk(std::span<const float>(impulses).first(256UZ), std::span<float>(out).first(256UZ));
-        const std::string refusal = refusalLive(*block, {{"rolloff", 0.00352}});
-        std::ignore               = block->processBulk(std::span<const float>(impulses).subspan(256UZ), std::span<float>(out).subspan(256UZ));
-        expect(refusal.contains("designs 65537 taps that deliver a stopband of")) << std::format("the design is refused with the stopband it delivers: {}", refusal);
-        expect(!refusal.contains("needs about")) << std::format("it was not the cap check: {}", refusal);
+        std::ignore                          = block->processBulk(std::span<const float>(impulses).first(256UZ), std::span<float>(out).first(256UZ));
+        const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(*block), {{"rolloff", 0.00352}});
+        std::ignore                          = block->processBulk(std::span<const float>(impulses).subspan(256UZ), std::span<float>(out).subspan(256UZ));
+        expect(eq(refused.size(), 1UZ) >> fatal) << "the one key the call changed fails";
+        const std::string& refusal = refused.front().reason;
+        expect(eq(refused.front().key, std::string("rolloff"))) << "the failure is reported under the key the call changed";
+        expect(refusal.starts_with("attenuation_db: ") && refusal.contains("bank 32 misses attenuation_db or the ripple limit")) << std::format("the reason names the design's key and the miss: {}", refusal);
+        expect(!refusal.contains("needs more than")) << std::format("it was not the cap check: {}", refusal);
         expect(std::ranges::equal(out, reference)) << "the samples are those of the unchanged block";
         expect(that % (block->nBankRebuilds() == 0ULL && block->currentDelaySamples() == unchanged->currentDelaySamples())) << "no bank was rebuilt and the delay is the accepted one";
     };
 
-    // The check admits a combination the design can still miss; the block then refuses with what the design delivers
-    "a design that misses its stopband is refused with the stopband it delivers"_test = [] {
+    // The check admits a combination the design can still miss; the block then refuses naming the bank
+    "a design that misses its stopband is refused naming the bank"_test = [] {
         gr::filter::ResamplerDesign design;
         design.taps.assign(gr::filter::kFractionalDelayMaxTaps | 1UZ, 0.f);
         design.stopbandDb = -41.79;
         design.rippleDb   = 0.069;
         design.ok         = false;
 
-        const std::optional<std::string> explicitBank = gr::blocks::channel::detail::designShortfall(2048UZ, false, 0.2, 60.0, design);
-        expect(fatal(explicitBank.has_value()));
-        expect(explicitBank->contains("RangeDelay") && explicitBank->contains("'bank_size' 2048 with") && explicitBank->contains("designs 65537 taps") && explicitBank->contains("stopband of -41.79 dB") && explicitBank->contains("ripple of 0.069 dB")) << std::format("the refusal names the settings and the delivered stopband and ripple: {}", *explicitBank);
-        expect(explicitBank->contains("lower 'bank_size'")) << std::format("an explicit bank is advised to be smaller: {}", *explicitBank);
-
-        const std::optional<std::string> derivedBank = gr::blocks::channel::detail::designShortfall(1024UZ, true, 0.2, 120.0, design);
-        expect(fatal(derivedBank.has_value()));
-        expect(derivedBank->contains("'bank_size' 1024 (derived)") && derivedBank->contains("raise 'order' to 3")) << std::format("a derived bank is marked and advised through its inputs: {}", *derivedBank);
+        const std::optional<std::string> refusal = gr::blocks::channel::detail::designShortfall(2048UZ, design);
+        expect(fatal(refusal.has_value()));
+        expect(eq(*refusal, std::string("bank 2048 misses attenuation_db or the ripple limit")));
 
         design.ok = true;
-        expect(!gr::blocks::channel::detail::designShortfall(2048UZ, false, 0.2, 60.0, design).has_value()) << "a design that met its target is not refused";
+        expect(!gr::blocks::channel::detail::designShortfall(2048UZ, design).has_value()) << "a design that met its target is not refused";
     };
 
     // A setting both blocks have reads the same in both
     "the settings RangeDelay shares with DopplerShift carry one documentation text"_test = [] {
         using Range         = RangeDelay<float>;
         using Shift         = DopplerShift<C>;
-        constexpr bool same = kSameDoc<decltype(Range::schedule_times_ns), decltype(Shift::schedule_times_ns)> && kSameDoc<decltype(Range::direction), decltype(Shift::direction)> && kSameDoc<decltype(Range::sample_rate), decltype(Shift::sample_rate)> && kSameDoc<decltype(Range::anchor_index), decltype(Shift::anchor_index)> && //
-                              kSameDoc<decltype(Range::anchor_ns), decltype(Shift::anchor_ns)> && kSameDoc<decltype(Range::anchor_source), decltype(Shift::anchor_source)> && kSameDoc<decltype(Range::honor_trigger_offset), decltype(Shift::honor_trigger_offset)>;
+        constexpr bool same = kSameDoc<decltype(Range::Settings::schedule_times_ns), decltype(Shift::Settings::schedule_times_ns)> && kSameDoc<decltype(Range::Settings::direction), decltype(Shift::Settings::direction)> && kSameDoc<decltype(Range::Settings::sample_rate), decltype(Shift::Settings::sample_rate)> && kSameDoc<decltype(Range::Settings::anchor_index), decltype(Shift::Settings::anchor_index)> && //
+                              kSameDoc<decltype(Range::Settings::anchor_ns), decltype(Shift::Settings::anchor_ns)> && kSameDoc<decltype(Range::Settings::anchor_source), decltype(Shift::Settings::anchor_source)> && kSameDoc<decltype(Range::Settings::honor_trigger_offset), decltype(Shift::Settings::honor_trigger_offset)>;
         expect(that % same) << "schedule_times_ns, direction, sample_rate, anchor_index, anchor_ns, anchor_source and honor_trigger_offset";
-        expect(that % (!kSameDoc<decltype(Range::schedule_file), decltype(Shift::schedule_file)>)) << "schedule_file names a different column in each block, so its texts differ";
+        expect(that % (!kSameDoc<decltype(Range::Settings::schedule_file), decltype(Shift::Settings::schedule_file)>)) << "schedule_file names a different column in each block, so its texts differ";
     };
 
     // A range-only file drives the delay and refuses the shift, naming the column it has not got
@@ -694,8 +695,7 @@ int main() {
         expect(block->schedulePosition() == SchedulePosition::Inside);
 
         const std::string refused = refusalOf<DopplerShift<C>>({{"schedule_file", path.string()}, {"sample_rate", 1.e6f}});
-        expect(!refused.empty() && refused.contains("has no frequency column")) << std::format("the shift refuses a table it cannot be built from, naming the column: {}", refused);
-        expect(refused.contains("offset_hz") && refused.contains("range_rate_m_s")) << std::format("and names the columns it looked for: {}", refused);
+        expect(!refused.empty() && refusedKeyOf<DopplerShift<C>>({{"schedule_file", path.string()}, {"sample_rate", 1.e6f}}) == "schedule_file" && refused.contains("frequency column")) << std::format("the shift refuses a table it cannot be built from, naming the column: {}", refused);
 
         std::filesystem::remove(path);
     };
@@ -712,7 +712,7 @@ int main() {
         const std::vector<double>       delays{1.0e-4, 1.5e-4};
         const double                    slopePerSecond = (delays[1] - delays[0]) / 1.0;
 
-        auto forward = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", delays}, {"direction", std::string("Apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
+        auto forward = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", delays}, {"direction", std::string("Apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{128U}}});
 
         // The two lines' latencies are fractional. A whole-sample comparison needs a bias that makes the total lag
         // integral. The causal rule needs a bias at or above the table's maximum. This bias meets both.
@@ -721,8 +721,8 @@ int main() {
         const auto   lag         = static_cast<std::size_t>(std::llround(2. * latency + biasSamples));
 
         const auto pair = [&](const std::vector<double>& table, std::span<const C> signal) {
-            auto       first     = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("Apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
-            auto       second    = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("Correct")}, {"bias_s", biasSamples / fs}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
+            auto       first     = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("Apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{128U}}});
+            auto       second    = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("Correct")}, {"bias_s", biasSamples / fs}, {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{128U}}});
             const auto delayed   = runWhole<RangeDelay<C>, C>(*first, signal);
             const auto recovered = runWhole<RangeDelay<C>, C>(*second, std::span<const C>(delayed));
 
@@ -772,7 +772,7 @@ int main() {
 
         const auto atTime = [&](std::int64_t timeNs) {
             return configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, static_cast<std::int64_t>(seconds * 1e9)}}, {"schedule_delays_s", std::vector<double>{0., change}}, //
-                {"sample_rate", static_cast<float>(fs)}, {"anchor_ns", timeNs}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+                {"sample_rate", static_cast<float>(fs)}, {"anchor_ns", timeNs}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
         };
 
         auto atStart = atTime(0LL);
@@ -797,7 +797,7 @@ int main() {
         constexpr std::size_t n  = 20'000UZ;
 
         const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL, 4'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.02, 0.005}}, //
-            {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{32U}}};
+            {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{32U}}};
 
         const auto           input     = bandLimited(n);
         auto                 whole     = configured<RangeDelay<C>>(settings);
@@ -820,7 +820,7 @@ int main() {
         const auto                 input = bandLimited(n);
 
         const gr::property_map delaySettings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL, 4'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.02, 0.005}}, //
-            {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{32U}}, {"anchor_source", std::string("first_trigger")}};
+            {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{32U}}, {"anchor_source", std::string("first_trigger")}};
         const gr::property_map shiftSettings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL, 4'000'000'000LL}}, {"schedule_offsets_hz", std::vector<double>{100., 200., -50.}}, //
             {"sample_rate", static_cast<float>(fs)}, {"anchor_source", std::string("first_trigger")}};
 
@@ -854,7 +854,7 @@ int main() {
 
         const auto             input = bandLimited(n);
         const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL, 4'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.02, 0.005}}, //
-            {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{32U}}};
+            {"sample_rate", static_cast<float>(fs)}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{32U}}};
 
         auto fromTrigger = configured<RangeDelay<C>>([&] {
             auto s             = table;
@@ -1038,7 +1038,7 @@ int main() {
         constexpr std::size_t n      = 512UZ;
         constexpr double      kDelay = 10.25; // samples, at a rate of one sample per second
 
-        auto         block   = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{kDelay, kDelay}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+        auto         block   = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{kDelay, kDelay}}, {"sample_rate", 1.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
         const double latency = block->latencySamples();
 
         const std::vector<float>   input(n, 1.f);
@@ -1053,7 +1053,7 @@ int main() {
 
         // the same mapping however the stream is cut
         for (const std::size_t chunk : {1UZ, 7UZ, 1000UZ}) {
-            auto       again  = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{kDelay, kDelay}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+            auto       again  = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{kDelay, kDelay}}, {"sample_rate", 1.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
             const auto result = drive<float>(*again, std::span<const float>(input), std::span<const gr::Tag>(tags), chunk);
             expect(that % (result.tags.size() == 2UZ)) << std::format("chunk {}: both tags", chunk);
             expect(that % (result.tags[0].index == expected)) << std::format("chunk {}: the same output sample", chunk);
@@ -1064,7 +1064,7 @@ int main() {
     "tags that reach one output sample are attached together and counted"_test = [] {
         constexpr std::size_t n = 256UZ;
         // the delay falls 0.9 s per second at one sample per second, so the read position advances 1.9 per output
-        auto         block   = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{100., 10.}}, {"sample_rate", 1.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+        auto         block   = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{100., 10.}}, {"sample_rate", 1.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
         const double latency = block->latencySamples();
 
         const std::vector<float> input(n, 1.f);
@@ -1100,7 +1100,7 @@ int main() {
     // The reserved keys' reports about the stream are counted and not acted on
     "a gap and a disagreeing rate are counted where they pass"_test = [] {
         constexpr std::size_t n     = 256UZ;
-        auto                  block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"sample_rate", 1.e3f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+        auto                  block = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{1e-3, 1e-3}}, {"sample_rate", 1.e3f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
 
         const std::vector<float>   input(n, 1.f);
         const std::vector<gr::Tag> tags{gr::Tag{50UZ, gr::property_map{{gr::property_map::key_type(gr::tag::N_DROPPED_SAMPLES.key()), gr::Size_t{17U}}}}, //
@@ -1130,7 +1130,7 @@ int main() {
                 gr::Tag{100UZ, {{gr::property_map::key_type(gr::tag::SAMPLE_RATE.key()), 2.f * kRate}}},                      //
                 gr::Tag{150UZ, {{gr::property_map::key_type(gr::tag::SAMPLE_RATE.key()), kRate}}},                            //
                 gr::Tag{250UZ, {{"marker", std::int64_t{7}}}}};
-        auto& block      = graph.emplaceBlock<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{kDelay, kDelay}}, {"sample_rate", kRate}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+        auto& block      = graph.emplaceBlock<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{kDelay, kDelay}}, {"sample_rate", kRate}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
         auto& sink       = graph.emplaceBlock<EndSink<float>>();
         expect(graph.connect<"out", "in">(source, block).has_value());
         expect(graph.connect<"out", "in">(block, sink).has_value());
@@ -1148,7 +1148,7 @@ int main() {
 
     // A change refused while the block runs leaves every sample where an unchanged block puts it
     "a refused change that names a rate leaves the delay at the accepted rate"_test = [] {
-        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}};
+        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}};
         std::vector<float>     impulses(512UZ, 0.f);
         impulses[100UZ] = 1.f;
         impulses[356UZ] = 1.f;
@@ -1173,11 +1173,11 @@ int main() {
         std::vector<float> out(impulses.size());
         std::ignore = block->processBulk(std::span<const float>(impulses).first(256UZ), std::span<float>(out).first(256UZ));
         expect(refusedLive(*block, {{"sample_rate", 0.f}})) << "a rate of zero";
-        expect(refusedLive(*block, {{"order", 2}})) << "an order the line has no blend for";
+        expect(refusedLive(*block, {{"interpolation", std::string("quadratic")}})) << "an interpolation the line has no blend for";
         expect(refusedLive(*block, {{"attenuation_db", 10.0}})) << "an attenuation below the design range";
         expect(refusedLive(*block, {{"rolloff", 1.0}})) << "a rolloff of one";
         expect(refusedLive(*block, {{"bank_size", gr::Size_t{48U}}})) << "a bank that is not a power of two";
-        expect(that % (block->sample_rate.value == 1'000.f && block->order.value == 1 && block->attenuation_db.value == 60.0 && block->rolloff.value == 0.2 && block->bank_size.value == 32U)) << "every member keeps its accepted value";
+        expect(that % (block->settings.sample_rate.value == 1'000.f && block->settings.interpolation.value == gr::filter::ArmInterpolation::linear && block->settings.attenuation_db.value == 60.0 && block->settings.rolloff.value == 0.2 && block->settings.bank_size.value == 32U)) << "every member keeps its accepted value";
         std::ignore = block->processBulk(std::span<const float>(impulses).subspan(256UZ), std::span<float>(out).subspan(256UZ));
         expect(std::ranges::equal(out, reference)) << "and the samples are those of the unchanged block";
         expect(gr::blocks::testing::settingsOutsideLimits(RangeDelay<float>{}).empty()) << "every default lies inside its limits";
@@ -1214,7 +1214,7 @@ int main() {
                 expect(fromTrigger->anchorArmed()) << std::format("{}: part {} is armed", what, part);
             }
         };
-        compare.template operator()<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 10'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 3}, {"bank_size", gr::Size_t{32U}}}, //
+        compare.template operator()<RangeDelay<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 10'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{32U}}}, //
             {{"schedule_delays_s", std::vector<double>{0.02, 0.02}}}, "RangeDelay");
         compare.template operator()<DopplerShift<C>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 10'000'000'000LL}}, {"schedule_offsets_hz", std::vector<double>{100., 100.}}, {"sample_rate", 1'000.f}}, //
             {{"schedule_offsets_hz", std::vector<double>{120., 120.}}}, "DopplerShift");
@@ -1258,21 +1258,21 @@ int main() {
 
     // A refused rate staged again beside the change that makes it valid is taken
     "a refused rate is written back, and staged again beside the change that makes it valid reaches the samples"_test = [] {
-        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}};
+        const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}};
         std::vector<float>     impulse(256UZ, 0.f);
         impulse[100UZ] = 1.f;
 
         // The first change holds a rate and a direction the block refuses. The second holds the same rate and a good direction.
         auto block = configured<RangeDelay<float>>(settings);
         expect(refusedLive(*block, {{"sample_rate", 500.f}, {"direction", std::string("undo")}}));
-        expect(that % (block->sample_rate.value == 1'000.f)) << "the accepted rate is written back to its member";
+        expect(that % (block->settings.sample_rate.value == 1'000.f)) << "the accepted rate is written back to its member";
         expect(!refusedLive(*block, {{"sample_rate", 500.f}, {"direction", std::string("Apply")}})) << "the same rate beside a valid direction is taken";
-        expect(that % (block->sample_rate.value == 500.f));
+        expect(that % (block->settings.sample_rate.value == 500.f));
         std::vector<float> out(impulse.size());
         std::ignore = block->processBulk(std::span<const float>(impulse), std::span<float>(out));
 
         // A block configured at 500 Hz from the start puts the impulse where this one must.
-        auto               direct = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 500.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
+        auto               direct = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 500.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
         std::vector<float> expected(impulse.size());
         std::ignore = direct->processBulk(std::span<const float>(impulse), std::span<float>(expected));
         expect(std::ranges::equal(out, expected)) << "the impulse leaves where the 500 Hz line puts it";
@@ -1281,22 +1281,22 @@ int main() {
 
     // A refused direction is written back, and a later change of the bias alone is checked against the accepted direction
     "a refused direction is written back, and a later change of another setting is taken"_test = [] {
-        auto              block    = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}});
-        const std::string accepted = block->direction.value;
+        auto              block    = configured<RangeDelay<float>>({{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}});
+        const auto        accepted = block->settings.direction.value;
         const std::string refusal  = refusalLive(*block, {{"direction", std::string("undo")}});
-        expect(fatal(refusal.contains("'direction'"))) << refusal;
-        expect(that % (block->direction.value == accepted)) << "the accepted direction is written back to its member";
+        expect(fatal(refusal.contains("must be one of: apply, correct"))) << refusal;
+        expect(that % (block->settings.direction.value == accepted)) << "the accepted direction is written back to its member";
 
         const std::string unrelated = refusalLive(*block, {{"bias_s", 0.001}});
         expect(unrelated.empty()) << std::format("a new bias is taken; the refusal: {}", unrelated);
-        expect(that % (block->bias_s.value == 0.001 && block->biasSeconds() == 0.001)) << "the member and the block take the new bias";
+        expect(that % (block->settings.bias_s.value == 0.001 && block->biasSeconds() == 0.001)) << "the member and the block take the new bias";
     };
 
     // A change that arms the anchor starts the line on silence, as a tag that arms it does
     "an arm by a settings change starts the line on silence"_test = [] {
         constexpr std::size_t  n     = 300UZ;
         const auto             input = bandLimited(3UZ * n);
-        const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}};
+        const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}};
 
         // The reference starts on silence at the input the arm meets. The table holds one delay. The position in time
         // does not matter.
@@ -1318,7 +1318,7 @@ int main() {
     "a re-anchor by a settings change starts the line on silence"_test = [] {
         constexpr std::size_t  n     = 300UZ;
         const auto             input = bandLimited(2UZ * n);
-        const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}};
+        const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}};
 
         // The table holds one delay. A new anchor changes no delay and starts the line on silence.
         auto       fresh     = configured<RangeDelay<C>>(table);
@@ -1348,7 +1348,7 @@ int main() {
     "an arm after a stretch of pass-through starts the line on silence"_test = [] {
         constexpr std::size_t  n     = 300UZ;
         const auto             input = bandLimited(3UZ * n);
-        const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"order", 1}, {"bank_size", gr::Size_t{32U}}, {"anchor_source", std::string("first_trigger")}};
+        const gr::property_map table{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 100'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.01}}, {"sample_rate", 1'000.f}, {"interpolation", std::string("linear")}, {"bank_size", gr::Size_t{32U}}, {"anchor_source", std::string("first_trigger")}};
 
         // The reference sees one trigger, at sample 2n. Its line takes nothing before that tag.
         auto                       fresh = configured<RangeDelay<C>>(table);
@@ -1371,28 +1371,22 @@ int main() {
     };
 
     // A failed first application leaves start() with the accepted values, which are the defaults
-    "start builds the line from the accepted values and never throws"_test = [] {
-        auto block  = std::make_unique<RangeDelay<float>>(gr::property_map{{"direction", std::string("undo")}});
-        bool failed = false;
-        try {
-            block->settings().init();
-            failed = !block->settings().applyStagedParameters().failedParameters.empty();
-        } catch (const std::exception&) {
-            failed = true;
-        }
-        expect(failed) << "an unknown direction is refused";
+    "a refused block builds no line, and its start builds none"_test = [] {
+        auto block = std::make_unique<RangeDelay<float>>(gr::property_map{{"direction", std::string("undo")}});
+        expect(!block->check({}).has_value()) << "an unknown direction is refused";
         expect(nothrow([&] { block->start(); })) << "start never throws";
-        expect(that % (block->historySamples() > 0UZ)) << "and the line exists";
+        expect(that % (block->historySamples() == 0UZ)) << "the apply hook alone builds the line, and it never ran";
         std::vector<float> input(64UZ, 1.f);
         std::vector<float> out(64UZ);
         expect(block->processBulk(std::span<const float>(input), std::span<float>(out)) == gr::work::Status::OK);
+        expect(std::ranges::equal(out, input)) << "with no line the stream passes through";
     };
 
     // A table or a rate keeps the history. A new bank drops it.
     "restaging a table keeps the line's history and the bank alone rebuilds it"_test = [] {
         constexpr std::size_t  n = 4'000UZ;
         const gr::property_map settings{{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.02}}, //
-            {"sample_rate", 1.e3f}, {"order", 3}, {"bank_size", gr::Size_t{32U}}};
+            {"sample_rate", 1.e3f}, {"interpolation", std::string("cubic")}, {"bank_size", gr::Size_t{32U}}};
 
         const auto           input     = bandLimited(n);
         auto                 straight  = configured<RangeDelay<C>>(settings);
@@ -1403,7 +1397,7 @@ int main() {
         std::ignore = restaged->processBulk(std::span<const C>(input).first(2000UZ), std::span<C>(out.data(), 2000UZ));
         expect(restaged->schedulePosition() == SchedulePosition::After) << "two seconds in, the first table holds its last value";
         // A third knot at ten seconds holds the last value. The new table commands the same delay at every sample of
-        // the run. It differs from the held table, and core passes it to settingsChanged().
+        // the run. It differs from the held table, and core passes it to applySettings().
         expect(!refusedLive(*restaged, {{"schedule_times_ns", std::vector<std::int64_t>{0LL, 1'000'000'000LL, 10'000'000'000LL}}, {"schedule_delays_s", std::vector<double>{0.01, 0.02, 0.02}}}));
         expect(restaged->schedulePosition() == SchedulePosition::Inside) << "the new table is in force";
         std::ignore = restaged->processBulk(std::span<const C>(input).subspan(2000UZ), std::span<C>(out.data() + 2000UZ, n - 2000UZ));
@@ -1411,15 +1405,13 @@ int main() {
         expect(std::ranges::equal(out, reference)) << "a table that commands the same delays is the same stream: the history and the read cursor are kept";
         expect(that % (restaged->nBankRebuilds() == 0ULL)) << "and no bank was cut a second time";
 
-        std::ignore = restaged->settings().setStaged({{"bank_size", gr::Size_t{128U}}});
-        std::ignore = restaged->settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(*restaged), {{"bank_size", gr::Size_t{128U}}}).empty());
         expect(that % (restaged->nBankRebuilds() == 1ULL)) << "a new bank is a new window, and the history it cost is counted";
 
         // a deeper table grows the history and keeps the bank
         auto              deeper = configured<RangeDelay<C>>(settings);
         const std::size_t held   = deeper->historySamples();
-        std::ignore              = deeper->settings().setStaged({{"schedule_delays_s", std::vector<double>{0.01, 0.5}}});
-        std::ignore              = deeper->settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(*deeper), {{"schedule_delays_s", std::vector<double>{0.01, 0.5}}}).empty());
         expect(that % (deeper->historySamples() > held)) << "the line reaches as far back as the new table asks";
         expect(that % (deeper->nBankRebuilds() == 0ULL)) << "without the bank changing at all";
     };

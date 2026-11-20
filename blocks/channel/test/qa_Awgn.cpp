@@ -7,18 +7,19 @@
 #include <numeric>
 #include <print>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/channel/NoisePower.hpp>
 #include <gnuradio-4.0/channel/Awgn.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 namespace {
 
 template<typename T>
 [[nodiscard]] gr::blocks::channel::AwgnChannel<T> makeChannel(double noisePower, std::uint64_t seed) {
     gr::blocks::channel::AwgnChannel<T> block({{"noise_power", noisePower}, {"seed", seed}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -129,24 +130,16 @@ const boost::ut::suite<"AwgnChannel"> awgnTests = [] {
         expect(lt(std::abs(meanPower(out) / (1.0 + power) - 1.0), 0.02)) << std::format("measured {:g}, expected {:g}", meanPower(out), 1.0 + power);
     };
 
-    // separate blocks keep the two cases independent
-    "a mid-stream reseed is refused"_test = [] {
-        auto block = makeChannel<C>(1.0, 4ULL);
-        block.start();
-        expect(throws([&] {
-            std::ignore = block.settings().setStaged({{"seed", std::uint64_t(9)}});
-            std::ignore = block.settings().applyStagedParameters();
-        })) << "seed is a staged-restart setting";
-        block.stop();
+    // a running graph refuses a change of a StoppedOnly setting at the call
+    "seed takes a change only while the graph is stopped"_test = [] {
+        static_assert(decltype(gr::blocks::channel::AwgnChannel<C>::Settings::seed)::stoppedOnly(), "a mid-stream reseed would be a new realization");
+        static_assert(!decltype(gr::blocks::channel::AwgnChannel<C>::Settings::noise_power)::stoppedOnly(), "noise power stays live-settable");
     };
 
     "noise power stays live-settable, and moves without disturbing the draw sequence"_test = [] {
         auto block = makeChannel<C>(1.0, 4ULL);
         block.start();
-        expect(nothrow([&] {
-            std::ignore = block.settings().setStaged({{"noise_power", 2.0}});
-            std::ignore = block.settings().applyStagedParameters();
-        })) << "noise power must stay live-settable";
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"noise_power", 2.0}}).empty()) << "noise power must stay live-settable";
 
         // the amplitude change must scale the same realization rather than restart it: one block run at
         // power 4 matches another run at power 1 scaled by two, sample for sample
@@ -154,8 +147,7 @@ const boost::ut::suite<"AwgnChannel"> awgnTests = [] {
         auto scaled    = makeChannel<C>(1.0, 4ULL);
         reference.start();
         scaled.start();
-        std::ignore = scaled.settings().setStaged({{"noise_power", 4.0}});
-        std::ignore = scaled.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(scaled), {{"noise_power", 4.0}}).empty());
 
         constexpr std::size_t nSamples = 4096UZ;
         std::vector<C>        zeros(nSamples, C{});
@@ -164,13 +156,9 @@ const boost::ut::suite<"AwgnChannel"> awgnTests = [] {
         std::ignore = reference.processBulk(std::span<const C>(zeros), std::span<C>(a));
         std::ignore = scaled.processBulk(std::span<const C>(zeros), std::span<C>(b));
         expect(a == b) << "an amplitude change must not reseed";
-
-        block.stop();
-        reference.stop();
-        scaled.stop();
     };
 
-    "negative noise power is refused"_test = [] { expect(throws([] { std::ignore = makeChannel<float>(-1.0, 0ULL); })); };
+    "negative noise power is refused"_test = [] { expect(gr::testing::initRefused<gr::blocks::channel::AwgnChannel<float>>({{"noise_power", -1.0}, {"seed", std::uint64_t{0U}}})); };
 
     "noisePowerFor states the literature's operating point"_test = [] {
         // 0 dB Es/N0 at unit symbol energy and one sample per symbol is unit noise power
@@ -178,6 +166,18 @@ const boost::ut::suite<"AwgnChannel"> awgnTests = [] {
         expect(approx(noisePowerFor(10.f), 0.1f, 1e-6f));
         // noise added at 4x oversampling spreads over four samples per symbol
         expect(approx(noisePowerFor(10.f, 1.f, 4.f), 0.4f, 1e-6f));
+    };
+};
+
+const boost::ut::suite<"AwgnChannel settings at the initialization"> awgnInitTests = [] {
+    using namespace boost::ut;
+
+    "AwgnChannel initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::AwgnChannel<std::complex<float>>>({
+            {"noise_power", 0.5},
+            {"seed", std::uint64_t{3U}},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

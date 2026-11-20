@@ -33,35 +33,33 @@ struct Quantizer : gr::Block<Quantizer<T>> {
 
 `bits` counts the whole word including its sign, so 8 bits gives codes -128..127, and values beyond
 `full_scale` land exactly on the rails.
+
+`bits` counts the sign bit; `full_scale` is the amplitude that maps to the positive rail.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "bits", Visible, Doc<"converter word length including the sign bit, 2-24">> bits       = 12U;
-    Annotated<double, "full_scale", Visible, Doc<"amplitude mapping to the positive rail">>           full_scale = 1.0;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"bits">, Visible, Doc<"word length">, Limits<Min<2U>, Max<24U>>> bits       = 12U;
+        Annotated<double, Visible, Doc<"full-scale amplitude">, Limits<Over<0.0>>>                  full_scale = 1.0;
 
-    GR_MAKE_REFLECTABLE(Quantizer, in, out, bits, full_scale);
+        GR_MAKE_REFLECTABLE(Settings, bits, full_scale);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Quantizer, in, out, settings);
 
     /// Half the code range, 2^(bits-1): the grid is stated here once, and read from the members wherever it is needed.
     [[nodiscard]] static double halfRange(gr::Size_t wordLength) noexcept { return std::exp2(static_cast<double>(wordLength) - 1.); }
 
-    // The grid follows the members, never the keys a batch named: a converter left at its declared defaults is
-    // never called back and must still quantize on its own grid.
-    double _delta       = full_scale.value / halfRange(bits.value);
-    double _lowestCode  = -halfRange(bits.value);
-    double _highestCode = halfRange(bits.value) - 1.;
+    double _delta{};
+    double _lowestCode{};
+    double _highestCode{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        if (bits < 2U || bits > 24U) {
-            throw gr::exception(std::format("Quantizer: 'bits' must be in [2, 24], got {}", bits.value));
-        }
-        if (full_scale <= 0.0) {
-            throw gr::exception(std::format("Quantizer: 'full_scale' must be positive, got {}", full_scale.value));
-        }
-        _delta       = full_scale.value / halfRange(bits.value);
-        _lowestCode  = -halfRange(bits.value);
-        _highestCode = halfRange(bits.value) - 1.;
+    void applySettings(const Settings& s) {
+        _delta       = s.full_scale / halfRange(s.bits);
+        _lowestCode  = -halfRange(s.bits);
+        _highestCode = halfRange(s.bits) - 1.;
     }
 
     [[nodiscard]] float quantize(float value) const noexcept {
