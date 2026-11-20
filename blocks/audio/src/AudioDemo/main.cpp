@@ -120,7 +120,7 @@ private:
 } // namespace audio_test_app_detail
 
 namespace {
-using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded>;
 
 std::atomic<bool>          playbackRunning{false};
 std::atomic<bool>          micRunning{false};

@@ -26,6 +26,7 @@
 #include <gnuradio-4.0/basic/NullSources.hpp>
 #include <gnuradio-4.0/fileio/WavBlocks.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #ifdef __GNUC__
@@ -276,7 +277,7 @@ std::optional<std::expected<void, gr::Error>> runBounded(gr::scheduler::Simple<>
 
 #ifndef __EMSCRIPTEN__
 /// @brief Couples the sink's PCM format to the rate and channel count of the stream it plays.
-void coupleStreamFormat(gr::blocks::audio::AudioSink<float>& sink) { sink.settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}, {gr::tag::NUM_CHANNELS.name(), std::string(gr::tag::NUM_CHANNELS.key())}}); }
+void coupleStreamFormat(gr::blocks::audio::AudioSink<float>& sink) { boost::ut::expect(sink.setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}, {gr::tag::NUM_CHANNELS.name(), std::string(gr::tag::NUM_CHANNELS.key())}}).has_value()); }
 #endif
 
 const boost::ut::suite<"audio device tests"> _audioTests = [] {
@@ -302,8 +303,8 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.state() != gr::lifecycle::State::ERROR) << caseName;
 
         expect(sink._useDummyBackendForTests) << caseName;
-        expect(eq(sink.num_channels.value, 2U)) << caseName;
-        expect(eq(sink.sample_rate.value, 22050.f)) << caseName;
+        expect(eq(sink.settings.num_channels.value, 2U)) << caseName;
+        expect(eq(sink.settings.sample_rate.value, 22050.f)) << caseName;
     };
 
     "AudioSource captures PCM with soundio dummy backend"_test = [] {
@@ -321,10 +322,10 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.state() != gr::lifecycle::State::ERROR) << caseName;
 
         expect(source._useDummyBackendForTests) << caseName;
-        expect(gt(source.sample_rate.value, 0.0f)) << caseName;
-        expect(gt(source.num_channels.value, 0U)) << caseName;
+        expect(gt(source.status.current_sample_rate.value, 0.0f)) << caseName;
+        expect(gt(source.status.current_num_channels.value, 0U)) << caseName;
         expect(gt(sink._nSamplesProduced, 0UZ)) << caseName;
-        expectSingleFormatTag(sink._tags, source.sample_rate.value, source.num_channels.value, caseName);
+        expectSingleFormatTag(sink._tags, source.status.current_sample_rate.value, source.status.current_num_channels.value, caseName);
     };
 
     "AudioSource accounts for every captured sample"_test = [] {
@@ -344,7 +345,7 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         // a consumer that keeps up must see no loss, and any loss that does happen must be counted
         // rather than inferred from a gap in the stream
         expect(gt(sink._nSamplesProduced, 0UZ)) << caseName;
-        expect(eq(source.dropped_samples.value, gr::Size_t(0))) << std::format("{}: a keeping-up consumer must not lose samples, dropped {}", caseName, source.dropped_samples.value);
+        expect(eq(source.status.dropped_samples.value, gr::Size_t(0))) << std::format("{}: a keeping-up consumer must not lose samples, dropped {}", caseName, source.status.dropped_samples.value);
     };
 
     "AudioSource accounts for the losses the backend reports"_test = [] {
@@ -369,18 +370,14 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
 
         // the public count is what the backend lost plus the silence it delivered plus what the
         // block itself discarded, with nothing left behind by the shutdown paths
-        expect(eq(static_cast<std::size_t>(source.dropped_samples.value), source._backendDroppedSamples + source._backendSilenceSamples + source._backlogDiscardedSamples)) //
-            << std::format("{}: dropped={} backendDropped={} silence={} backlogDiscarded={}", caseName, source.dropped_samples.value, source._backendDroppedSamples, source._backendSilenceSamples, source._backlogDiscardedSamples);
+        expect(eq(static_cast<std::size_t>(source.status.dropped_samples.value), source._backendDroppedSamples + source._backendSilenceSamples + source._backlogDiscardedSamples)) //
+            << std::format("{}: dropped={} backendDropped={} silence={} backlogDiscarded={}", caseName, source.status.dropped_samples.value, source._backendDroppedSamples, source._backendSilenceSamples, source._backlogDiscardedSamples);
 
         // and the setting a control plane reads is current with the member
-        const auto reported = source.settings().get("dropped_samples");
+        const auto reported = source.get<gr::Size_t>("dropped_samples");
         expect(reported.has_value()) << caseName;
         if (reported.has_value()) {
-            const auto* reportedValue = reported->get_if<gr::Size_t>();
-            expect(reportedValue != nullptr) << caseName;
-            if (reportedValue != nullptr) {
-                expect(eq(*reportedValue, source.dropped_samples.value)) << caseName;
-            }
+            expect(eq(*reported, source.status.dropped_samples.value)) << caseName;
         }
     };
 
@@ -400,12 +397,29 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         // and the block's stop collects what the backend was holding when it stopped
         gr::blocks::audio::AudioSource<float> source({{"sample_rate", 48000.f}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}});
         source._useDummyBackendForTests = true;
-        source.settings().init();
-        std::ignore = source.settings().applyStagedParameters();
-        source.start();
-        source._backendImpl._state.silenceSamples.fetch_add(17U);
-        source.stop();
-        expect(eq(source.dropped_samples.value, gr::Size_t(17))) << std::format("{}: holes pending at stop must reach the public count, got {}", caseName, source.dropped_samples.value);
+        expect(source.check({}).has_value()) << caseName;
+        {
+            const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(source)); // start() and stop() publish, as on the block's own thread
+            source.start();
+            source._backendImpl._state.silenceSamples.fetch_add(17U);
+            source.stop();
+        }
+        expect(eq(source.status.dropped_samples.value, gr::Size_t(17))) << std::format("{}: holes pending at stop must reach the public count, got {}", caseName, source.status.dropped_samples.value);
+    };
+
+    // start() alone opens the device, so a running source refuses a change to its device, backend or buffer rather
+    // than taking one that does nothing until the next start
+    "a running AudioSource refuses a change to its device settings"_test = [] {
+        using gr::lifecycle::State;
+        gr::blocks::audio::AudioSource<float> source({{"sample_rate", 48000.f}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}});
+        source._useDummyBackendForTests = true;
+        expect(fatal(source.check({}).has_value()));
+        const gr::settings::detail::OwnThread ownThread(gr::settings::detail::settingsOf(source)); // start() and stop() publish, as on the block's own thread
+        expect(fatal(source.changeStateTo(State::INITIALISED).has_value() && source.changeStateTo(State::RUNNING).has_value()));
+        for (const gr::property_map& change : {gr::property_map{{"device", std::string("other")}}, gr::property_map{{"backend", std::string("dummy")}}, gr::property_map{{"io_buffer_size", 0.2f}}}) {
+            expect(!source.set(change, gr::settings::noWait).has_value()) << std::format("{} was taken while the source ran", change.begin()->first);
+        }
+        expect(source.changeStateTo(State::REQUESTED_STOP).has_value() && source.changeStateTo(State::STOPPED).has_value());
     };
 
     "the soundio capture callback dates the frames it stores"_test = [] {
@@ -592,8 +606,8 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.state() != gr::lifecycle::State::ERROR) << caseName;
 
         // staged, written and dropped must together account for everything the block accepted
-        expect(eq(sink._totalStagedSamples, sink._totalIoWrittenSamples + static_cast<std::size_t>(sink.dropped_samples.value))) //
-            << std::format("{}: staged={} written={} dropped={}", caseName, sink._totalStagedSamples, sink._totalIoWrittenSamples, sink.dropped_samples.value);
+        expect(eq(sink._totalStagedSamples, sink._totalIoWrittenSamples + static_cast<std::size_t>(sink.status.dropped_samples.value))) //
+            << std::format("{}: staged={} written={} dropped={}", caseName, sink._totalStagedSamples, sink._totalIoWrittenSamples, sink.status.dropped_samples.value);
     };
 
     "AudioSink reconfigures while streaming"_test = [] {
@@ -617,11 +631,10 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
             source._tags.push_back({reconfiguration.index, std::move(tagMap)});
         }
 
-        auto& sink = graph.emplaceBlock<gr::blocks::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}});
+        // the sample-exact accounting below holds only with the resampling compensator out of the way
+        auto& sink = graph.emplaceBlock<gr::blocks::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}, {"drift_correction", std::string("None")}});
         coupleStreamFormat(sink);
         sink._useDummyBackendForTests = true;
-        // the sample-exact accounting below holds only with the resampling compensator out of the way
-        sink.drift_correction = gr::algorithm::DriftCorrection::None;
         expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
 
         gr::scheduler::Simple<> sched;
@@ -630,16 +643,16 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.state() != gr::lifecycle::State::ERROR) << caseName;
 
         // the run ends on the configuration the last tag asked for, negotiated with the device
-        expect(eq(sink.sample_rate.value, reconfigurations.back().sampleRate)) << caseName;
-        expect(eq(sink.num_channels.value, reconfigurations.back().numChannels)) << caseName;
+        expect(eq(sink.status.current_sample_rate.value, reconfigurations.back().sampleRate)) << caseName;
+        expect(eq(sink.status.current_num_channels.value, reconfigurations.back().numChannels)) << caseName;
         expect(eq(sink._activeConfig.sampleRate, static_cast<std::uint32_t>(reconfigurations.back().sampleRate))) << caseName;
         expect(eq(sink._activeConfig.numChannels, static_cast<std::uint32_t>(reconfigurations.back().numChannels))) << caseName;
 
         // every sample the sink accepted reached a device or was counted as lost, across all the
         // staging rings the reconfigurations replaced
         expect(gt(sink._totalStagedSamples, 0UZ)) << caseName;
-        expect(eq(sink._totalStagedSamples, sink._totalIoWrittenSamples + static_cast<std::size_t>(sink.dropped_samples.value))) //
-            << std::format("{}: staged={} written={} dropped={}", caseName, sink._totalStagedSamples, sink._totalIoWrittenSamples, sink.dropped_samples.value);
+        expect(eq(sink._totalStagedSamples, sink._totalIoWrittenSamples + static_cast<std::size_t>(sink.status.dropped_samples.value))) //
+            << std::format("{}: staged={} written={} dropped={}", caseName, sink._totalStagedSamples, sink._totalIoWrittenSamples, sink.status.dropped_samples.value);
     };
 
     "AudioSource loops back into AudioSink with soundio dummy backend"_test = [] {
@@ -660,10 +673,10 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
 
         expect(source._useDummyBackendForTests) << caseName;
         expect(sink._useDummyBackendForTests) << caseName;
-        expect(gt(source.sample_rate.value, 0.0f)) << caseName;
-        expect(gt(source.num_channels.value, 0U)) << caseName;
-        expect(gt(sink.sample_rate.value, 0.0f)) << caseName;
-        expect(gt(sink.num_channels.value, 0U)) << caseName;
+        expect(gt(source.status.current_sample_rate.value, 0.0f)) << caseName;
+        expect(gt(source.status.current_num_channels.value, 0U)) << caseName;
+        expect(gt(sink.status.current_sample_rate.value, 0.0f)) << caseName;
+        expect(gt(sink.status.current_num_channels.value, 0U)) << caseName;
     };
 
     "available_devices is populated after start"_test = [] {
@@ -679,8 +692,8 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.exchange(std::move(graph)).has_value()) << caseName;
         expect(runSchedulerFor(sched, 200ms).has_value()) << caseName;
 
-        expect(!source.available_devices.value.empty()) << caseName;
-        for (const auto& entry : source.available_devices.value) {
+        expect(!source.status.available_devices.value.empty()) << caseName;
+        for (const auto& entry : source.status.available_devices.value) {
             expect(entry.find('[') != std::string::npos) << "device entry should contain '[': " << entry;
             expect(entry.find(']') != std::string::npos) << "device entry should contain ']': " << entry;
         }
@@ -703,7 +716,7 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         expect(sched.exchange(std::move(graph)).has_value()) << caseName;
         expect(sched.runAndWait().has_value()) << caseName;
 
-        expect(!sink.available_devices.value.empty()) << caseName;
+        expect(!sink.status.available_devices.value.empty()) << caseName;
     };
 
     "a named audio backend is the one the block connects through"_test = [] {
@@ -721,7 +734,7 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
 
         // the setting alone selects the backend, and the block reports the one it got
         expect(!source._useDummyBackendForTests) << caseName;
-        expect(eq(source.active_backend.value, std::string("dummy"))) << caseName;
+        expect(eq(source.status.active_backend.value, std::string("dummy"))) << caseName;
         expect(gt(sink._nSamplesProduced, 0UZ)) << caseName;
     };
 
@@ -882,11 +895,10 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         constexpr double           kRate    = 48000.0;
 
         gr::Graph graph;
-        auto&     source                = graph.emplaceBlock<gr::blocks::audio::AudioSource<float>>({{"sample_rate", static_cast<float>(kRate)}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}, {"emit_timing_tags", true}, {"tag_interval", 0.0f}});
+        auto&     source                = graph.emplaceBlock<gr::blocks::audio::AudioSource<float>>({{"sample_rate", static_cast<float>(kRate)}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}, {"emit_timing_tags", true}, {"tag_interval", 0.0f}, {"drift_correction", std::string("None")}});
         source._useDummyBackendForTests = true;
         // without drift compensation every output sample is a captured one, and its index counts the sample periods before it
-        source.drift_correction = gr::algorithm::DriftCorrection::None;
-        auto& sink              = graph.emplaceBlock<ArrivalSink<float>>();
+        auto& sink = graph.emplaceBlock<ArrivalSink<float>>();
         expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
 
         gr::scheduler::Simple<> sched;
@@ -1170,10 +1182,9 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         expect(sched.exchange(std::move(graph)).has_value()) << caseName;
         expect(runSchedulerFor(sched, 300ms).has_value()) << caseName;
 
-        expect(static_cast<bool>(source.permission.value)) << "source permission should be true after start";
+        expect(static_cast<bool>(source.status.permission.value)) << "source permission should be true after start";
 
-        const auto activeParams = source.settings().getStored().value_or(gr::property_map{});
-        expect(activeParams.contains("permission")) << "permission should be in active parameters";
+        expect(source.get<bool>("permission").value_or(false)) << "a read of permission returns the published value";
     };
 
     "AudioSink permission setting is readable"_test = [] {
@@ -1193,10 +1204,19 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         expect(sched.exchange(std::move(graph)).has_value()) << caseName;
         expect(sched.runAndWait().has_value()) << caseName;
 
-        expect(static_cast<bool>(sink.permission.value)) << "sink permission should be true after start";
+        expect(static_cast<bool>(sink.status.permission.value)) << "sink permission should be true after start";
 
-        const auto activeParams = sink.settings().getStored().value_or(gr::property_map{});
-        expect(activeParams.contains("permission")) << "permission should be in active parameters";
+        expect(sink.get<bool>("permission").value_or(false)) << "a read of permission returns the published value";
+    };
+
+    "the audio blocks initialize at each setting"_test = [] {
+        using gr::testing::initFailures;
+        const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+        // AudioSink's hook runs at the initialization, before any device is open
+        auto failures = initFailures<gr::blocks::audio::AudioSink<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t{2U}}, {"io_buffer_size", 0.5f}, {"device", std::string("dummy")}, {"backend", std::string("dummy")}, {"ppm_estimator_cutoff", 0.5f}, {"debug_console", true}});
+        expect(failures.empty()) << report(failures);
+        failures = initFailures<gr::blocks::audio::AudioSource<float>>({{"sample_rate", 22050.f}, {"num_channels", gr::Size_t{2U}}, {"io_buffer_size", 0.5f}, {"device", std::string("dummy")}, {"emit_timing_tags", false}, {"tag_interval", 0.5f}, {"trigger_name", std::string("clock")}});
+        expect(failures.empty()) << report(failures);
     };
 
     "DriftCompensator sink insert and drop"_test = [] {
