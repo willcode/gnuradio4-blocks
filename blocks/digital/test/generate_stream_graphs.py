@@ -601,7 +601,7 @@ either runs to the end with settings the block accepts or ends with the block's 
 # additive generator runs s[k] = f(s, k) from the seed's bits as s[0 .. degree-1] and emits in[k] XOR s[k]. The
 # multiplicative scrambler emits y[k] = in[k] XOR f(y, k) and the descrambler in[k] XOR f(in, k), the seed's bits being
 # the degree bits before the stream, oldest first. An item carries bits_per_item bits in its low positions, the first
-# in time at the top under MsbFirst and at the bottom under LsbFirst. The forced-transition group emits
+# in time at the top under msb_first and at the bottom under lsb_first. The forced-transition group emits
 # y[k] = v XOR x[k] XOR f(y, k) XOR F[k], with F[k] one where the counter reads N - 1, then compares y[k-p] and y[k-q]
 # over the bits transmitted in the epoch and sets the counter to zero if they differ and to (c + 1) mod N otherwise.
 
@@ -1182,7 +1182,7 @@ def scrambler_profiles():
         """
 The named profiles. ccsds131 over zeros gives the CCSDS sequence, as the taps and seed spelled out do. pn9 over zeros
 gives the CC11xx and SX12xx whitening sequence FF E1 1D 9A ED 85 33 24, read least significant bit first, and does so
-with bits_per_item 8 and bit_order MsbFirst staged beside it. The g3ruh pair restores its input, and the g3ruh
+with bits_per_item 8 and bit_order msb_first staged beside it. The g3ruh pair restores its input, and the g3ruh
 scrambler gives what taps 12,17 and a seed of 17 zeros give. Each sink expects its bytes.
 """,
     )
@@ -1785,7 +1785,7 @@ from (n-1)*s + 1 on, for strides 1, 3, 5 and 40. Each sink expects its stream an
             name,
             "uint8",
             stream,
-            {"access_code": word, "stride": u32(spacing)},
+            {"access_code": word, "code_stride": u32(spacing)},
             tag_key="gr:trigger_name",
             tag_indices=indices(found),
         )
@@ -1797,7 +1797,7 @@ from (n-1)*s + 1 on, for strides 1, 3, 5 and 40. Each sink expects its stream an
         code = code_string(word, n)
         found = correlate(stream, code, stride=spacing)
         assert indices(found) == [at + lag]
-        settings = {"access_code": code, "stride": u32(spacing)}
+        settings = {"access_code": code, "code_stride": u32(spacing)}
         name = f"strided_{n}_{spacing}"
         correlator(
             g,
@@ -1831,7 +1831,7 @@ from (n-1)*s + 1 on, for strides 1, 3, 5 and 40. Each sink expects its stream an
         found = correlate(stream, code, tolerated, stride=spacing)
         settings = {
             "access_code": code,
-            "stride": u32(spacing),
+            "code_stride": u32(spacing),
             "max_errors": u32(tolerated),
         }
         name = f"survives_{wrong}"
@@ -1852,7 +1852,11 @@ from (n-1)*s + 1 on, for strides 1, 3, 5 and 40. Each sink expects its stream an
         stream = [rng.next() & 1 for _ in range(lag + 30)]
         found = correlate(stream, code, 8, stride=spacing)
         assert indices(found) == list(range(lag, lag + 30))
-        settings = {"access_code": code, "stride": u32(spacing), "max_errors": u32(8)}
+        settings = {
+            "access_code": code,
+            "code_stride": u32(spacing),
+            "max_errors": u32(8),
+        }
         correlator(
             g,
             f"warm_{spacing}",

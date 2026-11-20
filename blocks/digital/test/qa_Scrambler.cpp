@@ -1,8 +1,10 @@
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <span>
 #include <string>
@@ -12,6 +14,7 @@
 
 #include <gnuradio-4.0/digital/Scrambler.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
@@ -34,18 +37,37 @@ namespace spans = gr::blocks::testing::span;
 [[nodiscard]] gr::property_map ituFormASettings() { return {{"taps", std::string("18,23")}, {"seed", std::string(23UZ, '1')}}; }
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
 template<typename TBlock>
 void restage(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().set(std::move(settings));
-    std::ignore = block.settings().activateContext();
-    std::ignore = block.settings().applyStagedParameters();
+    applyOrThrow(block, settings);
 }
 
 [[nodiscard]] gr::property_map with(gr::property_map settings, gr::property_map extra) {
@@ -109,16 +131,14 @@ template<typename TBlock>
 const boost::ut::suite<"additive scrambler"> additiveTests = [] {
     using namespace boost::ut;
 
-    "until it is configured the block is inert"_test = [] {
+    "until a generator is named the block is not ready"_test = [] {
         // nothing downstream mistakes a pass-through for a scrambled stream
-        AdditiveScrambler               block{};
-        const std::vector<std::uint8_t> zeros(32UZ, std::uint8_t{0});
-        std::vector<std::uint8_t>       out(32UZ);
-        std::vector<gr::Tag>            published;
-        spans::InputSpan<std::uint8_t>  inSpan{std::span<const std::uint8_t>(zeros)};
-        spans::OutputSpan<std::uint8_t> outSpan{std::span<std::uint8_t>(out), 0UZ, &published};
-        expect(that % (block.processBulk(inSpan, outSpan) == gr::work::Status::ERROR));
-        expect(eq(inSpan.consumed, 0UZ));
+        AdditiveScrambler                                 block{};
+        const std::expected<void, gr::settings::Rejected> ready = block.check({});
+        expect(!ready.has_value());
+        if (!ready.has_value()) {
+            expect(std::ranges::any_of(ready.error(), [](const gr::settings::Rejection& entry) { return entry.key == "taps"; })) << "the reason names the setting a host gives";
+        }
     };
 
     "a rejected setting leaves the configuration it was applied to intact"_test = [] {

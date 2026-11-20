@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -51,14 +52,15 @@ framings as library constants; none of them is a default here, because there is 
 one would be a silent interoperability assumption.
 
 The delimiter is spelled as a bit string, most significant bit first in wire order, and `bits_per_item` says how many
-bits an input item carries, so a bit-level and a byte-level delimiter are the same mechanism at 1 and at 8.
+bits an input item carries, so a bit-level and a byte-level delimiter are the same mechanism at 1 and at 8. A soft
+stream carries one bit per item.
 `transparency` names how the protocol keeps the delimiter out of the payload, and the settings are checked against
 that claim when they are staged: under bit stuffing a delimiter a conforming encoder could produce is refused
 outright, and under byte escaping, where the guarantee depends on a peer this block cannot inspect, it is warned
 about.
 
-`end_delimiter` and `max_payload_items` are both required and neither has a default; without either the block refuses
-to `start()` and is inert if driven. The bound is what keeps a frame that never ends — a corrupted closing delimiter,
+`end_delimiter` and `max_payload_items` are both required and neither has a default; without either the block is not
+ready. The bound is what keeps a frame that never ends — a corrupted closing delimiter,
 or a stream that is not the protocol configured — from accumulating with the stream.
 
 Every record on `out` was closed by a delimiter the block matched. A frame that reached the bound, one shorter than
@@ -66,31 +68,45 @@ Every record on `out` was closed by a delimiter the block matched. A frame that 
 carrying `discard_reason`. A region between two delimiters carrying no items is idle rather than a short frame and is
 counted without being published, because an idle link is back-to-back delimiters. `sequence` counts records across
 both ports, so a gap in `out`'s own sequence is exactly a record that went to `reject`.
+
+The delimiters are written as '0'/'1' characters, MSB first in wire order; `start_delimiter` is read under frame_open
+start, and under frame_open delimiter the closing delimiter opens the next frame. Under bit stuffing, a 0 arriving after
+exactly `stuff_after_ones` consecutive 1s is removed, and `abort_ones` consecutive 1s abandon the frame in progress.
+Under byte escaping, `escape_map` holds flat (escaped, original) pairs, at most 256. `max_payload_items` and
+`min_payload_items` count decoded items, and a closed region shorter than `min_payload_items` is refused as undersize;
+an HDLC link at bits_per_item 1 sets 24 for a three-octet minimum. A `payload_pack_bits` of 1 to 8 repacks the decoded
+bits into items of that width, with bits_per_item 1 and byte items. `trigger` names the gr:trigger_name that
+resynchronizes the machine, and `frame_label` is written under the record's trigger_name key when no detector supplied
+one.
 )"">;
 
     PortIn<T>                            in;
     PortOut<DataSet<T>, Async>           out;
     PortOut<DataSet<T>, Async, Optional> reject;
 
-    Annotated<std::string, "end_delimiter", Doc<"the closing delimiter as '0'/'1' characters, MSB first in wire order; required, empty leaves the block inert">, Visible>                                                                                                               end_delimiter{};
-    Annotated<std::string, "frame_open", Doc<"'delimiter' (the closing delimiter opens the next frame), 'start' or 'immediate'">, Visible>                                                                                                                                              frame_open = std::string("delimiter");
-    Annotated<std::string, "start_delimiter", Doc<"the opening delimiter; required and non-empty for frame_open 'start', and must be empty otherwise">>                                                                                                                                 start_delimiter{};
-    Annotated<gr::Size_t, "bits_per_item", Doc<"bits each input item carries, 1 to 8; a soft stream carries one bit per item and any other value is refused">>                                                                                                                          bits_per_item    = 1U;
-    Annotated<gr::math::BitOrder, "bit_order", Doc<"order of an item's bits on the wire, MsbFirst or LsbFirst; meaningful only above one bit per item">>                                                                                                                                bit_order        = gr::math::BitOrder::MsbFirst;
-    Annotated<std::string, "transparency", Doc<"how the payload avoids the delimiter: 'none', 'bit_stuffing' or 'byte_escape'">, Visible>                                                                                                                                               transparency     = std::string("none");
-    Annotated<gr::Size_t, "stuff_after_ones", Doc<"bit stuffing only: a 0 arriving at exactly this consecutive-ones count is removed, 2 to 62">>                                                                                                                                        stuff_after_ones = 5U;
-    Annotated<gr::Size_t, "abort_ones", Doc<"bit stuffing only: this many consecutive 1s abandons the frame in progress; 0 disables, and it must exceed stuff_after_ones">>                                                                                                             abort_ones       = 7U;
-    Annotated<gr::Size_t, "escape_item", Doc<"byte escaping only: the introducer's item value, 0 to 255">>                                                                                                                                                                              escape_item      = 0U;
-    Annotated<std::vector<gr::Size_t>, "escape_map", Doc<"byte escaping only: flat (escaped, original) pairs, at most 256 of them, every value 0 to 255 and no escaped value repeated">>                                                                                                escape_map{};
-    Annotated<gr::Size_t, "max_payload_items", Unit<"items">, Doc<"the largest payload a frame may carry, in decoded items; required, 0 leaves the block inert">, Visible>                                                                                                              max_payload_items = 0U;
-    Annotated<gr::Size_t, "min_payload_items", Unit<"items">, Doc<"a closed region shorter than this is refused as undersize, in the decoded items max_payload_items counts; 1 accepts every non-empty region, and an HDLC link at bits_per_item 1 sets 24 for a three-octet minimum">> min_payload_items = 1U;
-    Annotated<gr::Size_t, "payload_pack_bits", Doc<"0 emits decoded items unchanged; 1 to 8 repacks the decoded bits into items of that width, and needs bits_per_item 1 and byte items">>                                                                                              payload_pack_bits = 0U;
-    Annotated<gr::math::BitOrder, "payload_bit_order", Doc<"the order the pack stage assembles bits in, separate from bit_order because the wire's item order and the payload's byte order differ">>                                                                                    payload_bit_order = gr::math::BitOrder::MsbFirst;
-    Annotated<std::string, "trigger", Doc<"the gr:trigger_name that resynchronizes the machine; empty accepts any trigger tag">>                                                                                                                                                        trigger{};
-    Annotated<bool, "trigger_resets", Doc<"whether a matching trigger tag resets the machine at all">>                                                                                                                                                                                  trigger_resets = true;
-    Annotated<std::string, "frame_label", Doc<"written under the record's trigger_name key when no detector supplied one; deliberately not named for that reserved key">>                                                                                                               frame_label    = std::string("delimiter");
+    struct Settings {
+        Annotated<std::string, Doc<"closing delimiter bits">, Visible>              end_delimiter{};
+        Annotated<gr::digital::FrameOpen, Doc<"frame opening">, Visible>            frame_open = gr::digital::FrameOpen::Delimiter;
+        Annotated<std::string, Doc<"opening delimiter bits">>                       start_delimiter{};
+        Annotated<gr::Size_t, Doc<"bits per input item">, Limits<Min<1U>, Max<8U>>> bits_per_item    = 1U;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                             bit_order        = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::digital::Transparency, Doc<"payload transparency">, Visible>  transparency     = gr::digital::Transparency::None;
+        Annotated<gr::Size_t, Doc<"ones before a stuffed bit">>                     stuff_after_ones = 5U;
+        Annotated<gr::Size_t, Doc<"abort run length (0 = off)">>                    abort_ones       = 7U;
+        Annotated<gr::Size_t, Doc<"escape value">, Limits<Max<255U>>>               escape_item      = 0U;
+        Annotated<std::vector<gr::Size_t>, Doc<"escape pairs">>                     escape_map{};
+        Annotated<gr::Size_t, Unit<"items">, Doc<"payload length limit">, Visible>  max_payload_items = 0U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"minimum payload length">>         min_payload_items = 1U;
+        Annotated<gr::Size_t, Doc<"payload pack width (0 = unpacked)">>             payload_pack_bits = 0U;
+        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                     payload_bit_order = gr::math::BitOrder::MsbFirst;
+        Annotated<std::string, Doc<"resynchronizing trigger name (empty = any)">>   trigger{};
+        Annotated<bool, Doc<"trigger reset">>                                       trigger_resets = true;
+        Annotated<std::string, Doc<"default frame trigger name">>                   frame_label    = std::string("delimiter");
 
-    GR_MAKE_REFLECTABLE(DelimiterExtractor, in, out, reject, end_delimiter, frame_open, start_delimiter, bits_per_item, bit_order, transparency, stuff_after_ones, abort_ones, escape_item, escape_map, max_payload_items, min_payload_items, payload_pack_bits, payload_bit_order, trigger, trigger_resets, frame_label);
+        GR_MAKE_REFLECTABLE(Settings, end_delimiter, frame_open, start_delimiter, bits_per_item, bit_order, transparency, stuff_after_ones, abort_ones, escape_item, escape_map, max_payload_items, min_payload_items, payload_pack_bits, payload_bit_order, trigger, trigger_resets, frame_label);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DelimiterExtractor, in, out, reject, settings);
 
     // Counted, stated drops. Plain members, read by the owning thread and by QA, and reported once at stop().
     std::uint64_t nFramesEmitted       = 0ULL; ///< records published on `out`; the denominator the others are read against
@@ -131,16 +147,55 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
     std::optional<float>             _rate{};
     std::uint64_t                    _sequence = 0ULL;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        using gr::digital::Transparency;
+        const std::vector<gr::Size_t> map = s.escape_map;
+        if (s.end_delimiter.value.empty()) {
+            return gr::Refused(s.end_delimiter, "required");
+        }
+        if (s.max_payload_items == 0U) {
+            return gr::Refused(s.max_payload_items, "required");
+        }
+        if (s.transparency == Transparency::ByteEscape && map.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.escape_map, "must have an even length");
+        }
+        if (s.transparency == Transparency::ByteEscape && std::ranges::any_of(map, [](gr::Size_t value) { return value > 255U; })) {
+            return gr::Refused(s.escape_map, "each value must be <= 255");
+        }
+        if (std::floating_point<T> && s.bits_per_item != 1U) {
+            return gr::Refused(s.bits_per_item, "must be 1 on a floating-point stream");
+        }
+        if (std::floating_point<T> && s.payload_pack_bits != 0U) {
+            return gr::Refused(s.payload_pack_bits, "must be 0 on a floating-point stream");
+        }
+        std::ignore = framing(s);
+        return {};
+    }
 
-    void start() {
-        rebuild();
-        if (end_delimiter.value.empty()) {
-            throw gr::exception("end_delimiter is required and has no default: there is no universal delimiter and a silent one would be a silent interoperability assumption");
+    void applySettings(const Settings& s) {
+        gr::digital::DelimiterConfig cfg     = framing(s);
+        const std::string            warning = gr::digital::unforgeabilityWarning(cfg);
+        if (!warning.empty()) {
+            std::println(stderr, "gr::blocks::digital::DelimiterExtractor '{}': {}", this->name, warning);
         }
-        if (max_payload_items == 0U) {
-            throw gr::exception("max_payload_items is required and has no default: without it a frame whose closing delimiter was corrupted accumulates with the stream");
-        }
+
+        _scanner.prepare(std::move(cfg));
+        _pending.reserve(std::min<std::size_t>(s.max_payload_items, kPendingReserve));
+        clearRun();
+    }
+
+    void start() { clearRun(); }
+
+    /// @brief An idle machine with every count at zero: a new framing starts there, and so does a restart.
+    void clearRun() {
+        reset();
+        _scanner.counters    = {};
+        nFramesEmitted       = 0ULL;
+        nTriggerResets       = 0ULL;
+        nTagsOutsideFrames   = 0ULL;
+        nTagsOnRemovedItems  = 0ULL;
+        nDroppedTimingEvents = 0ULL;
+        refreshCounters();
     }
 
     void reset() {
@@ -151,87 +206,35 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
         _sequence = 0ULL;
     }
 
-    /// @brief Rebuilds the scanner from the settings, refusing everything the framing cannot be.
-    void rebuild() {
+    /// @brief The framing the settings in @p n name, configured by the library, which throws for one it refuses.
+    [[nodiscard]] gr::digital::DelimiterConfig framing(const Settings& s) const {
         gr::digital::DelimiterConfig cfg;
-        try {
-            cfg.frameOpen    = gr::digital::frameOpenFromName(frame_open.value);
-            cfg.transparency = gr::digital::transparencyFromName(transparency.value);
-            cfg.bitOrder     = bit_order;
-            cfg.packOrder    = payload_bit_order;
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::string(error.what()));
+        cfg.endDelimiter    = s.end_delimiter.value;
+        cfg.frameOpen       = s.frame_open.value;
+        cfg.transparency    = s.transparency.value;
+        cfg.bitOrder        = s.bit_order.value;
+        cfg.packOrder       = s.payload_bit_order.value;
+        cfg.bitsPerItem     = s.bits_per_item.value;
+        cfg.maxPayloadItems = s.max_payload_items.value;
+        cfg.minPayloadItems = s.min_payload_items.value;
+        cfg.packBits        = s.payload_pack_bits.value;
+        // a setting of a mode not configured keeps the library's default: ignored, never refused
+        if (cfg.frameOpen == gr::digital::FrameOpen::Start) {
+            cfg.startDelimiter = s.start_delimiter.value;
         }
-
-        if (cfg.transparency != gr::digital::Transparency::BitStuffing && (stuff_after_ones.value != 5U || abort_ones.value != 7U)) {
-            throw gr::exception(std::format("stuff_after_ones and abort_ones belong to 'bit_stuffing' and transparency is '{}', so a value away from the default is a settings error rather than a harmless extra", transparency.value));
+        if (cfg.transparency == gr::digital::Transparency::BitStuffing) {
+            cfg.stuffAfterOnes = s.stuff_after_ones.value;
+            cfg.abortOnes      = s.abort_ones.value;
         }
-        if (cfg.transparency != gr::digital::Transparency::ByteEscape && (escape_item.value != 0U || !escape_map.value.empty())) {
-            throw gr::exception(std::format("escape_item and escape_map belong to 'byte_escape' and transparency is '{}', so a value away from the default is a settings error rather than a harmless extra", transparency.value));
-        }
-        if (escape_item.value > 255U) {
-            throw gr::exception(std::format("escape_item is an item value and must be in [0, 255], got {}", escape_item.value));
-        }
-        if (escape_map.value.size() % 2UZ != 0UZ) {
-            throw gr::exception(std::format("escape_map is a flat list of (escaped, original) pairs and must have an even length, got {}", escape_map.value.size()));
-        }
-        if (escape_map.value.size() > 512UZ) {
-            throw gr::exception(std::format("escape_map holds {} values, which is more than the 256 pairs a byte alphabet can distinguish", escape_map.value.size()));
-        }
-        for (const gr::Size_t value : escape_map.value) {
-            if (value > 255U) {
-                throw gr::exception(std::format("escape_map carries {}, which is not an item value in [0, 255]", value));
+        if (cfg.transparency == gr::digital::Transparency::ByteEscape) {
+            cfg.escapeItem                    = static_cast<std::uint8_t>(s.escape_item.value);
+            const std::vector<gr::Size_t> map = s.escape_map.value;
+            for (std::size_t i = 0UZ; i + 1UZ < map.size(); i += 2UZ) {
+                cfg.escapeMap.emplace_back(static_cast<std::uint8_t>(map[i]), static_cast<std::uint8_t>(map[i + 1UZ]));
             }
         }
-
-        if constexpr (std::floating_point<T>) {
-            if (bits_per_item.value != 1U) {
-                throw gr::exception(std::format("a soft item carries one sliced bit and nothing else, so bits_per_item must be 1 on a floating-point stream, got {}", bits_per_item.value));
-            }
-            if (cfg.transparency == gr::digital::Transparency::ByteEscape) {
-                throw gr::exception("byte escaping needs byte items and this stream is floating point");
-            }
-            if (payload_pack_bits.value != 0U) {
-                throw gr::exception("the pack stage assembles bits into bytes and needs byte items; this stream is floating point");
-            }
-        }
-
-        cfg.endDelimiter    = end_delimiter.value;
-        cfg.startDelimiter  = start_delimiter.value;
-        cfg.bitsPerItem     = static_cast<unsigned>(bits_per_item.value);
-        cfg.stuffAfterOnes  = static_cast<unsigned>(stuff_after_ones.value);
-        cfg.abortOnes       = static_cast<unsigned>(abort_ones.value);
-        cfg.escapeItem      = static_cast<std::uint8_t>(escape_item.value);
-        cfg.maxPayloadItems = static_cast<std::size_t>(max_payload_items.value);
-        cfg.minPayloadItems = static_cast<std::size_t>(min_payload_items.value);
-        cfg.packBits        = static_cast<unsigned>(payload_pack_bits.value);
-        cfg.escapeMap.reserve(escape_map.value.size() / 2UZ);
-        for (std::size_t i = 0UZ; i + 1UZ < escape_map.value.size(); i += 2UZ) {
-            cfg.escapeMap.emplace_back(static_cast<std::uint8_t>(escape_map.value[i]), static_cast<std::uint8_t>(escape_map.value[i + 1UZ]));
-        }
-
-        try {
-            gr::digital::configureDelimiter(cfg);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::string(error.what()));
-        }
-
-        if (const std::string warning = gr::digital::unforgeabilityWarning(cfg); !warning.empty()) {
-            std::println(stderr, "gr::blocks::digital::DelimiterExtractor '{}': {}", this->name, warning);
-        }
-
-        _scanner.prepare(std::move(cfg));
-        _pending.clear();
-        _pending.reserve(std::min(static_cast<std::size_t>(max_payload_items.value), kPendingReserve));
-        _triggerMeta.clear();
-        _rate.reset();
-        _sequence            = 0ULL;
-        nFramesEmitted       = 0ULL;
-        nTriggerResets       = 0ULL;
-        nTagsOutsideFrames   = 0ULL;
-        nTagsOnRemovedItems  = 0ULL;
-        nDroppedTimingEvents = 0ULL;
-        refreshCounters();
+        gr::digital::configureDelimiter(cfg);
+        return cfg;
     }
 
     void stop() {
@@ -261,13 +264,6 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& rejectSpan) {
-        if (!_scanner.configured()) { // unconfigured: inert rather than matching or accumulating something arbitrary
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            rejectSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         _tags.clear();
         for (const auto& [relIndex, tagMap] : inSpan.tags()) {
             // a block holding a partial frame across calls is shown an earlier call's tag again at a negative index
@@ -304,7 +300,7 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
             bool resetHere = false;
             for (std::size_t k = tagBegin; k < tagEnd; ++k) {
                 readRate(*_tags[k].map);
-                if (!resetHere && trigger_resets && matches(*_tags[k].map)) {
+                if (!resetHere && settings.trigger_resets && matches(*_tags[k].map)) {
                     _triggerMeta = *_tags[k].map;
                     _scanner.resynchronize();
                     dropPending();
@@ -323,7 +319,7 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
                     ++nTagsOutsideFrames;
                     continue;
                 }
-                if (_pending.size() >= static_cast<std::size_t>(max_payload_items.value)) {
+                if (_pending.size() >= static_cast<std::size_t>(settings.max_payload_items.value)) {
                     ++nDroppedTimingEvents; // the framework permits several tags at one index, so the list is bounded by fiat
                     continue;
                 }
@@ -371,7 +367,7 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
         const std::span<const T> payload = _scanner.frame();
         const std::size_t        decoded = _scanner.frameDecodedItems();
         // a packed item holds `payload_pack_bits` decoded items, so a tag on any of them lands on that one item
-        const std::size_t width = _scanner.framePacked() ? static_cast<std::size_t>(payload_pack_bits.value) : 1UZ;
+        const std::size_t width = _scanner.framePacked() ? static_cast<std::size_t>(settings.payload_pack_bits.value) : 1UZ;
 
         DataSet<T> record;
         record.signal_values.assign(payload.begin(), payload.end());
@@ -432,10 +428,10 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
         if (entry == tagMap.end()) {
             return false;
         }
-        if (trigger.value.empty()) {
+        if (settings.trigger.value.empty()) {
             return true;
         }
-        return entry->second.value_or(std::string_view{}) == std::string_view(trigger.value);
+        return entry->second.value_or(std::string_view{}) == std::string_view(settings.trigger.value);
     }
 
     /// @brief Holds the most recent input `sample_rate` as provenance about the stream the frames were taken from.
@@ -452,7 +448,7 @@ both ports, so a gap in `out`'s own sequence is exactly a record that went to `r
     /// @brief The trigger's own label, or `frame_label` when no detector supplied one.
     [[nodiscard]] pmt::Value triggerName() const {
         const auto entry = _triggerMeta.find(property_map::key_type(gr::tag::TRIGGER_NAME.key()));
-        return entry == _triggerMeta.end() ? pmt::Value(std::string_view(frame_label.value)) : entry->second;
+        return entry == _triggerMeta.end() ? pmt::Value(std::string_view(settings.frame_label.value)) : entry->second;
     }
 
     /// @brief The detector's Hamming distance, which travels inside `gr:trigger_meta_info` rather than as a tag key.

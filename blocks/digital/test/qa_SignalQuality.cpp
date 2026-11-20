@@ -17,6 +17,7 @@
 #include <gnuradio-4.0/channel/Awgn.hpp>
 #include <gnuradio-4.0/digital/SignalQuality.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 #include <gnuradio-4.0/algorithm/digital/Constellation.hpp>
@@ -69,19 +70,38 @@ using gr::digital::Constellation;
 
 using CF = std::complex<float>;
 
+template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
 /// Both meters hold atomics and are therefore not movable, so a block is built in place and initialized by reference.
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     block.start();
 }
 
 template<typename TBlock>
 void restage(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().set(std::move(settings));
-    std::ignore = block.settings().activateContext();
-    std::ignore = block.settings().applyStagedParameters();
+    applyOrThrow(block, settings);
 }
 
 struct Rng {
@@ -138,7 +158,7 @@ void feed(TBlock& block, std::span<const CF> stream, std::span<const std::size_t
 
 /// @brief A noisy QPSK stream at a stated signal-to-noise ratio, for the record-port cases below.
 [[nodiscard]] std::vector<CF> noisyStream(double snrDb, std::size_t count) {
-    const Constellation<float> qpsk    = gr::digital::constellationFromName<float>("qpsk", 4UZ, 0.f, 0U, {}, "power");
+    const Constellation<float> qpsk    = Constellation<float>::qpsk();
     const auto                 symbols = symbolStream(qpsk, count, 20260901ULL);
     return throughAwgn(std::span<const CF>(symbols), noisePowerAt(snrDb), 4242ULL);
 }
@@ -316,7 +336,7 @@ const boost::ut::suite<"signal quality"> signalQualityTests = [] {
         SnrEstimator<float> freshSnr({{"window", 1024U}});
         init(freshSnr);
         expect(eq(freshSnr.snrLinear(), 0.0));
-        expect(eq(freshSnr.snrDb(), -freshSnr.ceiling_db.value)) << "an empty window reads the negative ceiling rather than negative infinity";
+        expect(eq(freshSnr.snrDb(), -freshSnr.settings.ceiling_db.value)) << "an empty window reads the negative ceiling rather than negative infinity";
         expect(eq(freshSnr.coverage(), 0.0));
         expect(eq(freshSnr.nWindows(), std::uint64_t{0}));
         expect(eq(freshSnr.nDegenerate(), std::uint64_t{0}));
@@ -522,7 +542,7 @@ const boost::ut::suite<"signal quality"> signalQualityTests = [] {
     };
 
     "degenerate settings"_test = [] {
-        // A throwing applyStagedParameters() leaves the offending value staged, so each case gets a block of its own.
+        // A block whose constructed value is refused stays uninitialized, so each case gets a block of its own.
         expect(throws([] {
             EvmMeter<float> rejected({{"mode", std::string("known_reference")}});
             init(rejected);
@@ -572,8 +592,7 @@ const boost::ut::suite<"signal quality"> signalQualityTests = [] {
         const auto scene = noisyStream(20.0, 4096UZ * 2UZ);
 
         EvmMeter<float> evm({{"constellation", std::string("qpsk")}, {"window", gr::Size_t{1024U}}});
-        evm.settings().init();
-        std::ignore = evm.settings().applyStagedParameters();
+        initialize(evm);
         evm.start();
 
         const auto records = drive(evm, std::span<const CF>(scene));
@@ -598,15 +617,13 @@ const boost::ut::suite<"signal quality"> signalQualityTests = [] {
         const auto scene = noisyStream(20.0, 4096UZ);
 
         SnrEstimator<float> connected({{"method", std::string("m2m4")}, {"window", gr::Size_t{1024U}}});
-        connected.settings().init();
-        std::ignore = connected.settings().applyStagedParameters();
+        initialize(connected);
         connected.start();
         std::ignore = drive(connected, std::span<const CF>(scene));
 
         // the same block driven through a span that reports itself unconnected, which is what an unwired port is
         SnrEstimator<float> bare({{"method", std::string("m2m4")}, {"window", gr::Size_t{1024U}}});
-        bare.settings().init();
-        std::ignore = bare.settings().applyStagedParameters();
+        initialize(bare);
         bare.start();
         {
             namespace test        = gr::blocks::testing::span;

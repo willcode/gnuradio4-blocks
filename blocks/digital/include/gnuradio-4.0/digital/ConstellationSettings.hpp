@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
-#include <string_view>
 
 #include <gnuradio-4.0/annotated.hpp>
 #include <gnuradio-4.0/meta/utils.hpp>
@@ -15,18 +14,18 @@
 namespace gr::blocks::digital {
 
 /**
- * @brief The constellation as a setting - a name and its parameters - rather than a shared mutable object.
+ * @brief The constellation as a setting - a family and its parameters - rather than a shared mutable object.
  *
  * Each block owns its own value, built once per settings change from `constellation`, `arity`, `phase_offset`,
  * `label_xor`, `points` and `normalization`, so there is nothing to share between blocks and nothing to reallocate
- * while `work()` is reading it. The naming itself lives beside the kernel in the library; what this adds is the
+ * while `work()` is reading it. The families themselves live beside the kernel in the library; what this adds is the
  * settings types the blocks carry and the failure a block reports, since a graph reports a bad setting as a
  * `gr::exception` rather than as the library's own argument error.
  */
 template<std::floating_point F>
-[[nodiscard]] gr::digital::Constellation<F> constellationFromSettings(std::string_view name, gr::Size_t arity, F phaseOffset, gr::Size_t labelXor, std::span<const F> interleavedPoints, std::string_view normalizationName) {
+[[nodiscard]] gr::digital::Constellation<F> constellationFromSettings(gr::digital::ConstellationFamily family, gr::Size_t arity, F phaseOffset, gr::Size_t labelXor, std::span<const F> interleavedPoints, gr::digital::Normalization normalization) {
     try {
-        return gr::digital::constellationFromName<F>(name, static_cast<std::size_t>(arity), phaseOffset, static_cast<std::uint8_t>(labelXor), interleavedPoints, normalizationName);
+        return gr::digital::constellationOfFamily<F>(family, static_cast<std::size_t>(arity), phaseOffset, static_cast<std::uint8_t>(labelXor), interleavedPoints, normalization);
     } catch (const std::invalid_argument& error) {
         throw gr::exception(error.what());
     }

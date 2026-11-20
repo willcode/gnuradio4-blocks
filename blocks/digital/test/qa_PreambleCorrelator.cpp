@@ -3,13 +3,20 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <numbers>
 #include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
+#include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/digital/PreambleCorrelator.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -22,10 +29,20 @@ using CF = std::complex<float>;
 constexpr double kPi = std::numbers::pi;
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
@@ -154,6 +171,100 @@ struct Rng {
         imag += weight * static_cast<double>(samples[k].imag());
     }
     return CF(static_cast<float>(real), static_cast<float>(imag));
+}
+
+} // namespace
+
+namespace qa_preamble_correlator {
+
+/// Emits a fixed sequence in calls of at most `burst` samples, each tag on its stated sample, then ends the stream.
+struct TaggedSource : gr::Block<TaggedSource> {
+    gr::PortOut<CF> out;
+
+    std::vector<CF>      samples{};
+    std::vector<gr::Tag> tags{}; ///< in sample order
+    std::size_t          burst = 64UZ;
+    std::size_t          at    = 0UZ;
+    std::size_t          next  = 0UZ;
+
+    GR_MAKE_REFLECTABLE(TaggedSource, out);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
+        if (at >= samples.size()) {
+            outSpan.publish(0UZ);
+            this->requestStop();
+            return gr::work::Status::DONE;
+        }
+        const std::size_t take = std::min({burst, samples.size() - at, outSpan.size()});
+        std::copy_n(samples.begin() + static_cast<std::ptrdiff_t>(at), take, outSpan.begin());
+        while (next < tags.size() && tags[next].index < at + take) {
+            outSpan.publishTag(tags[next].map, tags[next].index - at);
+            ++next;
+        }
+        at += take;
+        outSpan.publish(take);
+        return gr::work::Status::OK;
+    }
+};
+
+/// Keeps every sample and every tag it receives, each tag at its absolute sample index.
+struct TagCollector : gr::Block<TagCollector> {
+    gr::PortIn<CF> in;
+
+    std::vector<CF>      samples{};
+    std::vector<gr::Tag> tags{};
+
+    GR_MAKE_REFLECTABLE(TagCollector, in);
+
+    [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan) {
+        for (const auto& [relIndex, tagMap] : inSpan.tags()) {
+            if (relIndex >= 0) {
+                tags.push_back(gr::Tag{samples.size() + static_cast<std::size_t>(relIndex), tagMap.get()});
+            }
+        }
+        samples.insert(samples.end(), inSpan.begin(), inSpan.end());
+        std::ignore = inSpan.consume(inSpan.size());
+        return gr::work::Status::OK;
+    }
+};
+
+} // namespace qa_preamble_correlator
+
+namespace {
+
+/// What a graph run of the correlator leaves behind.
+struct LabelRun {
+    bool                 completed = false; ///< `runAndWait()` returned no error
+    std::string          label{};           ///< `trigger_label` as a settings read returns it after the run
+    std::vector<gr::Tag> tags{};            ///< the tags on `out`
+};
+
+/// Runs @p stream with @p planted on its port through a source, a correlator built from @p settings and a sink. With
+/// @p couple, the correlator's `trigger_label` follows the `gr:trigger_name` tag key.
+[[nodiscard]] LabelRun runLabelGraph(gr::property_map settings, std::vector<CF> stream, std::vector<gr::Tag> planted, bool couple) {
+    gr::Graph graph;
+    auto&     source = graph.emplaceBlock<qa_preamble_correlator::TaggedSource>();
+    auto&     block  = graph.emplaceBlock<PreambleCorrelator<float>>(std::move(settings));
+    auto&     sink   = graph.emplaceBlock<qa_preamble_correlator::TagCollector>();
+    if (couple) {
+        boost::ut::expect(block.setTagCouplings({{"trigger_label", std::string(gr::tag::TRIGGER_NAME.key())}}).has_value());
+    }
+    source.samples = std::move(stream);
+    source.tags    = std::move(planted);
+    source.burst   = 8UZ;
+    boost::ut::expect(graph.connect<"out", "in">(source, block).has_value());
+    boost::ut::expect(graph.connect<"out", "in">(block, sink).has_value());
+
+    gr::scheduler::Simple scheduler;
+    if (!scheduler.exchange(std::move(graph)).has_value()) {
+        boost::ut::expect(false) << "the scheduler takes the graph";
+        return {};
+    }
+    LabelRun run;
+    run.completed = scheduler.runAndWait().has_value(); // the source ends the stream
+    run.label     = block.template get<std::string>("trigger_label").value_or(std::string{});
+    run.tags      = sink.tags;
+    return run;
 }
 
 } // namespace
@@ -374,9 +485,10 @@ const boost::ut::suite<"preamble correlator"> preambleTests = [] {
         expect(that % (tagOffsets(corrTags) == std::vector<std::size_t>{72UZ})) << std::format("corr published [{}]", join(tagOffsets(corrTags)));
     };
 
-    "an arriving trigger_name tag does not retune the emitted label"_test = [] {
-        // Every writable member is in the auto-update set, so a setting named for a reserved key follows any tag of
-        // that key. The label is named trigger_label for exactly this reason.
+    "a trigger_name tag on the input port leaves the label, unless a caller couples the two"_test = [] {
+        // A setting follows a tag key only where a caller couples the two, so a tag that carries the reserved key the
+        // detections are labeled under passes through and leaves `trigger_label` as it was built. A coupling makes the
+        // same tag retune it, from the tag's sample on.
         constexpr std::size_t kLength = 16UZ;
         constexpr std::size_t kAt     = 48UZ;
         const std::vector<CF> word    = syncWord(kLength, 0x5151ULL);
@@ -384,31 +496,31 @@ const boost::ut::suite<"preamble correlator"> preambleTests = [] {
 
         const gr::property_map::key_type triggerName{gr::tag::TRIGGER_NAME.key()};
         const std::vector<gr::Tag>       planted{gr::Tag{4UZ, gr::property_map{{triggerName, gr::pmt::Value(std::string("access_code"))}}}};
+        const gr::property_map           settings{{"sequence", interleaved(std::span<const CF>(word))}, {"threshold", 0.5f}, {"trigger_label", std::string("preamble")}};
 
-        PreambleCorrelator<float> block = make<PreambleCorrelator<float>>({{"sequence", interleaved(std::span<const CF>(word))}, {"threshold", 0.5f}, {"trigger_label", std::string("preamble")}});
-        block.settings().autoUpdate(planted[0UZ]);
-        std::ignore = block.settings().applyStagedParameters();
-        expect(eq(block.trigger_label.value, std::string("preamble"))) << "the arriving tag drives no setting of this block";
+        for (const bool coupled : {false, true}) {
+            const LabelRun run = runLabelGraph(settings, stream, planted, coupled);
+            expect(run.completed) << std::format("coupled {}: the run completes", coupled);
+            const std::string wantLabel = coupled ? std::string("access_code") : std::string("preamble");
+            expect(eq(run.label, wantLabel)) << std::format("coupled {}: a settings read after the run", coupled);
 
-        std::vector<float>   magnitude;
-        std::vector<gr::Tag> corrTags;
-        const auto           seen = gr::blocks::testing::span::run3<CF, float>(block, std::span<const CF>(stream), 8UZ, magnitude, true, std::span<const gr::Tag>(planted), 0UZ, &corrTags);
-
-        std::vector<std::string> labels;
-        for (const gr::Tag& seenTag : seen.tags) {
-            if (const auto found = seenTag.map.find(triggerName); found != seenTag.map.end()) {
-                labels.push_back(found->second.value_or(std::string{}));
+            std::vector<std::string> labels;
+            for (const gr::Tag& seenTag : run.tags) {
+                if (const auto found = seenTag.map.find(triggerName); found != seenTag.map.end()) {
+                    labels.push_back(found->second.value_or(std::string{}));
+                }
             }
+            expect(that % (labels == std::vector<std::string>{std::string("access_code"), wantLabel})) << std::format("coupled {}: the passing tag leaves as it arrived and the detection carries the label in force", coupled);
+            expect(that % (tagOffsets(run.tags) == std::vector<std::size_t>{4UZ + kLength, kAt + kLength})) << std::format("coupled {}: out published [{}]", coupled, join(tagOffsets(run.tags)));
         }
-        expect(that % (labels == std::vector<std::string>{std::string("access_code"), std::string("preamble")})) << "the passing label is forwarded as it arrived and the detection carries the configured one";
     };
 
     "degenerate parameters throw"_test = [] {
         const std::vector<float> flat = interleaved(std::span<const CF>(syncWord(8UZ)));
         expect(throws([] {
-            PreambleCorrelator<float> block{}; // no settings at all, so nothing is staged and nothing is validated
-            block.start();
-        })) << "there is no default sequence: a block without one refuses to start";
+            PreambleCorrelator<float> block{}; // built without a sequence, which the check refuses
+            initialize(block);
+        })) << "there is no default sequence: a block without one is not ready";
         expect(throws([] { std::ignore = make<PreambleCorrelator<float>>({{"sequence", std::vector<float>{1.0f, 0.0f, 1.0f}}}); })) << "an odd count is not a list of re,im pairs";
         expect(throws([&flat] { std::ignore = make<PreambleCorrelator<float>>({{"sequence", flat}, {"threshold", 0.0f}}); }));
         expect(throws([&flat] { std::ignore = make<PreambleCorrelator<float>>({{"sequence", flat}, {"threshold", -1.0f}}); }));

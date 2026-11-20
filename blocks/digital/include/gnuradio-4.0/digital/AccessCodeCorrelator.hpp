@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -36,10 +37,9 @@ inline constexpr std::string_view ccsds_asm = "00011010110011111111110000011101"
  * In a concatenated chain the marker is encoded by the inner code along with everything else, so the encoded
  * marker's leading symbols depend on whatever data preceded it. From input bit `K-1` onward the register holds
  * only the marker's own bits, so the last `n * (32 - (K - 1))` symbols are a genuine constant of the channel —
- * derived here by encoding the marker from every initial state and keeping the symbols they all agree on, which
- * is also the check that the truncation is exactly right. The string is '0'/'1' characters in symbol order,
- * ready for this block's `access_code`; under the rate-1/2 conventions it is 52 symbols. An unknown convention
- * name is refused listing the ones there are.
+ * derived here by encoding the marker from the zero state and keeping those symbols. The string is '0'/'1'
+ * characters in symbol order, ready for this block's `access_code`; under the rate-1/2 conventions it is 52
+ * symbols. An unknown convention name is refused listing the ones there are.
  */
 [[nodiscard]] inline std::string ccsdsEncodedAsm(std::string_view convention) {
     gr::fec::ConvolutionalCode code;
@@ -55,27 +55,17 @@ inline constexpr std::string_view ccsds_asm = "00011010110011111111110000011101"
     const std::size_t n     = code.polynomialCount;
     const std::size_t keep  = (steps - (code.constraintLength - 1UZ)) * n;
 
-    std::string       word;
-    const std::size_t states = code.states();
-    for (std::uint32_t initial = 0U; initial < states; ++initial) {
-        std::string   encoded;
-        std::uint32_t state = initial;
-        for (const char bit : ccsds_asm) {
-            const std::uint32_t input = bit == '1' ? 1U : 0U;
-            const std::uint32_t out   = gr::fec::convolutionalBranch(code, state, input);
-            for (std::size_t j = 0UZ; j < n; ++j) {
-                encoded.push_back(((out >> j) & 1U) != 0U ? '1' : '0');
-            }
-            state = gr::fec::convolutionalNextState(code, state, input);
+    std::string   encoded;
+    std::uint32_t state = 0U;
+    for (const char bit : ccsds_asm) {
+        const std::uint32_t input = bit == '1' ? 1U : 0U;
+        const std::uint32_t out   = gr::fec::convolutionalBranch(code, state, input);
+        for (std::size_t j = 0UZ; j < n; ++j) {
+            encoded.push_back(((out >> j) & 1U) != 0U ? '1' : '0');
         }
-        const std::string tail = encoded.substr(encoded.size() - keep);
-        if (word.empty()) {
-            word = tail;
-        } else if (word != tail) {
-            throw gr::exception(std::format("the encoded marker's last {} symbols differ between initial states, which contradicts the register's own arithmetic", keep));
-        }
+        state = gr::fec::convolutionalNextState(code, state, input);
     }
-    return word;
+    return encoded.substr(encoded.size() - keep);
 }
 } // namespace syncword
 
@@ -124,6 +114,9 @@ struct Word128 {
 
 } // namespace detail
 
+/// @brief Which item AccessCodeCorrelator's tag names: the one after the code, or the code's first.
+enum class TagPosition : std::uint8_t { payload_start, code_start };
+
 GR_REGISTER_BLOCK(gr::blocks::digital::AccessCodeCorrelator, [T], [ std::uint8_t, float ])
 
 template<BitLike T>
@@ -134,7 +127,7 @@ struct AccessCodeCorrelator : Block<AccessCodeCorrelator<T>> {
 The detector half of a framing chain. The stream passes through unchanged, the tags carry the framework's reserved
 `trigger_*` keys, and `StreamToDataSet` cuts packets out of this block's output with no adapter in between.
 
-There is no default access code: a block with none set throws rather than detecting something arbitrary. `max_errors`
+There is no default access code: a block with none set is not ready rather than detecting something arbitrary. `max_errors`
 is an inclusive bound on the Hamming distance rather than a count of matching bits, so 0 is an exact match. The tag
 sits at the first item after the code, which is the first payload item, and the Hamming distance travels in
 `gr:trigger_meta_info` as `sync_errors` rather than as the tag's key.
@@ -149,7 +142,7 @@ sync thresholds in (P25's C4FM sync is 24 dibits, its threshold symbol-wise). At
 iff non-zero and a soft item slices at zero, exactly as before; a soft stream carries one bit per item by nature, so
 a wider setting on a float stream is refused.
 
-`stride` spaces the code's items `s` apart instead of packing them together, which is the construction the AO-40 FEC
+`code_stride` spaces the code's items `s` apart instead of packing them together, which is the construction the AO-40 FEC
 beacon uses: a code of `n` items at stride `s` is exactly one row of an `s` by `n` block interleaver, so after
 deinterleaving it is the frame's first `n` items and the coded block is everything behind it. Only the comparison is
 strided; the frame of `n*s` items under it is contiguous, so the extraction downstream is an ordinary window and no
@@ -164,23 +157,31 @@ begins, and it gives the block an output lag of `D = (n-1)*s + 1` items on `Prea
 does. An extractor after `code_start` is a start-only filter with no history at all. A tag arriving from upstream keeps
 its input offset. Under `code_start` it stands `D` items ahead of the sample it marked. Only the tags this block emits
 carry the lag.
+
+`access_code` is written as '0'/'1' characters. `max_errors` is the largest distance accepted, counted in symbols of
+`bits_per_item` bits. `trigger_label` is written under gr:trigger_name of the emitted tags, which an extractor filters
+on.
 )"">;
 
-    /// @brief The largest `stride`, at sixteen bytes of register each: 64 KB of state at the cap, and the AO-40
+    /// @brief The largest `code_stride`, at sixteen bytes of register each: 64 KB of state at the cap, and the AO-40
     /// geometries' 80 and 51 stay comfortably L1. The bounded-state rule the family works under is what fixes it.
-    static constexpr std::size_t kMaxStride = 4096UZ;
+    static constexpr gr::Size_t kMaxStride = 4096U;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::string, "access_code", Doc<"the sync word as '0'/'1' characters, 1 to 128 of them; there is no default">, Visible>                                        access_code{};
-    Annotated<gr::Size_t, "max_errors", Doc<"maximum distance accepted, inclusive, in symbols of bits_per_item bits; 0 is an exact match">>                                  max_errors    = 0U;
-    Annotated<std::string, "trigger_label", Doc<"the label written under the gr:trigger_name key of the emitted tags, which an extractor filters on">>                       trigger_label = std::string("access_code");
-    Annotated<gr::Size_t, "bits_per_item", Doc<"bits each item contributes to the register, 1 to 8; above 1 an item is one symbol and byte items carry their low bits">>     bits_per_item = 1U;
-    Annotated<gr::Size_t, "stride", Unit<"items">, Doc<"items between consecutive code items, 1 to 4096; 1 is a contiguous sync word and is the default">, Visible>          stride        = 1U;
-    Annotated<std::string, "tag_at", Doc<"'payload_start' (the item after the code, no lag) or 'code_start' (the code's first item, the output lagging by (n-1)*stride+1)">> tag_at        = std::string("payload_start");
+    struct Settings {
+        Annotated<std::string, Doc<"access code bits">, Visible>                                                                  access_code{};
+        Annotated<gr::Size_t, Doc<"error limit (0 = exact)">>                                                                     max_errors    = 0U;
+        Annotated<std::string, Doc<"emitted trigger name">>                                                                       trigger_label = std::string("access_code");
+        Annotated<gr::Size_t, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>>                                                     bits_per_item = 1U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"code item stride (1 = contiguous)">, Visible, Limits<Min<1U>, Max<kMaxStride>>> code_stride   = 1U;
+        Annotated<TagPosition, Doc<"tag position">>                                                                               tag_at        = TagPosition::payload_start;
 
-    GR_MAKE_REFLECTABLE(AccessCodeCorrelator, in, out, access_code, max_errors, trigger_label, bits_per_item, stride, tag_at);
+        GR_MAKE_REFLECTABLE(Settings, access_code, max_errors, trigger_label, bits_per_item, code_stride, tag_at);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(AccessCodeCorrelator, in, out, settings);
 
     /// @brief Tags emitted over the block's life. The binomial false-alarm rate of the word's length and `max_errors`
     /// turns it into an expected value, and a count far above that says `max_errors` is too generous.
@@ -189,18 +190,46 @@ carry the lag.
     detail::Word128              _code{};
     detail::Word128              _mask{};
     detail::Word128              _groupLsb{};       /// one bit per symbol, at each symbol's lowest position
-    std::vector<detail::Word128> _registers{};      /// one register per residue class modulo `stride`
+    std::vector<detail::Word128> _registers{};      /// one register per residue class modulo `code_stride`
     std::size_t                  _codeLength = 0UZ; /// the code in bits
-    std::size_t                  _symbols    = 0UZ; /// the code in items, which is what `stride` spaces apart
-    std::size_t                  _firstAt    = 0UZ; /// `(n-1)*stride + 1`, the first item a whole comparison exists at
+    std::size_t                  _symbols    = 0UZ; /// the code in items, which is what `code_stride` spaces apart
+    std::size_t                  _firstAt    = 0UZ; /// `(n-1)*code_stride + 1`, the first item a whole comparison exists at
     std::size_t                  _seen       = 0UZ; /// items shifted in since the last reset, capped at `_firstAt`
     std::size_t                  _phase      = 0UZ; /// the residue of the item about to be shifted in
     std::vector<T>               _delay{};          /// the output lag's ring, empty unless `tag_at` is 'code_start'
     std::size_t                  _delayAt = 0UZ;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::string code  = s.access_code;
+        const std::size_t width = s.bits_per_item;
+        if (code.empty()) {
+            return gr::Refused(s.access_code, "required");
+        }
+        if (code.size() > 128UZ) {
+            return gr::Refused(s.access_code, "must be <= 128 bits");
+        }
+        if (std::ranges::any_of(code, [](char c) { return c != '0' && c != '1'; })) {
+            return gr::Refused(s.access_code, "must contain only 0s and 1s");
+        }
+        if (std::floating_point<T> && width != 1UZ) {
+            return gr::Refused(s.bits_per_item, "must be 1 on a floating-point stream");
+        }
+        if (code.size() % width != 0UZ) {
+            return gr::Refused(s.access_code, "must be a multiple of bits_per_item");
+        }
+        if (s.max_errors > code.size() / width) {
+            return gr::Refused(s.max_errors, "must be <= the symbols in access_code");
+        }
+        return {};
+    }
 
-    void start() { rebuild(); }
+    void applySettings(const Settings& s) { rebuild(s); }
+
+    // a restart counts its own detections and compares against an empty register
+    void start() {
+        nDetections = 0ULL;
+        reset();
+    }
 
     void stop() {
         if (nDetections != 0ULL) {
@@ -216,39 +245,13 @@ carry the lag.
         _delayAt = 0UZ;
     }
 
-    void rebuild() {
-        const std::string_view code(access_code.value);
-        if (code.empty() || code.size() > 128UZ) {
-            throw gr::exception(std::format("access_code is {} bits; it must be between 1 and 128, and there is no default sync word", code.size()));
-        }
-        detail::Word128 word{};
+    void rebuild(const Settings& s) {
+        const std::string_view code(s.access_code.value);
+        const std::size_t      width   = s.bits_per_item;
+        const std::size_t      spacing = s.code_stride;
+        detail::Word128        word{};
         for (const char character : code) {
-            if (character != '0' && character != '1') {
-                throw gr::exception(std::format("access_code must be '0' and '1' characters only, got '{}' in \"{}\"", character, code));
-            }
             word.shiftInLow(1U, character == '1' ? 1ULL : 0ULL);
-        }
-        const auto width = static_cast<std::size_t>(bits_per_item.value);
-        if (width < 1UZ || width > 8UZ) {
-            throw gr::exception(std::format("bits_per_item must be between 1 and 8, got {}", bits_per_item.value));
-        }
-        if constexpr (std::floating_point<T>) {
-            if (width != 1UZ) {
-                throw gr::exception("a soft stream carries one bit per item; bits_per_item above 1 needs byte items");
-            }
-        }
-        if (code.size() % width != 0UZ) {
-            throw gr::exception(std::format("access_code is {} bits, not a whole number of {}-bit symbols", code.size(), width));
-        }
-        if (static_cast<std::size_t>(max_errors) > code.size() / width) {
-            throw gr::exception(std::format("max_errors {} exceeds the {} symbols of the access code, which would match everything", max_errors.value, code.size() / width));
-        }
-        const auto spacing = static_cast<std::size_t>(stride.value);
-        if (spacing < 1UZ || spacing > kMaxStride) {
-            throw gr::exception(std::format("stride is the item spacing of a distributed sync word and must be in [1, {}], got {}", kMaxStride, stride.value));
-        }
-        if (tag_at.value != "payload_start" && tag_at.value != "code_start") {
-            throw gr::exception(std::format("tag_at must be 'payload_start' or 'code_start', got '{}'", tag_at.value));
         }
 
         _codeLength = code.size();
@@ -259,25 +262,20 @@ carry the lag.
         for (std::size_t at = 0UZ; at < _codeLength; at += width) {
             _groupLsb.setBit(at);
         }
-        // the oldest item a comparison reads is `i - 1 - (n-1)*stride`, so no whole comparison exists before that
+        // the oldest item a comparison reads is `i - 1 - (n-1)*code_stride`, so no whole comparison exists before that
         // index is non-negative. At stride 1 this is `i = n`, which is the contiguous rule, so one counter serves both
         _firstAt = (_symbols - 1UZ) * spacing + 1UZ;
 
-        // `_symbols` is at most 128, the register's width, and `stride` at most 4096, so the lag is at most
+        // `_symbols` is at most 128, the register's width, and `code_stride` at most 4096, so the lag is at most
         // 127*4096 + 1 = 520193 items — still under the bounded-state line the "D above 2^20 throws" check would
         // draw, so the two caps remain the check and no second one exists.
         _registers.assign(spacing, detail::Word128{});
-        _delay.assign(tag_at.value == "code_start" ? _firstAt : 0UZ, T{});
+        _delay.assign(s.tag_at == TagPosition::code_start ? _firstAt : 0UZ, T{});
         nDetections = 0ULL;
         reset(); // a new code compares against its own bits, never against the previous code's
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (_codeLength == 0UZ) { // the block is inert rather than matching something arbitrary
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
         const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
         // a code within the low limb never reads or writes the high one, so a code up to 64 bits costs one limb
         // and only a longer word pays for the second
@@ -297,8 +295,8 @@ carry the lag.
         const detail::Word128 mask     = _mask;
         const detail::Word128 groupLsb = _groupLsb;
         const std::size_t     length   = _codeLength;
-        const auto            width    = static_cast<unsigned>(bits_per_item.value);
-        const auto            bound    = static_cast<std::size_t>(max_errors);
+        const unsigned        width    = settings.bits_per_item;
+        const std::size_t     bound    = settings.max_errors;
         const std::size_t     spacing  = _registers.size();
         const std::size_t     firstAt  = _firstAt;
 
@@ -340,8 +338,8 @@ carry the lag.
                 if (wrong <= bound) {
                     // the code's first item is at input `i - lag`, which the lag puts at output `i`; without a lag the
                     // tag names the item after the code's last, which is also `i`. The index does not move either way.
-                    outSpan.publishTag(property_map{{gr::tag::TRIGGER_NAME.key(), trigger_label.value}, //
-                                           {gr::tag::TRIGGER_OFFSET.key(), 0.0f},                       //
+                    outSpan.publishTag(property_map{{gr::tag::TRIGGER_NAME.key(), settings.trigger_label.value}, //
+                                           {gr::tag::TRIGGER_OFFSET.key(), 0.0f},                                //
                                            {gr::tag::TRIGGER_META_INFO.key(), property_map{{"sync_errors", static_cast<gr::Size_t>(wrong)}, {"code_length", static_cast<gr::Size_t>(length)}}}},
                         i);
                     ++nDetections;

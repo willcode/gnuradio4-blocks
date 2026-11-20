@@ -6,11 +6,13 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <optional>
 #include <print>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -54,26 +56,36 @@ Three counted drops, each publishing nothing and each named at `stop()`: a recor
 payload whose item count does not invert to a whole field value the layout can carry, and a metadata value the layout
 read and rejected -- a `packet_number` or `header_flags` too wide for its field. Metadata crosses verbatim and the
 record gains `header_items`, the count the header occupied, so a loopback chain can be read frame by frame.
+
+`sync_word` is written as '0'/'1' characters ahead of the header. `fixed_payload_items` applies under fixed_length,
+`byte_order` under length_plain and `flags_position` under length_golay24; the length formats need `length_bits`.
+`check_items` counts uncounted trailing check items when count_covers is payload, and `frame_prefix_items` the counted
+prefix items when it is whole_frame. Records longer than `max_payload_items` are dropped. A nonzero `payload_pack_bits`
+unpacks that many bits per record item.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "sync_word", Doc<"the sync word as '0'/'1' characters, up to 64 of them, emitted ahead of the header; empty emits none and there is no default">, Visible>              sync_word{};
-    Annotated<std::string, "header_format", Doc<"'length_crc' (default), 'length_repeated', 'fixed_length', 'length_plain' or 'length_golay24'">, Visible>                                         header_format       = std::string("length_crc");
-    Annotated<gr::Size_t, "fixed_payload_items", Unit<"items">, Doc<"the length, for 'fixed_length' only">>                                                                                        fixed_payload_items = 0U;
-    Annotated<gr::Size_t, "length_bits", Unit<"bit">, Doc<"the length field's width, [1,32] for 'length_plain' and [1,12] for 'length_golay24'; required by both, 0 is unset">>                    length_bits         = 0U;
-    Annotated<std::string, "byte_order", Doc<"'big' or 'little': the length field's byte order, for 'length_plain' only; 'little' needs a width that is a whole number of bytes">>                 byte_order          = std::string("big");
-    Annotated<std::string, "flags_position", Doc<"'high' or 'low': which end of the Golay header's twelve information bits the flags occupy, for 'length_golay24' only">>                          flags_position      = std::string("high");
-    Annotated<std::string, "count_covers", Doc<"what the length field counts: 'payload', 'payload_and_check' or 'whole_frame'; required by both length formats and there is no default">, Visible> count_covers{};
-    Annotated<gr::Size_t, "count_unit_items", Unit<"items">, Doc<"items per counted unit, [1,64]; 8 because a wire item is one bit and a length field counts bytes">>                              count_unit_items   = 8U;
-    Annotated<gr::Size_t, "check_items", Unit<"items">, Doc<"trailing check items the field does not count; only meaningful under 'payload'">>                                                     check_items        = 0U;
-    Annotated<gr::Size_t, "frame_prefix_items", Unit<"items">, Doc<"frame items ahead of the payload the field does count; only under 'whole_frame', and 0 means the header's own item count">>    frame_prefix_items = 0U;
-    Annotated<gr::Size_t, "max_payload_items", Unit<"items">, Doc<"the largest wire payload a frame may carry; required, 0 leaves the block inert, and a longer record is dropped">, Visible>      max_payload_items  = 0U;
-    Annotated<gr::Size_t, "payload_pack_bits", Doc<"0 takes the record's items as wire bit items; 1 to 8 unpacks each record item into that many bit items first">>                                payload_pack_bits  = 0U;
-    Annotated<gr::math::BitOrder, "payload_bit_order", Doc<"the order the unpack stage takes a record item's bits in, MsbFirst or LsbFirst">>                                                      payload_bit_order  = gr::math::BitOrder::MsbFirst;
+    struct Settings {
+        Annotated<std::string, Doc<"sync word bits (empty = omitted)">, Visible>                      sync_word{};
+        Annotated<HeaderLayout, Doc<"header layout">, Visible>                                        header_format       = HeaderLayout::length_crc;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"fixed payload length">>                             fixed_payload_items = 0U;
+        Annotated<gr::Size_t, Unit<"bit">, Doc<"length field width">>                                 length_bits         = 0U;
+        Annotated<gr::digital::HeaderByteOrder, Doc<"length field byte order">>                       byte_order          = gr::digital::HeaderByteOrder::Big;
+        Annotated<gr::digital::FlagsPosition, Doc<"Golay flags position">>                            flags_position      = gr::digital::FlagsPosition::High;
+        Annotated<gr::digital::CountCovers, Doc<"length field coverage">, Visible>                    count_covers        = gr::digital::CountCovers::Unset;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"items per length unit">, Limits<Min<1U>, Max<64U>>> count_unit_items    = 8U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"trailing check length">>                            check_items         = 0U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"counted prefix length (0 = header)">>               frame_prefix_items  = 0U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"payload length limit">, Visible>                    max_payload_items   = 0U;
+        Annotated<gr::Size_t, Doc<"payload pack width (0 = unpacked)">, Limits<Max<8U>>>              payload_pack_bits   = 0U;
+        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                                       payload_bit_order   = gr::math::BitOrder::MsbFirst;
 
-    GR_MAKE_REFLECTABLE(LengthHeaderFramer, in, out, sync_word, header_format, fixed_payload_items, length_bits, byte_order, flags_position, count_covers, count_unit_items, check_items, frame_prefix_items, max_payload_items, payload_pack_bits, payload_bit_order);
+        GR_MAKE_REFLECTABLE(Settings, sync_word, header_format, fixed_payload_items, length_bits, byte_order, flags_position, count_covers, count_unit_items, check_items, frame_prefix_items, max_payload_items, payload_pack_bits, payload_bit_order);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(LengthHeaderFramer, in, out, settings);
 
     // Plain members, read by the owning thread and by QA, and reported once at stop().
     std::uint64_t nRecords               = 0ULL; ///< records framed and published; the denominator the others are read against
@@ -87,53 +99,41 @@ record gains `header_items`, the count the header occupied, so a loopback chain 
     std::vector<std::uint8_t> _sync{};
     gr::math::BitRepack       _unpack{};
     std::vector<std::uint8_t> _frame{};
-    bool                      _configured = false;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() {
-        rebuild();
-        if (max_payload_items == 0U) {
-            throw gr::exception("max_payload_items is required and has no default: the bound the receiving end refuses above is the bound this end must not send");
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::string word = s.sync_word;
+        if (word.size() > 64UZ) {
+            return gr::Refused(s.sync_word, "must be <= 64 bits");
         }
+        if (std::ranges::any_of(word, [](char c) { return c != '0' && c != '1'; })) {
+            return gr::Refused(s.sync_word, "must contain only 0s and 1s");
+        }
+        if (s.max_payload_items == 0U) {
+            return gr::Refused(s.max_payload_items, "required");
+        }
+        return detail::checkHeaderLayout(s);
     }
 
-    void rebuild() {
-        const std::string_view word(sync_word.value);
-        if (word.size() > 64UZ) {
-            throw gr::exception(std::format("sync_word is {} bits; a detector's register is 64 wide, and there is no default sync word", word.size()));
+    void applySettings(const Settings& s) {
+        _sync.clear();
+        for (const char character : s.sync_word.value) {
+            _sync.push_back(static_cast<std::uint8_t>(character == '1' ? 1U : 0U));
         }
-        std::vector<std::uint8_t> sync;
-        sync.reserve(word.size());
-        for (const char character : word) {
-            if (character != '0' && character != '1') {
-                throw gr::exception(std::format("sync_word must be '0' and '1' characters only, got '{}' in \"{}\"", character, word));
-            }
-            sync.push_back(static_cast<std::uint8_t>(character == '1' ? 1U : 0U));
+        if (s.payload_pack_bits != 0U) {
+            gr::math::configureRepack(_unpack, s.payload_pack_bits, 1U, s.payload_bit_order, gr::math::BitOrder::MsbFirst);
         }
-
-        const auto packBits = static_cast<unsigned>(payload_pack_bits.value);
-        if (packBits > 8U) {
-            throw gr::exception(std::format("payload_pack_bits is 0, for a record already carrying bit items, or in [1, 8], got {}", packBits));
-        }
-        gr::math::BitRepack unpack;
-        if (packBits != 0U) {
-            try {
-                gr::math::configureRepack(unpack, packBits, 1U, payload_bit_order, gr::math::BitOrder::MsbFirst);
-            } catch (const std::invalid_argument& reason) {
-                throw gr::exception(std::string(reason.what()));
-            }
-        }
-
-        // built last, because it is the setting group most likely to be rejected and nothing above it has been written
-        _format      = detail::headerLayoutFrom(detail::HeaderLayoutSettings{header_format.value, fixed_payload_items.value, max_payload_items.value, length_bits.value, byte_order.value, flags_position.value, count_covers.value, count_unit_items.value, check_items.value, frame_prefix_items.value});
+        _format      = detail::headerLayoutOf(s);
         _headerItems = gr::digital::headerItemsOf(_format);
-        _sync        = std::move(sync);
-        _unpack      = unpack;
-        _configured  = max_payload_items != 0U;
 
         _frame.clear();
-        _frame.reserve(_sync.size() + _headerItems + static_cast<std::size_t>(max_payload_items.value));
+        _frame.reserve(_sync.size() + _headerItems + s.max_payload_items);
+        clearCounts();
+    }
+
+    void start() { clearCounts(); }
+
+    /// @brief Zeroes the counts stop() reports, for a new layout and for a restart.
+    void clearCounts() {
         nRecords               = 0ULL;
         nItemsEmitted          = 0ULL;
         nRecordsRefused        = 0ULL;
@@ -159,16 +159,10 @@ record gains `header_items`, the count the header occupied, so a loopback chain 
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_configured) { // unconfigured: inert rather than framing against an unbounded length
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         const bool        connected = outSpan.isConnected; // read once: the record count below is derived from it
         const std::size_t available = inSpan.size();
         const std::size_t nInput    = connected ? std::min(available, outSpan.size()) : available;
-        const auto        packBits  = static_cast<std::size_t>(payload_pack_bits.value);
+        const std::size_t packBits  = settings.payload_pack_bits;
         std::size_t       published = 0UZ;
 
         for (std::size_t i = 0UZ; i < nInput; ++i) {
@@ -178,7 +172,7 @@ record gains `header_items`, the count the header occupied, so a loopback chain 
             // the wire count is computed before anything is resized, so nothing an upstream record supplied reaches a
             // resize unchecked
             const std::size_t wireItems = packBits == 0UZ ? payload.size() : payload.size() * packBits;
-            if (wireItems == 0UZ || wireItems > static_cast<std::size_t>(max_payload_items.value)) {
+            if (wireItems == 0UZ || wireItems > static_cast<std::size_t>(settings.max_payload_items.value)) {
                 ++nRecordsRefused;
                 continue;
             }

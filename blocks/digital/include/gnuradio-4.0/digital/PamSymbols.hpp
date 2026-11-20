@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -64,6 +65,8 @@ that finds the port's buffer full skips its record rather than stalling the symb
 running state, and the next record carries a newer one.
 
 Even M only; a grid with a level at zero changes the decision and both loops, and no consumer exists.
+
+The level spacing may move by the fraction `spread_limit` about its nominal 2.
 )"">;
 
     PortIn<T>  in;
@@ -72,12 +75,16 @@ Even M only; a grid with a level at zero changes the decision and both loops, an
     /// and the two readers below remain the whole interface for a graph that polls.
     PortOut<DataSet<float>, Async, Optional> records;
 
-    Annotated<gr::Size_t, "n_levels", Visible, Doc<"M, even and at least 2">>                              n_levels     = 4U;
-    Annotated<double, "spread_rate", Doc<"level-spacing loop gain">>                                       spread_rate  = 0.0100;
-    Annotated<double, "offset_rate", Doc<"common-shift loop gain">>                                        offset_rate  = 0.1250;
-    Annotated<double, "spread_limit", Doc<"fractional band the spacing may move in, about its nominal 2">> spread_limit = 0.20;
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"level count">, Limits<Min<2U>>> n_levels     = 4U;
+        Annotated<double, Doc<"level spacing loop gain">>                   spread_rate  = 0.0100;
+        Annotated<double, Doc<"common shift loop gain">>                    offset_rate  = 0.1250;
+        Annotated<double, Doc<"spacing deviation limit">>                   spread_limit = 0.20;
 
-    GR_MAKE_REFLECTABLE(LevelTracker, in, out, records, n_levels, spread_rate, offset_rate, spread_limit);
+        GR_MAKE_REFLECTABLE(Settings, n_levels, spread_rate, offset_rate, spread_limit);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(LevelTracker, in, out, records, settings);
 
     /// The tracked quantities, in this order, so that a reader sees both of one instant together.
     static constexpr std::size_t kSpread = 0UZ;
@@ -106,11 +113,15 @@ Even M only; a grid with a level at zero changes the decision and both loops, an
         return gr::measurement::makeScalarRecord(std::span<const gr::measurement::ScalarChannel>(channels), std::numeric_limits<float>::quiet_NaN(), startsAt, property_map{{std::pmr::string("n_symbols"), pmt::Value(static_cast<std::uint64_t>(nSymbols))}, {std::pmr::string("index_unit"), pmt::Value(std::string("symbol"))}});
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (n_levels < 2U || (n_levels % 2U) != 0U) {
-            throw gr::exception(std::format("n_levels must be even and at least 2, got {}", n_levels.value));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.n_levels % 2U != 0U) {
+            return gr::Refused(s.n_levels, "must be even");
         }
-        if (newSettings.contains("n_levels")) { // a new grid invalidates every tracked quantity
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.n_levels.changed()) { // a new grid invalidates every tracked quantity
             _spread = 2.0;
             _offset = 0.0;
             _tracked.publish({_spread, _offset}, 1ULL);
@@ -131,9 +142,9 @@ Even M only; a grid with a level at zero changes the decision and both loops, an
     /// on a full output.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& recordSpan) {
         const std::size_t nSamples = std::min(inSpan.size(), outSpan.size());
-        const auto        levels   = static_cast<std::size_t>(n_levels.value);
-        const double      spreadLo = 2.0 * (1.0 - spread_limit);
-        const double      spreadHi = 2.0 * (1.0 + spread_limit);
+        const auto        levels   = static_cast<std::size_t>(settings.n_levels.value);
+        const double      spreadLo = 2.0 * (1.0 - settings.spread_limit);
+        const double      spreadHi = 2.0 * (1.0 + settings.spread_limit);
         const std::size_t innerLo  = levels / 2UZ - 1UZ;
 
         for (std::size_t i = 0UZ; i < nSamples; ++i) {
@@ -145,9 +156,9 @@ Even M only; a grid with a level at zero changes the decision and both loops, an
             const double      error = value - level;
 
             const double weight = (rank == innerLo || rank == innerLo + 1UZ) ? 1.0 : 0.5;
-            _spread += (level > 0.0 ? error : -error) * weight * spread_rate;
+            _spread += (level > 0.0 ? error : -error) * weight * settings.spread_rate;
             _spread = std::clamp(_spread, spreadLo, spreadHi);
-            _offset += error * offset_rate;
+            _offset += error * settings.offset_rate;
         }
 
         std::size_t made = 0UZ;
@@ -183,33 +194,40 @@ most distant wrong answer available. The label table maps level rank, lowest to 
 because real protocols' maps are non-monotonic - C4FM's is {3, 2, 0, 1} for {-3, -1, +1, +3}. An empty table emits the
 rank itself, the identity map for any M. The input's spacing is the nominal 2; a stream at any other spacing is
 normalized upstream.
+
+`labels` maps each level rank, lowest to highest, to the value emitted.
 )"">;
 
     PortIn<T>             in;
     PortOut<std::uint8_t> out;
 
-    Annotated<gr::Size_t, "n_levels", Visible, Doc<"M, even and at least 2">>                                                                      n_levels = 4U;
-    Annotated<std::vector<gr::Size_t>, "labels", Doc<"level rank (lowest to highest) to emitted value; size M, or empty to emit the rank itself">> labels{};
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"level count">, Limits<Min<2U>>>               n_levels = 4U;
+        Annotated<std::vector<gr::Size_t>, Doc<"emitted value per level (empty = rank)">> labels{};
 
-    GR_MAKE_REFLECTABLE(PamSlicer, in, out, n_levels, labels);
+        GR_MAKE_REFLECTABLE(Settings, n_levels, labels);
+    } settings;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        if (n_levels < 2U || (n_levels % 2U) != 0U) {
-            throw gr::exception(std::format("n_levels must be even and at least 2, got {}", n_levels.value));
+    GR_MAKE_REFLECTABLE(PamSlicer, in, out, settings);
+
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::vector<gr::Size_t> table = s.labels;
+        if (s.n_levels % 2U != 0U) {
+            return gr::Refused(s.n_levels, "must be even");
         }
-        if (!labels.value.empty() && labels.value.size() != static_cast<std::size_t>(n_levels.value)) {
-            throw gr::exception(std::format("labels holds {} entries for {} levels; one per level rank", labels.value.size(), n_levels.value));
+        if (!table.empty() && table.size() != s.n_levels) {
+            return gr::Refused(s.labels, "must have n_levels entries");
         }
-        for (const gr::Size_t label : labels.value) {
-            if (label > 255U) { // the emitted item is one byte, and a wider label would be truncated on the sample path
-                throw gr::exception(std::format("labels holds {}, which does not fit the byte the block emits; every label is at most 255", label));
-            }
+        // the emitted item is one byte, and a wider label would be truncated on the sample path
+        if (std::ranges::any_of(table, [](gr::Size_t label) { return label > 255U; })) {
+            return gr::Refused(s.labels, "each emitted value must be <= 255");
         }
+        return {};
     }
 
     [[nodiscard]] std::uint8_t processOne(T sample) const noexcept {
-        const std::size_t rank = detail::pamRank(static_cast<double>(sample), 2.0, static_cast<std::size_t>(n_levels.value));
-        return static_cast<std::uint8_t>(labels.value.empty() ? rank : labels.value[rank]);
+        const std::size_t rank = detail::pamRank(static_cast<double>(sample), 2.0, static_cast<std::size_t>(settings.n_levels.value));
+        return static_cast<std::uint8_t>(settings.labels.value.empty() ? rank : settings.labels.value[rank]);
     }
 };
 

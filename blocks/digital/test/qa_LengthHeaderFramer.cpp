@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <span>
@@ -45,10 +46,20 @@ struct Rng {
 };
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
@@ -180,6 +191,10 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         expect(eq(gr::digital::readHeaderField(header, 0UZ, 16UZ), std::uint32_t{32})) << "(272 - 16) / 8 = 32, which is what the field carries";
         expect(eq(framer.nRecords, 1ULL));
         expect(eq(framer.nItemsEmitted, kSyncBits + 16UZ + 272UZ));
+
+        framer.start();
+        expect(eq(framer.nRecords, 0ULL)) << "a restart counts its own records";
+        expect(eq(framer.nItemsEmitted, 0ULL)) << "and its own items";
     };
 
     "transmit and receive are one chain, over both realizations and every convention"_test = [] {
@@ -295,25 +310,18 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         expect(eq(framed[0UZ].signal_values.size(), 16UZ + 64UZ)) << "the header and the payload alone, for a chain whose preamble is generated upstream";
 
         const std::string tooLong = complaint([] { std::ignore = make<LengthHeaderFramer>(with(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 4096U), {{"sync_word", std::string(65UZ, '1')}})); });
-        expect(tooLong.contains("65")) << tooLong;
+        expect(tooLong.contains("64 bits")) << tooLong;
         const std::string notBinary = complaint([] { std::ignore = make<LengthHeaderFramer>(with(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 4096U), {{"sync_word", std::string("0101x101")}})); });
-        expect(notBinary.contains("0101x101")) << notBinary;
+        expect(notBinary.contains("0s and 1s")) << notBinary;
     };
 
-    "max_payload_items is required and the block is inert without it"_test = [] {
-        expect(throws([] {
-            LengthHeaderFramer block{}; // no settings at all, so nothing is staged and nothing is validated until start
-            block.start();
-        })) << "the bound the receiving end refuses above is the bound this end must not send";
-
-        Rng                       rng{};
-        LengthHeaderFramer        block{};
-        const std::vector<Record> sent{recordOf(randomBytes(8UZ, rng))};
-        std::vector<Record>       scratch(1UZ);
-        InputSpan<Record>         inSpan{std::span<const Record>(sent)};
-        OutputSpan<Record>        outSpan{std::span<Record>(scratch)};
-        expect(that % (block.processBulk(inSpan, outSpan) == gr::work::Status::ERROR));
-        expect(eq(inSpan.consumed, 0UZ));
+    "max_payload_items is required and the block is not ready without it"_test = [] {
+        LengthHeaderFramer                                block{}; // built at its defaults, whose max_payload_items of 0 the check refuses
+        const std::expected<void, gr::settings::Rejected> ready = block.check({});
+        expect(!ready.has_value()) << "the bound the receiving end refuses above is the bound this end must not send";
+        if (!ready.has_value()) {
+            expect(std::ranges::any_of(ready.error(), [](const gr::settings::Rejection& entry) { return entry.key == "max_payload_items"; }));
+        }
     };
 
     "the layout settings are the framer's, refused in the same places"_test = [] {
@@ -325,15 +333,15 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
 
         refuses({{"max_payload_items", 256U}, {"length_bits", 16U}}, "length_bits", "a width belongs to the length formats");
         refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}}, "count_covers", "and count_covers has no default");
-        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("Payload")}}, "13", "a Golay header carries twelve information bits");
-        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("Payload")}, {"payload_pack_bits", 9U}}, "9", "an item unpacks into at most eight bits");
+        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"check_items", 2U}}, "check_items", "a check field under a convention that counts it");
+        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("Payload")}}, "length_bits", "a Golay header carries twelve information bits");
+        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("Payload")}, {"payload_pack_bits", 9U}}, "must be <= 8", "an item unpacks into at most eight bits");
 
         expect(nothrow([] { std::ignore = make<LengthHeaderFramer>({{"max_payload_items", 256U}}); })) << "and the realizations in use need none of them";
     };
 
     "an idle framer answers that it waits for input, not progress"_test = [] {
-        LengthHeaderFramer block = make<LengthHeaderFramer>({{"max_payload_items", 256U}});
-        block.start();
+        LengthHeaderFramer  block = make<LengthHeaderFramer>({{"max_payload_items", 256U}});
         std::vector<Record> room(2UZ);
         InputSpan<Record>   inSpan{std::span<const Record>{}};
         OutputSpan<Record>  outSpan{std::span<Record>(room)};

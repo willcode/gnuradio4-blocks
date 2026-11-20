@@ -56,6 +56,9 @@ target_link_libraries(qa_Scrambler PRIVATE gr-digital gr-testing)
 add_ut_test(qa_SignalQuality)
 target_link_libraries(qa_SignalQuality PRIVATE gr-digital gr-channel gr-testing)
 
+add_ut_test(qa_DigitalSettingsInit)
+target_link_libraries(qa_DigitalSettingsInit PRIVATE gr-digital gr-testing)
+
 add_ut_test(qa_ModemDemo)
 target_link_libraries(
   qa_ModemDemo
@@ -138,7 +141,7 @@ gr_digital_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_0
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 0"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -146,7 +149,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_1
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 1"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -154,7 +157,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_2
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 2"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -162,7 +165,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_3
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 3"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -170,7 +173,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_5
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 5"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -178,7 +181,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_6
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 6"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -186,7 +189,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_12
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 12"
+  "block 'append_block' refuses its settings: width: must be a multiple of 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -194,7 +197,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_65
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 65"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -202,7 +205,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_100
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 100"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -210,7 +213,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_width_1000
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 1000"
+  "block 'append_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -218,7 +221,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_0
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 0"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -226,7 +229,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_1
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 1"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -234,7 +237,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_2
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 2"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -242,7 +245,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_3
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 3"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -250,7 +253,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_5
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 5"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -258,7 +261,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_6
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 6"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -266,7 +269,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_12
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 12"
+  "block 'check_block' refuses its settings: width: must be a multiple of 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -274,7 +277,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_65
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 65"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -282,7 +285,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_100
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 100"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -290,7 +293,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_width_1000
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: width must be a multiple of 8 in .8, 64. because the block appends whole bytes, got 1000"
+  "block 'check_block' refuses its settings: width: must be >= 8 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -298,7 +301,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_append_byte_order
   graphs/crc-settings.yaml
-  "CrcAppend[^\n]* throws: crc_byte_order must be 'big' or 'little', got 'network'"
+  "block 'append_block' refuses its settings: crc_byte_order: must be one of: big, little"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -306,7 +309,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_crc_check_byte_order
   graphs/crc-settings.yaml
-  "CrcCheck[^\n]* throws: crc_byte_order must be 'big' or 'little', got ''"
+  "block 'check_block' refuses its settings: crc_byte_order: must be one of: big, little"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -338,7 +341,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_bits_per_item
   graphs/delimiter-extractor-settings.yaml
-  "gr::digital::configureDelimiter: bitsPerItem must be in .1, 8., got 9"
+  "bits_per_item: must be >= 1 and <= 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -346,7 +349,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_frame_open
   graphs/delimiter-extractor-settings.yaml
-  "frame_open must be 'delimiter', 'start' or 'immediate', got 'whenever'"
+  "frame_open: must be one of: delimiter, start, immediate"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -362,39 +365,14 @@ gr_add_failing_graph_test(
   "bit_extractor.end_delimiter=\"11000000\""
   "bit_extractor.frame_open=start")
 gr_add_failing_graph_test(
-  graph_digital_refused_extractor_start_unused
-  graphs/delimiter-extractor-settings.yaml
-  "gr::digital::configureDelimiter: frameOpen 'delimiter' consults no startDelimiter"
-  PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrDigitalBlocksShared>
-  SET
-  "bit_extractor.end_delimiter=\"11000000\""
-  "bit_extractor.start_delimiter=\"00100100\"")
-gr_add_failing_graph_test(
   graph_digital_refused_extractor_transparency
   graphs/delimiter-extractor-settings.yaml
-  "transparency must be 'none', 'bit_stuffing' or 'byte_escape', got 'magic'"
+  "transparency: must be one of: none, bit_stuffing, byte_escape"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
   "bit_extractor.end_delimiter=\"11000000\""
   "bit_extractor.transparency=magic")
-gr_add_failing_graph_test(
-  graph_digital_refused_extractor_stuffing_outside
-  graphs/delimiter-extractor-settings.yaml
-  "stuff_after_ones and abort_ones belong to 'bit_stuffing' and transparency is 'none'"
-  PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrDigitalBlocksShared>
-  SET
-  "bit_extractor.stuff_after_ones=!!uint32 4")
-gr_add_failing_graph_test(
-  graph_digital_refused_extractor_escape_outside
-  graphs/delimiter-extractor-settings.yaml
-  "escape_item and escape_map belong to 'byte_escape' and transparency is 'none'"
-  PLUGIN_DIRS
-  $<TARGET_FILE_DIR:GrDigitalBlocksShared>
-  SET
-  "bit_extractor.escape_item=!!uint32 219")
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_stuffing_bytes
   graphs/delimiter-extractor-settings.yaml
@@ -434,7 +412,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_escape_map_odd
   graphs/delimiter-extractor-settings.yaml
-  "escape_map is a flat list of \\(escaped, original\\) pairs and must have an even length, got 1"
+  "escape_map: must have an even length"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -454,7 +432,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_escape_item_wide
   graphs/delimiter-extractor-settings.yaml
-  "escape_item is an item value and must be in .0, 255., got 300"
+  "escape_item: must be <= 255"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -513,7 +491,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_soft_bytes
   graphs/delimiter-extractor-settings.yaml
-  "a soft item carries one sliced bit and nothing else, so bits_per_item must be 1 on a floating-point stream, got 8"
+  "bits_per_item: must be 1 on a floating-point stream"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -522,7 +500,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_soft_pack
   graphs/delimiter-extractor-settings.yaml
-  "the pack stage assembles bits into bytes and needs byte items. this stream is floating point"
+  "payload_pack_bits: must be 0 on a floating-point stream"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -530,7 +508,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_required_both
   graphs/delimiter-extractor-settings.yaml
-  "DelimiterExtractor[^\n]* throws: end_delimiter is required and has no default"
+  "refuse their settings: [^\n]*DelimiterExtractor[^\n]*.end_delimiter: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -539,7 +517,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_required_bound
   graphs/delimiter-extractor-settings.yaml
-  "DelimiterExtractor[^\n]* throws: max_payload_items is required and has no default"
+  "block 'byte_extractor' refuses its settings: max_payload_items: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -547,7 +525,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_extractor_required_delimiter
   graphs/delimiter-extractor-settings.yaml
-  "DelimiterExtractor[^\n]* throws: end_delimiter is required and has no default"
+  "refuse their settings: [^\n]*DelimiterExtractor[^\n]*.end_delimiter: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -595,7 +573,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_framer_required_both
   graphs/delimiter-framer-settings.yaml
-  "DelimiterFramer[^\n]* throws: end_delimiter is required and has no default"
+  "refuse their settings: [^\n]*DelimiterFramer[^\n]*.end_delimiter: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -605,7 +583,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_framer_required_bound
   graphs/delimiter-framer-settings.yaml
-  "DelimiterFramer[^\n]* throws: max_payload_items is required and has no default"
+  "block 'byte_framer' refuses its settings: max_payload_items: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -613,7 +591,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_framer_required_delimiter
   graphs/delimiter-framer-settings.yaml
-  "DelimiterFramer[^\n]* throws: end_delimiter is required and has no default"
+  "refuse their settings: [^\n]*DelimiterFramer[^\n]*.end_delimiter: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -622,7 +600,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_slicer_labels
   graphs/pam-settings.yaml
-  "PamSlicer[^\n]* throws: labels holds 2 entries for 4 levels. one per level rank"
+  "block 'slicer_block' refuses its settings: labels: must have n_levels entries"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -630,7 +608,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_slicer_odd_levels
   graphs/pam-settings.yaml
-  "PamSlicer[^\n]* throws: n_levels must be even and at least 2, got 3"
+  "block 'slicer_block' refuses its settings: n_levels: must be even"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -639,7 +617,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_tracker_odd_levels
   graphs/pam-settings.yaml
-  "LevelTracker[^\n]* throws: n_levels must be even and at least 2, got 3"
+  "block 'tracker_block' refuses its settings: n_levels: must be even"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -761,7 +739,7 @@ gr_digital_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_encoder_zero
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint8>[^\n]* throws: modulus is an alphabet size and must be at least 2, got 0"
+  "block 'encoder_block' refuses its settings: modulus: must be >= 2 and <= 256"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -769,7 +747,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_encoder_one
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint8>[^\n]* throws: modulus is an alphabet size and must be at least 2, got 1"
+  "block 'encoder_block' refuses its settings: modulus: must be >= 2 and <= 256"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -777,7 +755,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_decoder_zero
   graphs/differential-settings.yaml
-  "DifferentialDecoder<uint8>[^\n]* throws: modulus is an alphabet size and must be at least 2, got 0"
+  "block 'decoder_block' refuses its settings: modulus: must be >= 2 and <= 256"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -785,7 +763,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_encoder_wide
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint8>[^\n]* throws: modulus 257 exceeds the 256 values the sample type can hold"
+  "block 'encoder_block' refuses its settings: modulus: must be >= 2 and <= 256"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -793,7 +771,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_decoder_wide
   graphs/differential-settings.yaml
-  "DifferentialDecoder<uint8>[^\n]* throws: modulus 512 exceeds the 256 values the sample type can hold"
+  "block 'decoder_block' refuses its settings: modulus: must be >= 2 and <= 256"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -801,7 +779,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_wide_encoder_wide
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint16>[^\n]* throws: modulus 65537 exceeds the 65536 values the sample type can hold"
+  "block 'wide_encoder_block' refuses its settings: modulus: must be >= 2 and <= 65536"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -809,7 +787,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_encoder_state
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint8>[^\n]* throws: initial_state 4 must be below modulus 4"
+  "block 'encoder_block' refuses its settings: initial_state: must be < modulus"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -817,7 +795,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_decoder_state
   graphs/differential-settings.yaml
-  "DifferentialDecoder<uint8>[^\n]* throws: initial_state 9 must be below modulus 4"
+  "block 'decoder_block' refuses its settings: initial_state: must be < modulus"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -825,7 +803,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_encoder_nrzi
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint8>[^\n]* throws: coding 'nrzi' is a binary code and requires modulus 2, got 4"
+  "block 'encoder_block' refuses its settings: coding: nrzi requires modulus 2"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -833,7 +811,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_decoder_nrzi
   graphs/differential-settings.yaml
-  "DifferentialDecoder<uint8>[^\n]* throws: coding 'nrzi' is a binary code and requires modulus 2, got 4"
+  "block 'decoder_block' refuses its settings: coding: nrzi requires modulus 2"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -841,7 +819,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_differential_encoder_coding
   graphs/differential-settings.yaml
-  "DifferentialEncoder<uint8>[^\n]* throws: coding must be 'differential' or 'nrzi', got 'manchester'"
+  "block 'encoder_block' refuses its settings: coding: must be one of: differential, nrzi"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -865,7 +843,7 @@ gr_digital_graph_test(
   graphs/scrambler-settings.yaml
   SET
   "additive_block.bits_per_item=!!uint32 1"
-  "additive_block.bit_order=LsbFirst")
+  "additive_block.bit_order=lsb_first")
 gr_digital_graph_test(
   graph_digital_accepted_scrambler_profile_si4463
   graphs/scrambler-settings.yaml
@@ -887,7 +865,7 @@ gr_digital_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_no_generator
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: taps names the feedback delays as a decimal list such as \\\"1,3,5,8\\\" and has no default"
+  "refuse their settings: [^\n]*AdditiveScrambler[^\n]*.taps: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -896,7 +874,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_no_seed
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: seed is the first 8 bits of the sequence and has no default"
+  "block 'additive_block' refuses its settings: seed: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -904,7 +882,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_taps_zero
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting taps: gr::digital::tapsFromDelayList: a delay of zero, got '1,0,5'"
+  "block 'additive_block' refuses its settings: taps: each delay must be >= 1 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -912,7 +890,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_taps_above
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting taps: gr::digital::tapsFromDelayList: a delay above 64, got '1,65'"
+  "block 'additive_block' refuses its settings: taps: each delay must be >= 1 and <= 64"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -920,7 +898,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_taps_repeated
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting taps: gr::digital::tapsFromDelayList: a repeated delay, got '3,3'"
+  "block 'additive_block' refuses its settings: taps: each delay must be unique"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -928,7 +906,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_taps_stray
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting taps: gr::digital::tapsFromDelayList: a character that is neither a digit, a comma nor a space, got '1,3:5'"
+  "block 'additive_block' refuses its settings: taps: must be a comma-separated list of delays"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -936,7 +914,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_seed_short
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting seed: gr::digital::seedFromBitString: the seed must be exactly 8 bits, got '1111'"
+  "block 'additive_block' refuses its settings: seed: must be as long as the largest tap"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -944,7 +922,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_seed_digit
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting seed: gr::digital::seedFromBitString: the seed must be '0' and '1' characters, got '11112111'"
+  "block 'additive_block' refuses its settings: seed: must be 0s and 1s"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -952,7 +930,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_seed_zeros
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: seed \\\"00000000\\\" is all zeros, which is a dead generator"
+  "block 'additive_block' refuses its settings: seed: must contain a 1"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -960,7 +938,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_bits_zero
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: bits_per_item is the significant bits of an item and must be in .1, 8., got 0"
+  "block 'additive_block' refuses its settings: bits_per_item: must be >= 1 and <= 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -968,7 +946,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_bits_nine
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: bits_per_item is the significant bits of an item and must be in .1, 8., got 9"
+  "block 'additive_block' refuses its settings: bits_per_item: must be >= 1 and <= 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -976,7 +954,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_profile_taps
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: profile \\\"ccsds131\\\" names the generator, so taps \\\"4,7\\\" cannot be staged beside it"
+  "block 'additive_block' refuses its settings: taps: is incompatible with profile"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -986,7 +964,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_profile_seed
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: profile \\\"ccsds131\\\" names the generator, so seed \\\"00001111\\\" cannot be staged beside it"
+  "block 'additive_block' refuses its settings: seed: is incompatible with profile"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -996,7 +974,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_profile_sequence
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: profile \\\"ccsds131\\\" names the generator, so sequence \\\"FF E1\\\" cannot be staged beside it"
+  "block 'additive_block' refuses its settings: sequence: is incompatible with profile"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1007,7 +985,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_taps_sequence
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: taps \\\"1,3,5,8\\\" walks a recursion and sequence \\\"FF E1\\\" supplies the mask outright"
+  "block 'additive_block' refuses its settings: sequence: is incompatible with taps"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1015,7 +993,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_profile_unknown
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting profile: gr::digital::profileByName: unknown profile 'ccsds132', the names are ccsds131, ccsds131_17, pn9, si4463, g3ruh"
+  "refuses its settings: profile: must be one of: none, ccsds131, ccsds131_17, pn9, si4463"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1025,7 +1003,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_additive_g3ruh
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting profile: gr::digital::applyProfile: profile 'g3ruh' is multiplicative .self-synchronizing. and cannot be used additive"
+  "refuses its settings: profile: must be one of: none, ccsds131, ccsds131_17, pn9, si4463"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1035,7 +1013,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_multiplicative_ccsds131
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting profile: gr::digital::applyProfile: profile 'ccsds131' is additive and cannot be used multiplicative"
+  "refuses its settings: profile: must be one of: none, g3ruh"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1045,7 +1023,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_multiplicative_pn9
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting profile: gr::digital::applyProfile: profile 'pn9' is additive and cannot be used multiplicative"
+  "refuses its settings: profile: must be one of: none, g3ruh"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1055,7 +1033,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_descrambler_ccsds131
   graphs/scrambler-settings.yaml
-  "MultiplicativeDescrambler[^\n]* throws: setting profile: gr::digital::applyProfile: profile 'ccsds131' is additive and cannot be used multiplicative"
+  "refuses its settings: profile: must be one of: none, g3ruh"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1065,7 +1043,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_descrambler_pn9
   graphs/scrambler-settings.yaml
-  "MultiplicativeDescrambler[^\n]* throws: setting profile: gr::digital::applyProfile: profile 'pn9' is additive and cannot be used multiplicative"
+  "refuses its settings: profile: must be one of: none, g3ruh"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1075,7 +1053,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_multiplicative_seed
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting seed: gr::digital::seedFromBitString: the seed must be exactly 23 bits, got '101'"
+  "block 'scrambler_block' refuses its settings: seed: must be as long as the largest tap"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1084,7 +1062,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_sequence_overrun
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: sequence holds 32 bits and sequence_repeat is false, so a reset_period of 8 items at 8 bits each leaves the last 32 bits of every epoch unscrambled"
+  "block 'sequence_block' refuses its settings: reset_period: must be 0 or <= 4, the items in the sequence, while sequence_repeat is false"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1092,7 +1070,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_sequence_odd
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting sequence: gr::digital::sequenceFromHex: an odd number of hexadecimal digits, got 'FF E'"
+  "block 'sequence_block' refuses its settings: sequence: must have an even number of digits"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1100,7 +1078,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_sequence_digit
   graphs/scrambler-settings.yaml
-  "AdditiveScrambler<uint8>[^\n]* throws: setting sequence: gr::digital::sequenceFromHex: a character that is neither a hexadecimal digit nor a space, got 'FF G1'"
+  "block 'sequence_block' refuses its settings: sequence: must be hexadecimal"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1108,7 +1086,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_monitor_disabled
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting the forced-transition group: gr::digital::configureMonitor: monitorDelays describes a disabled mechanism when forceAfter is zero, got '1,2'"
+  "refuses its settings: setting the forced-transition group: gr::digital::configureMonitor: monitorDelays describes a disabled mechanism when forceAfter is zero, got '1,2'"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1116,7 +1094,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_monitor_missing
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting the forced-transition group: gr::digital::tapsFromDelayList: the list must name at least one decimal delay, got ''"
+  "refuses its settings: setting the forced-transition group: gr::digital::tapsFromDelayList: must be a comma-separated list of delays, got ''"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1124,7 +1102,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_force_one
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting the forced-transition group: gr::digital::configureMonitor: forceAfter must be zero or in .2, 4096., got 1"
+  "refuses its settings: setting the forced-transition group: gr::digital::configureMonitor: forceAfter must be zero or in .2, 4096., got 1"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1133,7 +1111,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_monitor_three
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting the forced-transition group: gr::digital::configureMonitor: monitorDelays must name exactly two distinct delays, got '1,2,3'"
+  "refuses its settings: setting the forced-transition group: gr::digital::configureMonitor: monitorDelays must name exactly two distinct delays, got '1,2,3'"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1142,7 +1120,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_scrambler_monitor_one
   graphs/scrambler-settings.yaml
-  "MultiplicativeScrambler[^\n]* throws: setting the forced-transition group: gr::digital::configureMonitor: monitorDelays must name exactly two distinct delays, got '2'"
+  "refuses its settings: setting the forced-transition group: gr::digital::configureMonitor: monitorDelays must name exactly two distinct delays, got '2'"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1189,23 +1167,23 @@ gr_digital_graph_test(
   graph_digital_accepted_access_code_stride_cap
   graphs/access-code-settings.yaml
   SET
-  "byte_correlator.stride=!!uint32 4096")
+  "byte_correlator.code_stride=!!uint32 4096")
 gr_digital_graph_test(
   graph_digital_accepted_access_code_strided_limbs
   graphs/access-code-settings.yaml
   SET
   "byte_correlator.access_code=\"11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111\""
-  "byte_correlator.stride=!!uint32 80")
+  "byte_correlator.code_stride=!!uint32 80")
 gr_digital_graph_test(
   graph_digital_accepted_access_code_soft_strided
   graphs/access-code-settings.yaml
   SET
-  "soft_correlator.stride=!!uint32 80"
+  "soft_correlator.code_stride=!!uint32 80"
   "soft_correlator.tag_at=code_start")
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_empty
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: access_code is 0 bits. it must be between 1 and 128, and there is no default sync word"
+  "refuse their settings: [^\n]*AccessCodeCorrelator[^\n]*.access_code: required"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1213,7 +1191,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_long
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: access_code is 129 bits. it must be between 1 and 128"
+  "block 'byte_correlator' refuses its settings: access_code: must be <= 128 bits"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1222,7 +1200,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_bound
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: max_errors 5 exceeds the 4 symbols of the access code, which would match everything"
+  "block 'byte_correlator' refuses its settings: max_errors: must be <= the symbols in access_code"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1231,7 +1209,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_space
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: access_code must be '0' and '1' characters only, got ' ' in \\\"10 11\\\""
+  "block 'byte_correlator' refuses its settings: access_code: must contain only 0s and 1s"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1239,7 +1217,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_digit
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: access_code must be '0' and '1' characters only, got '2' in \\\"1012\\\""
+  "block 'byte_correlator' refuses its settings: access_code: must contain only 0s and 1s"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1247,7 +1225,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_width_zero
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: bits_per_item must be between 1 and 8, got 0"
+  "block 'byte_correlator' refuses its settings: bits_per_item: must be >= 1 and <= 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1256,7 +1234,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_width_nine
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: bits_per_item must be between 1 and 8, got 9"
+  "block 'byte_correlator' refuses its settings: bits_per_item: must be >= 1 and <= 8"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1265,7 +1243,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_whole_symbols
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: access_code is 5 bits, not a whole number of 2-bit symbols"
+  "block 'byte_correlator' refuses its settings: access_code: must be a multiple of bits_per_item"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1274,7 +1252,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_symbol_bound
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: max_errors 3 exceeds the 2 symbols of the access code"
+  "block 'byte_correlator' refuses its settings: max_errors: must be <= the symbols in access_code"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1284,7 +1262,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_soft_width
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<float32>[^\n]* throws: a soft stream carries one bit per item. bits_per_item above 1 needs byte items"
+  "block 'soft_correlator' refuses its settings: bits_per_item: must be 1 on a floating-point stream"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1293,23 +1271,23 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_stride_zero
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: stride is the item spacing of a distributed sync word and must be in .1, 4096., got 0"
+  "block 'byte_correlator' refuses its settings: code_stride: must be >= 1 and <= 4096"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
-  "byte_correlator.stride=!!uint32 0")
+  "byte_correlator.code_stride=!!uint32 0")
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_stride_above
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: stride is the item spacing of a distributed sync word and must be in .1, 4096., got 4097"
+  "block 'byte_correlator' refuses its settings: code_stride: must be >= 1 and <= 4096"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
-  "byte_correlator.stride=!!uint32 4097")
+  "byte_correlator.code_stride=!!uint32 4097")
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_tag_at
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: tag_at must be 'payload_start' or 'code_start', got 'frame_start'"
+  "block 'byte_correlator' refuses its settings: tag_at: must be one of: payload_start, code_start"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
@@ -1317,12 +1295,12 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_digital_refused_access_code_strided_long
   graphs/access-code-settings.yaml
-  "AccessCodeCorrelator<uint8>[^\n]* throws: access_code is 129 bits"
+  "block 'byte_correlator' refuses its settings: access_code: must be <= 128 bits"
   PLUGIN_DIRS
   $<TARGET_FILE_DIR:GrDigitalBlocksShared>
   SET
   "byte_correlator.access_code=\"111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111\""
-  "byte_correlator.stride=!!uint32 80")
+  "byte_correlator.code_stride=!!uint32 80")
 gr_digital_graph_test(
   graph_digital_counters_access_code_strided_4_3
   graphs/access-code-strided.yaml

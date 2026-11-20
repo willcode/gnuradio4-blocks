@@ -6,11 +6,9 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
-#include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -43,54 +41,57 @@ interference the receiver has to live with.
 
 Symbols arrive as floats on the odd grid `±1, ±3, …, ±(M-1)`, the grid `PamSlicer` and `LevelTracker` decode.
 Turning bits into that grid is an affine map on two levels and a Gray map above it, both of which belong upstream.
+
+A symbol of amplitude a turns the carrier by pi * h * a radians, h the modulation index. A pulse length of 1 is full
+response. Only the gaussian pulse reads `bt`; 0.3 and 0.5 are usual.
 )"">;
 
     PortIn<T>                in;
     PortOut<std::complex<T>> out;
 
-    Annotated<double, "modulation_index", Visible, Doc<"h: a symbol of amplitude a turns the carrier by pi*h*a radians">> modulation_index   = 0.5;
-    Annotated<gr::Size_t, "samples_per_symbol", Visible, Doc<"output samples produced per input symbol; at least 2">>     samples_per_symbol = 8U;
-    Annotated<std::string, "pulse", Visible, Doc<"frequency pulse: rect, raised_cosine or gaussian">>                     pulse              = std::string("rect");
-    Annotated<gr::Size_t, "pulse_length", Doc<"L: symbols the pulse spans; 1 is full response, at most 8">>               pulse_length       = 1U;
-    Annotated<double, "bt", Doc<"bandwidth-symbol-time product; read only by the gaussian pulse, 0.3 and 0.5 are usual">> bt                 = 0.3;
-    Annotated<T, "amplitude", Doc<"the envelope magnitude the output holds">>                                             amplitude          = T(1);
+    struct Settings {
+        Annotated<double, Visible, Doc<"modulation index">, Limits<Over<0.0>, Max<4.0>>>                          modulation_index   = 0.5;
+        Annotated<gr::Size_t, Visible, Doc<"samples per symbol">, Limits<Min<2U>>>                                samples_per_symbol = 8U;
+        Annotated<gr::digital::CpmPulseShape, Visible, Doc<"frequency pulse">>                                    pulse              = gr::digital::CpmPulseShape::Rect;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"pulse length (1 = full response)">, Limits<Min<1U>, Max<8U>>> pulse_length       = 1U;
+        Annotated<double, Doc<"bandwidth-time product">>                                                          bt                 = 0.3;
+        Annotated<T, Doc<"envelope amplitude">>                                                                   amplitude          = T(1);
 
-    GR_MAKE_REFLECTABLE(CpmModulate, in, out, modulation_index, samples_per_symbol, pulse, pulse_length, bt, amplitude);
+        GR_MAKE_REFLECTABLE(Settings, modulation_index, samples_per_symbol, pulse, pulse_length, bt, amplitude);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(CpmModulate, in, out, settings);
 
     gr::digital::CpmPulse<T> _pulse{};
     gr::signal::Phasor<T>    _phasor{};
     std::vector<double>      _increments{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kDesignKeys{"modulation_index", "samples_per_symbol", "pulse", "pulse_length", "bt"};
-
-        const bool designed = !_pulse.pulse().empty();
-        if (!designed || std::ranges::any_of(kDesignKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            design();
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.pulse == gr::digital::CpmPulseShape::Gaussian && s.bt <= 0.) {
+            return gr::Refused(s.bt, "must be > 0 when pulse is gaussian");
         }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        const bool redesign = s.modulation_index.changed() || s.samples_per_symbol.changed() || s.pulse.changed() || s.pulse_length.changed() || s.bt.changed();
+        if (!redesign) {
+            return;
+        }
+        _pulse.configure(s.pulse, s.pulse_length, s.samples_per_symbol, s.modulation_index, s.bt);
+        this->input_chunk_size  = 1U;
+        this->output_chunk_size = s.samples_per_symbol;
     }
 
     void start() {
-        design();
         _pulse.reset();
         _phasor.setPhase(0.);
-    }
-
-    void design() {
-        try {
-            _pulse.configure(gr::digital::cpmPulseShapeFrom(pulse), static_cast<std::size_t>(pulse_length.value), static_cast<std::size_t>(samples_per_symbol.value), modulation_index, bt);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(error.what()); // a graph reports a bad setting as a gr::exception, the kernel as an argument error
-        }
-
-        this->input_chunk_size  = 1U;
-        this->output_chunk_size = samples_per_symbol;
     }
 
     /// @brief One symbol becomes `samples_per_symbol` outputs, so a tag at input `t` belongs at output `sps*t`.
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t processedIn) {
-        const auto                                        sps = static_cast<std::size_t>(samples_per_symbol.value);
+        const std::size_t                                 sps = settings.samples_per_symbol;
         std::vector<std::pair<std::size_t, property_map>> arriving;
         gr::for_each_reader_span(
             [&](auto& span) {
@@ -126,7 +127,7 @@ Turning bits into that grid is an affine map on two levels and a Gray map above 
     }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<std::complex<T>> output) {
-        const auto        sps      = static_cast<std::size_t>(samples_per_symbol.value);
+        const std::size_t sps      = settings.samples_per_symbol;
         const std::size_t nSymbols = std::min(input.size(), output.size() / sps);
         const std::size_t nSamples = nSymbols * sps;
 
@@ -138,8 +139,8 @@ Turning bits into that grid is an affine map on two levels and a Gray map above 
         _pulse.incrementsFor(input.first(nSymbols), increments);
         _phasor.fillModulated(std::span<const double>(increments), output.first(nSamples));
 
-        if (amplitude != T(1)) { // scaling by exactly one is the identity, so the common case skips the pass
-            const T gain = amplitude;
+        if (settings.amplitude != T(1)) { // scaling by exactly one is the identity, so the common case skips the pass
+            const T gain = settings.amplitude;
             std::ranges::transform(output.first(nSamples), output.begin(), [gain](std::complex<T> v) { return gain * v; });
         }
         return work::Status::OK;

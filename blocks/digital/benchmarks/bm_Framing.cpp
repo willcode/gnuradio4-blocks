@@ -82,8 +82,7 @@ struct WriterSpan : std::span<T> {
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 
@@ -160,15 +159,15 @@ int main() {
     constexpr std::array<std::size_t, 3UZ>          kStrides{1UZ, 51UZ, 80UZ};
     std::vector<AccessCodeCorrelator<std::uint8_t>> strided;
     for (const std::size_t spacing : kStrides) {
-        strided.push_back(make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(kSyncWord, 52UZ)}, {"max_errors", static_cast<gr::Size_t>(14)}, {"stride", static_cast<gr::Size_t>(spacing)}}));
+        strided.push_back(make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(kSyncWord, 52UZ)}, {"max_errors", static_cast<gr::Size_t>(14)}, {"code_stride", static_cast<gr::Size_t>(spacing)}}));
     }
     AccessCodeCorrelator<std::uint8_t> lagged = make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(kSyncWord, 52UZ)}, {"max_errors", static_cast<gr::Size_t>(14)}, //
-        {"stride", static_cast<gr::Size_t>(51)}, {"tag_at", std::string("code_start")}});
+        {"code_stride", static_cast<gr::Size_t>(51)}, {"tag_at", std::string("code_start")}});
 
     // the AO-40 long form's 65 items spill into the register's second limb, which every shorter code skips; this arm
     // is the price of the wide path, read against the n=52 arm at the same stride
     AccessCodeCorrelator<std::uint8_t> longForm = make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(kSyncWord, 52UZ) + codeString(kSyncWord, 13UZ)}, //
-        {"max_errors", static_cast<gr::Size_t>(16)}, {"stride", static_cast<gr::Size_t>(80)}});
+        {"max_errors", static_cast<gr::Size_t>(16)}, {"code_stride", static_cast<gr::Size_t>(80)}});
 
     std::vector<gr::blocks::testing::bench::Arm> arms;
     for (std::size_t which = 0UZ; which < kCodeLengths.size(); ++which) {

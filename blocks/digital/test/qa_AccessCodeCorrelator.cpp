@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <span>
 #include <string>
@@ -13,6 +14,7 @@
 
 #include <gnuradio-4.0/digital/AccessCodeCorrelator.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
@@ -23,18 +25,37 @@ using gr::blocks::digital::AccessCodeCorrelator;
 constexpr std::uint64_t kInteropAccessCode = 0xACDDA4E2F28C20FCULL;
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
 template<typename TBlock>
 void restage(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().set(std::move(settings));
-    std::ignore = block.settings().activateContext();
-    std::ignore = block.settings().applyStagedParameters();
+    applyOrThrow(block, settings);
 }
 
 [[nodiscard]] std::string codeString(std::uint64_t word, std::size_t bits) {
@@ -122,16 +143,13 @@ static_assert(AccessCodeCorrelator<float>::keepsTagOffsets());
 const boost::ut::suite<"access code correlator"> accessCodeTests = [] {
     using namespace boost::ut;
 
-    "until it starts the block is inert"_test = [] {
-        AccessCodeCorrelator<std::uint8_t>                  block{};
-        const std::vector<std::uint8_t>                     zeros(32UZ, 0U);
-        std::vector<std::uint8_t>                           out(32UZ);
-        std::vector<gr::Tag>                                published;
-        gr::blocks::testing::span::InputSpan<std::uint8_t>  inSpan{std::span<const std::uint8_t>(zeros)};
-        gr::blocks::testing::span::OutputSpan<std::uint8_t> outSpan{std::span<std::uint8_t>(out), 0UZ, &published};
-        expect(that % (block.processBulk(inSpan, outSpan) == gr::work::Status::ERROR));
-        expect(eq(inSpan.consumed, 0UZ));
-        expect(eq(published.size(), 0UZ));
+    "without an access code the block is not ready"_test = [] {
+        AccessCodeCorrelator<std::uint8_t>                block{};
+        const std::expected<void, gr::settings::Rejected> ready = block.check({});
+        expect(!ready.has_value());
+        if (!ready.has_value()) {
+            expect(std::ranges::any_of(ready.error(), [](const gr::settings::Rejection& entry) { return entry.key == "access_code"; })) << "the reason names the setting a host gives";
+        }
     };
 
     "a longer code mid-stream re-arms the warm-up"_test = [] {
@@ -145,6 +163,18 @@ const boost::ut::suite<"access code correlator"> accessCodeTests = [] {
         const std::vector<std::size_t> where = offsets<std::uint8_t>(block, std::span<const std::uint8_t>(zeros));
         expect(!where.empty());
         expect(eq(where.empty() ? 0UZ : where.front(), 16UZ)) << "the counter is reset by the code change, so no stale bit is compared";
+    };
+
+    "a restart counts its own detections and warms up again"_test = [] {
+        const std::vector<std::uint8_t>    zeros(64UZ, 0U);
+        AccessCodeCorrelator<std::uint8_t> block = make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", std::string(4UZ, '0')}});
+        std::ignore                              = offsets<std::uint8_t>(block, std::span<const std::uint8_t>(zeros));
+        expect(gt(block.nDetections, 0ULL));
+
+        block.start();
+        expect(eq(block.nDetections, 0ULL)) << "the count stop() reports after a restart is the new run's alone";
+        const std::vector<std::size_t> where = offsets<std::uint8_t>(block, std::span<const std::uint8_t>(zeros));
+        expect(eq(where.empty() ? 0UZ : where.front(), 4UZ)) << "and the register holds none of the last run's items";
     };
 
     "the tags do not move with the chunk size"_test = [] {
@@ -207,10 +237,10 @@ const boost::ut::suite<"distributed sync words"> distributedSyncTests = [] {
         constexpr std::size_t kItems = 8UZ;
         const auto            first  = [](const std::vector<std::size_t>& where) { return where.empty() ? 0UZ : where.front(); };
 
-        AccessCodeCorrelator<std::uint8_t> block = make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(0xA5ULL, kItems)}, {"stride", gr::Size_t{5}}, {"max_errors", static_cast<gr::Size_t>(kItems)}});
+        AccessCodeCorrelator<std::uint8_t> block = make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(0xA5ULL, kItems)}, {"code_stride", gr::Size_t{5}}, {"max_errors", static_cast<gr::Size_t>(kItems)}});
         std::vector<std::uint8_t>          stream(80UZ, std::uint8_t{1});
         expect(eq(first(offsets<std::uint8_t>(block, std::span<const std::uint8_t>(stream))), 36UZ)) << "7 * 5 + 1";
-        restage(block, {{"stride", gr::Size_t{3}}});
+        restage(block, {{"code_stride", gr::Size_t{3}}});
         expect(eq(first(offsets<std::uint8_t>(block, std::span<const std::uint8_t>(stream))), 22UZ)) << "7 * 3 + 1, counted from the change and not from the stream's start";
         restage(block, {{"access_code", codeString(0x5AULL, kItems)}});
         expect(eq(first(offsets<std::uint8_t>(block, std::span<const std::uint8_t>(stream))), 22UZ)) << "and a new code warms up too";
@@ -246,7 +276,7 @@ const boost::ut::suite<"distributed sync words"> distributedSyncTests = [] {
             const double      spread   = arm.sigmas * std::sqrt(expected);
 
             AccessCodeCorrelator<std::uint8_t> block = make<AccessCodeCorrelator<std::uint8_t>>({{"access_code", codeString(0x000BADC0FFEE1234ULL, kItems)}, //
-                {"stride", static_cast<gr::Size_t>(arm.spacing)}, {"max_errors", static_cast<gr::Size_t>(kTolerated)}});
+                {"code_stride", static_cast<gr::Size_t>(arm.spacing)}, {"max_errors", static_cast<gr::Size_t>(kTolerated)}});
             std::ignore                              = gr::blocks::testing::span::run<std::uint8_t>(block, std::span<const std::uint8_t>(stream));
 
             const auto seen = static_cast<double>(block.nDetections);
@@ -259,7 +289,7 @@ const boost::ut::suite<"distributed sync words"> distributedSyncTests = [] {
 const boost::ut::suite<"the encoded sync marker"> encodedMarkerTests = [] {
     using namespace boost::ut;
 
-    "the encoded sync marker is derived, state-independent, and matches its check value"_test = [] {
+    "the encoded sync marker is derived and matches its check value"_test = [] {
         const std::string ccsds = gr::blocks::digital::syncword::ccsdsEncodedAsm("ccsds");
         expect(eq(ccsds.size(), 52UZ)) << "2 * (32 - 6) symbols survive the truncation";
         expect(eq(ccsds, std::string("1000000111001001011100011010101001110011110100111110"))) << "the derivation reproduces the recorded word";

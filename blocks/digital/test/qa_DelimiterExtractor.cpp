@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <limits>
 #include <span>
@@ -36,10 +37,20 @@ struct Rng {
 };
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
@@ -210,27 +221,26 @@ const boost::ut::suite<"delimiter extractor"> delimiterExtractorTests = [] {
             }
             expect(eq(block.nTagsOnRemovedItems, 1ULL)) << std::format("chunk {}: the tag on the stuffed bit lands on the next surviving item", chunk);
             expect(eq(block.nTagsOutsideFrames, 1ULL)) << std::format("chunk {}: the tag before the first flag is outside every frame", chunk);
+
+            block.start();
+            expect(eq(block.nFramesEmitted, 0ULL)) << std::format("chunk {}: a restart counts its own frames", chunk);
+            expect(eq(block.nTagsOnRemovedItems, 0ULL)) << std::format("chunk {}: and its own tags", chunk);
+            expect(eq(block.nItemsDiscarded, 0ULL)) << std::format("chunk {}: and the scanner's counts too", chunk);
         }
     };
 
-    "without its two required settings the block is inert if driven"_test = [] {
-        const auto inert = [](gr::property_map settings) {
-            DelimiterExtractor<std::uint8_t>  block = make<DelimiterExtractor<std::uint8_t>>(std::move(settings));
-            const std::vector<std::uint8_t>   stream{0xC0U, 0x11U, 0x22U, 0xC0U};
-            std::vector<Record<std::uint8_t>> outScratch(4UZ);
-            std::vector<Record<std::uint8_t>> rejectScratch(4UZ);
-
-            InputSpan<std::uint8_t>          inSpan(std::span<const std::uint8_t>(stream), 0UZ);
-            OutputSpan<Record<std::uint8_t>> outSpan(std::span<Record<std::uint8_t>>(outScratch), 0UZ, nullptr, true);
-            OutputSpan<Record<std::uint8_t>> rejectSpan(std::span<Record<std::uint8_t>>(rejectScratch), 0UZ, nullptr, true);
-            const gr::work::Status           status = block.processBulk(inSpan, outSpan, rejectSpan);
-            boost::ut::expect(status == gr::work::Status::ERROR);
-            boost::ut::expect(boost::ut::eq(inSpan.consumed, 0UZ));
-            boost::ut::expect(boost::ut::eq(outSpan.count, 0UZ));
+    "without its two required settings the block is not ready"_test = [] {
+        const auto notReady = [](gr::property_map settings, std::string_view missing) {
+            DelimiterExtractor<std::uint8_t>                  block(std::move(settings));
+            const std::expected<void, gr::settings::Rejected> ready = block.check({});
+            boost::ut::expect(!ready.has_value()) << missing;
+            if (!ready.has_value()) {
+                boost::ut::expect(std::ranges::any_of(ready.error(), [missing](const gr::settings::Rejection& entry) { return entry.key == missing; })) << missing;
+            }
         };
 
-        inert({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}});
-        inert({{"max_payload_items", gr::Size_t{16}}});
+        notReady({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}}, "max_payload_items");
+        notReady({{"max_payload_items", gr::Size_t{16}}}, "end_delimiter");
     };
 
     "delimiters at every boundary, in all three transparency modes"_test = [] {

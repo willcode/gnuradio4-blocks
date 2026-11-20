@@ -17,6 +17,7 @@
 
 #include <gnuradio-4.0/algorithm/math/BitPacking.hpp>
 #include <gnuradio-4.0/digital/BitPacking.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -43,11 +44,15 @@ struct EpilogueProbe : gr::Block<EpilogueProbe, gr::Resampling<1UZ, 1UZ, false>>
     gr::PortIn<std::uint8_t>  in;
     gr::PortOut<std::uint8_t> out;
 
-    gr::Annotated<gr::Size_t, "chunk_in">     chunk_in     = 8U;
-    gr::Annotated<gr::Size_t, "chunk_out">    chunk_out    = 3U;
-    gr::Annotated<gr::Size_t, "tail_publish"> tail_publish = 0U;
+    struct Settings {
+        gr::Annotated<gr::Size_t> chunk_in     = 8U;
+        gr::Annotated<gr::Size_t> chunk_out    = 3U;
+        gr::Annotated<gr::Size_t> tail_publish = 0U;
 
-    GR_MAKE_REFLECTABLE(EpilogueProbe, in, out, chunk_in, chunk_out, tail_publish);
+        GR_MAKE_REFLECTABLE(Settings, chunk_in, chunk_out, tail_publish);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(EpilogueProbe, in, out, settings);
 
     std::size_t _bulkCalls               = 0UZ;
     std::size_t _bulkIn                  = 0UZ;
@@ -58,13 +63,13 @@ struct EpilogueProbe : gr::Block<EpilogueProbe, gr::Resampling<1UZ, 1UZ, false>>
     std::size_t _epiloguePublished       = 0UZ;
     std::size_t _bulkCallsBeforeEpilogue = 0UZ;
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& /*newSettings*/) { declareRate(); }
+    void applySettings(const Settings& s) { declareRate(s); }
 
-    void start() { declareRate(); } // a probe built entirely at its defaults moves no value and calls back nowhere
+    void start() { declareRate(settings); }
 
-    void declareRate() {
-        this->input_chunk_size  = chunk_in;
-        this->output_chunk_size = chunk_out;
+    void declareRate(const Settings& s) {
+        this->input_chunk_size  = s.chunk_in;
+        this->output_chunk_size = s.chunk_out;
     }
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outSpan) {
@@ -81,7 +86,7 @@ struct EpilogueProbe : gr::Block<EpilogueProbe, gr::Resampling<1UZ, 1UZ, false>>
         _epilogueReserved        = outSpan.size();
         _bulkCallsBeforeEpilogue = _bulkCalls;
 
-        const std::size_t emitted = std::min(static_cast<std::size_t>(tail_publish), outSpan.size());
+        const std::size_t emitted = std::min(static_cast<std::size_t>(settings.tail_publish), outSpan.size());
         std::ranges::fill(std::span<std::uint8_t>(outSpan.data(), emitted), std::uint8_t{2});
         outSpan.publish(emitted);
         _epiloguePublished = emitted;
@@ -127,12 +132,33 @@ struct ProbeRun {
     return result;
 }
 
+template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
 /// @brief A configured block, taken through the same steps the framework takes before the first call.
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     block.start();
     return block;
 }
@@ -598,11 +624,7 @@ const boost::ut::suite<"RepackBits"> repackBitsTests = [] {
         expect(throws([] { std::ignore = make<RepackBits>({{"bits_out", 9U}}); }));
 
         RepackBits block = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 3U}});
-        expect(throws([&block] {
-            std::ignore = block.settings().set({{"bits_out", 9U}});
-            std::ignore = block.settings().activateContext();
-            std::ignore = block.settings().applyStagedParameters();
-        })) << "a live width change is validated on the same route as a constructed one";
+        expect(throws([&block] { applyOrThrow(block, {{"bits_out", 9U}}); })) << "a live width change is validated on the same route as a constructed one";
         expect(eq(static_cast<unsigned>(block._repack.bitsIn), 8U));
         expect(eq(static_cast<unsigned>(block._repack.bitsOut), 3U)) << "a rejected width leaves the conversion as it was";
         expect(std::ranges::equal(drive(block, std::span<const std::uint8_t>(std::array<std::uint8_t, 3>{0xC5U, 0x3AU, 0x9FU})).samples, std::array<std::uint8_t, 8>{6U, 1U, 2U, 3U, 5U, 2U, 3U, 7U}));
@@ -773,11 +795,7 @@ const boost::ut::suite<"PackBits"> packBitsTests = [] {
         expect(throws([] { std::ignore = make<PackBits>({{"k", 9U}}); })) << "nine bits do not fit the byte a packed item is";
 
         PackBits block = make<PackBits>({{"k", 5U}});
-        expect(throws([&block] {
-            std::ignore = block.settings().set({{"k", 9U}});
-            std::ignore = block.settings().activateContext();
-            std::ignore = block.settings().applyStagedParameters();
-        }));
+        expect(throws([&block] { applyOrThrow(block, {{"k", 9U}}); }));
         expect(eq(static_cast<unsigned>(block._repack.bitsOut), 5U)) << "a rejected width leaves the conversion as it was";
     };
 
@@ -1023,9 +1041,7 @@ const boost::ut::suite<"record repack"> recordRepackTests = [] {
 
     const auto through = [](gr::property_map settings, const std::vector<Record>& records) {
         RecordRepackBits block(std::move(settings));
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
-        block.start(); // a batch that moves no value calls back nowhere, so this is what configures a block left at its defaults
+        initialize(block);
         return gr::blocks::testing::span::run<Record>(block, std::span<const Record>(records)).samples;
     };
 
@@ -1055,9 +1071,7 @@ const boost::ut::suite<"record repack"> recordRepackTests = [] {
 
     "a remainder is a counted, stated drop and the next record regroups"_test = [&] {
         RecordRepackBits block({{"bits_in", gr::Size_t{1U}}, {"bits_out", gr::Size_t{8U}}});
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
-        block.start(); // both values are the defaults, so the batch moves nothing and start is what configures the block
+        initialize(block);
 
         const std::vector<Record>                     records{recordOf(std::vector<std::uint8_t>(13UZ, 1U)), recordOf(std::vector<std::uint8_t>(16UZ, 1U))};
         std::vector<Record>                           outBuf(4UZ);

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -24,29 +25,6 @@ namespace detail {
 
 /// @brief Which end of the appended field the most significant CRC byte sits at.
 enum class ByteOrder : std::uint8_t { Big, Little };
-
-[[nodiscard]] inline ByteOrder byteOrderFromName(std::string_view name) {
-    if (name == "big") {
-        return ByteOrder::Big;
-    }
-    if (name == "little") {
-        return ByteOrder::Little;
-    }
-    throw gr::exception(std::format("crc_byte_order must be 'big' or 'little', got '{}'", name));
-}
-
-/**
- * @brief Build the kernel, validating `width` before anything is derived from it.
- *
- * No mask, table or byte count is computed until the value has been accepted, so an out-of-range width cannot reach a
- * shift whose count equals its operand's width.
- */
-[[nodiscard]] inline gr::digital::Crc buildByteWideCrc(gr::Size_t width, std::uint64_t polynomial, std::uint64_t initialValue, std::uint64_t finalXor, bool inputReflected, bool resultReflected) {
-    if (width < 8U || width > 64U || width % 8U != 0U) {
-        throw gr::exception(std::format("width must be a multiple of 8 in [8, 64] because the block appends whole bytes, got {}", width));
-    }
-    return gr::digital::Crc(static_cast<std::uint8_t>(width), polynomial, initialValue, finalXor, inputReflected, resultReflected);
-}
 
 [[nodiscard]] inline std::uint64_t readTrailingCrc(std::span<const std::uint8_t> bytes, std::size_t crcBytes, ByteOrder order) noexcept {
     const std::span<const std::uint8_t> field = bytes.last(crcBytes);
@@ -115,34 +93,43 @@ and is reached that way by the header formats. `skip_header_bytes` excludes lead
 keeps them in the output, and a record no longer than `skip_header_bytes` has nothing to protect and is dropped with a
 warning naming both numbers rather than being published unprotected. `crc_byte_order` says which end of the appended
 field the most significant byte sits at and defaults to `big`.
+
+`poly` is written MSB first with x^w omitted, and `initial_value` in the unreflected domain; `final_xor` is applied
+last. With `input_reflected`, each message byte enters LSB first; with `result_reflected`, the register is bit-reversed
+before final_xor. The leading `skip_header_bytes` are excluded from the computation and kept in the output.
 )"">;
 
     PortIn<DataSet<std::uint8_t>>         in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<gr::Size_t, "width", Unit<"bit">, detail::CrcSettingsDoc, Visible>                                                        width             = 32U;
-    Annotated<std::uint64_t, "poly", Doc<"generator polynomial, MSB-first, x^w omitted">>                                               poly              = 0x04C11DB7ULL;
-    Annotated<std::uint64_t, "initial_value", Doc<"seed, in the unreflected domain">>                                                   initial_value     = 0xFFFFFFFFULL;
-    Annotated<std::uint64_t, "final_xor", Doc<"XORed into the result last">>                                                            final_xor         = 0xFFFFFFFFULL;
-    Annotated<bool, "input_reflected", Doc<"each message byte enters LSB first">>                                                       input_reflected   = true;
-    Annotated<bool, "result_reflected", Doc<"the register is bit-reversed before final_xor">>                                           result_reflected  = true;
-    Annotated<std::string, "crc_byte_order", Doc<"'big' (most significant CRC byte first) or 'little'">>                                crc_byte_order    = std::string("big");
-    Annotated<gr::Size_t, "skip_header_bytes", Unit<"byte">, Doc<"leading bytes excluded from the computation and kept in the output">> skip_header_bytes = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"bit">, detail::CrcSettingsDoc, Visible, Limits<Min<8U>, Max<64U>>> width             = 32U;
+        Annotated<std::uint64_t, Doc<"generator polynomial">>                                          poly              = 0x04C11DB7ULL;
+        Annotated<std::uint64_t, Doc<"initial register value">>                                        initial_value     = 0xFFFFFFFFULL;
+        Annotated<std::uint64_t, Doc<"final XOR value">>                                               final_xor         = 0xFFFFFFFFULL;
+        Annotated<bool, Doc<"input reflection">>                                                       input_reflected   = true;
+        Annotated<bool, Doc<"result reflection">>                                                      result_reflected  = true;
+        Annotated<detail::ByteOrder, Doc<"CRC byte order">>                                            crc_byte_order    = detail::ByteOrder::Big;
+        Annotated<gr::Size_t, Unit<"byte">, Doc<"skipped header length">>                              skip_header_bytes = 0U;
 
-    GR_MAKE_REFLECTABLE(CrcAppend, in, out, width, poly, initial_value, final_xor, input_reflected, result_reflected, crc_byte_order, skip_header_bytes);
+        GR_MAKE_REFLECTABLE(Settings, width, poly, initial_value, final_xor, input_reflected, result_reflected, crc_byte_order, skip_header_bytes);
+    } settings;
 
-    gr::digital::Crc  _crc{32U, 0x04C11DB7ULL, 0xFFFFFFFFULL, 0xFFFFFFFFULL, true, true};
-    detail::ByteOrder _order    = detail::ByteOrder::Big;
-    std::size_t       _crcBytes = 4UZ;
+    GR_MAKE_REFLECTABLE(CrcAppend, in, out, settings);
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    gr::digital::Crc _crc{32U, 0x04C11DB7ULL, 0xFFFFFFFFULL, 0xFFFFFFFFULL, true, true};
+    std::size_t      _crcBytes = 4UZ;
 
-    void start() { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.width % 8U != 0U) {
+            return gr::Refused(s.width, "must be a multiple of 8");
+        }
+        return {};
+    }
 
-    void rebuild() {
-        _order    = detail::byteOrderFromName(crc_byte_order);
-        _crc      = detail::buildByteWideCrc(width, poly, initial_value, final_xor, input_reflected, result_reflected);
-        _crcBytes = static_cast<std::size_t>(width) / 8UZ;
+    void applySettings(const Settings& s) {
+        _crc      = gr::digital::Crc(static_cast<std::uint8_t>(s.width), s.poly, s.initial_value, s.final_xor, s.input_reflected, s.result_reflected);
+        _crcBytes = s.width / 8U;
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
@@ -153,18 +140,18 @@ field the most significant byte sits at and defaults to `big`.
 
         for (std::size_t i = 0UZ; i < nRecords; ++i) {
             const std::span<const std::uint8_t> bytes = detail::payloadOf(inSpan[i]);
-            if (bytes.size() <= static_cast<std::size_t>(skip_header_bytes)) {
-                std::println(stderr, "gr::blocks::digital::CrcAppend: dropping a record of {} bytes, which is no longer than skip_header_bytes = {} and has nothing to protect", bytes.size(), skip_header_bytes.value);
+            if (bytes.size() <= settings.skip_header_bytes) {
+                std::println(stderr, "gr::blocks::digital::CrcAppend: dropping a record of {} bytes, which is no longer than skip_header_bytes = {} and has nothing to protect", bytes.size(), settings.skip_header_bytes.value);
                 continue;
             }
-            const std::uint64_t value = _crc.compute(bytes.subspan(static_cast<std::size_t>(skip_header_bytes)));
+            const std::uint64_t value = _crc.compute(bytes.subspan(settings.skip_header_bytes));
 
             DataSet<std::uint8_t> record = inSpan[i];
             record.signal_values.reserve(bytes.size() + _crcBytes);
-            detail::appendCrc(record.signal_values, value, _crcBytes, _order);
+            detail::appendCrc(record.signal_values, value, _crcBytes, settings.crc_byte_order);
             detail::resizeRecord(record, bytes.size() + _crcBytes);
             detail::putRecordMeta(record, "crc_value", pmt::Value(value));
-            detail::putRecordMeta(record, "crc_width", pmt::Value(static_cast<std::uint64_t>(width.value)));
+            detail::putRecordMeta(record, "crc_width", pmt::Value(std::uint64_t{settings.width}));
 
             if (connected && published < outSpan.size()) {
                 outSpan[published] = std::move(record);
@@ -202,52 +189,63 @@ The length guard is mandatory: a record must hold more than `skip_header_bytes +
 a warning, a packet length being attacker-controlled in any receive chain. The check compares values rather than
 testing the residue, so it can report what it received: `meta_information[0]` carries `crc_ok` and the received
 `crc_value`.
+
+`poly` is written MSB first with x^w omitted, and `initial_value` in the unreflected domain; `final_xor` is applied
+last. With `input_reflected`, each message byte enters LSB first; with `result_reflected`, the register is bit-reversed
+before final_xor. The leading `skip_header_bytes` are excluded from the computation and always kept. `discard_crc`
+strips the CRC bytes on both ports alike.
 )"">;
 
     PortIn<DataSet<std::uint8_t>>         in;
     PortOut<DataSet<std::uint8_t>, Async> ok;
     PortOut<DataSet<std::uint8_t>, Async> fail;
 
-    Annotated<gr::Size_t, "width", Unit<"bit">, detail::CrcSettingsDoc, Visible>                                                    width             = 32U;
-    Annotated<std::uint64_t, "poly", Doc<"generator polynomial, MSB-first, x^w omitted">>                                           poly              = 0x04C11DB7ULL;
-    Annotated<std::uint64_t, "initial_value", Doc<"seed, in the unreflected domain">>                                               initial_value     = 0xFFFFFFFFULL;
-    Annotated<std::uint64_t, "final_xor", Doc<"XORed into the result last">>                                                        final_xor         = 0xFFFFFFFFULL;
-    Annotated<bool, "input_reflected", Doc<"each message byte enters LSB first">>                                                   input_reflected   = true;
-    Annotated<bool, "result_reflected", Doc<"the register is bit-reversed before final_xor">>                                       result_reflected  = true;
-    Annotated<std::string, "crc_byte_order", Doc<"'big' (most significant CRC byte first) or 'little'">>                            crc_byte_order    = std::string("big");
-    Annotated<gr::Size_t, "skip_header_bytes", Unit<"byte">, Doc<"leading bytes excluded from the computation and never stripped">> skip_header_bytes = 0U;
-    Annotated<bool, "discard_crc", Doc<"strip the CRC bytes, on both ports alike">>                                                 discard_crc       = false;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"bit">, detail::CrcSettingsDoc, Visible, Limits<Min<8U>, Max<64U>>> width             = 32U;
+        Annotated<std::uint64_t, Doc<"generator polynomial">>                                          poly              = 0x04C11DB7ULL;
+        Annotated<std::uint64_t, Doc<"initial register value">>                                        initial_value     = 0xFFFFFFFFULL;
+        Annotated<std::uint64_t, Doc<"final XOR value">>                                               final_xor         = 0xFFFFFFFFULL;
+        Annotated<bool, Doc<"input reflection">>                                                       input_reflected   = true;
+        Annotated<bool, Doc<"result reflection">>                                                      result_reflected  = true;
+        Annotated<detail::ByteOrder, Doc<"CRC byte order">>                                            crc_byte_order    = detail::ByteOrder::Big;
+        Annotated<gr::Size_t, Unit<"byte">, Doc<"skipped header length">>                              skip_header_bytes = 0U;
+        Annotated<bool, Doc<"CRC removal">>                                                            discard_crc       = false;
 
-    GR_MAKE_REFLECTABLE(CrcCheck, in, ok, fail, width, poly, initial_value, final_xor, input_reflected, result_reflected, crc_byte_order, skip_header_bytes, discard_crc);
+        GR_MAKE_REFLECTABLE(Settings, width, poly, initial_value, final_xor, input_reflected, result_reflected, crc_byte_order, skip_header_bytes, discard_crc);
+    } settings;
 
-    gr::digital::Crc  _crc{32U, 0x04C11DB7ULL, 0xFFFFFFFFULL, 0xFFFFFFFFULL, true, true};
-    detail::ByteOrder _order           = detail::ByteOrder::Big;
-    std::size_t       _crcBytes        = 4UZ;
-    bool              _reportedRefused = false;
+    GR_MAKE_REFLECTABLE(CrcCheck, in, ok, fail, settings);
+
+    gr::digital::Crc _crc{32U, 0x04C11DB7ULL, 0xFFFFFFFFULL, 0xFFFFFFFFULL, true, true};
+    std::size_t      _crcBytes        = 4UZ;
+    bool             _reportedRefused = false;
 
     /// @brief Records that failed and were dropped because the `fail` port had no room for them.
     std::uint64_t nRefusedDropped = 0ULL;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() {
-        rebuild();
-        nRefusedDropped  = 0ULL;
-        _reportedRefused = false;
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.width % 8U != 0U) {
+            return gr::Refused(s.width, "must be a multiple of 8");
+        }
+        return {};
     }
 
-    void rebuild() {
-        _order    = detail::byteOrderFromName(crc_byte_order);
-        _crc      = detail::buildByteWideCrc(width, poly, initial_value, final_xor, input_reflected, result_reflected);
-        _crcBytes = static_cast<std::size_t>(width) / 8UZ;
+    void applySettings(const Settings& s) {
+        _crc      = gr::digital::Crc(static_cast<std::uint8_t>(s.width), s.poly, s.initial_value, s.final_xor, s.input_reflected, s.result_reflected);
+        _crcBytes = s.width / 8U;
+    }
+
+    void start() {
+        nRefusedDropped  = 0ULL;
+        _reportedRefused = false;
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& okSpan, OutputSpanLike auto& failSpan) {
         // the guard subtracts rather than adds: skip_header_bytes is 32 bits wide, so on a target whose size_t is also
         // 32 bits a skip within width/8 bytes of the maximum would carry the sum past the length it is compared with,
         // and every record would pass a guard it cannot satisfy. shortest is formed in 64 bits, for the message alone.
-        const std::size_t   skip          = static_cast<std::size_t>(skip_header_bytes);
-        const std::uint64_t shortest      = static_cast<std::uint64_t>(skip_header_bytes) + static_cast<std::uint64_t>(_crcBytes);
+        const std::size_t   skip          = settings.skip_header_bytes;
+        const std::uint64_t shortest      = std::uint64_t{settings.skip_header_bytes} + _crcBytes;
         const std::size_t   available     = inSpan.size();
         const bool          okConnected   = okSpan.isConnected; // read once, so the room test and the store cannot disagree
         const bool          failConnected = failSpan.isConnected;
@@ -263,7 +261,7 @@ testing the residue, so it can report what it received: `meta_information[0]` ca
                 continue;
             }
 
-            const std::uint64_t received   = detail::readTrailingCrc(bytes, _crcBytes, _order);
+            const std::uint64_t received   = detail::readTrailingCrc(bytes, _crcBytes, settings.crc_byte_order);
             const std::uint64_t recomputed = _crc.compute(bytes.subspan(skip, bytes.size() - skip - _crcBytes));
             const bool          passed     = received == recomputed;
 
@@ -284,7 +282,7 @@ testing the residue, so it can report what it received: `meta_information[0]` ca
             }
 
             DataSet<std::uint8_t> record = inSpan[i];
-            if (discard_crc) {
+            if (settings.discard_crc) {
                 detail::resizeRecord(record, bytes.size() - _crcBytes);
             }
             detail::putRecordMeta(record, "crc_ok", pmt::Value(passed));

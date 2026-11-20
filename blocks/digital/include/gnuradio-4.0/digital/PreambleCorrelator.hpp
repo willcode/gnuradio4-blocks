@@ -10,6 +10,7 @@
 #include <format>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -23,6 +24,9 @@
 #include <gnuradio-4.0/annotated.hpp>
 
 namespace gr::blocks::digital {
+
+/// @brief The reference PreambleCorrelator's `threshold` scales: the noiseless peak, or the running mean.
+enum class ThresholdMode : std::uint8_t { absolute, relative };
 
 GR_REGISTER_BLOCK(gr::blocks::digital::PreambleCorrelator, [T], [float])
 
@@ -45,19 +49,26 @@ a stated precondition; `relative` tests against a multiple of the running mean a
 followed by `round(samples_per_symbol)` samples of dead time.
 
 The label the emitted tags carry under `gr:trigger_name` is the `trigger_label` setting.
+
+`sequence` holds interleaved re, im pairs. Under absolute threshold_mode, `threshold` is a fraction of the noiseless
+peak; under relative, a multiple of the running mean. `samples_per_symbol` is the dead time after a detection.
 )"">;
 
     PortIn<std::complex<F>>  in;
     PortOut<std::complex<F>> out;
     PortOut<float, Optional> corr;
 
-    Annotated<std::vector<F>, "sequence", Doc<"the sync sequence as interleaved re,im pairs; there is no default">, Visible>        sequence{};
-    Annotated<F, "threshold", Doc<"'absolute': a fraction of the noiseless peak. 'relative': a multiple of the running mean, > 1">> threshold          = static_cast<F>(0.9);
-    Annotated<std::string, "threshold_mode", Doc<"'absolute' (needs an AGC) or 'relative' (scale-free)">>                           threshold_mode     = std::string("absolute");
-    Annotated<F, "samples_per_symbol", Unit<"samples">, Doc<"dead time after a detection, in samples">>                             samples_per_symbol = F{1};
-    Annotated<std::string, "trigger_label", Doc<"the label written under the gr:trigger_name key of the emitted tags">>             trigger_label      = std::string("preamble");
+    struct Settings {
+        Annotated<std::vector<F>, Doc<"sync sequence">, Visible>                           sequence{};
+        Annotated<F, Doc<"detection threshold">, Limits<Over<F{0}>>>                       threshold          = static_cast<F>(0.9);
+        Annotated<ThresholdMode, Doc<"threshold reference">>                               threshold_mode     = ThresholdMode::absolute;
+        Annotated<F, Unit<"samples">, Doc<"dead time after detection">, Limits<Min<F{1}>>> samples_per_symbol = F{1};
+        Annotated<std::string, Doc<"emitted trigger name">>                                trigger_label      = std::string("preamble");
 
-    GR_MAKE_REFLECTABLE(PreambleCorrelator, in, out, corr, sequence, threshold, threshold_mode, samples_per_symbol, trigger_label);
+        GR_MAKE_REFLECTABLE(Settings, sequence, threshold, threshold_mode, samples_per_symbol, trigger_label);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PreambleCorrelator, in, out, corr, settings);
 
     std::vector<std::complex<F>>                        _reference;   ///< conj(s), so the correlation is a plain dot product
     std::vector<std::complex<F>>                        _window;      ///< `_carry` followed by this call's input
@@ -73,9 +84,29 @@ The label the emitted tags carry under `gr:trigger_name` is the `trigger_label` 
     std::size_t                                         _deadTime = 1UZ;
     std::uint64_t                                       _resumeAt = 0ULL; ///< absolute input index the dead time ends at
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::vector<F> values = s.sequence;
+        if (values.empty()) {
+            return gr::Refused(s.sequence, "required");
+        }
+        if (values.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.sequence, "must have an even length");
+        }
+        if (std::ranges::all_of(values, [](F value) { return value == F{0}; })) {
+            return gr::Refused(s.sequence, "must contain a nonzero value");
+        }
+        if (s.threshold_mode == ThresholdMode::relative && s.threshold <= F{1}) {
+            return gr::Refused(s.threshold, "must be > 1 when threshold_mode is relative");
+        }
+        return {};
+    }
 
-    void start() { rebuild(); }
+    // the label is read at each detection, so a new one leaves the correlation and the held tags as they are
+    void applySettings(const Settings& s) {
+        if (s.sequence.changed() || s.threshold.changed() || s.threshold_mode.changed() || s.samples_per_symbol.changed()) {
+            rebuild();
+        }
+    }
 
     void reset() {
         std::ranges::fill(_carry, std::complex<F>{});
@@ -87,36 +118,17 @@ The label the emitted tags carry under `gr:trigger_name` is the `trigger_label` 
     }
 
     void rebuild() {
-        if (sequence.value.empty() || sequence.value.size() % 2UZ != 0UZ) {
-            throw gr::exception(std::format("sequence is the sync word as interleaved re,im pairs and must be a non-empty even-length list, got {} values", sequence.value.size()));
-        }
-        if (!(threshold > F{0})) {
-            throw gr::exception(std::format("threshold must be strictly positive, got {}", static_cast<double>(threshold.value)));
-        }
-        if (threshold_mode != "absolute" && threshold_mode != "relative") {
-            throw gr::exception(std::format("threshold_mode must be 'absolute' or 'relative', got '{}'", threshold_mode.value));
-        }
-        if (threshold_mode == "relative" && !(threshold > F{1})) {
-            throw gr::exception(std::format("a 'relative' threshold is a multiple of the mean and must exceed 1, got {}", static_cast<double>(threshold.value)));
-        }
-        if (!(samples_per_symbol >= F{1})) {
-            throw gr::exception(std::format("samples_per_symbol is the dead time in samples and must be at least 1, got {}", static_cast<double>(samples_per_symbol.value)));
-        }
-
-        const std::size_t length = sequence.value.size() / 2UZ;
+        const std::size_t length = settings.sequence.value.size() / 2UZ;
         _reference.resize(length);
         double energy = 0.0;
         for (std::size_t k = 0UZ; k < length; ++k) {
-            const std::complex<F> symbol = std::complex<F>(sequence.value[2UZ * k], sequence.value[2UZ * k + 1UZ]);
+            const std::complex<F> symbol = std::complex<F>(settings.sequence.value[2UZ * k], settings.sequence.value[2UZ * k + 1UZ]);
             _reference[k]                = std::conj(symbol);
             energy += static_cast<double>(std::norm(symbol));
         }
-        if (!(energy > 0.0)) {
-            throw gr::exception("sequence has zero energy, so no threshold on the correlation means anything");
-        }
         _energy   = static_cast<F>(energy);
-        _relative = threshold_mode == "relative";
-        _deadTime = static_cast<std::size_t>(std::lround(static_cast<double>(samples_per_symbol.value)));
+        _relative = settings.threshold_mode == ThresholdMode::relative;
+        _deadTime = static_cast<std::size_t>(std::lround(static_cast<double>(settings.samples_per_symbol.value)));
         _carry.assign(length, std::complex<F>{});
         reset();
 
@@ -155,12 +167,6 @@ The label the emitted tags carry under `gr:trigger_name` is the `trigger_label` 
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& corrSpan) {
-        if (_reference.empty()) { // the block is inert rather than correlating against nothing
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            corrSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
         const bool        corrConnected = corrSpan.isConnected;
         const std::size_t nSamples      = corrConnected ? std::min({inSpan.size(), outSpan.size(), corrSpan.size()}) : std::min(inSpan.size(), outSpan.size());
         if (nSamples == 0UZ) {
@@ -197,7 +203,7 @@ The label the emitted tags carry under `gr:trigger_name` is the `trigger_label` 
             }
         }
 
-        const F level = _relative ? static_cast<F>(threshold * static_cast<F>(sum / static_cast<double>(nSamples))) : static_cast<F>(threshold * _energy * _energy);
+        const F level = _relative ? static_cast<F>(settings.threshold * static_cast<F>(sum / static_cast<double>(nSamples))) : static_cast<F>(settings.threshold * _energy * _energy);
 
         if (_carrying) { // the index before this call could only be confirmed once its successor arrived
             examine(base - 1ULL, _twoBack, _previous, _magnitude[0UZ], level, base);
@@ -239,12 +245,12 @@ The label the emitted tags carry under `gr:trigger_name` is the `trigger_label` 
         }
 
         // the sync word starts at input `at + 1 - N`, which the `N`-sample lag puts at output `at + 1`
-        _pendingTags.emplace_back(at + 1ULL, property_map{{gr::tag::TRIGGER_NAME.key(), trigger_label.value},                                                                              //
+        _pendingTags.emplace_back(at + 1ULL, property_map{{gr::tag::TRIGGER_NAME.key(), settings.trigger_label.value},                                                                     //
                                                  {gr::tag::TRIGGER_OFFSET.key(), static_cast<float>(offset)},                                                                              //
                                                  {gr::tag::TRIGGER_META_INFO.key(), property_map{{"phase_est", static_cast<float>(std::atan2(peak.imag(), peak.real()))},                  //
                                                                                         {"corr_mag", static_cast<float>(b)},                                                               //
                                                                                         {"amp_est", static_cast<float>(std::sqrt(static_cast<double>(b)) / static_cast<double>(_energy))}, //
-                                                                                        {"sps", static_cast<float>(samples_per_symbol.value)}}}});
+                                                                                        {"sps", static_cast<float>(settings.samples_per_symbol.value)}}}});
         _resumeAt = at + 1ULL + static_cast<std::uint64_t>(_deadTime);
     }
 

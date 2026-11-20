@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -29,6 +30,12 @@
 #include <gnuradio-4.0/digital/ConstellationSettings.hpp>
 
 namespace gr::blocks::digital {
+
+/// @brief How EvmMeter decides the reference symbol; a known-reference mode would join this one.
+enum class EvmMode : std::uint8_t { decision_directed };
+
+/// @brief How SnrEstimator separates signal from noise: blind by moments, or by the decided symbol.
+enum class SnrMethod : std::uint8_t { m2m4, decision_directed };
 
 namespace detail {
 
@@ -75,6 +82,11 @@ covers.
 
 The input is one complex sample per decided symbol, carrier locked and scaled to the constellation's own geometry -
 the stream `SymbolSync` and the carrier loops deliver. This block does not scale it.
+
+`mode` is `decision_directed`, the one reference this block has; a known-reference mode would arrive under it.
+
+`arity` is read by psk and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom. A
+change of `window` restarts the window.
 )"">;
 
     PortIn<std::complex<F>> in;
@@ -82,17 +94,20 @@ the stream `SymbolSync` and the carrier loops deliver. This block does not scale
     /// nothing and the readers below remain the whole interface for a graph that polls.
     PortOut<DataSet<float>, Async, Optional> records;
 
-    Annotated<std::string, "constellation", ConstellationSettingsDoc, Visible>         constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">> arity         = 4U;
-    Annotated<F, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>  phase_offset  = F{0};
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>     label_xor     = 0U;
-    Annotated<std::vector<F>, "points", Doc<"interleaved re,im for 'custom'">>         points{};
-    Annotated<std::string, "normalization", Doc<"'power', 'amplitude' or 'none'">>     normalization = std::string("power");
+    struct Settings {
+        Annotated<gr::digital::ConstellationFamily, ConstellationSettingsDoc, Visible>               constellation = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>                           arity         = 4U;
+        Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                               phase_offset  = F{0};
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                               label_xor     = 0U;
+        Annotated<std::vector<F>, Doc<"custom points">>                                              points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                            normalization = gr::digital::Normalization::Power;
+        Annotated<gr::Size_t, Unit<"symbols">, Visible, Doc<"symbols per reading">, Limits<Min<1U>>> window        = 1000U;
+        Annotated<EvmMode, Doc<"reference mode">>                                                    mode          = EvmMode::decision_directed;
 
-    Annotated<gr::Size_t, "window", Unit<"symbols">, Visible, Doc<"symbols per reading; a change restarts the window">> window = 1000U;
-    Annotated<std::string, "mode", Doc<"'decision_directed'; a known-reference mode would arrive under this name">>     mode   = std::string("decision_directed");
+        GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization, window, mode);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(EvmMeter, in, records, constellation, arity, phase_offset, label_xor, points, normalization, window, mode);
+    GR_MAKE_REFLECTABLE(EvmMeter, in, records, settings);
 
     gr::digital::Constellation<F> _constellation  = gr::digital::Constellation<F>::qpsk();
     double                        _referencePower = 1.;
@@ -114,31 +129,30 @@ the stream `SymbolSync` and the carrier loops deliver. This block does not scale
     std::uint64_t               _windowStartAt{0ULL}; ///< first symbol of the window now filling, a record's abscissa
     bool                        _flushed{false};      ///< the end-of-stream record has gone out
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const gr::digital::Constellation<F> decisions = constellationOf(s);
+        if (detail::referencePower(decisions) <= 0.) {
+            return gr::Refused(s.points, "must contain a nonzero value");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        _constellation  = constellationOf(s);
+        _referencePower = detail::referencePower(_constellation);
+        _window         = s.window;
+        _windowSize.store(std::uint64_t{s.window}, std::memory_order_relaxed);
+        restart();
+    }
+
+    [[nodiscard]] gr::digital::Constellation<F> constellationOf(const Settings& s) const { return constellationFromSettings<F>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
 
     void start() {
-        rebuild();
-        // The framework runs `processEpilogue` only over a non-empty trailing span, and that epilogue is what reports
+        restart();
+        // The framework runs `processEpilogue` only over a non-empty trailing span, and that epilogue reports
         // the window in progress when the stream ends. `processBulk` therefore leaves the last symbol of a call
         // unconsumed, and asking for two keeps that from stalling the steady state.
         in.min_samples = 2UZ;
-    }
-
-    void rebuild() {
-        if (mode != "decision_directed") {
-            throw gr::exception(std::format("mode must be 'decision_directed', got '{}'", mode.value));
-        }
-        if (window < 1U) {
-            throw gr::exception("window must hold at least one symbol");
-        }
-        _constellation  = constellationFromSettings<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization);
-        _referencePower = detail::referencePower(_constellation);
-        if (!(_referencePower > 0.)) {
-            throw gr::exception("the constellation's points carry no power to measure against");
-        }
-        _window = static_cast<std::size_t>(window.value);
-        _windowSize.store(static_cast<std::uint64_t>(_window), std::memory_order_relaxed);
-        restart();
     }
 
     void restart() noexcept {
@@ -331,23 +345,29 @@ covers.
 
 The input is one complex sample per decided symbol, carrier locked and scaled to the constellation's own geometry.
 This block does not scale it.
+
+A change of `window` restarts the window. snrDb() is clamped to `ceiling_db` either side of zero. `arity` is read by psk
+and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom.
 )"">;
 
     PortIn<std::complex<F>>                  in;
     PortOut<DataSet<float>, Async, Optional> records;
 
-    Annotated<std::string, "method", Visible, Doc<"'m2m4', blind and constant-modulus, or 'decision_directed'">>        method     = std::string("m2m4");
-    Annotated<gr::Size_t, "window", Unit<"symbols">, Visible, Doc<"symbols per reading; a change restarts the window">> window     = 4096U;
-    Annotated<double, "ceiling_db", Unit<"dB">, Doc<"the magnitude snrDb() is clamped to, either side of zero">>        ceiling_db = 100.0;
+    struct Settings {
+        Annotated<SnrMethod, Visible, Doc<"estimation method">>                                      method        = SnrMethod::m2m4;
+        Annotated<gr::Size_t, Unit<"symbols">, Visible, Doc<"symbols per reading">, Limits<Min<1U>>> window        = 4096U;
+        Annotated<double, Unit<"dB">, Doc<"SNR clamp">, Limits<Over<0.0>>>                           ceiling_db    = 100.0;
+        Annotated<gr::digital::ConstellationFamily, ConstellationSettingsDoc, Visible>               constellation = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>                           arity         = 4U;
+        Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                               phase_offset  = F{0};
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                               label_xor     = 0U;
+        Annotated<std::vector<F>, Doc<"custom points">>                                              points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                            normalization = gr::digital::Normalization::Power;
 
-    Annotated<std::string, "constellation", ConstellationSettingsDoc, Visible>         constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">> arity         = 4U;
-    Annotated<F, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>  phase_offset  = F{0};
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>     label_xor     = 0U;
-    Annotated<std::vector<F>, "points", Doc<"interleaved re,im for 'custom'">>         points{};
-    Annotated<std::string, "normalization", Doc<"'power', 'amplitude' or 'none'">>     normalization = std::string("power");
+        GR_MAKE_REFLECTABLE(Settings, method, window, ceiling_db, constellation, arity, phase_offset, label_xor, points, normalization);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(SnrEstimator, in, records, method, window, ceiling_db, constellation, arity, phase_offset, label_xor, points, normalization);
+    GR_MAKE_REFLECTABLE(SnrEstimator, in, records, settings);
 
     gr::digital::Constellation<F> _constellation    = gr::digital::Constellation<F>::qpsk();
     double                        _referencePower   = 1.;
@@ -371,35 +391,31 @@ This block does not scale it.
     std::uint64_t               _windowStartAt{0ULL}; ///< first symbol of the window now filling, a record's abscissa
     bool                        _flushed{false};      ///< the end-of-stream record has gone out
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() {
-        rebuild();
-        in.min_samples = 2UZ;
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        // the constellation is built whichever method runs, so a parameter it refuses is heard about rather than
+        // ignored; only the decision-directed method reads it
+        const gr::digital::Constellation<F> decisions = constellationOf(s);
+        if (s.method == SnrMethod::decision_directed && detail::referencePower(decisions) <= 0.) {
+            return gr::Refused(s.points, "must contain a nonzero value");
+        }
+        return {};
     }
 
-    void rebuild() {
-        if (method != "m2m4" && method != "decision_directed") {
-            throw gr::exception(std::format("method must be 'm2m4' or 'decision_directed', got '{}'", method.value));
-        }
-        if (window < 1U) {
-            throw gr::exception("window must hold at least one symbol");
-        }
-        if (!(ceiling_db > 0.)) {
-            throw gr::exception(std::format("ceiling_db is a magnitude and must be positive, got {}", ceiling_db.value));
-        }
-        // The vocabulary is validated whichever method runs, so a name that is wrong is heard about rather than
-        // ignored; only the decision-directed method reads the result.
-        _constellation    = constellationFromSettings<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization);
+    void applySettings(const Settings& s) {
+        _constellation    = constellationOf(s);
         _referencePower   = detail::referencePower(_constellation);
-        _decisionDirected = method == "decision_directed";
-        if (_decisionDirected && !(_referencePower > 0.)) {
-            throw gr::exception("the constellation's points carry no power to measure against");
-        }
-        _window = static_cast<std::size_t>(window.value);
-        _windowSize.store(static_cast<std::uint64_t>(_window), std::memory_order_relaxed);
-        _ceiling.store(ceiling_db, std::memory_order_relaxed);
+        _decisionDirected = s.method == SnrMethod::decision_directed;
+        _window           = s.window;
+        _windowSize.store(std::uint64_t{s.window}, std::memory_order_relaxed);
+        _ceiling.store(s.ceiling_db, std::memory_order_relaxed);
         restart();
+    }
+
+    [[nodiscard]] gr::digital::Constellation<F> constellationOf(const Settings& s) const { return constellationFromSettings<F>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
+
+    void start() {
+        restart();
+        in.min_samples = 2UZ;
     }
 
     void restart() noexcept {
@@ -549,7 +565,7 @@ private:
 
         if (_decisionDirected) {
             const double meanSquaredError = _sumSquared / count;
-            ratio                         = meanSquaredError > 0. ? _referencePower / meanSquaredError : std::pow(10., 0.1 * ceiling_db);
+            ratio                         = meanSquaredError > 0. ? _referencePower / meanSquaredError : std::pow(10., 0.1 * settings.ceiling_db);
         } else {
             const double m2   = _sumSquared / count;
             const double m4   = _sumFourth / count;
@@ -559,7 +575,7 @@ private:
             } else {
                 const double signal = std::sqrt(disc);
                 const double noise  = m2 - signal;
-                ratio               = noise > 0. ? signal / noise : std::pow(10., 0.1 * ceiling_db);
+                ratio               = noise > 0. ? signal / noise : std::pow(10., 0.1 * settings.ceiling_db);
             }
         }
         _slot.publish({ratio}, static_cast<std::uint64_t>(_filled));

@@ -40,11 +40,21 @@ constexpr std::array<CF, 3UZ> kChannel{CF(1.0f, 0.0f), CF(0.4f, 0.0f), CF(0.0f, 
 constexpr gr::Size_t  kNumTaps    = 11U;
 constexpr std::size_t kGroupDelay = (kNumTaps - 1U) / 2U; ///< the input samples a spike at the center of `kNumTaps` taps delays by
 
+template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
 /// A block carrying a seqlock is neither copyable nor movable, so every one below is built where it is used.
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     if constexpr (requires { block.start(); }) {
         block.start();
     }
@@ -221,7 +231,7 @@ struct Run {
     std::ranges::sort(source._tags, std::ranges::less{}, &gr::Tag::index);
 
     auto& equalizer = graph.emplaceBlock<LinearEqualizer<float>>(std::move(settings));
-    equalizer.settings().setTagCouplings({{"freeze", std::string("freeze")}});
+    boost::ut::expect(equalizer.setTagCouplings({{"freeze", std::string("freeze")}}).has_value());
     auto& sink = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
 
     boost::ut::expect(graph.connect<"out", "in">(source, equalizer).has_value());
@@ -448,6 +458,11 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         expect(lt(isi, -20.0)) << std::format("residual intersymbol interference {:.2f} dB", isi);
         expect(lt(acquired, 2000UZ)) << std::format("{} symbols to first cross {:.0f} dB", acquired, kCrossing);
         expect(eq(equalizer.nTrainingBursts(), 0ULL)) << "the modulus rule reads no reference at all";
+
+        LinearEqualizer<float> cold({{"num_taps", kNumTaps}, {"algorithm", std::string("Cma")}, {"step_size", 0.003}});
+        init(cold);
+        equalizer.start();
+        expect(that % (equalizer.taps() == cold.taps())) << "a restart adapts again from the spike, not from the last run's taps";
     };
 
     "decision-directed adaptation tracks a rotating channel that freezing cannot"_test = [] {
@@ -563,7 +578,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         std::ignore = drive(converged, std::span<const CF>(received).first(kAdapted), 1UZ, {}, std::span<const std::size_t>(kInCalls));
 
         const std::vector<float> frozen = converged.taps();
-        converged.freeze                = true;
+        expect(converged.set({{"freeze", true}}).has_value());
         trace.clear();
         const std::vector<CF> afterFreeze = drive(converged, std::span<const CF>(received).subspan(kAdapted), 1UZ, {}, std::span<const std::size_t>(kInCalls), &trace);
 
@@ -627,7 +642,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
     };
 
     "degenerate settings throw"_test = [] {
-        // a throwing applyStagedParameters() leaves the offending value staged, so every case gets its own block
+        // a block whose constructed value is refused stays uninitialized, so every case gets its own block
         expect(throws([] { construct<LinearEqualizer<float>>({{"num_taps", 10U}}); })) << "an even tap count leaves the spike without a center";
         expect(throws([] { construct<LinearEqualizer<float>>({{"num_taps", 0U}}); }));
         expect(throws([] { construct<LinearEqualizer<float>>({{"num_taps", 129U}}); })) << "128 taps is the longest filter the kernel accepts";

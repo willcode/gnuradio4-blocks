@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -48,30 +49,39 @@ item, spelled the way a record consumer reads it, so that a gap between two pack
 `length_plain` is a bare field of `length_bits` bits in `byte_order`, and `length_golay24` is a length and some flags
 under the extended Golay(24,12,8) code, so a header that took three bit errors still frames its packet and one that
 took four is refused rather than framing garbage; a corrected header carries `header_corrected_errors` and, where the
-width leaves any flag bits, `header_flags`. Both need `count_covers`, which has no default because `payload`,
+width leaves any flag bits, `header_flags`. Both need `count_covers`, which starts at `unset` because `payload`,
 `payload_and_check` and `whole_frame` give different answers for the same wire bits: reading a `payload` frame as
 `payload_and_check` hands the CRC checker a record two bytes short, and reading a `whole_frame` frame as `payload`
 over-runs into the next one. A setting belonging to one layout and staged away from its default while another is
 selected is a settings error rather than a harmless extra, and says so.
+
+`max_payload_items` is the largest payload a header may claim. `fixed_payload_items` applies under fixed_length,
+`byte_order` under length_plain and `flags_position` under length_golay24; the length formats need `length_bits`.
+`check_items` counts uncounted trailing check items when count_covers is payload, and `frame_prefix_items` the counted
+prefix items when it is whole_frame. `trigger` names the gr:trigger_name that starts a packet.
 )"">;
 
     PortIn<T>                  in;
     PortOut<DataSet<T>, Async> out;
 
-    Annotated<gr::Size_t, "max_payload_items", Unit<"items">, Doc<"the largest payload a header may claim; required, 0 is unset and throws">, Visible>                                             max_payload_items   = 0U;
-    Annotated<std::string, "header_format", Doc<"'length_crc' (default), 'length_repeated', 'fixed_length', 'length_plain' or 'length_golay24'">, Visible>                                         header_format       = std::string("length_crc");
-    Annotated<gr::Size_t, "fixed_payload_items", Unit<"items">, Doc<"the length, for 'fixed_length' only">>                                                                                        fixed_payload_items = 0U;
-    Annotated<gr::Size_t, "length_bits", Unit<"bit">, Doc<"the length field's width, [1,32] for 'length_plain' and [1,12] for 'length_golay24'; required by both, 0 is unset">>                    length_bits         = 0U;
-    Annotated<std::string, "byte_order", Doc<"'big' or 'little': the length field's byte order, for 'length_plain' only; 'little' needs a width that is a whole number of bytes">>                 byte_order          = std::string("big");
-    Annotated<std::string, "flags_position", Doc<"'high' or 'low': which end of the Golay header's twelve information bits the flags occupy, for 'length_golay24' only">>                          flags_position      = std::string("high");
-    Annotated<std::string, "count_covers", Doc<"what the length field counts: 'payload', 'payload_and_check' or 'whole_frame'; required by both length formats and there is no default">, Visible> count_covers{};
-    Annotated<gr::Size_t, "count_unit_items", Unit<"items">, Doc<"items per counted unit, [1,64]; 8 because a framer item is one bit and a length field counts bytes">>                            count_unit_items   = 8U;
-    Annotated<gr::Size_t, "check_items", Unit<"items">, Doc<"trailing check items the field does not count; only meaningful under 'payload'">>                                                     check_items        = 0U;
-    Annotated<gr::Size_t, "frame_prefix_items", Unit<"items">, Doc<"frame items ahead of the payload the field does count; only under 'whole_frame', and 0 means the header's own item count">>    frame_prefix_items = 0U;
-    Annotated<gr::Size_t, "trigger_to_header", Unit<"items">, Doc<"items from the tag to the header: 0 after an access-code detector, N after a preamble one">>                                    trigger_to_header  = 0U;
-    Annotated<std::string, "trigger", Doc<"the gr:trigger_name that starts a packet; empty accepts any trigger tag">>                                                                              trigger{};
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"items">, Doc<"payload length limit">, Visible>                    max_payload_items   = 0U;
+        Annotated<HeaderLayout, Doc<"header layout">, Visible>                                        header_format       = HeaderLayout::length_crc;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"fixed payload length">>                             fixed_payload_items = 0U;
+        Annotated<gr::Size_t, Unit<"bit">, Doc<"length field width">>                                 length_bits         = 0U;
+        Annotated<gr::digital::HeaderByteOrder, Doc<"length field byte order">>                       byte_order          = gr::digital::HeaderByteOrder::Big;
+        Annotated<gr::digital::FlagsPosition, Doc<"Golay flags position">>                            flags_position      = gr::digital::FlagsPosition::High;
+        Annotated<gr::digital::CountCovers, Doc<"length field coverage">, Visible>                    count_covers        = gr::digital::CountCovers::Unset;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"items per length unit">, Limits<Min<1U>, Max<64U>>> count_unit_items    = 8U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"trailing check length">>                            check_items         = 0U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"counted prefix length (0 = header)">>               frame_prefix_items  = 0U;
+        Annotated<gr::Size_t, Unit<"items">, Doc<"trigger to header offset">>                         trigger_to_header   = 0U;
+        Annotated<std::string, Doc<"packet trigger name (empty = any)">>                              trigger{};
 
-    GR_MAKE_REFLECTABLE(PacketFramer, in, out, max_payload_items, header_format, fixed_payload_items, length_bits, byte_order, flags_position, count_covers, count_unit_items, check_items, frame_prefix_items, trigger_to_header, trigger);
+        GR_MAKE_REFLECTABLE(Settings, max_payload_items, header_format, fixed_payload_items, length_bits, byte_order, flags_position, count_covers, count_unit_items, check_items, frame_prefix_items, trigger_to_header, trigger);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PacketFramer, in, out, settings);
 
     enum class State : std::uint8_t { Search, Armed, Payload };
 
@@ -84,9 +94,18 @@ selected is a settings error rather than a harmless extra, and says so.
     property_map                                _triggerMeta{};
     std::array<T, gr::digital::kMaxHeaderItems> _header{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.max_payload_items == 0U) {
+            return gr::Refused(s.max_payload_items, "required");
+        }
+        return detail::checkHeaderLayout(s);
+    }
 
-    void start() { rebuild(); }
+    void applySettings(const Settings& s) {
+        _format      = detail::headerLayoutOf(s);
+        _headerItems = gr::digital::headerItemsOf(_format);
+        reset();
+    }
 
     void reset() {
         _state         = State::Search;
@@ -96,21 +115,7 @@ selected is a settings error rather than a harmless extra, and says so.
         _triggerMeta.clear();
     }
 
-    void rebuild() {
-        if (max_payload_items == 0U) {
-            throw gr::exception("max_payload_items is required and has no default: without it a length demodulated from a noisy header is unbounded, which wedges the flowgraph");
-        }
-        _format      = detail::headerLayoutFrom(detail::HeaderLayoutSettings{header_format.value, fixed_payload_items.value, max_payload_items.value, length_bits.value, byte_order.value, flags_position.value, count_covers.value, count_unit_items.value, check_items.value, frame_prefix_items.value});
-        _headerItems = gr::digital::headerItemsOf(_format);
-        reset();
-    }
-
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (max_payload_items == 0U) { // unconfigured: the block is inert rather than framing against an unbounded length
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
         struct Arriving {
             std::size_t         at;
             const property_map* map;
@@ -123,7 +128,7 @@ selected is a settings error rather than a harmless extra, and says so.
         }
 
         const std::size_t room      = outSpan.isConnected ? outSpan.size() : 0UZ;
-        const std::size_t need      = static_cast<std::size_t>(trigger_to_header) + _headerItems;
+        const std::size_t need      = static_cast<std::size_t>(settings.trigger_to_header) + _headerItems;
         std::size_t       consumed  = 0UZ;
         std::size_t       published = 0UZ;
         std::size_t       i         = 0UZ;
@@ -180,10 +185,10 @@ selected is a settings error rather than a harmless extra, and says so.
                 break;
             }
             for (std::size_t k = 0UZ; k < _headerItems; ++k) {
-                _header[k] = inSpan[i + static_cast<std::size_t>(trigger_to_header) + k];
+                _header[k] = inSpan[i + static_cast<std::size_t>(settings.trigger_to_header) + k];
             }
             const std::optional<gr::digital::ParsedHeader> parsed = gr::digital::parseHeader<T>(_format, std::span<const T>(_header.data(), _headerItems));
-            if (!parsed.has_value() || parsed->payloadItems == 0UZ || parsed->payloadItems > static_cast<std::size_t>(max_payload_items)) {
+            if (!parsed.has_value() || parsed->payloadItems == 0UZ || parsed->payloadItems > static_cast<std::size_t>(settings.max_payload_items)) {
                 ++i; // one item, so a genuine trigger inside a false header is still reachable
                 consumed = i;
                 _state   = State::Search;
@@ -206,10 +211,10 @@ selected is a settings error rather than a harmless extra, and says so.
         if (entry == tagMap.end()) {
             return false;
         }
-        if (trigger.value.empty()) {
+        if (settings.trigger.value.empty()) {
             return true;
         }
-        return entry->second.value_or(std::string_view{}) == std::string_view(trigger.value);
+        return entry->second.value_or(std::string_view{}) == std::string_view(settings.trigger.value);
     }
 
     void begin(const gr::digital::ParsedHeader& parsed, std::size_t payloadStart) {

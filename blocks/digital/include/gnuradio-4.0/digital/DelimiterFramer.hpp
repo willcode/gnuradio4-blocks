@@ -6,10 +6,12 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -47,8 +49,8 @@ bit items for HDLC, byte items for SLIP, KISS and PPP — carrying the opening d
 closing delimiter in wire order. A framed record is a burst a transmitter can key on; turning a run of them into a
 continuous stream is `DataSetToStream`'s job, and an idle link's inter-frame fill is the transmitter's policy.
 
-`end_delimiter` and `max_payload_items` are both required and neither has a default; without either the block refuses
-to `start()` and is inert if driven. The bound is the number the receiving end refuses above, which makes it the number
+`end_delimiter` and `max_payload_items` are both required and neither has a default; without either the block is not
+ready. The bound is the number the receiving end refuses above, which makes it the number
 this end must not send: a record whose payload exceeds it, and an empty record, are counted drops that publish nothing,
 because framing either would put something on the air the peer is specified to reject.
 
@@ -60,26 +62,36 @@ instead: every payload item at which the receiver's match register would hold th
 
 Metadata crosses verbatim and the record gains `stuffing_inserted`, the mirror of the extractor's `stuffing_removed`,
 so a loopback chain can be read frame by frame.
+
+The delimiters are written as '0'/'1' characters, MSB first; `start_delimiter` is read under frame_open start.
+`stuff_after_ones` consecutive payload 1s are followed by a stuffed 0 under bit stuffing, and `abort_ones` is the
+receiver's abort run length. Under byte escaping, `escape_map` holds flat (escaped, original) pairs, and the last pair
+for a value wins. Records longer than `max_payload_items` wire items are dropped. A nonzero `payload_pack_bits` unpacks
+that many bits per record item and needs bits_per_item 1.
 )"">;
 
     PortIn<DataSet<std::uint8_t>, Async>  in;
     PortOut<DataSet<std::uint8_t>, Async> out;
 
-    Annotated<std::string, "end_delimiter", Doc<"the closing delimiter as '0'/'1' characters, MSB first in wire order; required, empty leaves the block inert">, Visible>                                          end_delimiter{};
-    Annotated<std::string, "frame_open", Doc<"what opens a frame: 'delimiter' (the closing delimiter again), 'start' (a separate one) or 'immediate' (nothing at all)">, Visible>                                  frame_open = std::string("delimiter");
-    Annotated<std::string, "start_delimiter", Doc<"the opening delimiter; required and non-empty for frame_open 'start', and must be empty otherwise">>                                                            start_delimiter{};
-    Annotated<gr::Size_t, "bits_per_item", Doc<"bits each emitted item carries, 1 to 8">>                                                                                                                          bits_per_item    = 1U;
-    Annotated<gr::math::BitOrder, "bit_order", Doc<"order of an item's bits on the wire, MsbFirst or LsbFirst; meaningful only above one bit per item">>                                                           bit_order        = gr::math::BitOrder::MsbFirst;
-    Annotated<std::string, "transparency", Doc<"how the payload is kept clear of the delimiter: 'none', 'bit_stuffing' or 'byte_escape'">, Visible>                                                                transparency     = std::string("none");
-    Annotated<gr::Size_t, "stuff_after_ones", Doc<"bit stuffing only: a 0 is inserted after the payload one that brings the consecutive-ones count to exactly this, 2 to 62">>                                     stuff_after_ones = 5U;
-    Annotated<gr::Size_t, "abort_ones", Doc<"bit stuffing only: the receiver's abort run length; validated so one configuration describes both ends, and nothing here sends an abort">>                            abort_ones       = 7U;
-    Annotated<gr::Size_t, "escape_item", Doc<"byte escaping only: the introducer's item value, 0 to 255">>                                                                                                         escape_item      = 0U;
-    Annotated<std::vector<gr::Size_t>, "escape_map", Doc<"byte escaping only: flat (escaped, original) pairs; a repeated original encodes by the last pair naming it">>                                            escape_map{};
-    Annotated<gr::Size_t, "max_payload_items", Unit<"items">, Doc<"the largest payload a frame may carry, in wire items; required, 0 leaves the block inert, and a longer record is dropped">, Visible>            max_payload_items = 0U;
-    Annotated<gr::Size_t, "payload_pack_bits", Doc<"0 takes the record's items as wire items; 1 to 8 unpacks each of them into that many bit items first, and needs bits_per_item 1">>                             payload_pack_bits = 0U;
-    Annotated<gr::math::BitOrder, "payload_bit_order", Doc<"the order the unpack stage takes a record item's bits in, separate from bit_order because the payload's byte order and the wire's item order differ">> payload_bit_order = gr::math::BitOrder::MsbFirst;
+    struct Settings {
+        Annotated<std::string, Doc<"closing delimiter bits">, Visible>               end_delimiter{};
+        Annotated<gr::digital::FrameOpen, Doc<"frame opening">, Visible>             frame_open = gr::digital::FrameOpen::Delimiter;
+        Annotated<std::string, Doc<"opening delimiter bits">>                        start_delimiter{};
+        Annotated<gr::Size_t, Doc<"bits per output item">, Limits<Min<1U>, Max<8U>>> bits_per_item    = 1U;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                              bit_order        = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::digital::Transparency, Doc<"payload transparency">, Visible>   transparency     = gr::digital::Transparency::None;
+        Annotated<gr::Size_t, Doc<"ones before a stuffed bit">>                      stuff_after_ones = 5U;
+        Annotated<gr::Size_t, Doc<"receiver abort run length">>                      abort_ones       = 7U;
+        Annotated<gr::Size_t, Doc<"escape value">, Limits<Max<255U>>>                escape_item      = 0U;
+        Annotated<std::vector<gr::Size_t>, Doc<"escape pairs">>                      escape_map{};
+        Annotated<gr::Size_t, Unit<"items">, Doc<"payload length limit">, Visible>   max_payload_items = 0U;
+        Annotated<gr::Size_t, Doc<"payload pack width (0 = unpacked)">>              payload_pack_bits = 0U;
+        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                      payload_bit_order = gr::math::BitOrder::MsbFirst;
 
-    GR_MAKE_REFLECTABLE(DelimiterFramer, in, out, end_delimiter, frame_open, start_delimiter, bits_per_item, bit_order, transparency, stuff_after_ones, abort_ones, escape_item, escape_map, max_payload_items, payload_pack_bits, payload_bit_order);
+        GR_MAKE_REFLECTABLE(Settings, end_delimiter, frame_open, start_delimiter, bits_per_item, bit_order, transparency, stuff_after_ones, abort_ones, escape_item, escape_map, max_payload_items, payload_pack_bits, payload_bit_order);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DelimiterFramer, in, out, settings);
 
     // Plain members, read by the owning thread and by QA, and reported once at stop().
     std::uint64_t nRecords          = 0ULL; ///< records framed and published; the denominator the others are read against
@@ -92,79 +104,72 @@ so a loopback chain can be read frame by frame.
     gr::digital::DelimiterEncoder _encoder{};
     std::vector<std::uint8_t>     _framed{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() {
-        rebuild();
-        if (end_delimiter.value.empty()) {
-            throw gr::exception("end_delimiter is required and has no default: there is no universal delimiter and a silent one would be a silent interoperability assumption");
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        using gr::digital::Transparency;
+        const std::vector<gr::Size_t> map = s.escape_map;
+        if (s.end_delimiter.value.empty()) {
+            return gr::Refused(s.end_delimiter, "required");
         }
-        if (max_payload_items == 0U) {
-            throw gr::exception("max_payload_items is required and has no default: the bound the receiving end refuses above is the bound this end must not send");
+        if (s.max_payload_items == 0U) {
+            return gr::Refused(s.max_payload_items, "required");
         }
+        if (s.transparency == Transparency::ByteEscape && map.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.escape_map, "must have an even length");
+        }
+        if (s.transparency == Transparency::ByteEscape && std::ranges::any_of(map, [](gr::Size_t value) { return value > 255U; })) {
+            return gr::Refused(s.escape_map, "each value must be <= 255");
+        }
+        std::ignore = framing(s);
+        return {};
     }
 
-    /// @brief Rebuilds the encoder from the settings, refusing everything the framing cannot be.
-    void rebuild() {
-        gr::digital::DelimiterConfig cfg;
-        try {
-            cfg.frameOpen    = gr::digital::frameOpenFromName(frame_open.value);
-            cfg.transparency = gr::digital::transparencyFromName(transparency.value);
-            cfg.bitOrder     = bit_order;
-            cfg.packOrder    = payload_bit_order;
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::string(error.what()));
-        }
-
-        if (cfg.transparency != gr::digital::Transparency::BitStuffing && (stuff_after_ones.value != 5U || abort_ones.value != 7U)) {
-            throw gr::exception(std::format("stuff_after_ones and abort_ones belong to 'bit_stuffing' and transparency is '{}', so a value away from the default is a settings error rather than a harmless extra", transparency.value));
-        }
-        if (cfg.transparency != gr::digital::Transparency::ByteEscape && (escape_item.value != 0U || !escape_map.value.empty())) {
-            throw gr::exception(std::format("escape_item and escape_map belong to 'byte_escape' and transparency is '{}', so a value away from the default is a settings error rather than a harmless extra", transparency.value));
-        }
-        if (escape_item.value > 255U) {
-            throw gr::exception(std::format("escape_item is an item value and must be in [0, 255], got {}", escape_item.value));
-        }
-        if (escape_map.value.size() % 2UZ != 0UZ) {
-            throw gr::exception(std::format("escape_map is a flat list of (escaped, original) pairs and must have an even length, got {}", escape_map.value.size()));
-        }
-        if (escape_map.value.size() > 512UZ) {
-            throw gr::exception(std::format("escape_map holds {} values, which is more than the 256 pairs a byte alphabet can distinguish", escape_map.value.size()));
-        }
-        for (const gr::Size_t value : escape_map.value) {
-            if (value > 255U) {
-                throw gr::exception(std::format("escape_map carries {}, which is not an item value in [0, 255]", value));
-            }
-        }
-
-        cfg.endDelimiter    = end_delimiter.value;
-        cfg.startDelimiter  = start_delimiter.value;
-        cfg.bitsPerItem     = static_cast<unsigned>(bits_per_item.value);
-        cfg.stuffAfterOnes  = static_cast<unsigned>(stuff_after_ones.value);
-        cfg.abortOnes       = static_cast<unsigned>(abort_ones.value);
-        cfg.escapeItem      = static_cast<std::uint8_t>(escape_item.value);
-        cfg.maxPayloadItems = static_cast<std::size_t>(max_payload_items.value);
-        cfg.packBits        = static_cast<unsigned>(payload_pack_bits.value);
-        cfg.escapeMap.reserve(escape_map.value.size() / 2UZ);
-        for (std::size_t i = 0UZ; i + 1UZ < escape_map.value.size(); i += 2UZ) {
-            cfg.escapeMap.emplace_back(static_cast<std::uint8_t>(escape_map.value[i]), static_cast<std::uint8_t>(escape_map.value[i + 1UZ]));
-        }
-
-        try {
-            gr::digital::framerConfigure(cfg);
-        } catch (const std::invalid_argument& error) {
-            throw gr::exception(std::string(error.what()));
-        }
-
-        _encoder.prepare(std::move(cfg));
+    void applySettings(const Settings& s) {
+        _encoder.prepare(framing(s));
         _framed.clear();
-        _framed.reserve(gr::digital::framedItemsBound(_encoder.config, static_cast<std::size_t>(max_payload_items.value)));
+        _framed.reserve(gr::digital::framedItemsBound(_encoder.config, s.max_payload_items));
+        clearCounts();
+    }
+
+    void start() { clearCounts(); }
+
+    /// @brief Every count at zero: a new framing counts from there, and so does a restart.
+    void clearCounts() {
         nRecords          = 0ULL;
         nItemsEmitted     = 0ULL;
         nStuffedBits      = 0ULL;
         nEscapedItems     = 0ULL;
         nForgedDelimiters = 0ULL;
         nRecordsRefused   = 0ULL;
+    }
+
+    /// @brief The framing the settings in @p n name, configured for the transmit side by the library, which throws for one it refuses.
+    [[nodiscard]] gr::digital::DelimiterConfig framing(const Settings& s) const {
+        gr::digital::DelimiterConfig cfg;
+        cfg.endDelimiter    = s.end_delimiter.value;
+        cfg.frameOpen       = s.frame_open.value;
+        cfg.transparency    = s.transparency.value;
+        cfg.bitOrder        = s.bit_order.value;
+        cfg.packOrder       = s.payload_bit_order.value;
+        cfg.bitsPerItem     = s.bits_per_item.value;
+        cfg.maxPayloadItems = s.max_payload_items.value;
+        cfg.packBits        = s.payload_pack_bits.value;
+        // the settings of the other modes stay at the library's defaults
+        if (cfg.frameOpen == gr::digital::FrameOpen::Start) {
+            cfg.startDelimiter = s.start_delimiter.value;
+        }
+        if (cfg.transparency == gr::digital::Transparency::BitStuffing) {
+            cfg.stuffAfterOnes = s.stuff_after_ones.value;
+            cfg.abortOnes      = s.abort_ones.value;
+        }
+        if (cfg.transparency == gr::digital::Transparency::ByteEscape) {
+            cfg.escapeItem                    = static_cast<std::uint8_t>(s.escape_item.value);
+            const std::vector<gr::Size_t> map = s.escape_map.value;
+            for (std::size_t i = 0UZ; i + 1UZ < map.size(); i += 2UZ) {
+                cfg.escapeMap.emplace_back(static_cast<std::uint8_t>(map[i]), static_cast<std::uint8_t>(map[i + 1UZ]));
+            }
+        }
+        gr::digital::framerConfigure(cfg);
+        return cfg;
     }
 
     void stop() {
@@ -186,12 +191,6 @@ so a loopback chain can be read frame by frame.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        if (!_encoder.configured()) { // unconfigured: inert rather than framing something arbitrary
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         const bool        connected = outSpan.isConnected; // read once: the record count below is derived from it
         const std::size_t available = inSpan.size();
         const std::size_t nInput    = connected ? std::min(available, outSpan.size()) : available;
@@ -200,7 +199,7 @@ so a loopback chain can be read frame by frame.
         for (std::size_t i = 0UZ; i < nInput; ++i) {
             const std::span<const std::uint8_t> payload = payloadOf(inSpan[i]);
             const std::size_t                   items   = _encoder.unpackedItems(payload.size());
-            if (items == 0UZ || items > static_cast<std::size_t>(max_payload_items.value)) {
+            if (items == 0UZ || items > static_cast<std::size_t>(settings.max_payload_items.value)) {
                 // a frame with no items is the receiver's idle rather than a frame, and one above the bound is a frame
                 // the peer is specified to reject; both are counted here and stated at stop()
                 ++nRecordsRefused;

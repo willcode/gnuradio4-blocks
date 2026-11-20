@@ -43,10 +43,20 @@ using CF = std::complex<float>;
 constexpr double kPi = std::numbers::pi;
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     if constexpr (requires { block.start(); }) {
         block.start();
     }
@@ -358,8 +368,8 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
     };
 
     "settings outside the kernel's range are refused"_test = [] {
-        // Every case builds its own block: a settings change that throws leaves the offending value staged, so the
-        // same block would refuse the next attempt whatever it asked for.
+        // Every case builds its own block: a block whose constructed value is refused stays uninitialized, and refuses
+        // again at its next use whatever that asks for.
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"samples_per_symbol", gr::Size_t(1)}}); })) << "two samples is the fewest a phase trajectory can be drawn on";
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse_length", gr::Size_t(0)}}); })) << "a pulse spans at least one symbol";
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse_length", gr::Size_t(9)}}); })) << "and at most eight";

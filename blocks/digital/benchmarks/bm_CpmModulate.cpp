@@ -34,18 +34,17 @@ constexpr std::array<Row, 4UZ> kRows{Row{"rect, L=1", CpmPulseShape::Rect, 1U}, 
 
 [[nodiscard]] const char* shapeName(CpmPulseShape shape) {
     switch (shape) {
-    case CpmPulseShape::Rect: return "rect";
-    case CpmPulseShape::RaisedCosine: return "raised_cosine";
-    case CpmPulseShape::Gaussian: return "gaussian";
+    case CpmPulseShape::Rect: return "Rect";
+    case CpmPulseShape::RaisedCosine: return "RaisedCosine";
+    case CpmPulseShape::Gaussian: return "Gaussian";
     }
-    return "rect";
+    return "Rect";
 }
 
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

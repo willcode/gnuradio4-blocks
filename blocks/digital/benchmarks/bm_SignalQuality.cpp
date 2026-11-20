@@ -33,9 +33,8 @@ constexpr std::size_t kRepeats        = 9UZ;
 /// Both meters carry a seqlock and are therefore neither copyable nor movable.
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> make(gr::property_map settings) {
-    auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    auto block  = std::make_unique<TBlock>(std::move(settings));
+    std::ignore = block->check({});
     block->start();
     return block;
 }

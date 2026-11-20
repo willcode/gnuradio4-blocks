@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -21,43 +22,6 @@
 
 namespace gr::blocks::digital {
 
-namespace detail {
-
-/// @brief The convention @p name selects, refusing the empty default and reporting through the graph's exception type.
-[[nodiscard]] inline gr::digital::ManchesterConvention manchesterConvention(std::string_view name) {
-    using gr::digital::ManchesterConvention;
-    if (name == gr::digital::conventionName(ManchesterConvention::Ieee8023)) {
-        return ManchesterConvention::Ieee8023;
-    }
-    if (name == gr::digital::conventionName(ManchesterConvention::GeThomas)) {
-        return ManchesterConvention::GeThomas;
-    }
-    if (name.empty()) {
-        throw gr::exception("convention has no default and must be set to 'ieee802_3' or 'ge_thomas': a stream read under the wrong one decodes to the exact complement of the data and raises no violation anywhere, so a guess is invisible");
-    }
-    throw gr::exception(std::format("convention must be 'ieee802_3' or 'ge_thomas', got '{}'", name));
-}
-
-/**
- * @brief Validates the four settings, then configures @p cfg.
- *
- * Everything is checked before the kernel is touched, so a rejected setting leaves the previous
- * configuration whole and the block keeps running on it. The kernel's own rejections are the same two
- * bounds and would throw `std::invalid_argument`; they are unreachable from here.
- */
-inline void configureManchester(gr::digital::ManchesterConfig& cfg, std::string_view convention, gr::Size_t bitsPerItem, gr::math::BitOrder order, gr::Size_t chipPhase) {
-    const gr::digital::ManchesterConvention mode = manchesterConvention(convention);
-    if (bitsPerItem < 1U || bitsPerItem > 8U) {
-        throw gr::exception(std::format("bits_per_item must be in [1, 8], got {}", bitsPerItem));
-    }
-    if (chipPhase > 1U) {
-        throw gr::exception(std::format("chip_phase must be 0 or 1, got {}", chipPhase));
-    }
-    gr::digital::configureManchester(cfg, mode, static_cast<unsigned>(bitsPerItem), order, static_cast<unsigned>(chipPhase));
-}
-
-} // namespace detail
-
 GR_REGISTER_BLOCK(gr::blocks::digital::ManchesterEncoder)
 
 struct ManchesterEncoder : Block<ManchesterEncoder, BackwardTagPropagation, Resampling<1UZ, 2UZ, true>> {
@@ -68,9 +32,9 @@ Every bit carries a transition at its center, the running disparity returns to z
 than two like chips ever occur in a row -- for any data, with no seed and no state. That is what buys a receiver a
 clock to lock to and an AC-coupled line its DC balance, and it costs exactly one thing: twice the signaling rate.
 
-`convention` is required and has no default. The two live readings of the code are exact chipwise complements of one
-another, so a receiver on the wrong one is handed the bitwise complement of the data with no error indication of any
-kind; nothing short of a downstream CRC can tell. IEEE Std 802.3 is `ieee802_3`, MIL-STD-1553 is `ge_thomas`, and
+`convention` is required: it starts at `unset`, and neither convention is a default. The two live readings of the code
+are exact chipwise complements of one another, so a receiver on the wrong one is handed the bitwise complement of the
+data with no error indication of any kind; nothing short of a downstream CRC can tell. IEEE Std 802.3 is `ieee802_3`, MIL-STD-1553 is `ge_thomas`, and
 IEC 62386 lighting is `ieee802_3`.
 
 An item carries `bits_per_item` significant bits in its low positions, traversed in `bit_order` on both ports. Bits
@@ -83,31 +47,28 @@ item 2t. Being a rate changer it forwards only the framework's own tag vocabular
     PortIn<std::uint8_t>  in;
     PortOut<std::uint8_t> out;
 
-    Annotated<std::string, "convention", Doc<"'ieee802_3' or 'ge_thomas'; there is no default, because the wrong one is silent">, Visible> convention{};
-    Annotated<gr::Size_t, "bits_per_item", Unit<"bit">, Doc<"significant bits per item, 1 to 8, on both ports">>                           bits_per_item = 8U;
-    Annotated<gr::math::BitOrder, "bit_order", Doc<"the traversal of each item's field, not the order of bytes">>                          bit_order     = gr::math::BitOrder::MsbFirst;
+    struct Settings {
+        Annotated<gr::digital::ManchesterConvention, Doc<"chip convention">, Visible>      convention    = gr::digital::ManchesterConvention::Unset;
+        Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item = 8U;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order     = gr::math::BitOrder::MsbFirst;
 
-    GR_MAKE_REFLECTABLE(ManchesterEncoder, in, out, convention, bits_per_item, bit_order);
+        GR_MAKE_REFLECTABLE(Settings, convention, bits_per_item, bit_order);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ManchesterEncoder, in, out, settings);
 
     gr::digital::ManchesterConfig _coder{};
-    bool                          _configured = false;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() { rebuild(); }
-
-    void rebuild() {
-        detail::configureManchester(_coder, convention, bits_per_item, bit_order, 0U);
-        _configured = true; // only reached when every setting was accepted
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.convention == gr::digital::ManchesterConvention::Unset) {
+            return gr::Refused(s.convention, "required");
+        }
+        return {};
     }
 
-    [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) noexcept {
-        if (!_configured) { // the block is inert rather than coding under a convention nobody chose
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
+    void applySettings(const Settings& s) { gr::digital::configureManchester(_coder, s.convention, s.bits_per_item, s.bit_order, 0U); }
 
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) noexcept {
         const std::size_t nItems = std::min(inSpan.size(), outSpan.size() / 2UZ);
         gr::digital::encodeManchester(_coder, std::span<const std::uint8_t>(inSpan.data(), nItems), std::span<std::uint8_t>(outSpan.data(), 2UZ * nItems));
 
@@ -145,48 +106,50 @@ setting is required and has no default. See ManchesterEncoder for the convention
 
 The block is exactly 2:1, so a forwarded `gr:sample_rate` is halved and a tag arriving at input item t leaves at output
 item floor(t/2). Being a rate changer it forwards the framework's own tag vocabulary only.
+
+`chip_phase` is the parity of the absolute chip index at which a pair starts. A tag at `align_tag_key` re-anchors the
+pairing grid; a nonempty `align_tag_value` requires the tag's value to be that string. With `flush_partial`, the end of
+the stream emits the trailing partial item, its pad positions flagged as violations.
 )"">;
 
     PortIn<std::uint8_t>                in;
     PortOut<std::uint8_t>               out;
     PortOut<std::uint8_t, gr::Optional> violation;
 
-    Annotated<std::string, "convention", Doc<"'ieee802_3' or 'ge_thomas'; there is no default, because the wrong one is silent">, Visible>              convention{};
-    Annotated<gr::Size_t, "bits_per_item", Unit<"bit">, Doc<"significant bits per item, 1 to 8, on every port">>                                        bits_per_item = 8U;
-    Annotated<gr::math::BitOrder, "bit_order", Doc<"the traversal of each item's field, not the order of bytes">>                                       bit_order     = gr::math::BitOrder::MsbFirst;
-    Annotated<gr::Size_t, "chip_phase", Doc<"0 or 1: the parity of the absolute chip index at which a pair starts">>                                    chip_phase    = 0U;
-    Annotated<std::string, "align_tag_key", Doc<"tag key whose position re-anchors the pairing grid; empty disables tag-driven alignment">>             align_tag_key = std::string(gr::tag::TRIGGER_NAME.key());
-    Annotated<std::string, "align_tag_value", Doc<"if non-empty, the tag's value at that key must be a string equal to this; empty matches any value">> align_tag_value{};
-    Annotated<bool, "flush_partial", Doc<"at end of stream emit the trailing partial item, its pad positions flagged as violations">>                   flush_partial = true;
+    struct Settings {
+        Annotated<gr::digital::ManchesterConvention, Doc<"chip convention">, Visible>      convention    = gr::digital::ManchesterConvention::Unset;
+        Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item = 8U;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order     = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::Size_t, Doc<"pair start parity">, Limits<Max<1U>>>                   chip_phase    = 0U;
+        Annotated<std::string, Doc<"alignment tag key (empty = off)">>                     align_tag_key = std::string(gr::tag::TRIGGER_NAME.key());
+        Annotated<std::string, Doc<"alignment tag value (empty = any)">>                   align_tag_value{};
+        Annotated<bool, Doc<"partial item flush">>                                         flush_partial = true;
 
-    GR_MAKE_REFLECTABLE(ManchesterDecoder, in, out, violation, convention, bits_per_item, bit_order, chip_phase, align_tag_key, align_tag_value, flush_partial);
+        GR_MAKE_REFLECTABLE(Settings, convention, bits_per_item, bit_order, chip_phase, align_tag_key, align_tag_value, flush_partial);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ManchesterDecoder, in, out, violation, settings);
 
     gr::digital::ManchesterConfig _coder{};
-    bool                          _configured = false;
     std::vector<std::uint8_t>     _spare{}; ///< flags for a chunk an unconnected violation port could not hold
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        // only the four settings that move the pairing grid reconfigure the kernel, and the kernel's own copy of them
-        // is what says whether one did. A carry chip held across a change of align_tag_key, align_tag_value or
-        // flush_partial is still the chip it was, because those select a boundary or a tail rule rather than move one.
-        if (_configured                                                           //
-            && convention.value == gr::digital::conventionName(_coder.convention) //
-            && bits_per_item.value == static_cast<gr::Size_t>(_coder.bitsPerItem) //
-            && bit_order.value == _coder.order                                    //
-            && chip_phase.value == static_cast<gr::Size_t>(_coder.chipPhase)) {
-            return;
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.convention == gr::digital::ManchesterConvention::Unset) {
+            return gr::Refused(s.convention, "required");
         }
-        rebuild();
+        return {};
     }
 
-    void start() { rebuild(); }
+    // only the four settings that move the pairing grid reconfigure the kernel. A carry chip held across a change of
+    // align_tag_key, align_tag_value or flush_partial is still the chip it was, because those select a boundary or a
+    // tail rule rather than move one.
+    void applySettings(const Settings& s) {
+        if (s.convention.changed() || s.bits_per_item.changed() || s.bit_order.changed() || s.chip_phase.changed()) {
+            gr::digital::configureManchester(_coder, s.convention, s.bits_per_item, s.bit_order, s.chip_phase);
+        }
+    }
 
     void reset() { gr::digital::resetManchester(_coder); }
-
-    void rebuild() {
-        detail::configureManchester(_coder, convention, bits_per_item, bit_order, chip_phase);
-        _configured = true;
-    }
 
     /// @brief Items fabricated by a grid change to phase 1, cumulative across settings changes and resets.
     [[nodiscard]] std::uint64_t nOrphanItems() const noexcept { return _coder.nOrphanItems; }
@@ -206,13 +169,6 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& violationSpan) {
-        if (!_configured) { // the block is inert rather than decoding under a convention nobody chose
-            std::ignore = inSpan.consume(0UZ);
-            outSpan.publish(0UZ);
-            violationSpan.publish(0UZ);
-            return work::Status::ERROR;
-        }
-
         const bool        wanted = violationSpan.isConnected;
         const std::size_t nItems = wanted ? std::min({inSpan.size() / 2UZ, outSpan.size(), violationSpan.size()}) : std::min(inSpan.size() / 2UZ, outSpan.size());
 
@@ -221,7 +177,7 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
         const std::span<std::uint8_t>       flags = flagRoom(violationSpan, nItems);
 
         std::size_t done = 0UZ;
-        if (!align_tag_key.value.empty()) {
+        if (!settings.align_tag_key.value.empty()) {
             for (const auto& [relIndex, tagMap] : inSpan.tags(inSpan.size())) {
                 // a tag interior to a chunk that could not be broken at it returns in the next chunk at a negative
                 // relative index; it was acted on the first time and must not move the grid twice
@@ -256,7 +212,7 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
      */
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& violationSpan) {
         const unsigned    width      = static_cast<unsigned>(_coder.bitsPerItem);
-        const std::size_t totalChips = _configured ? inSpan.size() * width + (_coder.hasCarry ? 1UZ : 0UZ) : 0UZ;
+        const std::size_t totalChips = inSpan.size() * width + (_coder.hasCarry ? 1UZ : 0UZ);
         if (totalChips == 0UZ) {
             outSpan.publish(0UZ);
             violationSpan.publish(0UZ);
@@ -271,7 +227,7 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
         const bool        wanted = violationSpan.isConnected;
         const std::size_t room   = wanted ? std::min(outSpan.size(), violationSpan.size()) : outSpan.size();
 
-        if (!flush_partial || nItems > room) {
+        if (!settings.flush_partial || nItems > room) {
             _coder.nDroppedChips += totalChips;
             _coder.carry    = 0U;
             _coder.hasCarry = false;
@@ -339,14 +295,14 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
 
     /// @brief Whether @p tagMap asks for the grid to be re-anchored at its own item.
     [[nodiscard]] bool isAlignmentTag(const property_map& tagMap) const {
-        const auto entry = tagMap.find(property_map::key_type(align_tag_key.value));
+        const auto entry = tagMap.find(property_map::key_type(settings.align_tag_key.value));
         if (entry == tagMap.end()) {
             return false;
         }
-        if (align_tag_value.value.empty()) {
+        if (settings.align_tag_value.value.empty()) {
             return true;
         }
-        return entry->second.value_or(std::string_view{}) == std::string_view(align_tag_value.value);
+        return entry->second.value_or(std::string_view{}) == std::string_view(settings.align_tag_value.value);
     }
 
     /**

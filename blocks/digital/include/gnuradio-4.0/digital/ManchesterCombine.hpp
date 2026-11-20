@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -24,16 +25,6 @@ enum class ManchesterInput : std::uint8_t {
     Differential, ///< the output of a differential detector: one parity is a constant, the other is the bit
     Chips         ///< chip decisions: a bit is half the difference of the two chips of a pair
 };
-
-[[nodiscard]] inline ManchesterInput manchesterInput(std::string_view name) {
-    if (name == "differential") {
-        return ManchesterInput::Differential;
-    }
-    if (name == "chips") {
-        return ManchesterInput::Chips;
-    }
-    throw gr::exception(std::format("input must be 'differential' or 'chips', got '{}'", name));
-}
 
 /**
  * @brief Which parity of the chip index a bit's pair starts at, estimated from two leaky means.
@@ -101,6 +92,9 @@ struct ManchesterPairing {
 
 } // namespace detail
 
+/// @brief The parity of the absolute chip index at which a bit's pair starts: estimated from the stream, or pinned.
+enum class PairingPhase : std::uint8_t { estimate, even, odd };
+
 GR_REGISTER_BLOCK(gr::blocks::digital::ManchesterCombine)
 
 struct ManchesterCombine : Block<ManchesterCombine, BackwardTagPropagation, Resampling<2UZ, 1UZ, true>> {
@@ -119,12 +113,15 @@ inter-bit parity selected, not a difference taken.
 The pairing is estimated from the stream and needs no help from the framing: exactly one parity of the chip index
 carries a constant, so the parity whose leaky mean stands further from zero is the one inside a bit and the other is
 published. `averaging_symbols` sets that mean's window and `hold_symbols` how many symbols in a row must ask for a
-move before the grid takes it. `phase` pins the grid instead, at the parity of the absolute chip index a pair starts
-at -- `ManchesterDecoder`'s reading of the same word. `chip_phase` reports the grid in force and `confidence` the
+move before the grid takes it. `phase` `even` or `odd` pins the grid instead, at the parity of the absolute chip index
+a pair starts at -- `ManchesterDecoder`'s `chip_phase` 0 or 1; `estimate` leaves it to the stream. `chip_phase` reports the grid in force and `confidence` the
 normalized distance between the two parities' statistics, both one item per bit and both optional.
 
 The block is exactly 2:1, so a forwarded `sample_rate` is halved and a tag arriving at input item t leaves at output
 item floor(t/2). Being a rate changer it forwards the framework's own tag vocabulary only.
+
+`averaging_symbols` is the span of the pairing estimate's leaky mean, and `hold_symbols` the run of unbroken
+disagreement before the pairing moves.
 )"">;
 
     PortIn<float>            in;
@@ -132,49 +129,34 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
     PortOut<float, Optional> chip_phase;
     PortOut<float, Optional> confidence;
 
-    Annotated<std::string, "input", Doc<"'differential' for a differential detector's output, 'chips' for chip decisions">, Visible> input             = std::string("differential");
-    Annotated<gr::Size_t, "averaging_symbols", Unit<"symbol">, Doc<"symbols the pairing estimate's leaky mean averages over">>       averaging_symbols = 256U;
-    Annotated<gr::Size_t, "hold_symbols", Unit<"symbol">, Doc<"symbols of unbroken disagreement before the pairing moves">>          hold_symbols      = 64U;
-    Annotated<std::int32_t, "phase", Doc<"0 or 1 pins the parity of the chip index a pair starts at; -1 estimates it">>              phase             = -1;
+    struct Settings {
+        Annotated<detail::ManchesterInput, Doc<"input kind">, Visible>                          input             = detail::ManchesterInput::Differential;
+        Annotated<gr::Size_t, Unit<"symbol">, Doc<"pairing averaging length">, Limits<Min<1U>>> averaging_symbols = 256U;
+        Annotated<gr::Size_t, Unit<"symbol">, Doc<"pairing hold length">>                       hold_symbols      = 64U;
+        Annotated<PairingPhase, Doc<"pairing grid">>                                            phase             = PairingPhase::estimate;
 
-    GR_MAKE_REFLECTABLE(ManchesterCombine, in, out, chip_phase, confidence, input, averaging_symbols, hold_symbols, phase);
+        GR_MAKE_REFLECTABLE(Settings, input, averaging_symbols, hold_symbols, phase);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ManchesterCombine, in, out, chip_phase, confidence, settings);
 
     detail::ManchesterPairing _pairing{};
-    bool                      _differential = true;
     float                     _previous     = 0.f;   ///< the chip before this chunk, which a pair on the other parity reads
     bool                      _havePrevious = false; ///< false only for the first pair of a stream
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() { rebuild(); }
+    void applySettings(const Settings& s) {
+        _pairing.alpha  = 1. / static_cast<double>(s.averaging_symbols);
+        _pairing.hold   = s.hold_symbols;
+        _pairing.pinned = s.phase != PairingPhase::estimate;
+        if (_pairing.pinned) {
+            _pairing.phase = s.phase == PairingPhase::odd ? 1U : 0U;
+        }
+    }
 
     void reset() {
         _pairing.reset();
         _havePrevious = false;
         _previous     = 0.f;
-    }
-
-    /**
-     * @brief Validates every setting, then configures the estimate.
-     *
-     * Nothing is written until all four are accepted, so a rejected setting leaves the estimate whole and the block
-     * keeps running on it.
-     */
-    void rebuild() {
-        const detail::ManchesterInput mode = detail::manchesterInput(input.value);
-        if (averaging_symbols.value < 1U) {
-            throw gr::exception(std::format("averaging_symbols must be at least 1, got {}", averaging_symbols.value));
-        }
-        if (phase.value < -1 || phase.value > 1) {
-            throw gr::exception(std::format("phase must be -1 to estimate the pairing, or 0 or 1 to pin it, got {}", phase.value));
-        }
-        _differential   = mode == detail::ManchesterInput::Differential;
-        _pairing.alpha  = 1. / static_cast<double>(averaging_symbols.value);
-        _pairing.hold   = static_cast<std::size_t>(hold_symbols.value);
-        _pairing.pinned = phase.value >= 0;
-        if (_pairing.pinned) {
-            _pairing.phase = static_cast<unsigned>(phase.value);
-        }
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& phaseSpan, OutputSpanLike auto& confidenceSpan) {
@@ -185,13 +167,14 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
         nItems                     = wantConfidence ? std::min(nItems, confidenceSpan.size()) : nItems;
 
         // every item of a pair is two apart from its neighbor in the next pair, so one parity holds for the chunk
-        const unsigned firstParity = static_cast<unsigned>(inSpan.streamIndex & 1ULL);
+        const unsigned firstParity  = static_cast<unsigned>(inSpan.streamIndex & 1ULL);
+        const bool     differential = settings.input.value == detail::ManchesterInput::Differential;
 
         for (std::size_t m = 0UZ; m < nItems; ++m) {
             const float first  = inSpan[2UZ * m];
             const float second = inSpan[2UZ * m + 1UZ];
 
-            if (_differential) {
+            if (differential) {
                 _pairing.observe(firstParity, static_cast<double>(first));
                 _pairing.observe(firstParity ^ 1U, static_cast<double>(second));
             } else {
@@ -200,10 +183,10 @@ item floor(t/2). Being a rate changer it forwards the framework's own tag vocabu
                 }
                 _pairing.observe(firstParity ^ 1U, static_cast<double>(second) * static_cast<double>(first));
             }
-            _pairing.step(_differential);
+            _pairing.step(differential);
 
             const bool  leads = firstParity == _pairing.phase;         // this chunk's first item opens the pair
-            const float bit   = _differential                          //
+            const float bit   = differential                           //
                                     ? (leads ? first : second)         //
                                     : (leads ? 0.5f * (first - second) //
                                              : (_havePrevious ? 0.5f * (_previous - first) : 0.f));

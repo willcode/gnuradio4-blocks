@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -28,6 +29,9 @@
 
 namespace gr::blocks::digital {
 
+/// @brief What the `lms` and `nlms` rules adapt against: the decided symbol, or a stated training sequence.
+enum class EqualizerReference : std::uint8_t { decision_directed, training };
+
 GR_REGISTER_BLOCK(gr::blocks::digital::LinearEqualizer, [T], [float])
 
 template<std::floating_point F>
@@ -44,13 +48,14 @@ by the energy in the tap window, so one step size suits a range of input levels;
 driving the output modulus toward the constellation's own `E|a|^4 / E|a|^2`. Constant-modulus adaptation converges to
 the channel inverse up to an arbitrary phase rotation, which downstream carrier recovery owns.
 
-The reference for `lms` and `nlms` is either the decision — the constellation point nearest the output — or a stated
+The `reference` for `lms` and `nlms` is either the decision — the constellation point nearest the output — or a stated
 training sequence. A training run starts where a `gr:trigger_name` tag marks a frame, offset by the filter's own group
 delay, and lasts as long as the sequence; between runs the block continues on decisions. With no trigger ever
 arriving the block adapts on decisions from the start, which is degraded rather than broken, and `n_training_bursts`
 says which happened.
 
-The taps start as a unit spike at the center, so an unadapted equalizer is a delay of `(num_taps-1)/2` input samples,
+`num_taps` is odd and the taps start as a unit spike at the center, so an unadapted equalizer is a delay of
+`(num_taps-1)/2` input samples,
 and that delay is what a converged one keeps. A step too large for the channel walks the taps away from any solution;
 rather than stream a growing signal the block watches the tap energy, re-initializes past a bound, and counts it in
 `n_resets`.
@@ -63,28 +68,36 @@ is read by polling those methods, from any thread, and each returns a value whol
 is read. They are not settings: a settings map is served from a cache refreshed when settings apply, so a value that
 changes on the sample path would read as its starting value forever. A record output port carrying the same
 observations, on the measurement conventions, is what will make them readable outside C++.
+
+A `samples_per_symbol` of 1 spaces the taps by a symbol and 2 by half a symbol. `training_sequence` holds interleaved
+re, im symbols a training run adapts against. While `freeze` is set, adaptation stops and filtering continues. Tap
+energy above `divergence_bound` resets the taps to the spike, counted in n_resets. `arity` is read by psk and qam,
+`phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom.
 )"">;
 
     PortIn<std::complex<F>>  in;
     PortOut<std::complex<F>> out;
 
-    Annotated<gr::Size_t, "num_taps", Visible, Doc<"odd, 1 to 127; the group delay is (num_taps-1)/2 input samples">>       num_taps           = 11U;
-    Annotated<std::string, "algorithm", Visible, Doc<"'lms', 'nlms' or 'cma'">>                                             algorithm          = std::string("lms");
-    Annotated<std::string, "reference", Doc<"'decision_directed' or 'training'; the modulus rule reads neither">>           reference          = std::string("decision_directed");
-    Annotated<double, "step_size", Visible, Doc<"mu, in (0, 1)">>                                                           step_size          = 0.01;
-    Annotated<gr::Size_t, "samples_per_symbol", Visible, Doc<"1 for symbol spacing, 2 for fractional">>                     samples_per_symbol = 1U;
-    Annotated<std::vector<F>, "training_sequence", Doc<"interleaved re,im symbols a training run adapts against">>          training_sequence{};
-    Annotated<bool, "freeze", Doc<"live: adaptation stops, filtering continues">>                                           freeze           = false;
-    Annotated<double, "divergence_bound", Doc<"tap energy past which the taps return to the spike and n_resets counts it">> divergence_bound = 100.0;
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"tap count">, Limits<Min<1U>, Max<127U>>>        num_taps           = 11U;
+        Annotated<gr::digital::AdaptiveAlgorithm, Visible, Doc<"adaptation algorithm">>     algorithm          = gr::digital::AdaptiveAlgorithm::Lms;
+        Annotated<EqualizerReference, Doc<"adaptation reference">>                          reference          = EqualizerReference::decision_directed;
+        Annotated<double, Visible, Doc<"step size">, Limits<Over<0.0>, Under<1.0>>>         step_size          = 0.01;
+        Annotated<gr::Size_t, Visible, Doc<"samples per symbol">, Limits<Min<1U>, Max<2U>>> samples_per_symbol = 1U;
+        Annotated<std::vector<F>, Doc<"training symbols">>                                  training_sequence{};
+        Annotated<bool, Doc<"adaptation freeze">>                                           freeze           = false;
+        Annotated<double, Doc<"divergence bound">, Limits<Over<1.0>>>                       divergence_bound = 100.0;
+        Annotated<gr::digital::ConstellationFamily, ConstellationSettingsDoc, Visible>      constellation    = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>                  arity            = 4U;
+        Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                      phase_offset     = F{0};
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                      label_xor        = 0U;
+        Annotated<std::vector<F>, Doc<"custom points">>                                     points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                   normalization = gr::digital::Normalization::Power;
 
-    Annotated<std::string, "constellation", ConstellationSettingsDoc, Visible>         constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">> arity         = 4U;
-    Annotated<F, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>  phase_offset  = F{0};
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>     label_xor     = 0U;
-    Annotated<std::vector<F>, "points", Doc<"interleaved re,im for 'custom'">>         points{};
-    Annotated<std::string, "normalization", Doc<"'power', 'amplitude' or 'none'">>     normalization = std::string("power");
+        GR_MAKE_REFLECTABLE(Settings, num_taps, algorithm, reference, step_size, samples_per_symbol, training_sequence, freeze, divergence_bound, constellation, arity, phase_offset, label_xor, points, normalization);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(LinearEqualizer, in, out, num_taps, algorithm, reference, step_size, samples_per_symbol, training_sequence, freeze, divergence_bound, constellation, arity, phase_offset, label_xor, points, normalization);
+    GR_MAKE_REFLECTABLE(LinearEqualizer, in, out, settings);
 
     /// The scalar observables, in this order, so that a reader sees the three of one instant together.
     static constexpr std::size_t kErrorPower = 0UZ;
@@ -111,45 +124,51 @@ observations, on the measurement conventions, is what will make them readable ou
     std::size_t              _resets     = 0UZ;
     std::size_t              _bursts     = 0UZ;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kDesignKeys{"num_taps", "algorithm", "reference", "step_size", "samples_per_symbol", "training_sequence", "divergence_bound", "constellation", "arity", "phase_offset", "label_xor", "points", "normalization"};
-
-        const bool designed = _filter.size() > 0UZ && !_filter.taps().empty();
-        if (!designed || std::ranges::any_of(kDesignKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            rebuild();
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const std::vector<F> training = s.training_sequence;
+        if (s.num_taps % 2U == 0U) {
+            return gr::Refused(s.num_taps, "must be odd");
         }
+        if (training.size() % 2UZ != 0UZ) {
+            return gr::Refused(s.training_sequence, "must have an even length");
+        }
+        if (s.reference == EqualizerReference::training && s.algorithm != gr::digital::AdaptiveAlgorithm::Cma && training.empty()) {
+            return gr::Refused(s.training_sequence, "required");
+        }
+        const gr::digital::Constellation<F> decisions = constellationOf(s);
+        std::ignore                                   = gr::digital::modulusReference<F>(decisions.points());
+        return {};
     }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        if (reference != "decision_directed" && reference != "training") {
-            throw gr::exception(std::format("reference must be 'decision_directed' or 'training', got '{}'", reference.value));
+    // freeze is read at each symbol, so a change of it alone leaves the taps where adaptation took them
+    void applySettings(const Settings& s) {
+        const bool redesign = s.num_taps.changed() || s.algorithm.changed() || s.reference.changed() || s.step_size.changed() || s.samples_per_symbol.changed() || s.training_sequence.changed() || s.divergence_bound.changed() //
+                              || s.constellation.changed() || s.arity.changed() || s.phase_offset.changed() || s.label_xor.changed() || s.points.changed() || s.normalization.changed();
+        if (!redesign) {
+            return;
         }
-        if (samples_per_symbol < 1U || samples_per_symbol > 2U) {
-            throw gr::exception(std::format("samples_per_symbol is 1 or 2, got {}", samples_per_symbol.value));
-        }
-        if ((training_sequence.value.size() % 2UZ) != 0UZ) {
-            throw gr::exception(std::format("training_sequence is interleaved re,im and needs an even count, got {}", training_sequence.value.size()));
-        }
-        _constellation = constellationFromSettings<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization);
+        _constellation = constellationOf(s);
+        _filter.configure(s.num_taps, s.algorithm, s.step_size, gr::digital::modulusReference<F>(_constellation.points()), s.divergence_bound);
 
-        const auto rule = gr::digital::adaptiveAlgorithmFrom(algorithm);
-        _filter.configure(static_cast<std::size_t>(num_taps.value), rule, step_size, gr::digital::modulusReference<F>(_constellation.points()), divergence_bound);
-
-        _training.resize(training_sequence.value.size() / 2UZ);
+        _training.resize(s.training_sequence.value.size() / 2UZ);
         for (std::size_t i = 0UZ; i < _training.size(); ++i) {
-            _training[i] = std::complex<F>(training_sequence.value[2UZ * i], training_sequence.value[2UZ * i + 1UZ]);
+            _training[i] = std::complex<F>(s.training_sequence.value[2UZ * i], s.training_sequence.value[2UZ * i + 1UZ]);
         }
-        _trained = reference == "training" && rule != gr::digital::AdaptiveAlgorithm::Cma;
-        if (_trained && _training.empty()) {
-            throw gr::exception("reference 'training' needs a training_sequence to adapt against");
-        }
-        _sps = static_cast<std::size_t>(samples_per_symbol.value);
+        _trained = s.reference == EqualizerReference::training && s.algorithm != gr::digital::AdaptiveAlgorithm::Cma;
+        _sps     = s.samples_per_symbol;
 
-        this->input_chunk_size  = samples_per_symbol;
+        this->input_chunk_size  = s.samples_per_symbol;
         this->output_chunk_size = 1U;
+        clearRun();
+    }
 
+    void start() {
+        _filter.reset();
+        clearRun();
+    }
+
+    /// @brief No training run under way and every observable at zero: a new design starts there, and so does a restart.
+    void clearRun() {
         _trainingLeft  = 0UZ;
         _trainingIndex = 0UZ;
         _pendingStarts.clear();
@@ -158,6 +177,8 @@ observations, on the measurement conventions, is what will make them readable ou
         _bursts     = 0UZ;
         publishObservables();
     }
+
+    [[nodiscard]] gr::digital::Constellation<F> constellationOf(const Settings& s) const { return constellationFromSettings<F>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
 
     /// @brief One symbol out per `samples_per_symbol` in, so a tag at input `t` belongs at output `t / sps`.
     template<typename TInputSpans, typename TOutputSpans>
@@ -244,7 +265,7 @@ observations, on the measurement conventions, is what will make them readable ou
             const double errorIm = static_cast<double>(want.imag()) - static_cast<double>(y.imag());
             _errorPower += (errorRe * errorRe + errorIm * errorIm - _errorPower) * kErrorSmoothing;
 
-            if (!freeze) {
+            if (!settings.freeze) {
                 _resets += _filter.adapt(y, want) ? 1UZ : 0UZ;
             }
         }

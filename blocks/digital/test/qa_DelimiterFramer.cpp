@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <span>
 #include <string>
@@ -22,10 +23,20 @@ using gr::blocks::testing::span::OutputSpan;
 using Record = gr::DataSet<std::uint8_t>;
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
@@ -117,6 +128,9 @@ const boost::ut::suite<"delimiter framer"> delimiterFramerTests = [] {
         expect(eq(none.out.size(), 0UZ));
         expect(eq(none.consumed, records.size()));
         expect(eq(silent.nRecords, 3ULL)) << "the frames were built and counted; only the publish was skipped";
+        silent.start();
+        expect(eq(silent.nRecords, 0ULL)) << "a restart counts its own records";
+        expect(eq(silent.nItemsEmitted, 0ULL)) << "and its own items";
 
         // room for fewer records than arrived: the rest stay in the buffer for the next call
         DelimiterFramer     narrow = make<DelimiterFramer>(slipFraming(64U));
@@ -128,21 +142,22 @@ const boost::ut::suite<"delimiter framer"> delimiterFramerTests = [] {
         expect(eq(inSpan.consumed, 2UZ)) << "only the records the port had room for were consumed";
     };
 
-    "without its two required settings the block is inert if driven"_test = [] {
-        const std::vector<Record> records{recordOf({0x11U, 0x22U})};
-        DelimiterFramer           block = make<DelimiterFramer>({{"max_payload_items", gr::Size_t{16}}});
-        std::vector<Record>       scratch(4UZ);
-        InputSpan<Record>         inSpan(std::span<const Record>(records), 0UZ);
-        OutputSpan<Record>        outSpan(std::span<Record>(scratch), 0UZ, nullptr, true);
-        const gr::work::Status    status = block.processBulk(inSpan, outSpan);
-        expect(status == gr::work::Status::ERROR);
-        expect(eq(inSpan.consumed, 0UZ));
-        expect(eq(outSpan.count, 0UZ));
+    "without its two required settings the block is not ready"_test = [] {
+        const auto notReady = [](gr::property_map settings, std::string_view missing) {
+            DelimiterFramer                                   block(std::move(settings));
+            const std::expected<void, gr::settings::Rejected> ready = block.check({});
+            boost::ut::expect(!ready.has_value()) << missing;
+            if (!ready.has_value()) {
+                boost::ut::expect(std::ranges::any_of(ready.error(), [missing](const gr::settings::Rejection& entry) { return entry.key == missing; })) << missing;
+            }
+        };
+
+        notReady({{"end_delimiter", std::string("01111110")}}, "max_payload_items");
+        notReady({{"max_payload_items", gr::Size_t{16}}}, "end_delimiter");
     };
 
     "an idle framer answers that it waits for input, not progress"_test = [] {
-        DelimiterFramer block = make<DelimiterFramer>(hdlcFraming(1024U));
-        block.start();
+        DelimiterFramer     block = make<DelimiterFramer>(hdlcFraming(1024U));
         std::vector<Record> room(2UZ);
         InputSpan<Record>   inSpan(std::span<const Record>{}, 0UZ);
         OutputSpan<Record>  outSpan(std::span<Record>(room), 0UZ, nullptr, true);

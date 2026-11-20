@@ -28,6 +28,17 @@
  */
 namespace {
 
+template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
 using gr::blocks::digital::ManchesterCombine;
 using gr::blocks::testing::ProcessFunction;
 using gr::blocks::testing::TagSink;
@@ -236,14 +247,14 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
 
         // inside a bit the detector multiplies two antipodal chips, so the recovered bit carries an overall minus
         const auto pinnedAt = [&data](std::string_view label, const std::vector<float>& soft, std::int32_t pinned, std::size_t from, std::size_t offset) {
-            const Combined run = through({{"input", std::string("Differential")}, {"phase", pinned}}, std::span<const float>(soft));
+            const Combined run = through({{"input", std::string("Differential")}, {"phase", std::string(pinned == 0 ? "even" : "odd")}}, std::span<const float>(soft));
             expect(eq(run.bits.size(), soft.size() / 2UZ)) << label << ": one bit for two chips";
             expect(eq(disagreements(std::span<const float>(run.bits), std::span<const int>(data), from, offset, -1), 0UZ)) << label << ": every transmitted bit comes back";
             expect(gt(meanOverRms(std::span<const float>(run.bits).subspan(from)), 0.9999)) << label << ": the decisions are antipodal, so the mean magnitude is the root mean square";
             expect(std::ranges::all_of(run.phase, [pinned](float value) { return value == static_cast<float>(pinned); })) << label << ": the pinned grid is what the port reports";
         };
-        pinnedAt("phase 0", even, 0, 1UZ, 0UZ);
-        pinnedAt("phase 1", odd, 1, 0UZ, 1UZ);
+        pinnedAt("phase even", even, 0, 1UZ, 0UZ);
+        pinnedAt("phase odd", odd, 1, 0UZ, 1UZ);
     };
 
     // The estimating arm: the same stream with the pairing left to the block
@@ -276,7 +287,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         const std::vector<int>   chips = manchesterChips(std::span<const int>(data));
         const std::vector<float> soft  = detected(std::span<const int>(chips));
 
-        const Combined selected  = through({{"input", std::string("Differential")}, {"phase", std::int32_t{0}}}, std::span<const float>(soft));
+        const Combined selected  = through({{"input", std::string("Differential")}, {"phase", std::string("even")}}, std::span<const float>(soft));
         const double   antipodal = meanOverRms(std::span<const float>(selected.bits).subspan(1UZ));
         expect(gt(antipodal, 0.9999)) << "the selected parity is antipodal";
 
@@ -364,14 +375,12 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
     "the settings that have no meaning are refused"_test = [] {
         const auto build = [](gr::property_map settings) {
             ManchesterCombine block(std::move(settings));
-            block.settings().init();
-            std::ignore = block.settings().applyStagedParameters();
-            block.start();
+            initialize(block);
         };
         expect(throws([&build] { build({{"input", std::string("soft")}}); })) << "a stream this block cannot read is named, not guessed at";
-        expect(throws([&build] { build({{"phase", std::int32_t{2}}}); })) << "a pairing grid has two parities";
+        expect(throws([&build] { build({{"phase", std::string("both")}}); })) << "a pairing grid has two parities";
         expect(throws([&build] { build({{"averaging_symbols", gr::Size_t{0}}}); })) << "a mean over no symbols is not a mean";
-        expect(nothrow([&build] { build({{"input", std::string("Chips")}, {"phase", std::int32_t{1}}}); }));
+        expect(nothrow([&build] { build({{"input", std::string("Chips")}, {"phase", std::string("odd")}}); }));
     };
 };
 

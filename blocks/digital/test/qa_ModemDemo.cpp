@@ -167,8 +167,7 @@ struct Recovery {
     }
 
     EvmMeter<float> meter;
-    meter.constellation = std::string("qpsk");
-    meter.window        = static_cast<gr::Size_t>(rotated.size());
+    boost::ut::expect(meter.set({{"constellation", "qpsk"}, {"window", static_cast<gr::Size_t>(rotated.size())}}).has_value());
     meter.start();
     // the meter carries an optional record port now; this reading is taken through the poll, so nothing is wired
     namespace test = gr::blocks::testing::span;

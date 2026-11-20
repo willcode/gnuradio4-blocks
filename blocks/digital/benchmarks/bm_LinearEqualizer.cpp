@@ -32,20 +32,18 @@ struct Row {
 };
 
 constexpr std::array<Row, 5UZ> kRows{
-    Row{"11 taps, lms", 11U, "lms", 1U},
-    Row{"31 taps, lms", 31U, "lms", 1U},
-    Row{"127 taps, lms", 127U, "lms", 1U},
-    Row{"31 taps, nlms", 31U, "nlms", 1U},
-    Row{"31 taps, cma", 31U, "cma", 1U},
+    Row{"11 taps, lms", 11U, "Lms", 1U},
+    Row{"31 taps, lms", 31U, "Lms", 1U},
+    Row{"127 taps, lms", 127U, "Lms", 1U},
+    Row{"31 taps, nlms", 31U, "Nlms", 1U},
+    Row{"31 taps, cma", 31U, "Cma", 1U},
 };
 
 /// A block carrying a seqlock is neither copyable nor movable, so each one is built where it is used and held by
 /// pointer for the arm that drives it.
 [[nodiscard]] std::unique_ptr<LinearEqualizer<float>> make(const Row& row) {
-    auto block = std::make_unique<LinearEqualizer<float>>(gr::property_map{{"num_taps", row.taps}, {"algorithm", std::string(row.algorithm)}, {"samples_per_symbol", row.samplesPerSymbol}, {"step_size", 0.005}});
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
-    block->start();
+    auto block  = std::make_unique<LinearEqualizer<float>>(gr::property_map{{"num_taps", row.taps}, {"algorithm", std::string(row.algorithm)}, {"samples_per_symbol", row.samplesPerSymbol}, {"step_size", 0.005}});
+    std::ignore = block->check({});
     return block;
 }
 

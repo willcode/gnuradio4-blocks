@@ -27,11 +27,21 @@ using gr::blocks::testing::ProcessFunction;
 using gr::blocks::testing::TagSink;
 using gr::blocks::testing::TagSource;
 
+template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
 /// A block carrying a seqlock is neither copyable nor movable, so every one below is built where it is used.
 template<typename TBlock>
 void init(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     if constexpr (requires { block.start(); }) {
         block.start();
     }

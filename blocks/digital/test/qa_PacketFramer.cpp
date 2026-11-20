@@ -26,10 +26,20 @@ constexpr std::uint64_t kSyncWord = 0xACDDA4E2F28C20FCULL;
 constexpr std::size_t   kSyncBits = 64UZ;
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
@@ -420,14 +430,12 @@ const boost::ut::suite<"packet framer"> packetFramerTests = [] {
 
     "degenerate parameters throw"_test = [] {
         expect(throws([] {
-            PacketFramer<std::uint8_t> block{}; // no settings at all, so nothing is staged and nothing is validated
-            block.start();
-        })) << "max_payload_items is required and has no default: a block without it refuses to start";
+            PacketFramer<std::uint8_t> block{}; // built without max_payload_items, which the check refuses
+            initialize(block);
+        })) << "max_payload_items is required and has no default: a block without it is not ready";
         expect(throws([] {
-            PacketFramer<std::uint8_t> block(gr::property_map{{"max_payload_items", 0U}}); // 0 is the default, so the batch moves nothing and there is no callback to refuse in
-            block.settings().init();
-            std::ignore = block.settings().applyStagedParameters();
-            block.start();
+            PacketFramer<std::uint8_t> block(gr::property_map{{"max_payload_items", 0U}}); // 0 is the default, and a given 0 is refused like a missing one
+            initialize(block);
         })) << "and stating the unset value explicitly leaves it unset";
         expect(throws([] { std::ignore = make<PacketFramer<std::uint8_t>>({{"max_payload_items", 256U}, {"header_format", std::string("counter")}}); }));
         expect(throws([] { std::ignore = make<PacketFramer<std::uint8_t>>({{"max_payload_items", 256U}, {"header_format", std::string("fixed_length")}}); })) << "a fixed length of zero is not a length";
@@ -445,7 +453,7 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
         // conventions write 32, 34 and 36 and every one of them has to extract the same 272 items
         constexpr std::size_t kPayloadItems = 272UZ;
         const LengthRow       kRows[]{{"length_plain", "Payload", gr::digital::CountCovers::Payload, 16UZ, 8U, 16U, 0U}, //
-                  {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 8U, 0U, 0U},    //
+                  {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 8U, 0U, 0U},  //
                   {"length_plain", "WholeFrame", gr::digital::CountCovers::WholeFrame, 16UZ, 8U, 0U, 16U}};
         const std::uint32_t   kWritten[]{32U, 34U, 36U};
 
@@ -478,11 +486,11 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
     };
 
     "both realizations round trip random lengths under every convention"_test = [] {
-        const LengthRow kRows[]{{"length_plain", "Payload", gr::digital::CountCovers::Payload, 16UZ, 8U, 16U, 0U},        //
+        const LengthRow kRows[]{{"length_plain", "Payload", gr::digital::CountCovers::Payload, 16UZ, 8U, 16U, 0U},          //
             {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 8U, 0U, 0U},           //
-            {"length_plain", "WholeFrame", gr::digital::CountCovers::WholeFrame, 16UZ, 8U, 0U, 0U},                      //
+            {"length_plain", "WholeFrame", gr::digital::CountCovers::WholeFrame, 16UZ, 8U, 0U, 0U},                       //
             {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 1U, 0U, 0U, "Little"}, //
-            {"length_golay24", "Payload", gr::digital::CountCovers::Payload, 8UZ, 8U, 16U, 0U, "Big", "High"},            //
+            {"length_golay24", "Payload", gr::digital::CountCovers::Payload, 8UZ, 8U, 16U, 0U, "Big", "High"},              //
             {"length_golay24", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 8UZ, 8U, 0U, 0U, "Big", "Low"}};
 
         for (const LengthRow& row : kRows) {
@@ -632,17 +640,18 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
         refuses(gr::property_map{{"max_payload_items", 256U}, {"byte_order", std::string("Little")}}, "byte_order", "byte_order belongs to length_plain alone");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"flags_position", std::string("Low")}}, "flags_position", "and flags_position to length_golay24 alone");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"fixed_payload_items", 64U}}, "fixed_payload_items", "and a fixed length to fixed_length alone");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 12U}, {"count_covers", std::string("PayloadAndCheck")}, {"byte_order", std::string("Little")}}, "byte_order", "byte_order under length_golay24");
 
         const gr::property_map plain{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"count_covers", std::string("PayloadAndCheck")}};
         refuses(plain, "length_bits", "length_bits is required by the length formats and has no default");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}}, "count_covers", "and count_covers has none either");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("everything")}}, "everything", "an unrecognized convention names itself");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 33U}, {"count_covers", std::string("PayloadAndCheck")}}, "33", "a field wider than the framer's header buffer");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 12U}, {"count_covers", std::string("PayloadAndCheck")}, {"byte_order", std::string("Little")}}, "12", "a byte order over a field that is not whole bytes");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("PayloadAndCheck")}}, "13", "a Golay header carries twelve information bits");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"count_unit_items", 65U}}, "65", "a counted unit above 64 items");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"check_items", 16U}}, "16", "a check field under a convention that counts it");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("Payload")}, {"frame_prefix_items", 16U}}, "16", "and a frame prefix under one that does not");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("everything")}}, "count_covers", "an unrecognized convention names the setting");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 33U}, {"count_covers", std::string("PayloadAndCheck")}}, "length_bits", "a field wider than the framer's header buffer");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 12U}, {"count_covers", std::string("PayloadAndCheck")}, {"byte_order", std::string("Little")}}, "byte_order", "a byte order over a field that is not whole bytes");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("PayloadAndCheck")}}, "length_bits", "a Golay header carries twelve information bits");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"count_unit_items", 65U}}, "must be >= 1 and <= 64", "a counted unit above 64 items");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"check_items", 2U}}, "check_items", "a check field under a convention that counts it");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("Payload")}, {"frame_prefix_items", 16U}}, "frame_prefix_items", "and a frame prefix under one that does not");
 
         expect(nothrow([&crc] { std::ignore = make<PacketFramer<std::uint8_t>>(crc); })) << "and a settings vector naming no layout-specific setting leaves the realizations in use alone";
     };

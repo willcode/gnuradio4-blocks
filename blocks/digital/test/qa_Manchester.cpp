@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <span>
 #include <string>
@@ -15,6 +16,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/algorithm/math/BitPacking.hpp>
 #include <gnuradio-4.0/digital/Manchester.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -28,18 +30,37 @@ using gr::blocks::digital::ManchesterEncoder;
 constexpr std::string_view kCustomKey = "manchester_probe";
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
 template<typename TBlock>
 void restage(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().set(std::move(settings));
-    std::ignore = block.settings().activateContext();
-    std::ignore = block.settings().applyStagedParameters();
+    applyOrThrow(block, settings);
 }
 
 [[nodiscard]] gr::property_map encoderSettings(std::string_view convention, gr::Size_t bitsPerItem = 8U, std::string_view order = "MsbFirst") { //
@@ -465,10 +486,7 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
     };
 
     "validation rejects, and the previous configuration survives"_test = [] {
-        expect(throws([] {
-            auto block = make<ManchesterEncoder>({{"convention", std::string("")}}); // the empty spelling is the default, so the batch moves nothing
-            block.start();
-        })) << "there is no default convention";
+        expect(throws([] { std::ignore = make<ManchesterEncoder>({{"convention", std::string("Unset")}}); })) << "there is no default convention";
         expect(throws([] { std::ignore = make<ManchesterEncoder>({{"convention", std::string("ieee802.3")}}); })) << "a typo must not silently become a convention";
         expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("Ieee8023", 0U)); }));
         expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("Ieee8023", 9U)); }));
@@ -483,17 +501,13 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         expect(that % (after.samples == before.samples)) << "a rejected setting leaves the previous configuration whole";
     };
 
-    "an unconfigured block is inert"_test = [] {
-        ManchesterEncoder block;
-        block.settings().init();
-
-        const std::array<std::uint8_t, 4UZ> data{1U, 2U, 3U, 4U};
-        std::array<std::uint8_t, 8UZ>       room{};
-        InputSpan<std::uint8_t>             inSpan{std::span<const std::uint8_t>(data)};
-        OutputSpan<std::uint8_t>            outSpan{std::span<std::uint8_t>(room)};
-        expect(that % (block.processBulk(inSpan, outSpan) == gr::work::Status::ERROR));
-        expect(eq(inSpan.consumed, 0UZ));
-        expect(eq(outSpan.count, 0UZ));
+    "a block built without a convention is not ready"_test = [] {
+        ManchesterEncoder                                 block;
+        const std::expected<void, gr::settings::Rejected> ready = block.check({});
+        expect(!ready.has_value()) << "there is no default convention";
+        if (!ready.has_value()) {
+            expect(std::ranges::any_of(ready.error(), [](const gr::settings::Rejection& entry) { return entry.key == "convention"; }));
+        }
     };
 };
 
@@ -561,7 +575,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         auto chips = rng.items(8192UZ, 1U); // arbitrary chips, violations and all
         for (const std::string_view convention : kConventions) {
             const auto seen = decoded(decoderSettings(convention, 1U), std::span<const std::uint8_t>(chips));
-            const auto k    = static_cast<unsigned>(gr::digital::conventionXor(gr::digital::conventionFromName(convention)));
+            const auto k    = static_cast<unsigned>(gr::digital::conventionXor(convention == "GeThomas" ? gr::digital::ManchesterConvention::GeThomas : gr::digital::ManchesterConvention::Ieee8023));
             expect(that % (rebuiltChips(seen.bits, seen.flags, k) == chips)) << std::format("{}: the chip stream comes back exactly", convention);
         }
     };
@@ -761,7 +775,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
             auto                      block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
             const auto                seen  = decodedBy(block, std::span<const std::uint8_t>(violating));
             expect(std::ranges::all_of(seen.flags, [](std::uint8_t flag) { return flag == 1U; })) << "every pair is reported";
-            expect(eq(block.chip_phase.value, gr::Size_t{0})) << "and the setting is untouched";
+            expect(eq(block.settings.chip_phase.value, gr::Size_t{0})) << "and the setting is untouched";
             expect(eq(block._coder.gridParity, std::uint8_t{0U}));
             expect(eq(block.nOrphanItems(), 0ULL));
             expect(eq(block.nDroppedChips(), 0ULL));
@@ -809,10 +823,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
     };
 
     "validation rejects, and the previous configuration survives"_test = [] {
-        expect(throws([] {
-            auto block = make<ManchesterDecoder>({{"convention", std::string("")}}); // the empty spelling is the default, so the batch moves nothing
-            block.start();
-        })) << "there is no default convention";
+        expect(throws([] { std::ignore = make<ManchesterDecoder>({{"convention", std::string("Unset")}}); })) << "there is no default convention";
         expect(throws([] { std::ignore = make<ManchesterDecoder>({{"convention", std::string("thomas")}}); }));
         expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("Ieee8023", 0U)); }));
         expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("Ieee8023", 9U)); }));

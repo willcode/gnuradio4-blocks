@@ -414,7 +414,7 @@ def crc_settings(s, order, skip=None, **more):
         "final_xor": U64(s[4]),
         "input_reflected": s[5],
         "result_reflected": s[6],
-        "crc_byte_order": order,
+        "crc_byte_order": order.capitalize(),
     }
     if skip is not None:
         p["skip_header_bytes"] = U32(skip)

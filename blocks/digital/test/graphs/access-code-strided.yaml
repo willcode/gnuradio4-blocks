@@ -160,7 +160,7 @@ blocks:
     parameters:
       name: ao40_long_correlator
       access_code: "10000110101110110111110010111111001001100010101110110000011010111"
-      stride: !!uint32 80
+      code_stride: !!uint32 80
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: ao40_long_sink
@@ -395,7 +395,7 @@ blocks:
     parameters:
       name: ao40_short_correlator
       access_code: "1000011010111011011111001011111100100110001010111011"
-      stride: !!uint32 51
+      code_stride: !!uint32 51
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: ao40_short_sink
@@ -488,7 +488,7 @@ blocks:
     parameters:
       name: strided_4_3_correlator
       access_code: "1011"
-      stride: !!uint32 3
+      code_stride: !!uint32 3
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: strided_4_3_sink
@@ -509,7 +509,7 @@ blocks:
     parameters:
       name: delayed_4_3_correlator
       access_code: "1011"
-      stride: !!uint32 3
+      code_stride: !!uint32 3
       tag_at: code_start
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -532,7 +532,7 @@ blocks:
     parameters:
       name: strided_8_5_correlator
       access_code: "10110100"
-      stride: !!uint32 5
+      code_stride: !!uint32 5
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: strided_8_5_sink
@@ -555,7 +555,7 @@ blocks:
     parameters:
       name: delayed_8_5_correlator
       access_code: "10110100"
-      stride: !!uint32 5
+      code_stride: !!uint32 5
       tag_at: code_start
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -591,7 +591,7 @@ blocks:
     parameters:
       name: survives_0_correlator
       access_code: "10110100110100011100111001110011"
-      stride: !!uint32 17
+      code_stride: !!uint32 17
       max_errors: !!uint32 5
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -645,7 +645,7 @@ blocks:
     parameters:
       name: survives_1_correlator
       access_code: "10110100110100011100111001110011"
-      stride: !!uint32 17
+      code_stride: !!uint32 17
       max_errors: !!uint32 5
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -699,7 +699,7 @@ blocks:
     parameters:
       name: survives_3_correlator
       access_code: "10110100110100011100111001110011"
-      stride: !!uint32 17
+      code_stride: !!uint32 17
       max_errors: !!uint32 5
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -753,7 +753,7 @@ blocks:
     parameters:
       name: survives_5_correlator
       access_code: "10110100110100011100111001110011"
-      stride: !!uint32 17
+      code_stride: !!uint32 17
       max_errors: !!uint32 5
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -807,7 +807,7 @@ blocks:
     parameters:
       name: survives_6_correlator
       access_code: "10110100110100011100111001110011"
-      stride: !!uint32 17
+      code_stride: !!uint32 17
       max_errors: !!uint32 5
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -841,7 +841,7 @@ blocks:
     parameters:
       name: warm_1_correlator
       access_code: "10100101"
-      stride: !!uint32 1
+      code_stride: !!uint32 1
       max_errors: !!uint32 8
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -866,7 +866,7 @@ blocks:
     parameters:
       name: warm_3_correlator
       access_code: "10100101"
-      stride: !!uint32 3
+      code_stride: !!uint32 3
       max_errors: !!uint32 8
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -891,7 +891,7 @@ blocks:
     parameters:
       name: warm_5_correlator
       access_code: "10100101"
-      stride: !!uint32 5
+      code_stride: !!uint32 5
       max_errors: !!uint32 8
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
@@ -923,7 +923,7 @@ blocks:
     parameters:
       name: warm_40_correlator
       access_code: "10100101"
-      stride: !!uint32 40
+      code_stride: !!uint32 40
       max_errors: !!uint32 8
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:

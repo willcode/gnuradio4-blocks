@@ -18,6 +18,7 @@
 #include <gnuradio-4.0/algorithm/digital/Constellation.hpp>
 #include <gnuradio-4.0/digital/ConstellationBlocks.hpp>
 #include <gnuradio-4.0/digital/DifferentialCoding.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -64,18 +65,37 @@ constexpr Named kNamed[] = {{"bpsk", 2U, 1UZ}, {"qpsk", 4U, 2UZ}, {"psk8", 8U, 3
 [[nodiscard]] gr::property_map settingsOf(const Named& row) { return {{"constellation", std::string(row.name)}, {"arity", row.arity}}; }
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
+void applyOrThrow(TBlock& block, const gr::property_map& settings) {
+    if (const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), settings); !failed.empty()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : failed) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused the change:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
 template<typename TBlock>
 void restage(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().set(std::move(settings));
-    std::ignore = block.settings().activateContext();
-    std::ignore = block.settings().applyStagedParameters();
+    applyOrThrow(block, settings);
 }
 
 /// Drive a one-in one-out block over plain spans, `outPerIn` outputs reserved per input item.

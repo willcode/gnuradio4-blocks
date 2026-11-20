@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -29,16 +30,6 @@ using Symbol = gr::Size_t;
 
 enum class Coding : std::uint8_t { Differential, Nrzi };
 
-[[nodiscard]] inline Coding codingFromName(std::string_view name) {
-    if (name == "differential") {
-        return Coding::Differential;
-    }
-    if (name == "nrzi") {
-        return Coding::Nrzi;
-    }
-    throw gr::exception(std::format("coding must be 'differential' or 'nrzi', got '{}'", name));
-}
-
 /**
  * @brief The configuration both halves of the code share, and the one word of state each carries.
  *
@@ -54,21 +45,7 @@ struct CodingState {
     bool   binary  = true;
 };
 
-inline void configure(CodingState& coding, gr::Size_t modulus, std::string_view codingName, gr::Size_t initialState, std::uint64_t alphabet) {
-    if (modulus < 2U) {
-        throw gr::exception(std::format("modulus is an alphabet size and must be at least 2, got {}", modulus));
-    }
-    if (static_cast<std::uint64_t>(modulus) > alphabet) {
-        throw gr::exception(std::format("modulus {} exceeds the {} values the sample type can hold", modulus, alphabet));
-    }
-    const Coding mode = codingFromName(codingName);
-    if (mode == Coding::Nrzi && modulus != 2U) {
-        throw gr::exception(std::format("coding 'nrzi' is a binary code and requires modulus 2, got {}", modulus));
-    }
-    if (initialState >= modulus) {
-        throw gr::exception(std::format("initial_state {} must be below modulus {}", initialState, modulus));
-    }
-
+inline void configure(CodingState& coding, gr::Size_t modulus, Coding mode, gr::Size_t initialState) {
     coding.modulus = modulus;
     coding.mask    = modulus - 1U;
     coding.binary  = std::has_single_bit(modulus);
@@ -94,22 +71,43 @@ coincide. An input symbol at or above `modulus` is reduced rather than rejected,
 able to stop a graph.
 
 The block is 1:1, so every input tag key passes through at its own offset.
+
+A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every modulus up to 2^bits(T). nrzi toggles on
+0. `initial_state` is y[-1] and matches the decoder's.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "modulus", Unit<"symbols">, Doc<"alphabet size M: 2 for BPSK, 4 for QPSK, 8 for 8PSK; exact for every M in [2, 2^bits(T)]">> modulus       = 2U;
-    Annotated<std::string, "coding", Doc<"'differential', or 'nrzi' which is XNOR and transitions on a zero input bit">>                               coding        = std::string("differential");
-    Annotated<gr::Size_t, "initial_state", Doc<"y[-1]; must be below modulus and must match the decoder's">>                                           initial_state = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"alphabet size">> modulus       = 2U;
+        Annotated<detail::Coding, Doc<"line code">>                  coding        = detail::Coding::Differential;
+        Annotated<gr::Size_t, Doc<"initial state">>                  initial_state = 0U;
 
-    GR_MAKE_REFLECTABLE(DifferentialEncoder, in, out, modulus, coding, initial_state);
+        GR_MAKE_REFLECTABLE(Settings, modulus, coding, initial_state);
+    } settings;
 
-    detail::CodingState _coding{};
+    GR_MAKE_REFLECTABLE(DifferentialEncoder, in, out, settings);
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { detail::configure(_coding, modulus, coding, initial_state, std::uint64_t{1} << (8UZ * sizeof(T))); }
+    static constexpr std::uint64_t kAlphabet = std::uint64_t{1} << (8UZ * sizeof(T)); // the values a sample can hold
+    detail::CodingState            _coding{};
 
-    void reset() { _coding.state = initial_state; }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.modulus < 2U || s.modulus > kAlphabet) {
+            return gr::Refused(s.modulus, std::format("must be >= 2 and <= {}", kAlphabet));
+        }
+        if (s.coding == detail::Coding::Nrzi && s.modulus != 2U) {
+            return gr::Refused(s.coding, "nrzi requires modulus 2");
+        }
+        if (s.initial_state >= s.modulus) {
+            return gr::Refused(s.initial_state, "must be < modulus");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) { detail::configure(_coding, s.modulus, s.coding, s.initial_state); }
+
+    void reset() { _coding.state = settings.initial_state; }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         const std::size_t nSamples = std::min(input.size(), output.size());
@@ -162,22 +160,43 @@ An input symbol at or above `modulus` is reduced rather than rejected. See Diffe
 the rotation-ordered labeling the phase-ambiguity argument requires.
 
 The block is 1:1, so every input tag key passes through at its own offset.
+
+A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every modulus up to 2^bits(T). nrzi toggles on
+0. `initial_state` is y[-1] and matches the encoder's.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "modulus", Unit<"symbols">, Doc<"alphabet size M: 2 for BPSK, 4 for QPSK, 8 for 8PSK; exact for every M in [2, 2^bits(T)]">> modulus       = 2U;
-    Annotated<std::string, "coding", Doc<"'differential', or 'nrzi' which is XNOR and transitions on a zero input bit">>                               coding        = std::string("differential");
-    Annotated<gr::Size_t, "initial_state", Doc<"y[-1]; must be below modulus and must match the encoder's">>                                           initial_state = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"alphabet size">> modulus       = 2U;
+        Annotated<detail::Coding, Doc<"line code">>                  coding        = detail::Coding::Differential;
+        Annotated<gr::Size_t, Doc<"initial state">>                  initial_state = 0U;
 
-    GR_MAKE_REFLECTABLE(DifferentialDecoder, in, out, modulus, coding, initial_state);
+        GR_MAKE_REFLECTABLE(Settings, modulus, coding, initial_state);
+    } settings;
 
-    detail::CodingState _coding{};
+    GR_MAKE_REFLECTABLE(DifferentialDecoder, in, out, settings);
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { detail::configure(_coding, modulus, coding, initial_state, std::uint64_t{1} << (8UZ * sizeof(T))); }
+    static constexpr std::uint64_t kAlphabet = std::uint64_t{1} << (8UZ * sizeof(T)); // the values a sample can hold
+    detail::CodingState            _coding{};
 
-    void reset() { _coding.state = initial_state; }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.modulus < 2U || s.modulus > kAlphabet) {
+            return gr::Refused(s.modulus, std::format("must be >= 2 and <= {}", kAlphabet));
+        }
+        if (s.coding == detail::Coding::Nrzi && s.modulus != 2U) {
+            return gr::Refused(s.coding, "nrzi requires modulus 2");
+        }
+        if (s.initial_state >= s.modulus) {
+            return gr::Refused(s.initial_state, "must be < modulus");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) { detail::configure(_coding, s.modulus, s.coding, s.initial_state); }
+
+    void reset() { _coding.state = settings.initial_state; }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<T> output) noexcept {
         const std::size_t nSamples = std::min(input.size(), output.size());

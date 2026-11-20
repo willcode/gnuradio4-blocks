@@ -1,6 +1,6 @@
 # The named profiles. ccsds131 over zeros gives the CCSDS sequence, as the taps and seed spelled out do. pn9 over
 # zeros gives the CC11xx and SX12xx whitening sequence FF E1 1D 9A ED 85 33 24, read least significant bit first, and
-# does so with bits_per_item 8 and bit_order MsbFirst staged beside it. The g3ruh pair restores its input, and the
+# does so with bits_per_item 8 and bit_order msb_first staged beside it. The g3ruh pair restores its input, and the
 # g3ruh scrambler gives what taps 12,17 and a seed of 17 zeros give. Each sink expects its bytes.
 # generate_stream_graphs.py writes this file.
 blocks:

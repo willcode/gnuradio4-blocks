@@ -6,10 +6,11 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
-#include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -39,27 +40,36 @@ not for QAM, which compares against absolute levels - an AGC holding the input a
 stated precondition of every QAM decision.
 
 The block is one symbol in, one symbol out, so every input tag key passes through at its own offset.
+
+`arity` is read by psk and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom.
 )"">;
 
     PortIn<std::complex<F>> in;
     PortOut<std::uint8_t>   out;
 
-    Annotated<std::string, "constellation", ConstellationSettingsDoc, Visible>         constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">> arity         = 4U;
-    Annotated<F, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>  phase_offset  = F{0};
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>     label_xor     = 0U;
-    Annotated<std::vector<F>, "points", Doc<"interleaved re,im for 'custom'">>         points{};
-    Annotated<std::string, "normalization", Doc<"'power', 'amplitude' or 'none'">>     normalization = std::string("power");
+    struct Settings {
+        Annotated<gr::digital::ConstellationFamily, ConstellationSettingsDoc, Visible> constellation = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>             arity         = 4U;
+        Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                 phase_offset  = F{0};
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                 label_xor     = 0U;
+        Annotated<std::vector<F>, Doc<"custom points">>                                points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization = gr::digital::Normalization::Power;
 
-    GR_MAKE_REFLECTABLE(ConstellationDecoder, in, out, constellation, arity, phase_offset, label_xor, points, normalization);
+        GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ConstellationDecoder, in, out, settings);
 
     gr::digital::Constellation<F> _constellation = gr::digital::Constellation<F>::qpsk();
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        std::ignore = constellationOf(s);
+        return {};
+    }
 
-    void start() { rebuild(); }
+    void applySettings(const Settings& s) { _constellation = constellationOf(s); }
 
-    void rebuild() { _constellation = constellationFromSettings<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization); }
+    [[nodiscard]] gr::digital::Constellation<F> constellationOf(const Settings& s) const { return constellationFromSettings<F>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
 
     [[nodiscard]] std::size_t bitsPerSymbol() const { return _constellation.bitsPerSymbol(); }
 
@@ -72,8 +82,8 @@ The block is one symbol in, one symbol out, so every input tag key passes throug
 
 GR_REGISTER_BLOCK(gr::blocks::digital::ConstellationSoftDecoder, [T], [float])
 
-// The declared rate is the declared constellation's: qpsk carries two bits, and `rebuild()` follows the setting from
-// there. A block whose construction moved no value is never called back, so the two defaults have to agree.
+// The declared rate is the declared constellation's: qpsk carries two bits, and the apply hook follows the setting from
+// there.
 template<std::floating_point F>
 struct ConstellationSoftDecoder : Block<ConstellationSoftDecoder<F>, Resampling<1UZ, 2UZ, false>> {
     using Description = Doc<R""(
@@ -87,44 +97,46 @@ scale-sensitive for every constellation: an AGC holding the input at the constel
 precondition. `max_log` is the default and needs no transcendental; it is exact for BPSK and QPSK and within about
 `ln 2` elsewhere. The block is a 1:`m` interpolator whose ratio follows the constellation, so changing
 `constellation` changes the rate.
+
+`arity` is read by psk and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom.
+`noise_power` is the total complex noise power N0, linear. The exact LLR algorithm costs a logarithm per point.
 )"">;
 
     PortIn<std::complex<F>> in;
     PortOut<F>              out;
 
-    Annotated<std::string, "constellation", ConstellationSettingsDoc, Visible>                                     constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">>                             arity         = 4U;
-    Annotated<F, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>                              phase_offset  = F{0};
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>                                 label_xor     = 0U;
-    Annotated<std::vector<F>, "points", Doc<"interleaved re,im for 'custom'">>                                     points{};
-    Annotated<std::string, "normalization", Doc<"'power', 'amplitude' or 'none'">>                                 normalization  = std::string("power");
-    Annotated<F, "noise_power", Doc<"N0, the total complex noise power; linear, never dB, and strictly positive">> noise_power    = F{1};
-    Annotated<std::string, "soft_algorithm", Doc<"'max_log', or 'exact' which is the true LLR and costs a log">>   soft_algorithm = std::string("max_log");
+    struct Settings {
+        Annotated<gr::digital::ConstellationFamily, ConstellationSettingsDoc, Visible> constellation = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>             arity         = 4U;
+        Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                 phase_offset  = F{0};
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                 label_xor     = 0U;
+        Annotated<std::vector<F>, Doc<"custom points">>                                points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization  = gr::digital::Normalization::Power;
+        Annotated<F, Doc<"noise power">, Limits<Over<F{0}>>>                           noise_power    = F{1};
+        Annotated<gr::digital::SoftAlgorithm, Doc<"LLR algorithm">>                    soft_algorithm = gr::digital::SoftAlgorithm::MaxLog;
 
-    GR_MAKE_REFLECTABLE(ConstellationSoftDecoder, in, out, constellation, arity, phase_offset, label_xor, points, normalization, noise_power, soft_algorithm);
+        GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization, noise_power, soft_algorithm);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ConstellationSoftDecoder, in, out, settings);
 
     gr::digital::Constellation<F> _constellation = gr::digital::Constellation<F>::qpsk();
-    gr::digital::SoftAlgorithm    _algorithm     = gr::digital::SoftAlgorithm::MaxLog;
     std::size_t                   _bits          = 2UZ;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        std::ignore = constellationOf(s);
+        return {};
+    }
 
-    void start() { rebuild(); }
-
-    void rebuild() {
-        if (!(noise_power > F{0})) {
-            throw gr::exception(std::format("noise_power is a linear total complex noise power and must be strictly positive, got {}", static_cast<double>(noise_power.value)));
-        }
-        if (soft_algorithm != "max_log" && soft_algorithm != "exact") {
-            throw gr::exception(std::format("soft_algorithm must be 'max_log' or 'exact', got '{}'", soft_algorithm.value));
-        }
-        _algorithm     = soft_algorithm == "exact" ? gr::digital::SoftAlgorithm::Exact : gr::digital::SoftAlgorithm::MaxLog;
-        _constellation = constellationFromSettings<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization);
+    void applySettings(const Settings& s) {
+        _constellation = constellationOf(s);
         _bits          = _constellation.bitsPerSymbol();
 
         this->input_chunk_size  = 1U;
         this->output_chunk_size = static_cast<gr::Size_t>(_bits);
     }
+
+    [[nodiscard]] gr::digital::Constellation<F> constellationOf(const Settings& s) const { return constellationFromSettings<F>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
 
     [[nodiscard]] std::size_t bitsPerSymbol() const noexcept { return _bits; }
 
@@ -165,7 +177,7 @@ precondition. `max_log` is the default and needs no transcendental; it is exact 
 
     [[nodiscard]] work::Status processBulk(std::span<const std::complex<F>> input, std::span<F> output) {
         const std::size_t nSymbols = std::min(input.size(), output.size() / _bits);
-        _constellation.softDecisions(input.first(nSymbols), noise_power, output.first(nSymbols * _bits), _algorithm);
+        _constellation.softDecisions(input.first(nSymbols), settings.noise_power, output.first(nSymbols * _bits), settings.soft_algorithm);
         return work::Status::OK;
     }
 };
@@ -186,27 +198,36 @@ Nothing is scaled per sample and no scale factor is carried separately, which is
 renormalizes in place.
 
 The block is one symbol in, one symbol out, so every input tag key passes through at its own offset.
+
+`arity` is read by psk and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im, by custom.
 )"">;
 
     PortIn<std::uint8_t>     in;
     PortOut<std::complex<F>> out;
 
-    Annotated<std::string, "constellation", ConstellationSettingsDoc, Visible>         constellation = std::string("qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M, read by 'psk' and 'qam'">> arity         = 4U;
-    Annotated<F, "phase_offset", Unit<"rad">, Doc<"rotation of the 'psk' point set">>  phase_offset  = F{0};
-    Annotated<gr::Size_t, "label_xor", Doc<"label offset of the 'psk' point set">>     label_xor     = 0U;
-    Annotated<std::vector<F>, "points", Doc<"interleaved re,im for 'custom'">>         points{};
-    Annotated<std::string, "normalization", Doc<"'power', 'amplitude' or 'none'">>     normalization = std::string("power");
+    struct Settings {
+        Annotated<gr::digital::ConstellationFamily, ConstellationSettingsDoc, Visible> constellation = gr::digital::ConstellationFamily::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"constellation order">>             arity         = 4U;
+        Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                 phase_offset  = F{0};
+        Annotated<gr::Size_t, Doc<"psk label offset">>                                 label_xor     = 0U;
+        Annotated<std::vector<F>, Doc<"custom points">>                                points{};
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization = gr::digital::Normalization::Power;
 
-    GR_MAKE_REFLECTABLE(ConstellationEncoder, in, out, constellation, arity, phase_offset, label_xor, points, normalization);
+        GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ConstellationEncoder, in, out, settings);
 
     gr::digital::Constellation<F> _constellation = gr::digital::Constellation<F>::qpsk();
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        std::ignore = constellationOf(s);
+        return {};
+    }
 
-    void start() { rebuild(); }
+    void applySettings(const Settings& s) { _constellation = constellationOf(s); }
 
-    void rebuild() { _constellation = constellationFromSettings<F>(constellation, arity, phase_offset, label_xor, std::span<const F>(points.value), normalization); }
+    [[nodiscard]] gr::digital::Constellation<F> constellationOf(const Settings& s) const { return constellationFromSettings<F>(s.constellation.value, s.arity.value, s.phase_offset.value, s.label_xor.value, s.points.value, s.normalization.value); }
 
     [[nodiscard]] std::size_t bitsPerSymbol() const { return _constellation.bitsPerSymbol(); }
 
@@ -227,7 +248,7 @@ struct SymbolMap : Block<SymbolMap> {
 
 The table is 256 entries because the index is a byte, so stream data cannot make the lookup read out of range whatever
 the constellation's arity, which is the reason not to shrink it to `M`. A supplied table shorter than 256 fills the
-rest with identity; a longer one throws rather than being silently truncated.
+rest with identity; a longer one is refused rather than being silently truncated.
 
 Its use is the Gray-to-rotation permutation a differential chain needs: differential coding requires a rotation-ordered
 labeling, `c[(s+1) mod M] = c[s] * exp(j*2*pi/M)`, which a Gray labeling is not for `M >= 4`. The permutation belongs
@@ -236,27 +257,33 @@ rather than inside the constellation, which keeps the hard and the soft decision
 is in force. `Constellation::rotationToGray()` and `grayToRotation()` supply the tables.
 
 The block is 1:1, so every input tag key passes through at its own offset.
+
+A `map` shorter than 256 entries is filled with the identity.
 )"">;
 
     PortIn<std::uint8_t>  in;
     PortOut<std::uint8_t> out;
 
-    Annotated<std::vector<std::uint8_t>, "map", Doc<"up to 256 entries; a short table is identity-filled, a longer one throws">, Visible> map{};
+    struct Settings {
+        Annotated<std::vector<std::uint8_t>, Doc<"symbol map">, Visible> map{};
 
-    GR_MAKE_REFLECTABLE(SymbolMap, in, out, map);
+        GR_MAKE_REFLECTABLE(Settings, map);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SymbolMap, in, out, settings);
 
     std::array<std::uint8_t, 256> _table = identityTable();
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() { rebuild(); }
-
-    void rebuild() {
-        if (map.value.size() > _table.size()) {
-            throw gr::exception(std::format("map holds {} entries and the index is a byte, so at most {} are meaningful; a longer table is a mistake rather than something to truncate", map.value.size(), _table.size()));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.map.value.size() > _table.size()) {
+            return gr::Refused(s.map, "must have <= 256 entries");
         }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
         for (std::size_t i = 0UZ; i < _table.size(); ++i) {
-            _table[i] = i < map.value.size() ? map.value[i] : static_cast<std::uint8_t>(i);
+            _table[i] = i < s.map.value.size() ? s.map.value[i] : static_cast<std::uint8_t>(i);
         }
     }
 

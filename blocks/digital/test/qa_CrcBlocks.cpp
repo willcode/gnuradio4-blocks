@@ -49,10 +49,20 @@ constexpr ParameterSet kSets[] = {
 [[nodiscard]] gr::property_map settingsOf(const ParameterSet& set, const char* order, gr::Size_t skip = 0U) { return {{"width", set.width}, {"poly", set.poly}, {"initial_value", set.init}, {"final_xor", set.xorOut}, {"input_reflected", set.refIn}, {"result_reflected", set.refOut}, {"crc_byte_order", std::string(order)}, {"skip_header_bytes", skip}}; }
 
 template<typename TBlock>
+void initialize(TBlock& block) {
+    if (const auto initialized = block.check({}); !initialized.has_value()) {
+        std::string reasons;
+        for (const gr::settings::Rejection& entry : initialized.error()) {
+            reasons += std::format(" '{}': {}", entry.key, entry.reason);
+        }
+        throw gr::exception(std::format("the block refused its settings:{}", reasons));
+    }
+}
+
+template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    initialize(block);
     return block;
 }
 
@@ -352,7 +362,6 @@ const boost::ut::suite<"crc blocks"> crcBlockTests = [] {
     "an idle CRC block answers that it waits for input, not progress"_test = [] {
         CrcAppend appender = make<CrcAppend>(settingsOf(kSets[0], "big"));
         CrcCheck  checker  = make<CrcCheck>(settingsOf(kSets[0], "big"));
-        appender.start();
         checker.start();
         std::vector<Record> okBuffer(2UZ);
         std::vector<Record> failBuffer(2UZ);
