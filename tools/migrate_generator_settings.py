@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migrate a saved flow graph across two renames in this repository.
+"""Migrate a saved flow graph across the renames and the setting moves of this repository.
 
 1. The waveform frequency of gr::blocks::basic::SignalGenerator and
    gr::blocks::basic::FunctionGenerator moved off `frequency`, which is a reserved
@@ -38,6 +38,29 @@
    BasicDecimatingFilter or the four IirFilterDirectForm* names, which only gained
    keys beside their unchanged expansions.
 
+3. The settings keep no contexts, and the loader refuses a graph file that holds
+   `ctx_parameters`. gr::blocks::basic::FunctionGenerator holds the segments of
+   its waveform in its `segments` setting, a map from a segment's name to the
+   settings of the segment, and its `segment` setting selects one. Each context
+   of the block's `ctx_parameters` becomes a segment of that name, and the block
+   couples `segment` to the gr:context tag key, so a timing event that names a
+   context selects that segment. A context with an empty name held the block's
+   own values: its keys go to `parameters` where that does not name them
+   already. The keys the block does not have are dropped, wherever they stand:
+   signal_trigger, trigger_name, trigger_time, trigger_offset, trigger_meta_info
+   and context. The `time` of a context is dropped as well, since a segment
+   applies when it is selected. A timing event that names the segment in force
+   again restarts nothing, where a context named again restarted its waveform;
+   the block's `trigger` setting restarts it, and a graph that needs the restart
+   couples `trigger` to a tag key whose tag carries true. The tool cannot tell
+   which events meant a restart, so it adds no such coupling, and prints one line
+   per migrated FunctionGenerator that says so.
+
+4. gr::blocks::digital::AccessCodeCorrelator spaced its code's items by its
+   `stride` setting, which is now `code_stride`: `stride` is the block-wide stride
+   every block carries, read-only for this one. A saved graph that names `stride`
+   on the correlator becomes one that names `code_stride`.
+
 Usage:
     python3 tools/migrate_generator_settings.py graph.grc              # report only
     python3 tools/migrate_generator_settings.py --in-place graph.grc   # rewrite
@@ -51,10 +74,12 @@ import re
 import sys
 import unittest
 
-GENERATOR_BLOCKS = (
-    "gr::blocks::basic::SignalGenerator",
-    "gr::blocks::basic::FunctionGenerator",
-)
+# each block whose key moved, with the key's old and new name
+KEY_RENAMES = {
+    "gr::blocks::basic::SignalGenerator": ("frequency", "tone_frequency"),
+    "gr::blocks::basic::FunctionGenerator": ("frequency", "tone_frequency"),
+    "gr::blocks::digital::AccessCodeCorrelator": ("stride", "code_stride"),
+}
 
 ALIAS_FAMILIES = (
     "gr::blocks::basic::SchmittTrigger",
@@ -95,7 +120,7 @@ ALIAS_FAMILIES = (
 _ID_LINE = re.compile(
     r"^(?P<lead>\s*(?:-\s+)?)id:(?P<gap>\s*)(?P<value>.*?)(?P<trail>\s*)$"
 )
-_FREQUENCY_LINE = re.compile(r"^(?P<indent>\s*)frequency:(?P<rest>.*)$")
+_RENAMED_LINE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z_]+):(?P<rest>.*)$")
 
 
 def split_top_level(arguments):
@@ -140,9 +165,8 @@ def migrate(text):
     """Return the migrated text and a list of the changes made, as (line number, description)."""
     lines = text.splitlines(keepends=True)
     changes = []
-    generator_indent = (
-        None  # indentation of the current generator block's item, None when outside one
-    )
+    item_indent = None  # indentation of the current item of a block in KEY_RENAMES, None when outside one
+    renamed = None  # the (old, new) key of that block
 
     for number, line in enumerate(lines, start=1):
         body = line.rstrip("\r\n")
@@ -151,11 +175,8 @@ def migrate(text):
         match = _ID_LINE.match(body)
         if match:
             block_id = match.group("value")
-            generator_indent = (
-                indent
-                if base_name(block_id.strip().strip("'\"")) in GENERATOR_BLOCKS
-                else None
-            )
+            renamed = KEY_RENAMES.get(base_name(block_id.strip().strip("'\"")))
+            item_indent = indent if renamed is not None else None
             migrated = migrate_id(block_id)
             if migrated is not None:
                 lines[number - 1] = "{}id:{}{}{}\n".format(
@@ -169,25 +190,251 @@ def migrate(text):
                 )
             continue
 
-        if generator_indent is not None and body.strip() and indent <= generator_indent:
-            generator_indent = (
-                None  # the generator's own lines are indented past its item
-            )
+        if item_indent is not None and body.strip() and indent <= item_indent:
+            item_indent = None  # the block's own lines are indented past its item
 
-        if generator_indent is not None:
-            frequency = _FREQUENCY_LINE.match(body)
-            if frequency:
-                lines[number - 1] = "{}tone_frequency:{}\n".format(
-                    frequency.group("indent"), frequency.group("rest")
+        if item_indent is not None:
+            key = _RENAMED_LINE.match(body)
+            if key and key.group("key") == renamed[0]:
+                lines[number - 1] = "{}{}:{}\n".format(
+                    key.group("indent"), renamed[1], key.group("rest")
                 )
-                changes.append((number, "frequency -> tone_frequency"))
+                changes.append((number, "{} -> {}".format(*renamed)))
 
     return "".join(lines), changes
 
 
+FUNCTION_GENERATOR = "gr::blocks::basic::FunctionGenerator"
+DROPPED_GENERATOR_KEYS = (
+    "signal_trigger",
+    "trigger_name",
+    "trigger_time",
+    "trigger_offset",
+    "trigger_meta_info",
+    "context",
+)
+SEGMENT_COUPLING = "segment: gr:context"
+RESTART_NOTE = (
+    "a context named twice in a row restarts the waveform only through a coupling to `trigger`; "
+    "add one where a graph relies on the restart"
+)
+_PLAIN_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+_KEY_LINE = re.compile(
+    r"^(?P<indent>\s*)(?P<dash>-\s+)?(?P<key>[^\s:#][^:#]*?):(?:\s+(?P<value>.*?))?\s*$"
+)
+
+
+def _indent(line):
+    return len(line) - len(line.lstrip())
+
+
+def _unquote(text):
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        return text[1:-1]
+    return text
+
+
+def _segment_name(name):
+    return name if _PLAIN_NAME.match(name) else '"{}"'.format(name.replace('"', '\\"'))
+
+
+def _block_end(lines, start, item_indent):
+    """The index past the last line of the list item that starts at `start`."""
+    end = start + 1
+    while end < len(lines):
+        body = lines[end].rstrip("\r\n")
+        if body.strip() and _indent(body) <= item_indent:
+            break
+        end += 1
+    return end
+
+
+def _section(lines, start, end, key_indent, key):
+    """The [first, past) range of the mapping entry `key` at `key_indent` within [start, end), or None."""
+    for index in range(start, end):
+        body = lines[index].rstrip("\r\n")
+        match = _KEY_LINE.match(body)
+        if (
+            match
+            and not match.group("dash")
+            and len(match.group("indent")) == key_indent
+            and match.group("key") == key
+        ):
+            past = index + 1
+            while past < end:
+                inner = lines[past].rstrip("\r\n")
+                if inner.strip() and _indent(inner) <= key_indent:
+                    break
+                past += 1
+            return index, past
+    return None
+
+
+def _entries(lines, indent):
+    """The (key, lines) of each entry at `indent` in `lines`, each entry's lines carrying its own nested lines."""
+    entries = []
+    for line in lines:
+        body = line.rstrip("\r\n")
+        if not body.strip():
+            continue
+        match = _KEY_LINE.match(body)
+        if _indent(body) == indent and match and not match.group("dash"):
+            entries.append((match.group("key"), [body]))
+        elif entries:
+            entries[-1][1].append(body)
+    return entries
+
+
+def _reindent(entry_lines, old_indent, new_indent):
+    return [
+        " " * new_indent + line[old_indent:] if line.strip() else line
+        for line in entry_lines
+    ]
+
+
+def _contexts(lines):
+    """Each (name, entry lines, entry indent) of a ctx_parameters list given as its lines after the key."""
+    contexts = []
+    items = []
+    for line in lines:
+        body = line.rstrip("\r\n")
+        if body.lstrip().startswith("- "):
+            items.append([body])
+        elif items:
+            items[-1].append(body)
+    for item in items:
+        dash = item[0].index("-")
+        key_indent = (
+            dash + len(item[0][dash + 1 :]) - len(item[0][dash + 1 :].lstrip()) + 1
+        )
+        flat = [" " * key_indent + item[0][key_indent:]] + item[1:]
+        name = ""
+        for key, entry in _entries(flat, key_indent):
+            if key == "context":
+                name = _unquote(entry[0].split(":", 1)[1])
+        parameters = _section(flat, 0, len(flat), key_indent, "parameters")
+        entries, entry_indent = [], key_indent + 2
+        if parameters is not None:
+            nested = [
+                line for line in flat[parameters[0] + 1 : parameters[1]] if line.strip()
+            ]
+            if nested:
+                entry_indent = _indent(nested[0])
+                entries = _entries(nested, entry_indent)
+        contexts.append((name, entries, entry_indent))
+    return contexts
+
+
+def migrate_contexts(text):
+    """Return the text with each FunctionGenerator's ctx_parameters moved into segments, the changes made, and a note
+    per migrated block."""
+    lines = text.splitlines()
+    changes = []
+    notes = []
+    index = 0
+    while index < len(lines):
+        match = _ID_LINE.match(lines[index])
+        if not match or base_name(_unquote(match.group("value"))) != FUNCTION_GENERATOR:
+            index += 1
+            continue
+        item_indent = _indent(lines[index])
+        key_indent = len(match.group("lead"))
+        end = _block_end(lines, index, item_indent)
+        block = lines[index:end]
+        contexts_range = _section(block, 1, len(block), key_indent, "ctx_parameters")
+        parameters_range = _section(block, 1, len(block), key_indent, "parameters")
+
+        own = []
+        dropped = False
+        if parameters_range is not None:
+            nested = [
+                line
+                for line in block[parameters_range[0] + 1 : parameters_range[1]]
+                if line.strip()
+            ]
+            entry_indent = _indent(nested[0]) if nested else key_indent + 2
+            for key, entry in _entries(nested, entry_indent):
+                if key in DROPPED_GENERATOR_KEYS:
+                    changes.append((index + 1, "parameters: {} dropped".format(key)))
+                    dropped = True
+                else:
+                    own.append((key, _reindent(entry, entry_indent, key_indent + 2)))
+        if contexts_range is None and not dropped:
+            index = end
+            continue
+
+        segments = []
+        if contexts_range is not None:
+            for name, entries, entry_indent in _contexts(
+                block[contexts_range[0] + 1 : contexts_range[1]]
+            ):
+                kept = []
+                for key, entry in entries:
+                    if key in DROPPED_GENERATOR_KEYS:
+                        changes.append(
+                            (index + 1, "context {!r}: {} dropped".format(name, key))
+                        )
+                    else:
+                        kept.append((key, entry, entry_indent))
+                if name == "":
+                    named = {key for key, _ in own}
+                    for key, entry, old_indent in kept:
+                        if key not in named:
+                            own.append(
+                                (key, _reindent(entry, old_indent, key_indent + 2))
+                            )
+                    changes.append((index + 1, "context '' -> parameters"))
+                    continue
+                body = []
+                for key, entry, old_indent in kept:
+                    body.extend(_reindent(entry, old_indent, key_indent + 6))
+                segments.append((name, body))
+                changes.append((index + 1, "context {!r} -> segment".format(name)))
+            notes.append((index + 1, RESTART_NOTE))
+
+        rebuilt = [block[0]]
+        rest = [
+            line
+            for position, line in enumerate(block[1:], start=1)
+            if not (
+                parameters_range
+                and parameters_range[0] <= position < parameters_range[1]
+            )
+            and not (
+                contexts_range and contexts_range[0] <= position < contexts_range[1]
+            )
+        ]
+        rebuilt.append(" " * key_indent + "parameters:")
+        for _, entry in own:
+            rebuilt.extend(entry)
+        if segments:
+            rebuilt.append(" " * (key_indent + 2) + "segments:")
+            for name, body in segments:
+                rebuilt.append(" " * (key_indent + 4) + _segment_name(name) + ":")
+                rebuilt.extend(body if body else [" " * (key_indent + 6) + "{}"])
+        couplings = _section(rest, 0, len(rest), key_indent, "tag_couplings")
+        if segments and couplings is None:
+            rest.append(" " * key_indent + "tag_couplings:")
+            rest.append(" " * (key_indent + 2) + SEGMENT_COUPLING)
+            changes.append((index + 1, "tag_couplings: segment -> gr:context"))
+        elif segments and not any(
+            line.strip().startswith("segment:")
+            for line in rest[couplings[0] + 1 : couplings[1]]
+        ):
+            rest.insert(couplings[1], " " * (key_indent + 2) + SEGMENT_COUPLING)
+            changes.append((index + 1, "tag_couplings: segment -> gr:context"))
+        rebuilt.extend(rest)
+        lines[index:end] = rebuilt
+        index += len(rebuilt)
+
+    trailing = "\n" if text.endswith("\n") else ""
+    return "\n".join(lines) + trailing, changes, notes
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Migrate a saved flow graph across the generator setting and alias renames."
+        description="Migrate a saved flow graph across the generator setting and alias renames and the generator's segments."
     )
     parser.add_argument("graph", help="the saved graph file to migrate")
     parser.add_argument(
@@ -200,9 +447,13 @@ def main(argv=None):
     with open(arguments.graph, "r", encoding="utf-8") as handle:
         original = handle.read()
     migrated, changes = migrate(original)
+    migrated, context_changes, notes = migrate_contexts(migrated)
+    changes += context_changes
 
     for number, description in changes:
         print("{}:{}: {}".format(arguments.graph, number, description))
+    for number, note in notes:
+        print("{}:{}: note: {}".format(arguments.graph, number, note))
     if not changes:
         print("{}: nothing to migrate".format(arguments.graph))
         return 0
@@ -275,6 +526,75 @@ connections:
   - [tone, 0, sum, 0]
 """
 
+AFTER_SEGMENTS = AFTER.replace(
+    """    ctx_parameters:
+      - context: one
+        parameters:
+          tone_frequency: 10
+""",
+    """      segments:
+        one:
+          tone_frequency: 10
+    tag_couplings:
+      segment: gr:context
+""",
+)
+
+GENERATOR_BEFORE = """\
+blocks:
+  - id: gr::blocks::basic::FunctionGenerator<float32>
+    parameters:
+      name: ramp
+      sample_rate: 1000
+      signal_trigger: CMD_BP_START
+    ctx_parameters:
+      - context: one
+        time: 0
+        parameters:
+          signal_trigger: CMD_BP_START
+          signal_type: Const
+          start_value: 5
+      - context: two
+        time: 0
+        parameters:
+          signal_trigger: CMD_BP_START
+          signal_type: LinearRamp
+          start_value: 5
+          final_value: 30
+          duration: 0.2
+"""
+
+GENERATOR_AFTER = """\
+blocks:
+  - id: gr::blocks::basic::FunctionGenerator<float32>
+    parameters:
+      name: ramp
+      sample_rate: 1000
+      segments:
+        one:
+          signal_type: Const
+          start_value: 5
+        two:
+          signal_type: LinearRamp
+          start_value: 5
+          final_value: 30
+          duration: 0.2
+    tag_couplings:
+      segment: gr:context
+"""
+
+CORRELATOR_BEFORE = """\
+blocks:
+  - id: gr::blocks::digital::AccessCodeCorrelator<uint8>
+    parameters:
+      name: correlator
+      stride: !!uint32 80
+  - id: gr::blocks::basic::FunctionGenerator<float32>
+    parameters:
+      name: other
+      stride: 2
+"""
+
 
 class MigrateTest(unittest.TestCase):
     def test_fixture_graph(self):
@@ -284,6 +604,47 @@ class MigrateTest(unittest.TestCase):
 
     def test_migration_is_idempotent(self):
         self.assertEqual(migrate(AFTER), (AFTER, []))
+
+    def test_fixture_contexts_become_segments(self):
+        migrated, changes, notes = migrate_contexts(AFTER)
+        self.assertEqual(migrated, AFTER_SEGMENTS)
+        self.assertEqual(len(changes), 2)
+        self.assertEqual(notes, [(17, RESTART_NOTE)])
+
+    def test_generator_contexts_become_segments(self):
+        migrated, changes, notes = migrate_contexts(GENERATOR_BEFORE)
+        self.assertEqual(migrated, GENERATOR_AFTER)
+        self.assertEqual(notes, [(2, RESTART_NOTE)])
+        self.assertIn((2, "context 'one' -> segment"), changes)
+        self.assertIn((2, "tag_couplings: segment -> gr:context"), changes)
+
+    def test_segment_migration_is_idempotent(self):
+        self.assertEqual(migrate_contexts(GENERATOR_AFTER), (GENERATOR_AFTER, [], []))
+
+    def test_empty_context_goes_to_parameters(self):
+        before = GENERATOR_BEFORE.replace("context: one", "context: ''")
+        migrated, _, _ = migrate_contexts(before)
+        self.assertNotIn("        one:", migrated)
+        self.assertIn(
+            "      signal_type: Const\n      start_value: 5\n      segments:", migrated
+        )
+
+    def test_a_name_with_colons_is_quoted(self):
+        before = GENERATOR_BEFORE.replace(
+            "context: one", "context: FAIR.SELECTOR.C=1:S=1:P=1"
+        )
+        self.assertIn(
+            '        "FAIR.SELECTOR.C=1:S=1:P=1":\n', migrate_contexts(before)[0]
+        )
+
+    def test_correlator_stride_becomes_code_stride(self):
+        migrated, changes = migrate(CORRELATOR_BEFORE)
+        self.assertIn("      code_stride: !!uint32 80\n", migrated)
+        self.assertNotIn("stride: !!uint32", migrated.replace("code_stride", ""))
+        self.assertEqual(changes, [(5, "stride -> code_stride")])
+        self.assertIn(
+            "      stride: 2\n", migrated, "another block's key of that name stays"
+        )
 
     def test_center_frequency_is_left_alone(self):
         self.assertIn("      frequency: [107000000]", migrate(BEFORE)[0])
