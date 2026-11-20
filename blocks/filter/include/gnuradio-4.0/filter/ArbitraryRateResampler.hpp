@@ -50,21 +50,28 @@ tag on input `i` leaves on the output nearest `i*L + d`. A designed or other sym
 `(N-1)/2`. An asymmetric supplied prototype moves its tags by the centroid of its energy, rounded to the whole
 interpolated sample. A tag is placed when its sample is consumed and keeps that output through any later rate change or
 rebuild. A tag whose output lies past the stream's last output leaves at the end-of-stream index, one past that output.
+
+Supplied `taps` are the prototype at the interpolated rate L*fs_in and carry their own gain, L included. `rolloff` is
+the share of the surviving band spent on the transition, for designed taps only; `attenuation_db` also sizes the bank.
 )"">;
 
     PortIn<T, Async>  in;
     PortOut<T, Async> out;
 
-    Annotated<double, "rate", Doc<"output samples per input sample; must be positive. A ratio of small terms belongs in RationalResampler">>                    rate                = 1.0;
-    Annotated<double, "min_rate", Doc<"lowest rate the prototype is cut for; 0 tracks the rate in force when it was last built">>                               min_rate            = 0.0;
-    Annotated<gr::Size_t, "bank_size", Doc<"L: arms in the polyphase bank; 0 sizes it from attenuation_db and the interpolation order">>                        bank_size           = 0U;
-    Annotated<gr::Size_t, "interpolation_order", Doc<"q: 0 nearest arm, 1 linear, 3 cubic Lagrange">>                                                           interpolation_order = 1U;
-    Annotated<std::vector<float>, "taps", Doc<"prototype at the interpolated rate L*fs_in; empty designs one. Supplied taps carry their own gain, L included">> taps{};
-    Annotated<float, "rolloff", Unit<"fraction">, Doc<"share of the surviving band spent on the transition; designed taps only">>                               rolloff        = 0.2f;
-    Annotated<float, "attenuation_db", Unit<"dB">, Doc<"stopband target of the designed prototype, and what the bank is sized against">>                        attenuation_db = 60.f;
-    Annotated<float, "max_ripple_db", Unit<"dB">, Doc<"passband ripple target of the designed prototype">>                                                      max_ripple_db  = 0.1f;
+    struct Settings {
+        Annotated<double, Doc<"resampling rate">, Limits<Over<0.0>>>               rate          = 1.0;
+        Annotated<double, Doc<"minimum design rate (0 = rate)">>                   min_rate      = 0.0;
+        Annotated<gr::Size_t, Doc<"polyphase arm count (0 = derived)">>            bank_size     = 0U;
+        Annotated<gr::filter::ArmInterpolation, Doc<"interpolation between arms">> interpolation = gr::filter::ArmInterpolation::linear;
+        Annotated<std::vector<float>, Doc<"prototype taps (empty = designed)">>    taps{};
+        Annotated<float, Unit<"fraction">, Doc<"transition share">>                rolloff        = 0.2f;
+        Annotated<float, Unit<"dB">, Doc<"stopband target">>                       attenuation_db = 60.f;
+        Annotated<float, Unit<"dB">, Doc<"passband ripple target">>                max_ripple_db  = 0.1f;
 
-    GR_MAKE_REFLECTABLE(ArbitraryRateResampler, in, out, rate, min_rate, bank_size, interpolation_order, taps, rolloff, attenuation_db, max_ripple_db);
+        GR_MAKE_REFLECTABLE(Settings, rate, min_rate, bank_size, interpolation, taps, rolloff, attenuation_db, max_ripple_db);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ArbitraryRateResampler, in, out, settings);
 
     std::optional<TKernel> _resampler;
     std::size_t            _bankSize    = 1UZ;
@@ -78,22 +85,29 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
     detail::TagDelayLine   _tags;
     std::uint64_t          _latestHeld = 0ULL; /// the output of the last held tag
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kRebuildKeys{"bank_size", "interpolation_order", "taps", "rolloff", "attenuation_db", "max_ripple_db"};
-        const bool                  live    = _resampler.has_value();
-        const bool                  rebuilt = !live || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); });
-        if (rebuilt) {
-            rebuild();
-        } else if (newSettings.contains("rate") || newSettings.contains("min_rate")) {
-            retune();
+    // a design takes a few hundred milliseconds, so the apply hook designs and fails a design no prototype meets
+    void applySettings(const Settings& s) {
+        const bool live     = _resampler.has_value();
+        const bool redesign = s.bank_size.changed() || s.interpolation.changed() || s.taps.changed() || s.rolloff.changed() || s.attenuation_db.changed() || s.max_ripple_db.changed();
+        bool       designed = true;
+        if (redesign) {
+            designed = rebuild();
+        } else if (s.rate.changed() || s.min_rate.changed()) {
+            designed = retune();
         } else {
+            return;
+        }
+        if (!designed) {
+            this->fail(s.attenuation_db, kNoDesign);
             return;
         }
         _reorigin = _reorigin || live;
     }
 
     void start() {
-        rebuild();
+        if (!rebuild()) {
+            throw gr::exception(kNoDesign);
+        }
         _tags.reset();
         _latestHeld = 0ULL;
         _inOrigin   = 0ULL;
@@ -112,33 +126,41 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
     [[nodiscard]] std::size_t    inputsFor(std::size_t nOutput) const noexcept { return _resampler->inputsFor(nOutput); }
     [[nodiscard]] const TKernel& kernel() const noexcept { return *_resampler; }
 
-    void rebuild() {
-        if (!(rate > 0.0)) {
-            throw gr::exception(std::format("rate ({}) must be positive", rate.value));
-        }
-        const int order = static_cast<int>(interpolation_order);
-        if (order != 0 && order != 1 && order != 3) {
-            throw gr::exception(std::format("interpolation_order ({}) is 0, 1 or 3", interpolation_order.value));
-        }
+    static constexpr const char* kNoDesign = "must be lower, or max_ripple_db higher, for a prototype under the tap cap";
 
-        _bankSize = bank_size > 0U ? static_cast<std::size_t>(bank_size) : gr::filter::arbitraryBankSize(static_cast<double>(attenuation_db.value), static_cast<double>(rolloff.value), order);
+    /// @brief The prototype for a bank of @p bankSize arms cut for rates down to @p designedFor, or none when no
+    /// prototype under the tap cap meets the settings.
+    [[nodiscard]] std::optional<std::vector<float>> designedPrototype(std::size_t bankSize, double designedFor) const {
+        gr::filter::ResamplerDesign design = gr::filter::designArbitraryResampler(bankSize, designedFor, static_cast<double>(settings.rolloff.value), static_cast<double>(settings.attenuation_db.value), static_cast<double>(settings.max_ripple_db.value));
+        if (!design.ok) {
+            return std::nullopt;
+        }
+        return std::move(design.taps);
+    }
 
-        std::vector<float> prototype = taps;
+    /// @brief Builds the bank the settings name; false, changing nothing, when no prototype meets them.
+    [[nodiscard]] bool rebuild() {
+        const int         order    = gr::filter::interpolationOrder(settings.interpolation.value);
+        const std::size_t bankSize = settings.bank_size > 0U ? static_cast<std::size_t>(settings.bank_size) : gr::filter::arbitraryBankSize(static_cast<double>(settings.attenuation_db.value), static_cast<double>(settings.rolloff.value), order);
+
+        std::vector<float> prototype   = settings.taps;
+        double             designedFor = 0.0; // supplied taps are never redesigned; the caller owns the rate they are valid for
         if (prototype.empty()) {
-            _designedFor                             = designTarget();
-            const gr::filter::ResamplerDesign design = gr::filter::designArbitraryResampler(_bankSize, _designedFor, static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
-            if (!design.ok) {
-                throw gr::exception(std::format("no prototype under the tap cap meets {} dB stopband and {} dB ripple for a bank of {} at rates down to {}", attenuation_db.value, max_ripple_db.value, _bankSize, _designedFor));
+            designedFor                                = designTarget();
+            std::optional<std::vector<float>> designed = designedPrototype(bankSize, designedFor);
+            if (!designed) {
+                return false;
             }
-            prototype = design.taps;
-        } else {
-            _designedFor = 0.0; // supplied taps are never redesigned; the caller owns the rate they are valid for
+            prototype = std::move(*designed);
         }
+        _bankSize    = bankSize;
+        _designedFor = designedFor;
 
-        _resampler.emplace(rate, _bankSize, order, std::span<const float>(prototype));
+        _resampler.emplace(settings.rate, _bankSize, order, std::span<const float>(prototype));
         _stepOrigin  = _resampler->step();
         _phaseOrigin = _resampler->phase();
         _twiceDelay  = detail::twiceTapDelay(std::span<const float>(prototype));
+        return true;
     }
 
     /**
@@ -148,21 +170,19 @@ rebuild. A tag whose output lies past the stream's last output leaves at the end
      * the prototype narrower than it needs to be, which costs bandwidth and never aliases; only a fall below what it
      * was cut for folds anything in.
      */
-    void retune() {
-        if (!(rate > 0.0)) {
-            throw gr::exception(std::format("rate ({}) must be positive", rate.value));
-        }
+    [[nodiscard]] bool retune() {
         const double wanted = designTarget();
-        if (taps.value.empty() && wanted < _designedFor) {
-            const gr::filter::ResamplerDesign design = gr::filter::designArbitraryResampler(_bankSize, wanted, static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
-            if (!design.ok) {
-                throw gr::exception(std::format("no prototype under the tap cap meets {} dB stopband for a bank of {} at rates down to {}", attenuation_db.value, _bankSize, wanted));
+        if (settings.taps.value.empty() && wanted < _designedFor) {
+            const std::optional<std::vector<float>> prototype = designedPrototype(_bankSize, wanted);
+            if (!prototype) {
+                return false;
             }
-            _resampler->setTaps(design.taps); // keeps the phase and as much of the window as the new B holds
+            _resampler->setTaps(*prototype); // keeps the phase and as much of the window as the new B holds
             _designedFor = wanted;
-            _twiceDelay  = detail::twiceTapDelay(std::span<const float>(design.taps));
+            _twiceDelay  = detail::twiceTapDelay(std::span<const float>(*prototype));
         }
-        _resampler->setRate(rate);
+        _resampler->setRate(settings.rate);
+        return true;
     }
 
     /**
@@ -234,7 +254,7 @@ private:
             return;
         }
         if (const float* inputRate = it->second.get_if<float>(); inputRate != nullptr) {
-            it->second = static_cast<float>(rate * static_cast<double>(*inputRate));
+            it->second = static_cast<float>(settings.rate * static_cast<double>(*inputRate));
         }
     }
 
@@ -259,8 +279,8 @@ private:
 
     /// @brief The `min(1, r)` the prototype has to cover: the smaller of the current rate and the stated floor, where there is one.
     [[nodiscard]] double designTarget() const noexcept {
-        const double floorRate = min_rate > 0.0 ? static_cast<double>(min_rate) : 1.0;
-        return std::min({1.0, floorRate, static_cast<double>(rate)}); // AppleClang 21 reports nested two-argument std::min calls here as returning the address of a temporary
+        const double floorRate = settings.min_rate > 0.0 ? static_cast<double>(settings.min_rate) : 1.0;
+        return std::min({1.0, floorRate, static_cast<double>(settings.rate)}); // AppleClang 21 reports nested two-argument std::min calls here as returning the address of a temporary
     }
 
     /**

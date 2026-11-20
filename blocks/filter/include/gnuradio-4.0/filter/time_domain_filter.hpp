@@ -50,15 +50,19 @@ the end-of-stream index, one past that output.
 )"">;
     PortIn<T>  in;
     PortOut<T> out;
-    Tensor<T>  b{T{1}}; // feedforward coefficients
+    struct Settings {
+        Annotated<Tensor<T>> b = Tensor<T>{T{1}}; // feedforward coefficients
 
-    GR_MAKE_REFLECTABLE(fir_filter, in, out, b);
+        GR_MAKE_REFLECTABLE(Settings, b);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(fir_filter, in, out, settings);
 
     HistoryBuffer<T> inputHistory{32};
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) noexcept {
-        if (new_settings.contains("b") && b.size() > inputHistory.capacity()) {
-            inputHistory = HistoryBuffer<T>(std::bit_ceil(b.size()));
+    void applySettings(const Settings& s) noexcept {
+        if (s.b.changed() && s.b->size() > inputHistory.capacity()) {
+            inputHistory = HistoryBuffer<T>(std::bit_ceil(s.b->size()));
         }
     }
 
@@ -68,12 +72,12 @@ the end-of-stream index, one past that output.
 
     /// @brief The delay every forwarded tag moves by, in half samples. The value is `N` for a symmetric set of `N+1`
     /// coefficients.
-    [[nodiscard]] std::optional<std::uint64_t> twiceTagDelay() const noexcept { return detail::twiceTapDelay(std::span<const T>(b.data(), b.size())); }
+    [[nodiscard]] std::optional<std::uint64_t> twiceTagDelay() const noexcept { return detail::twiceTapDelay(std::span<const T>(settings.b->data(), settings.b->size())); }
 
     void filterSamples(std::span<const T> input, std::span<T> output) noexcept {
         for (std::size_t i = 0UZ; i < input.size(); ++i) {
             inputHistory.push_front(input[i]);
-            output[i] = std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
+            output[i] = std::transform_reduce(std::execution::unseq, settings.b->cbegin(), settings.b->cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
         }
     }
 };
@@ -101,17 +105,21 @@ a are the feedback coefficients
 )"">;
     PortIn<T>  in;
     PortOut<T> out;
-    Tensor<T>  b{1}; // feed-forward coefficients
-    Tensor<T>  a{1}; // feedback coefficients
+    struct Settings {
+        Annotated<Tensor<T>> b = Tensor<T>{1}; // feed-forward coefficients
+        Annotated<Tensor<T>> a = Tensor<T>{1}; // feedback coefficients
 
-    GR_MAKE_REFLECTABLE(iir_filter, in, out, b, a);
+        GR_MAKE_REFLECTABLE(Settings, b, a);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(iir_filter, in, out, settings);
 
     HistoryBuffer<T> inputHistory{32};
     HistoryBuffer<T> outputHistory{32};
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& new_settings) noexcept {
-        const auto new_size = std::max(a.size(), b.size());
-        if ((new_settings.contains("b") || new_settings.contains("a")) && (new_size >= inputHistory.capacity() || new_size >= inputHistory.capacity())) {
+    void applySettings(const Settings& s) noexcept {
+        const auto new_size = std::max(s.a->size(), s.b->size());
+        if ((s.b.changed() || s.a.changed()) && new_size >= inputHistory.capacity()) {
             inputHistory  = HistoryBuffer<T>(std::bit_ceil(new_size));
             outputHistory = HistoryBuffer<T>(std::bit_ceil(new_size));
         }
@@ -123,28 +131,28 @@ a are the feedback coefficients
             // y[n] = b[0] * x[n]   + b[1] * x[n-1] + ... + b[N] * x[n-N]
             //      - a[1] * y[n-1] - a[2] * y[n-2] - ... - a[M] * y[n-M]
             inputHistory.push_front(input);
-            const T feedforward = std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
-            const T feedback    = std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
+            const T feedforward = std::transform_reduce(std::execution::unseq, settings.b->cbegin(), settings.b->cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
+            const T feedback    = std::transform_reduce(std::execution::unseq, settings.a->cbegin() + 1, settings.a->cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
             const T output      = flushSubnormal(feedforward - feedback);
             outputHistory.push_front(output);
             return output;
         } else if constexpr (form == IIRForm::DF_II) {
             // w[n] = x[n] - a[1] * w[n-1] - a[2] * w[n-2] - ... - a[M] * w[n-M]
             // y[n] =        b[0] * w[n]   + b[1] * w[n-1] + ... + b[N] * w[n-N]
-            const T w = flushSubnormal(input - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}));
+            const T w = flushSubnormal(input - std::transform_reduce(std::execution::unseq, settings.a->cbegin() + 1, settings.a->cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}));
             inputHistory.push_front(w);
 
-            return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
+            return std::transform_reduce(std::execution::unseq, settings.b->cbegin(), settings.b->cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
         } else if constexpr (form == IIRForm::DF_I_TRANSPOSED) {
             // w_1[n] = x[n] - a[1] * w_2[n-1] - a[2] * w_2[n-2] - ... - a[M] * w_2[n-M]
             // y[n]   = b[0] * w_2[n] + b[1] * w_2[n-1] + ... + b[N] * w_2[n-N]
-            const T v0 = flushSubnormal(input - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}));
+            const T v0 = flushSubnormal(input - std::transform_reduce(std::execution::unseq, settings.a->cbegin() + 1, settings.a->cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}));
             outputHistory.push_front(v0);
 
-            return std::transform_reduce(std::execution::unseq, b.cbegin(), b.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
+            return std::transform_reduce(std::execution::unseq, settings.b->cbegin(), settings.b->cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{});
         } else if constexpr (form == IIRForm::DF_II_TRANSPOSED) {
             // y[n] = b_0 * f[n] + Σ (b_k * f[n−k] − a_k * y[n−k]) for k = 1 to N
-            const T output = flushSubnormal(b[0] * input + std::transform_reduce(std::execution::unseq, b.cbegin() + 1, b.cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}) - std::transform_reduce(std::execution::unseq, a.cbegin() + 1, a.cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}));
+            const T output = flushSubnormal(settings.b[0] * input + std::transform_reduce(std::execution::unseq, settings.b->cbegin() + 1, settings.b->cend(), inputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}) - std::transform_reduce(std::execution::unseq, settings.a->cbegin() + 1, settings.a->cend(), outputHistory.cbegin(), T{0}, std::plus<>{}, std::multiplies<>{}));
 
             inputHistory.push_front(input);
             outputHistory.push_front(output);
@@ -198,32 +206,45 @@ no single delay.
     std::uint64_t _twiceFirDelay = 0ULL; /// the FIR design's delay in half input samples, `twiceTapDelay`
 
     // Public settings
-    Annotated<FilterType, "filter_type", Doc<"Filter type ('FIR' or 'IIR')">, Visible>                                                             filter_type     = FilterType::IIR;
-    Annotated<gr::filter::Type, "filter_response", Doc<"Filter response ('LOWPASS', 'HIGHPASS', 'BANDPASS', 'BANDSTOP')">, Visible>                filter_response = gr::filter::Type::LOWPASS;
-    Annotated<gr::Size_t, "filter_order", Doc<"Filter order">>                                                                                     filter_order{3};
-    Annotated<float, "f_low", Doc<"Low cutoff frequency in Hz">, Visible>                                                                          f_low{0.1f};
-    Annotated<float, "f_high", Doc<"High cutoff frequency in Hz (only for BANDPASS/BANDSTOP)">, Visible>                                           f_high{0.2f};
-    Annotated<float, "sample rate", Doc<"Sample rate in Hz">, Visible>                                                                             sample_rate{1.0f};
-    Annotated<gr::Size_t, "decimation factor", Doc<"decimation; BasicDecimatingFilter only">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>>  decimate{1U};
-    Annotated<gr::filter::iir::Design, "iir_design_method", Doc<"IIR Filter design method ('BUTTERWORTH', 'BESSEL', 'CHEBYSHEV1', 'CHEBYSHEV2')">> iir_design_method = gr::filter::iir::Design::BUTTERWORTH;
-    Annotated<algorithm::window::Type, "fir_design_method", Doc<"FIR Filter design method ('None', 'Rectangular', 'Hamming', 'Hann', 'Blackman', 'Nuttall', 'BlackmanHarris', 'BlackmanNuttall', 'FlatTop', 'Exponential', 'Kaiser', 'Bartlett', 'Welch', 'Parzen', 'Tukey', 'Gaussian')">> //
-        fir_design_method = algorithm::window::Type::Kaiser;
+    struct Settings {
+        Annotated<FilterType, Doc<"filter type">, Visible>           filter_type     = FilterType::IIR;
+        Annotated<gr::filter::Type, Doc<"filter response">, Visible> filter_response = gr::filter::Type::LOWPASS;
+        Annotated<gr::Size_t, Doc<"filter order">>                   filter_order{3};
+        Annotated<float, Unit<"Hz">, Doc<"low cutoff">, Visible>     f_low{0.1f};
+        Annotated<float, Unit<"Hz">, Doc<"high cutoff">, Visible>    f_high{0.2f};
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Visible>    sample_rate{1.0f};
+        Annotated<gr::Size_t, Doc<"decimation">, Limits<Min<1U>>>    decimate{1U};
+        Annotated<gr::filter::iir::Design, Doc<"IIR design method">> iir_design_method = gr::filter::iir::Design::BUTTERWORTH;
+        Annotated<algorithm::window::Type, Doc<"FIR design window">> fir_design_method = algorithm::window::Type::Kaiser;
 
-    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method);
+        GR_MAKE_REFLECTABLE(Settings, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method);
+    } settings;
 
-    // `settingsChanged` is not reached by a batch that moves no value, so the filter is also designed at start.
+    GR_MAKE_REFLECTABLE(BasicFilterProto, in, out, settings);
+
+    // a restart designs the filter again, which clears its history
     void start() {
         designFilter();
         this->tagsStart();
     }
 
-    // re-designing resets the filter history, so only the keys the design depends on may trigger it
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kDesignKeys{"filter_type", "filter_response", "filter_order", "f_low", "f_high", "sample_rate", "decimate", "iir_design_method", "fir_design_method"};
-        if (std::ranges::any_of(kDesignKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const gr::filter::FilterParameters params{.order = s.filter_order.value, .fLow = static_cast<double>(s.f_low.value), .fHigh = static_cast<double>(s.f_high.value), .fs = static_cast<double>(s.sample_rate.value)};
+        if (s.filter_type.value == FilterType::FIR) {
+            std::ignore = gr::filter::fir::designFilter<ValueType>(s.filter_response.value, params, s.fir_design_method.value);
+        } else {
+            std::ignore = gr::filter::iir::designFilter<ValueType>(s.filter_response.value, params, s.iir_design_method.value);
+        }
+        return {};
+    }
+
+    // re-designing resets the filter history, so only the settings the design depends on may trigger it
+    void applySettings(const Settings& s) {
+        const bool redesign = s.filter_type.changed() || s.filter_response.changed() || s.filter_order.changed() || s.f_low.changed() || s.f_high.changed() || s.sample_rate.changed() || s.decimate.changed() || s.iir_design_method.changed() || s.fir_design_method.changed();
+        if (redesign) {
             designFilter();
         }
-        if (newSettings.contains("decimate")) {
+        if (s.decimate.changed()) {
             this->tagsMarkReorigin();
         }
     }
@@ -232,22 +253,22 @@ no single delay.
         using namespace gr::filter;
 
         if constexpr (not TParent::ResamplingControl::kIsConst) {
-            this->input_chunk_size = decimate;
+            this->input_chunk_size = settings.decimate;
         }
 
         // Set up filter parameters
         FilterParameters params;
-        params.order = filter_order;
-        params.fLow  = static_cast<double>(f_low);
-        params.fHigh = static_cast<double>(f_high);
-        params.fs    = static_cast<double>(sample_rate);
+        params.order = settings.filter_order;
+        params.fLow  = static_cast<double>(settings.f_low);
+        params.fHigh = static_cast<double>(settings.f_high);
+        params.fs    = static_cast<double>(settings.sample_rate);
 
-        if (filter_type == FilterType::FIR) { // design FIR filter
-            const FilterCoefficients<ValueType> coefficients = fir::designFilter<ValueType>(filter_response, params, fir_design_method);
+        if (settings.filter_type == FilterType::FIR) { // design FIR filter
+            const FilterCoefficients<ValueType> coefficients = fir::designFilter<ValueType>(settings.filter_response, params, settings.fir_design_method);
             _twiceFirDelay                                   = detail::twiceTapDelay(std::span<const ValueType>(coefficients.b));
             _filter                                          = FilterImpl(coefficients);
-        } else if (filter_type == FilterType::IIR) { // design IIR filter
-            _filter = FilterImpl(iir::designFilter<ValueType>(filter_response, params, iir_design_method));
+        } else if (settings.filter_type == FilterType::IIR) { // design IIR filter
+            _filter = FilterImpl(iir::designFilter<ValueType>(settings.filter_response, params, settings.iir_design_method));
         }
     }
 
@@ -256,13 +277,13 @@ no single delay.
         if constexpr (TParent::ResamplingControl::kIsConst) {
             return 1UZ;
         } else {
-            return static_cast<std::size_t>(decimate);
+            return static_cast<std::size_t>(settings.decimate);
         }
     }
 
     /// @brief The FIR design's delay in half input samples, or no value for an IIR design.
     [[nodiscard]] std::optional<std::uint64_t> twiceTagDelay() const noexcept {
-        if (filter_type == FilterType::FIR) {
+        if (settings.filter_type == FilterType::FIR) {
             return _twiceFirDelay;
         }
         return std::nullopt;
@@ -308,26 +329,30 @@ the last output. So do the tags past the last input sample.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "decimation factor", Doc<"Factor by which to downsample/drop input data">, Visible, Limits<1U, std::numeric_limits<gr::Size_t>::max()>> decim{1};
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"decimation">, Visible, Limits<Min<1U>>> decim{1};
 
-    GR_MAKE_REFLECTABLE(Decimator, in, out, decim);
+        GR_MAKE_REFLECTABLE(Settings, decim);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Decimator, in, out, settings);
 
     void start() { this->tagsStart(); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { this->input_chunk_size = decim; }
+    void applySettings(const Settings& s) { this->input_chunk_size = s.decim; }
 
     /// @brief Input samples per output, `decim`.
-    [[nodiscard]] std::size_t tagDecimation() const noexcept { return static_cast<std::size_t>(decim); }
+    [[nodiscard]] std::size_t tagDecimation() const noexcept { return static_cast<std::size_t>(settings.decim); }
 
     /// @brief No delay. The framework places the tags.
     [[nodiscard]] std::optional<std::uint64_t> twiceTagDelay() const noexcept { return std::nullopt; }
 
     void filterSamples(std::span<const T> input, std::span<T> output) noexcept {
-        assert(output.size() >= input.size() / decim);
+        assert(output.size() >= input.size() / settings.decim);
 
         std::size_t out_sample_idx = 0;
         for (std::size_t i = 0; i < input.size(); ++i) {
-            if (i % decim == 0) {
+            if (i % settings.decim == 0) {
                 output[out_sample_idx++] = input[i];
             }
         }

@@ -40,51 +40,58 @@ Alignment modes, by the value of `alignment`:
 
 Each tag moves with all its keys by that lag, which is 0 for `Causal`. A tag on input `i` leaves on output `i + lag`.
 A tag whose output lies past the stream's last output leaves at the end-of-stream index, one past that output.
+
+`sample rate` scales the derivative.
 )"">; // clang-format off
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "window size", Doc<"filter window size (samples, must be >= poly_order+1)">>  window_size  = 11U;
-    Annotated<gr::Size_t, "polynomial order", Doc<"order of fitting polynomial">>                       poly_order   = 4U;
-    Annotated<gr::Size_t, "derivative order", Doc<"derivative order (0=smooth, 1=1st deriv, ...)">>     deriv_order  = 0U;
-    Annotated<float, "sample rate", Doc<"input sample rate for derivative scaling">, Unit<"Hz">>        sample_rate  = 1.0f;
-    Annotated<std::string, "alignment", Doc<"Centred or Causal">>                                       alignment    = std::string("Centred");
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"window size">>  window_size  = 11U;
+        Annotated<gr::Size_t, Doc<"polynomial order">>                       poly_order   = 4U;
+        Annotated<gr::Size_t, Doc<"derivative order (0 = smoothing)">>     deriv_order  = 0U;
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">>        sample_rate  = 1.0f;
+        Annotated<algorithm::savitzky_golay::Alignment, Doc<"alignment">> alignment    = algorithm::savitzky_golay::Alignment::Centred;
 
-    GR_MAKE_REFLECTABLE(SavitzkyGolayFilter, in, out, window_size, poly_order, deriv_order, sample_rate, alignment);
+        GR_MAKE_REFLECTABLE(Settings, window_size, poly_order, deriv_order, sample_rate, alignment);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SavitzkyGolayFilter, in, out, settings);
 
 private:
     algorithm::savitzky_golay::SavitzkyGolayFilter<T> _state;
 
     [[nodiscard]] algorithm::savitzky_golay::Config<T> buildConfig() const {
-        const T sampleRateT = static_cast<T>(sample_rate.value);
+        const T sampleRateT = static_cast<T>(settings.sample_rate.value);
         return {
-            .derivOrder = static_cast<std::size_t>(deriv_order),
+            .derivOrder = static_cast<std::size_t>(settings.deriv_order),
             .delta      = (sampleRateT > T{0}) ? T{1} / sampleRateT : T{1},
-            .alignment  = (alignment.value == "Causal")
-                ? algorithm::savitzky_golay::Alignment::Causal
-                : algorithm::savitzky_golay::Alignment::Centred
+            .alignment  = settings.alignment.value
         };
     }
 
 public:
     void start() {
         _state = algorithm::savitzky_golay::SavitzkyGolayFilter<T>(
-            static_cast<std::size_t>(window_size),
-            static_cast<std::size_t>(poly_order),
+            static_cast<std::size_t>(settings.window_size),
+            static_cast<std::size_t>(settings.poly_order),
             buildConfig());
         this->tagsStart();
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("window_size") || newSettings.contains("poly_order") ||
-            newSettings.contains("deriv_order") || newSettings.contains("sample_rate") ||
-            newSettings.contains("alignment")) {
-            _state.setParameters(
-                static_cast<std::size_t>(window_size),
-                static_cast<std::size_t>(poly_order),
-                buildConfig());
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.poly_order >= s.window_size) {
+            return gr::Refused(s.poly_order, "must be < window_size");
         }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        _state.setParameters(
+            static_cast<std::size_t>(s.window_size),
+            static_cast<std::size_t>(s.poly_order),
+            buildConfig());
     }
 
     void reset() { _state.reset(); }
@@ -136,43 +143,47 @@ Boundary policy:
     PortIn<DataSet<T>>  in;
     PortOut<DataSet<T>> out;
 
-    Annotated<gr::Size_t, "window size", Doc<"filter window size (samples, must be >= poly_order+1)">>  window_size     = 11U;
-    Annotated<gr::Size_t, "polynomial order", Doc<"order of fitting polynomial">>                       poly_order      = 4U;
-    Annotated<gr::Size_t, "derivative order", Doc<"derivative order (0=smooth, 1=1st deriv, ...)>">>    deriv_order     = 0U;
-    Annotated<std::string, "boundary policy", Doc<"Reflect or Replicate">>                              boundary_policy = std::string("Reflect");
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"window size">>  window_size     = 11U;
+        Annotated<gr::Size_t, Doc<"polynomial order">>                       poly_order      = 4U;
+        Annotated<gr::Size_t, Doc<"derivative order (0 = smoothing)">>    deriv_order     = 0U;
+        Annotated<algorithm::savitzky_golay::BoundaryPolicy, Doc<"boundary policy">, Limits<OneOf<algorithm::savitzky_golay::BoundaryPolicy::Reflect, algorithm::savitzky_golay::BoundaryPolicy::Replicate>>> boundary_policy = algorithm::savitzky_golay::BoundaryPolicy::Reflect;
 
-    GR_MAKE_REFLECTABLE(SavitzkyGolayDataSetFilter, in, out, window_size, poly_order, deriv_order, boundary_policy);
+        GR_MAKE_REFLECTABLE(Settings, window_size, poly_order, deriv_order, boundary_policy);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SavitzkyGolayDataSetFilter, in, out, settings);
 
 private:
     std::vector<T> _coeffs;
 
-    [[nodiscard]] algorithm::savitzky_golay::Config<T> buildConfig() const {
+    [[nodiscard]] static algorithm::savitzky_golay::Config<T> buildConfig(const Settings& s) {
         return {
-            .derivOrder     = static_cast<std::size_t>(deriv_order),
+            .derivOrder     = static_cast<std::size_t>(s.deriv_order),
             .delta          = T{1},
             .alignment      = algorithm::savitzky_golay::Alignment::Centred,
-            .boundaryPolicy = (boundary_policy.value == "Replicate")
-                ? algorithm::savitzky_golay::BoundaryPolicy::Replicate
-                : algorithm::savitzky_golay::BoundaryPolicy::Reflect
+            .boundaryPolicy = s.boundary_policy.value
         };
     }
 
-    void updateCoefficients() {
+    void updateCoefficients(const Settings& s) {
         _coeffs = algorithm::savitzky_golay::computeCoefficients<T>(
-            static_cast<std::size_t>(window_size),
-            static_cast<std::size_t>(poly_order),
-            buildConfig());
+            static_cast<std::size_t>(s.window_size),
+            static_cast<std::size_t>(s.poly_order),
+            buildConfig(s));
     }
 
 public:
-    void start() { updateCoefficients(); }
+    void start() { updateCoefficients(settings); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("window_size") || newSettings.contains("poly_order") ||
-            newSettings.contains("deriv_order") || newSettings.contains("boundary_policy")) {
-            updateCoefficients();
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.poly_order >= s.window_size) {
+            return gr::Refused(s.poly_order, "must be < window_size");
         }
+        return {};
     }
+
+    void applySettings(const Settings& s) { updateCoefficients(s); }
 
     [[nodiscard]] DataSet<T> processOne(DataSet<T> input) {
         if (input.signal_values.empty() || _coeffs.empty()) {
@@ -181,14 +192,14 @@ public:
 
         std::vector<T> filtered(input.signal_values.size());
         if (input.size() <= 1UZ) {
-            algorithm::savitzky_golay::applyZeroPhase<T>(std::span<const T>(input.signal_values), std::span<T>(filtered), std::span<const T>(_coeffs), buildConfig());
+            algorithm::savitzky_golay::applyZeroPhase<T>(std::span<const T>(input.signal_values), std::span<T>(filtered), std::span<const T>(_coeffs), buildConfig(settings));
         } else {
             // each signal filters on its own: one flat pass would slide the window across the
             // join between two signals
             std::size_t offset = 0UZ;
             for (std::size_t i = 0UZ; i < input.size(); ++i) {
                 const std::span<const T> signal = input.signalValues(i);
-                algorithm::savitzky_golay::applyZeroPhase<T>(signal, std::span<T>(filtered).subspan(offset, signal.size()), std::span<const T>(_coeffs), buildConfig());
+                algorithm::savitzky_golay::applyZeroPhase<T>(signal, std::span<T>(filtered).subspan(offset, signal.size()), std::span<const T>(_coeffs), buildConfig(settings));
                 offset += signal.size();
             }
         }

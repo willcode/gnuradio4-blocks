@@ -6,7 +6,6 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
-#include <format>
 #include <limits>
 #include <optional>
 #include <span>
@@ -58,8 +57,7 @@ boxcars and `A(f) = sin(pi*D*f/fs) / (D*sin(pi*f/fs))`. It is zero at DC and ret
 and a delay of `2D-2`. The short form takes two boxcars and a delay of `D-1`. The long form is both the flatter and the
 narrower of the two. At `D = 32` its -3 dB corner sits at `0.419 * fs/D`, against `0.573 * fs/D` for the short form. The
 block refuses a change of `length` or `long_form` while it runs. A change while it is stopped rebuilds the filter with
-an empty history. The block writes `group_delay` itself and refuses a different `group_delay` unless the same change
-sets `length` or `long_form`.
+an empty history. `group_delay` is reported, never set: the block derives it from `length` and `long_form`.
 
 Each boxcar's running sum is updated incrementally and recomputed exactly every `reseed_interval` samples, oldest sample
 first. The recomputation stops a long float run from drifting without bound. A NaN or infinite input sample makes the
@@ -67,17 +65,29 @@ output non-finite until every boxcar has recomputed its sum after the value left
 fewer than `stages * (reseed_interval + length)` samples after that input. `reseed_interval` is at least one and may
 change while the block runs. `reset()` empties the history. From an empty history the first `2 * group_delay` outputs
 carry a start-up transient.
+
+With `long_form`, the block runs four boxcars and a delay of 2D-2; otherwise two and D-1, D the boxcar length.
+`reseed_interval` is the samples between exact recomputations of the sums.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "length", Doc<"boxcar length D">, Limits<2U, std::numeric_limits<gr::Size_t>::max()>>                                           length          = 32U;
-    Annotated<bool, "long_form", Doc<"four boxcars and delay 2D-2 when true, two and D-1 when false">>                                                    long_form       = true;
-    Annotated<gr::Size_t, "reseed_interval", Doc<"samples between exact recomputations of the sums">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>> reseed_interval = 4096U;
-    Annotated<gr::Size_t, "group_delay", Doc<"derived pipeline delay in samples, D-1 or 2D-2">>                                                           group_delay     = 62U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"boxcar length">, Limits<Min<2U>>, StoppedOnly>                  length          = 32U;
+        Annotated<bool, Doc<"two-stage boxcar">, StoppedOnly>                                      long_form       = true;
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"sum recomputation interval">, Limits<Min<1U>>> reseed_interval = 4096U;
 
-    GR_MAKE_REFLECTABLE(DcBlocker, in, out, length, long_form, reseed_interval, group_delay);
+        GR_MAKE_REFLECTABLE(Settings, length, long_form, reseed_interval);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"group delay">> group_delay = 62U;
+
+        GR_MAKE_REFLECTABLE(Status, group_delay);
+    } status;
+
+    GR_MAKE_REFLECTABLE(DcBlocker, in, out, settings, status);
 
     using Real                          = typename detail::RealOf<T>::type;
     static constexpr std::size_t kParts = detail::kPartsOf<T>;
@@ -94,45 +104,22 @@ carry a start-up transient.
     std::uint64_t                  _offset      = 0ULL; ///< samples filtered since the pipeline was built
     gr::Size_t                     _untilReseed = 0U;   ///< samples before the next exact recomputation of the sums
 
-    bool       _running       = false;
-    gr::Size_t _builtLength   = length.value;          ///< the accepted `length`, which the pipeline is built for
-    bool       _builtLongForm = long_form.value;       ///< the accepted `long_form`, which the pipeline is built for
-    gr::Size_t _interval      = reseed_interval.value; ///< the accepted `reseed_interval`
+    // the private section below makes the block no aggregate, so it takes the constructors of Block
+    using Block<DcBlocker<T>>::Block;
 
-    /// Builds the pipeline for the default settings.
-    explicit DcBlocker(property_map init = {}) : Block<DcBlocker<T>>(std::move(init)) { build(_builtLength, _builtLongForm); }
+    void start() { this->tagsStart(); }
 
-    void start() {
-        _running = true;
-        this->tagsStart();
-    }
-
-    void stop() { _running = false; }
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const bool       shapeWritten = newSettings.contains("length") || newSettings.contains("long_form");
-        const gr::Size_t builtDelay   = static_cast<gr::Size_t>(_delayLength);
-        if (!shapeWritten && newSettings.contains("group_delay") && group_delay.value != builtDelay) {
-            throw gr::exception(std::format("group_delay follows from length and long_form, which give {}", builtDelay));
-        }
-        const gr::Size_t nextLength   = newSettings.contains("length") ? length.value : _builtLength;
-        const bool       nextLongForm = newSettings.contains("long_form") ? long_form.value : _builtLongForm;
-        const gr::Size_t nextInterval = newSettings.contains("reseed_interval") ? reseed_interval.value : _interval;
-        const bool       rebuild      = nextLength != _builtLength || nextLongForm != _builtLongForm;
-        if (rebuild && _running) {
-            throw gr::exception(std::format("length and long_form are fixed while the block runs; stop it to change them from {} and {}", _builtLength, _builtLongForm));
-        }
-        _interval = nextInterval;
-        if (rebuild) {
-            build(nextLength, nextLongForm);
+    void applySettings(const Settings& s) {
+        if (s.length.changed() || s.long_form.changed()) {
+            build(s.length, s.long_form);
         }
         // the sums are recomputed on every sample whose offset since the build is a multiple of the interval
-        const gr::Size_t phase = static_cast<gr::Size_t>(_offset % _interval);
-        _untilReseed           = phase == 0U ? 0U : _interval - phase;
-        group_delay            = static_cast<gr::Size_t>(_delayLength);
+        const gr::Size_t phase = static_cast<gr::Size_t>(_offset % s.reseed_interval);
+        _untilReseed           = phase == 0U ? 0U : s.reseed_interval - phase;
+        status.group_delay     = static_cast<gr::Size_t>(_delayLength);
     }
 
-    void reset() { build(_builtLength, _builtLongForm); }
+    void reset() { build(settings.length, settings.long_form); }
 
     [[nodiscard]] std::size_t tagDecimation() const noexcept { return 1UZ; }
 
@@ -147,7 +134,7 @@ carry a start-up transient.
         for (std::size_t done = 0UZ; done < nSamples;) {
             if (_untilReseed == 0U) {
                 reseedOne(from + done * kParts, to + done * kParts);
-                _untilReseed = _interval - 1U;
+                _untilReseed = settings.reseed_interval - 1U;
                 ++done;
                 continue;
             }
@@ -245,17 +232,14 @@ private:
         _history.assign(nStages * kParts * boxcar, Real{});
         _delay.assign(kParts * delayLength, Real{});
         _sums.fill(Real{});
-        _nStages       = nStages;
-        _length        = boxcar;
-        _delayLength   = delayLength;
-        _divisor       = static_cast<Real>(boxcar);
-        _cursor        = 0UZ;
-        _delayCursor   = 0UZ;
-        _offset        = 0ULL;
-        _untilReseed   = 0U;
-        _builtLength   = newLength;
-        _builtLongForm = newLongForm;
-        group_delay    = static_cast<gr::Size_t>(delayLength);
+        _nStages     = nStages;
+        _length      = boxcar;
+        _delayLength = delayLength;
+        _divisor     = static_cast<Real>(boxcar);
+        _cursor      = 0UZ;
+        _delayCursor = 0UZ;
+        _offset      = 0ULL;
+        _untilReseed = 0U;
     }
 };
 

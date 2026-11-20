@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/filter/RationalResampler.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 #include "StreamEndSink.hpp"
@@ -41,8 +42,9 @@ template<std::integral To, std::integral From>
 template<typename T>
 [[nodiscard]] RationalResampler<T> makeResampler(gr::property_map settings) {
     RationalResampler<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     return block;
 }
 
@@ -202,8 +204,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         const std::vector<float> x(600UZ, 0.5f);
         expect(eq(run(block, x).size(), 600UZ));
 
-        std::ignore = block.settings().setStaged({{"interpolation", 3U}, {"decimation", 2U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 3U}, {"decimation", 2U}});
 
         expect(eq(block.input_chunk_size.value, 2U)) << "the new ratio is announced to the scheduler";
         expect(eq(block.output_chunk_size.value, 3U));
@@ -219,8 +220,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         expect(eq(head.samples.size(), 600UZ));
         expect(that % (head.offsetsOf("t0") == std::vector<std::size_t>{100UZ}));
 
-        std::ignore = block.settings().setStaged({{"interpolation", 3U}, {"decimation", 2U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 3U}, {"decimation", 2U}});
         expect(eq(block.input_chunk_size.value, 2U));
 
         // the new origin is input 600 / output 600, so input 604 is four inputs past it and 3/2 puts it six outputs on
@@ -229,8 +229,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         expect(eq(middle.samples.size(), 900UZ)) << "600 further inputs at 3/2";
         expect(that % (middle.offsetsOf("t1") == std::vector<std::size_t>{606UZ})) << "mapped from the new origin, not rescaled from zero";
 
-        std::ignore = block.settings().setStaged({{"interpolation", 1U}, {"decimation", 3U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 1U}, {"decimation", 3U}});
 
         // and on the way down: the origin is now input 1200 / output 1500, so input 1215 is five outputs past it
         const std::vector<gr::Tag> falling = {gr::Tag{1215UZ, tagKey(2)}};
@@ -261,15 +260,13 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         const auto                 head = runChunks<float>(block, std::span<const float>(x).first(600UZ), 50UZ, std::span<const gr::Tag>(early));
         expect(that % (ratesOf(head) == std::vector<float>{kRateIn})) << "a ratio of one leaves the rate alone";
 
-        std::ignore = block.settings().setStaged({{"interpolation", 3U}, {"decimation", 2U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 3U}, {"decimation", 2U}});
 
         const std::vector<gr::Tag> rising = {rateTag(604UZ)};
         const auto                 middle = runChunks<float>(block, std::span<const float>(x).subspan(600UZ, 600UZ), 50UZ, std::span<const gr::Tag>(rising), 600UZ, 600UZ);
         expect(that % (ratesOf(middle) == std::vector<float>{kRateIn * 3.f / 2.f})) << "3/2 raises the rate downstream reads";
 
-        std::ignore = block.settings().setStaged({{"interpolation", 1U}, {"decimation", 3U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 1U}, {"decimation", 3U}});
 
         const std::vector<gr::Tag> falling = {rateTag(1215UZ)};
         const auto                 tail    = runChunks<float>(block, std::span<const float>(x).subspan(1200UZ), 50UZ, std::span<const gr::Tag>(falling), 1200UZ, 1500UZ);
@@ -288,8 +285,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         const auto                 head = runChunks<float>(block, std::span<const float>(x).first(6UZ), 1UZ, std::span<const gr::Tag>(tags));
         expect(eq(head.tags.size(), 0UZ)) << "its output is not produced yet";
 
-        std::ignore = block.settings().setStaged({{"interpolation", 3U}, {"decimation", 1U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 3U}, {"decimation", 1U}});
 
         const auto tail = runChunks<float>(block, std::span<const float>(x).subspan(6UZ), 1UZ, {}, 6UZ, 2UZ);
         expect(eq(tail.tags.size(), 1UZ));
@@ -310,8 +306,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         expect(eq(head.samples.size(), 2UZ));
         expect(that % (head.offsetsOf("t0") == std::vector<std::size_t>{})) << "its output is not produced yet, so it is held";
 
-        std::ignore = block.settings().setStaged({{"rolloff", 0.3f}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"rolloff", 0.3f}});
 
         const auto tail = runChunks<float>(block, std::span<const float>(x).subspan(6UZ), 1UZ, {}, 6UZ, 2UZ);
         expect(eq(tail.samples.size(), 2UZ));
@@ -397,8 +392,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
 
         // The ratio is 3/2 with a unit tap and no delay, from the new origin at input 100 and output 100. Input 102
         // maps to output 103, ahead of the held tag. Input 140 maps to output 160.
-        std::ignore = block.settings().setStaged({{"interpolation", 3U}, {"decimation", 2U}, {"taps", std::vector<float>{1.0f}}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"interpolation", 3U}, {"decimation", 2U}, {"taps", std::vector<float>{1.0f}}});
         expect(eq(block.groupDelaySamples(), 0.0));
 
         const std::vector<gr::Tag> late{gr::Tag{102UZ, tagKey(1)}, gr::Tag{140UZ, tagKey(2)}};
@@ -426,7 +420,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
         expect(that % (run(block, x) == std::vector<float>{0.25f, 0.5f, 0.0f, 0.0f}));
     };
 
-    "a refused ratio names itself and says what to do"_test = [] {
+    "a refused ratio names itself and the tap bound"_test = [] {
         // 44.1 kHz to 2.4 MS/s reduces to 8000/147, whose filter exceeds the tap bound by a factor of four
         constexpr gr::Size_t kInterpolation = 2400000U;
         constexpr gr::Size_t kDecimation    = 44100U;
@@ -438,7 +432,7 @@ const boost::ut::suite<"rational resampler"> rationalResamplerTests = [] {
             text = error.what();
         }
         std::string missing;
-        for (const std::string& wanted : {std::format("{}/{}", kInterpolation / g, kDecimation / g), std::format("set as {}/{}", kInterpolation, kDecimation), std::format("{} taps", gr::filter::kResamplerMaxTaps), std::string("Chain two RationalResamplers"), std::string("smaller terms")}) {
+        for (const std::string& wanted : {std::format("{}/{}", kInterpolation / g, kDecimation / g), std::format("{} taps", gr::filter::kResamplerMaxTaps)}) {
             if (!text.contains(wanted)) {
                 missing += std::format(" '{}'", wanted);
             }

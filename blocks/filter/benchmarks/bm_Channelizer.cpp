@@ -27,9 +27,8 @@ constexpr std::array<gr::Size_t, 3UZ> kChannelCounts{4U, 16U, 64U};
 
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> make(gr::property_map settings) {
-    auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    auto block  = std::make_unique<TBlock>(std::move(settings));
+    std::ignore = block->check({});
     block->start();
     return block;
 }

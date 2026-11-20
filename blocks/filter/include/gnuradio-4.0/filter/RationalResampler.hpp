@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <numeric>
 #include <optional>
 #include <span>
@@ -47,19 +48,28 @@ Each tag moves with all its keys by the filter's delay `d`. `d` is in samples of
 tag on input `i` leaves on output `round((i*L + d) / M)`. A designed or other symmetric prototype of `N` taps delays by
 `(N-1)/2`. An asymmetric supplied prototype moves its tags by the centroid of its energy, rounded to the whole
 interpolated sample. A tag keeps the output it was given when it crossed, through any later rebuild. A tag whose output
-lies past the stream's last output leaves at the end-of-stream index, one past that output. )"">;
+lies past the stream's last output leaves at the end-of-stream index, one past that output.
+
+The block produces `interpolation` outputs per `decimation` inputs. Supplied `taps` are the prototype at the
+interpolated rate L*fs_in and carry their own gain, L included. `rolloff` is the fraction of the surviving band spent on
+the transition, for designed taps only.
+)"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "interpolation", Doc<"L: output samples produced per M inputs">, Visible>                                                             interpolation = 1U;
-    Annotated<gr::Size_t, "decimation", Doc<"M: input samples consumed per L outputs">, Visible>                                                                decimation    = 1U;
-    Annotated<std::vector<float>, "taps", Doc<"prototype at the interpolated rate L*fs_in; empty designs one. Supplied taps carry their own gain, L included">> taps{};
-    Annotated<float, "rolloff", Doc<"fraction of the surviving band spent on the transition; designed taps only">>                                              rolloff        = 0.2f;
-    Annotated<float, "attenuation_db", Unit<"dB">, Doc<"stopband target of the designed filter">>                                                               attenuation_db = 60.f;
-    Annotated<float, "max_ripple_db", Unit<"dB">, Doc<"passband ripple target of the designed filter">>                                                         max_ripple_db  = 0.1f;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"interpolation">, Visible, Limits<Min<1U>>>   interpolation = 1U;
+        Annotated<gr::Size_t, Doc<"decimation">, Visible, Limits<Min<1U>>>      decimation    = 1U;
+        Annotated<std::vector<float>, Doc<"prototype taps (empty = designed)">> taps{};
+        Annotated<float, Doc<"transition share">>                               rolloff        = 0.2f;
+        Annotated<float, Unit<"dB">, Doc<"stopband target">>                    attenuation_db = 60.f;
+        Annotated<float, Unit<"dB">, Doc<"passband ripple target">>             max_ripple_db  = 0.1f;
 
-    GR_MAKE_REFLECTABLE(RationalResampler, in, out, interpolation, decimation, taps, rolloff, attenuation_db, max_ripple_db);
+        GR_MAKE_REFLECTABLE(Settings, interpolation, decimation, taps, rolloff, attenuation_db, max_ripple_db);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(RationalResampler, in, out, settings);
 
     std::optional<gr::filter::PolyphaseResampler<T>> _resampler;
     std::uint64_t                                    _interpolation = 1ULL; /// after reduction, where the taps were designed
@@ -70,23 +80,24 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
     bool                                             _reorigin      = false;
     detail::TagDelayLine                             _tags;
 
-    /// The kernel is built from the members, and a batch that moves no value never calls back, so a block
-    /// constructed at its declared defaults is born with a kernel and the chunk sizes its ratio states.
-    explicit RationalResampler(property_map init = {}) : TParent(std::move(init)) { rebuild(); }
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kRebuildKeys{"interpolation", "decimation", "taps", "rolloff", "attenuation_db", "max_ripple_db"};
-
+    // a design can take seconds, so the apply hook designs once and fails a ratio no filter meets
+    void applySettings(const Settings& s) {
         const bool live        = _resampler.has_value();
-        const bool rateChanged = newSettings.contains("interpolation") || newSettings.contains("decimation");
-        if (!live || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            rebuild();
+        const bool rateChanged = s.interpolation.changed() || s.decimation.changed();
+        const bool redesign    = rateChanged || s.taps.changed() || s.rolloff.changed() || s.attenuation_db.changed() || s.max_ripple_db.changed();
+        if (redesign) {
+            if (const std::optional<std::string> failure = rebuild()) { // only the design shows it
+                this->fail(s.attenuation_db, *failure);
+                return;
+            }
         }
         _reorigin = _reorigin || (live && rateChanged);
     }
 
     void start() {
-        rebuild();
+        if (const std::optional<std::string> failure = rebuild()) {
+            throw gr::exception(*failure);
+        }
         _tags.reset();
         _inOrigin  = 0ULL;
         _outOrigin = 0ULL;
@@ -96,14 +107,11 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
     /// @brief The delay every forwarded tag moves by, in input samples. Generally not an integer.
     [[nodiscard]] double groupDelaySamples() const noexcept { return static_cast<double>(_twiceDelay) / (2.0 * static_cast<double>(_interpolation)); }
 
-    void rebuild() {
-        if (interpolation < 1U || decimation < 1U) {
-            throw gr::exception(std::format("interpolation ({}) and decimation ({}) must both be at least one", interpolation.value, decimation.value));
-        }
-
-        std::vector<float> prototype = taps;
-        std::uint64_t      l         = interpolation;
-        std::uint64_t      m         = decimation;
+    /// Builds the filter the settings name, or returns why no design meets them and changes nothing.
+    [[nodiscard]] std::optional<std::string> rebuild() {
+        std::vector<float> prototype = settings.taps;
+        std::uint64_t      l         = settings.interpolation;
+        std::uint64_t      m         = settings.decimation;
 
         // Supplied taps were designed against L*fs_in, and a reduced L is a different interpolated rate. Only a
         // designed prototype reduces the ratio. Supplied taps at a reducible ratio cost gcd(L, M) times the branches.
@@ -111,14 +119,9 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
             const std::uint64_t g = std::gcd(l, m);
             l /= g;
             m /= g;
-            const gr::filter::ResamplerDesign design = gr::filter::designResampler(static_cast<std::size_t>(l), static_cast<std::size_t>(m), static_cast<double>(rolloff.value), static_cast<double>(attenuation_db.value), static_cast<double>(max_ripple_db.value));
+            const gr::filter::ResamplerDesign design = gr::filter::designResampler(static_cast<std::size_t>(l), static_cast<std::size_t>(m), static_cast<double>(settings.rolloff.value), static_cast<double>(settings.attenuation_db.value), static_cast<double>(settings.max_ripple_db.value));
             if (!design.ok) {
-                const std::uint64_t larger   = std::max(l, m);
-                const std::size_t   estimate = gr::filter::fir::design::kaiserLength(static_cast<double>(attenuation_db.value), static_cast<double>(rolloff.value) * 0.5 / static_cast<double>(larger));
-                const std::string   setAs    = g > 1ULL ? std::format(", set as {}/{}", interpolation.value, decimation.value) : std::string{};
-                throw gr::exception(std::format("no filter of at most {} taps meets {} dB stopband and {} dB ripple at the ratio {}/{}{}. The filter length grows with the larger term, {}, and Kaiser's estimate for this ratio is {} taps. "
-                                                "Chain two RationalResamplers whose ratios multiply to {}/{}, choose rates whose ratio has smaller terms, or relax attenuation_db and max_ripple_db.",
-                    gr::filter::kResamplerMaxTaps, attenuation_db.value, max_ripple_db.value, l, m, setAs, larger, estimate, l, m));
+                return std::format("must be lower, or max_ripple_db higher, for a filter of at most {} taps at {}/{}", gr::filter::kResamplerMaxTaps, l, m);
             }
             prototype = design.taps;
         }
@@ -130,6 +133,7 @@ lies past the stream's last output leaves at the end-of-stream index, one past t
 
         this->input_chunk_size  = static_cast<gr::Size_t>(m);
         this->output_chunk_size = static_cast<gr::Size_t>(l);
+        return std::nullopt;
     }
 
     /**

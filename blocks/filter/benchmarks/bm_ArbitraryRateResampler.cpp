@@ -54,9 +54,8 @@ struct Bed {
     std::vector<CF>            input;
     std::vector<CF>            output;
 
-    Bed(const Shape& shape, gr::Size_t order) : block({{"rate", shape.rate}, {"bank_size", static_cast<gr::Size_t>(kBank)}, {"interpolation_order", order}}), input(noise(kPass)) {
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+    Bed(const Shape& shape, gr::Size_t order) : block({{"rate", shape.rate}, {"bank_size", static_cast<gr::Size_t>(kBank)}, {"interpolation", std::string(order == 3U ? "cubic" : "linear")}}), input(noise(kPass)) {
+        std::ignore = block.check({});
         block.start();
         output.resize(block.outputsFor(kPass) + 8UZ);
     }

@@ -68,8 +68,7 @@ struct Bed {
     std::vector<typename FirFilter<TSample, TTap>::TOut> output;
 
     Bed(const Shape& shape) : block({{"taps", noise<TTap>(shape.taps, 0x9E3779B97F4A7C15ULL)}, {"decimation", static_cast<gr::Size_t>(shape.decimation)}}), input(noise<TSample>(passLength(shape), 0xBF58476D1CE4E5B9ULL)), output(passLength(shape) / shape.decimation) {
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = block.check({});
         block.start();
     }
 

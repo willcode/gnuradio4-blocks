@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/filter/FirFilter.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 #include "StreamEndSink.hpp"
@@ -36,15 +37,16 @@ namespace filter_test = gr::blocks::filter::testing;
 template<typename TSample, typename TTap>
 [[nodiscard]] FirFilter<TSample, TTap> makeFir(gr::property_map settings) {
     FirFilter<TSample, TTap> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
     return block;
 }
 
 template<typename TSample, typename TTap>
 [[nodiscard]] auto run(FirFilter<TSample, TTap>& block, const std::vector<TSample>& input, std::size_t chunkOutputs = 0UZ) {
-    const std::size_t m = block.decimation;
+    const std::size_t m = block.settings.decimation;
     return test::runDecimating<typename FirFilter<TSample, TTap>::TOut>(block, std::span<const TSample>(input), chunkOutputs * m, m);
 }
 
@@ -396,8 +398,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
             const auto              head  = test::runDecimating<float>(block, std::span<const float>(x).first(kSeam), 0UZ, 1UZ);
             expect(eq(head.samples.size(), kSeam));
 
-            std::ignore = block.settings().setStaged({{"taps", after}});
-            std::ignore = block.settings().applyStagedParameters();
+            std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"taps", after}});
 
             const auto tail = test::runDecimating<float>(block, std::span<const float>(x).subspan(kSeam), 0UZ, 1UZ);
             expect(eq(tail.samples.size(), x.size() - kSeam)) << "the output count is unchanged by the tap change, and the first call after it produces";
@@ -437,8 +438,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
         expect(that % (head.offsetsOf("tag0") == std::vector<std::size_t>{1UZ}));
         expect(that % (head.offsetsOf("tag1") == std::vector<std::size_t>{2UZ}));
 
-        std::ignore = block.settings().setStaged({{"decimation", 4U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"decimation", 4U}});
 
         // the new origin is input 200 / output 20, so input 208 is two outputs past it
         const std::vector<gr::Tag> late{gr::Tag{208UZ, tagKey(2)}};
@@ -615,8 +615,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
         const auto                 head = test::runDecimating<float>(block, std::span<const float>(x).first(200UZ), 50UZ, 1UZ, std::span<const gr::Tag>(early));
         expect(that % head.offsetsOf("tag0").empty()) << "input 195 leaves on output 210, which the first 200 inputs do not produce";
 
-        std::ignore = block.settings().setStaged({{"taps", shorter}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"taps", shorter}});
         expect(eq(block.groupDelaySamples(), 2.0));
 
         // Under the new delay input 201 maps to 203, ahead of the held tag. Input 250 maps to 252.
@@ -702,10 +701,7 @@ const boost::ut::suite<"fir filter"> firFilterTests = [] {
         expect(throws([] { std::ignore = makeFir<float, float>({{"taps", std::vector<float>{}}, {"decimation", 1U}}); }));
 
         FirFilter<float, float> live = makeFir<float, float>({{"taps", std::vector<float>{1.0f}}, {"decimation", 1U}});
-        expect(throws([&live] {
-            std::ignore = live.settings().setStaged({{"decimation", 0U}});
-            std::ignore = live.settings().applyStagedParameters();
-        })) << "and on a live change";
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(live), {{"decimation", 0U}}).empty()) << "and on a live change";
 
         // a unit tap at M = 1 is a bit-exact pass-through, tags included
         FirFilter<CF, float>       through = makeFir<CF, float>({{"taps", std::vector<float>{1.0f}}, {"decimation", 1U}});

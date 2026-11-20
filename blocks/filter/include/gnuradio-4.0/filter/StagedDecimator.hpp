@@ -6,6 +6,8 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
+#include <format>
+#include <limits>
 #include <optional>
 #include <print>
 #include <span>
@@ -48,19 +50,29 @@ Each tag moves with all its keys by the ladder's delay `d`. A tag on input `i` l
 Over real samples `d` is `groupDelaySamples()`. Over complex samples the halving stages run as a halfband cascade. The
 cascade samples each halving's output one sample of that stage's input rate early. For `k` halvings `d` is then
 `groupDelaySamples()` less `2^k - 1`. A tag keeps the output it was given when it crossed, through any later rebuild. A
-tag whose output lies past the stream's last output leaves at the end-of-stream index, one past that output. )"">;
+tag whose output lies past the stream's last output leaves at the end-of-stream index, one past that output.
+
+`passband_width` is a fraction of the output rate, not of the input rate, and not a frequency. `ripple_db` is the budget
+of the whole cascade, divided evenly among the stages. `factor_odd` factors the odd part into primes, largest first;
+otherwise one polyphase stage takes it, which gains nothing at a decimation of 25. An odd factor above `max_odd_factor`
+is still placed in one stage, with a warning.
+)"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "decimation", Doc<"D: input samples consumed per output; at least one">, Visible>                                             decimation     = 1U;
-    Annotated<float, "passband_width", Doc<"W as a fraction of the output rate, in (0, 1); not of the input rate, and not a frequency">, Visible>       passband_width = 0.8f;
-    Annotated<float, "attenuation_db", Unit<"dB">, Doc<"per-stage stopband target">>                                                                    attenuation_db = 85.f;
-    Annotated<float, "ripple_db", Unit<"dB">, Doc<"ripple budget for the whole cascade, divided evenly among the stages">>                              ripple_db      = 0.05f;
-    Annotated<bool, "factor_odd", Doc<"factor the odd part into primes, largest first; false uses one polyphase stage which gains nothing at D = 25.">> factor_odd     = true;
-    Annotated<gr::Size_t, "max_odd_factor", Doc<"largest odd factor placed in one stage; a larger one is placed anyway and warned about">>              max_odd_factor = 25U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"decimation">, Visible, Limits<Min<1U>>>              decimation     = 1U;
+        Annotated<float, Doc<"passband width">, Visible, Limits<Over<0.f>, Under<1.f>>> passband_width = 0.8f;
+        Annotated<float, Unit<"dB">, Doc<"per-stage stopband target">>                  attenuation_db = 85.f;
+        Annotated<float, Unit<"dB">, Doc<"cascade ripple budget">>                      ripple_db      = 0.05f;
+        Annotated<bool, Doc<"odd part factoring">>                                      factor_odd     = true;
+        Annotated<gr::Size_t, Doc<"largest odd stage factor">>                          max_odd_factor = 25U;
 
-    GR_MAKE_REFLECTABLE(StagedDecimator, in, out, decimation, passband_width, attenuation_db, ripple_db, factor_odd, max_odd_factor);
+        GR_MAKE_REFLECTABLE(Settings, decimation, passband_width, attenuation_db, ripple_db, factor_odd, max_odd_factor);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(StagedDecimator, in, out, settings);
 
     static constexpr bool kHalfbandKernel = std::same_as<T, std::complex<float>>;
 
@@ -77,18 +89,21 @@ tag whose output lies past the stream's last output leaves at the end-of-stream 
     std::vector<T>                                 _back;
     detail::TagDelayLine                           _tags;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        static constexpr std::array kRebuildKeys{"decimation", "passband_width", "attenuation_db", "ripple_db", "factor_odd", "max_odd_factor"};
-
-        const bool rateChanged = _live && newSettings.contains("decimation");
-        if (!_live || std::ranges::any_of(kRebuildKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            rebuild();
+    // a ladder takes tens of milliseconds to design, so the apply hook designs once and fails one no ladder meets
+    void applySettings(const Settings& s) {
+        const bool rateChanged = _live && s.decimation.changed();
+        const bool redesign    = s.decimation.changed() || s.passband_width.changed() || s.attenuation_db.changed() || s.ripple_db.changed() || s.factor_odd.changed() || s.max_odd_factor.changed();
+        if (redesign && !rebuild()) { // only the design shows it
+            this->fail(s.attenuation_db, kNoLadder);
+            return;
         }
         _reorigin = _reorigin || rateChanged;
     }
 
     void start() {
-        rebuild();
+        if (!rebuild()) {
+            throw gr::exception(kNoLadder);
+        }
         _tags.reset();
         _inOrigin  = 0ULL;
         _outOrigin = 0ULL;
@@ -112,20 +127,17 @@ tag whose output lies past the stream's last output leaves at the end-of-stream 
     /// @brief `sum over stages of ((N_i - 1)/2) * p_{i-1}` input samples, the design's delay and the delay of the real-sample path.
     [[nodiscard]] std::uint64_t groupDelaySamples() const noexcept { return _design.groupDelaySamples; }
 
-    void rebuild() {
-        if (decimation < 1U) {
-            throw gr::exception(std::format("decimation ({}) must be at least one", decimation.value));
-        }
-        if (!(passband_width > 0.f) || !(passband_width < 1.f)) {
-            throw gr::exception(std::format("passband_width ({}) is a fraction of the output rate and must lie in (0, 1)", passband_width.value));
-        }
+    static constexpr const char* kNoLadder = "must be lower, or ripple_db higher, for a ladder to exist";
 
-        _design = gr::filter::designStagedDecimator(static_cast<std::size_t>(decimation), static_cast<double>(passband_width), static_cast<double>(attenuation_db), static_cast<double>(ripple_db), factor_odd, static_cast<std::size_t>(max_odd_factor));
-        if (!_design.ok) {
-            throw gr::exception(std::format("no ladder under the tap cap meets {} dB stopband and {} dB total ripple at a decimation of {} and a passband width of {}", attenuation_db.value, ripple_db.value, decimation.value, passband_width.value));
+    /// Builds the ladder the settings name; false, changing nothing, when no ladder meets them.
+    [[nodiscard]] bool rebuild() {
+        gr::filter::StagedDecimatorDesign design = gr::filter::designStagedDecimator(static_cast<std::size_t>(settings.decimation), static_cast<double>(settings.passband_width), static_cast<double>(settings.attenuation_db), static_cast<double>(settings.ripple_db), settings.factor_odd, static_cast<std::size_t>(settings.max_odd_factor));
+        if (!design.ok) {
+            return false;
         }
+        _design = std::move(design);
         if (_design.oversizedOddFactor != 0UZ) {
-            std::println(stderr, "gr::blocks::filter::StagedDecimator: a decimation of {} leaves an odd factor of {} above max_odd_factor ({}) — placed anyway, in one long closing stage", decimation.value, _design.oversizedOddFactor, max_odd_factor.value);
+            std::println(stderr, "gr::blocks::filter::StagedDecimator: a decimation of {} leaves an odd factor of {} above max_odd_factor ({}) — placed anyway, in one long closing stage", settings.decimation.value, _design.oversizedOddFactor, settings.max_odd_factor.value);
         }
 
         _cascade.reset();
@@ -160,14 +172,15 @@ tag whose output lies past the stream's last output leaves at the end-of-stream 
             }
         }
 
-        _decimation = decimation;
+        _decimation = settings.decimation;
         _twiceDelay = 2ULL * delay;
         _live       = true;
         _front.clear();
         _back.clear();
 
-        this->input_chunk_size  = static_cast<gr::Size_t>(decimation);
+        this->input_chunk_size  = static_cast<gr::Size_t>(settings.decimation);
         this->output_chunk_size = 1U;
+        return true;
     }
 
     /**

@@ -10,6 +10,7 @@
 
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/filter/FrequencyEstimator.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 namespace {
 auto generateTestSignal = [](float trueFreq, float fs, float noise, std::size_t numSamples) {
@@ -83,11 +84,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
         constexpr float       tolerance   = 0.03f;   // 30 mHz tolerance - meets grid monitoring requirements
 
         FrequencyEstimatorTimeDomain<float> estimator;
-        estimator.sample_rate = sample_rate;
-        estimator.n_periods   = 3U;
-        estimator.f_min       = 45.f;
-        estimator.f_expected  = 50.f;
-        estimator.f_max       = 55.f;
+        expect(estimator.set({{"sample_rate", sample_rate}, {"n_periods", 3U}, {"f_min", 45.f}, {"f_expected", 50.f}, {"f_max", 55.f}}).has_value());
         estimator.reset();
 
         // processing function using processOne
@@ -109,11 +106,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
         constexpr float       tolerance   = 0.03f;   // 30 mHz tolerance
 
         FrequencyEstimatorTimeDomainDecimating<float> estimator;
-        estimator.sample_rate = sample_rate;
-        estimator.n_periods   = 3U;
-        estimator.f_min       = 45.f;
-        estimator.f_expected  = 50.f;
-        estimator.f_max       = 55.f;
+        expect(estimator.set({{"sample_rate", sample_rate}, {"n_periods", 3U}, {"f_min", 45.f}, {"f_expected", 50.f}, {"f_max", 55.f}}).has_value());
         estimator.reset();
 
         // processing function using processBulk
@@ -143,11 +136,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
         constexpr float tolerance = 1.0f;
 
         FrequencyEstimatorFrequencyDomain<float> estimator;
-        estimator.sample_rate  = sample_rate;
-        estimator.f_min        = 45.f;
-        estimator.f_expected   = 50.f;
-        estimator.f_max        = 55.f;
-        estimator.min_fft_size = 4096U;
+        expect(estimator.set({{"sample_rate", sample_rate}, {"f_min", 45.f}, {"f_expected", 50.f}, {"f_max", 55.f}, {"min_fft_size", 4096U}}).has_value());
         estimator.reset();
 
         // Processing function using processOne
@@ -155,7 +144,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
             std::size_t i = 0UZ;
             for (const auto& sample : samples) {
                 float freqEstimate = estimator.processOne(sample);
-                if (i > estimator.min_fft_size) {
+                if (i > estimator.settings.min_fft_size) {
                     frequencyTrue.push_back(trueFreq);
                     frequencyEstimates.push_back(freqEstimate);
                 }
@@ -179,12 +168,7 @@ const boost::ut::suite<"FrequencyEstimatorTests"> FrequencyEstimatorTests = [] {
         constexpr float       tolerance   = 1.0f;    // 1 Hz tolerance (limited by FFT bin resolution)
 
         FrequencyEstimatorFrequencyDomainDecimating<float> estimator;
-        estimator.sample_rate      = sample_rate;
-        estimator.f_min            = 45.f;
-        estimator.f_expected       = 50.f;
-        estimator.f_max            = 55.f;
-        estimator.min_fft_size     = 4096U;
-        estimator.input_chunk_size = 4096U;
+        expect(estimator.set({{"sample_rate", sample_rate}, {"f_min", 45.f}, {"f_expected", 50.f}, {"f_max", 55.f}, {"min_fft_size", 4096U}, {"input_chunk_size", 4096U}}).has_value());
         estimator.reset();
 
         auto processFunc = [&estimator](const std::vector<float>& samples, std::vector<float>& frequencyTrue, std::vector<float>& frequencyEstimates, float trueFreq) {
@@ -247,12 +231,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
                     auto [refSignal, respSignal] = generateIQTestSignals<T>(freq, fs, ampRatio, phaseShift, dcOffset, noise, numSamples);
 
                     IQDemodulator<T, Resampling<1024U, 1U, false>> demod;
-                    demod.sample_rate      = fs;
-                    demod.f_high_pass      = 100.f;
-                    demod.f_low_pass       = 10000.f;
-                    demod.phase_unit       = phaseUnit;
-                    demod.invert_phase     = false;
-                    demod.input_chunk_size = chunkSize;
+                    expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}, {"phase_unit", std::string(gr::meta::enumName(phaseUnit).value_or(""))}, {"invert_phase", false}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
                     demod.start();
 
                     std::vector<T> ampOut(numChunks);
@@ -315,11 +294,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
         // test with invert_phase = false
         IQDemodulator<float, Resampling<256U, 1U, false>> demodNormal;
-        demodNormal.sample_rate      = fs;
-        demodNormal.f_high_pass      = 50.f;
-        demodNormal.f_low_pass       = 15000.f;
-        demodNormal.invert_phase     = false;
-        demodNormal.input_chunk_size = chunkSize;
+        expect(demodNormal.set({{"sample_rate", fs}, {"f_high_pass", 50.f}, {"f_low_pass", 15000.f}, {"invert_phase", false}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demodNormal.start();
 
         std::vector<float> amp1(numChunks), phase1(numChunks), freq1(numChunks);
@@ -327,11 +302,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
         // test with invert_phase = true
         IQDemodulator<float, Resampling<256U, 1U, false>> demodInverted;
-        demodInverted.sample_rate      = fs;
-        demodInverted.f_high_pass      = 50.f;
-        demodInverted.f_low_pass       = 15000.f;
-        demodInverted.invert_phase     = true;
-        demodInverted.input_chunk_size = chunkSize;
+        expect(demodInverted.set({{"sample_rate", fs}, {"f_high_pass", 50.f}, {"f_low_pass", 15000.f}, {"invert_phase", true}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demodInverted.start();
 
         std::vector<float> amp2(numChunks), phase2(numChunks), freq2(numChunks);
@@ -358,20 +329,14 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         }
 
         IQDemodulator<float, Resampling<256U, 1U, false>> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = 100.f;
-        demod.f_low_pass       = 10000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         std::vector<float> amp1(numChunks), phase1(numChunks), freq1(numChunks);
         std::ignore = demod.processBulk(ref, resp, amp1, phase1, freq1);
 
         // change LP cutoff - should trigger filter reset
-        property_map oldSettings, newSettings;
-        newSettings["f_low_pass"] = 5000.f;
-        demod.f_low_pass          = 5000.f;
-        demod.settingsChanged(oldSettings, newSettings);
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(demod), {{"f_low_pass", 5000.f}}).empty());
 
         // process again - filter states should have been reset
         std::vector<float> amp2(numChunks), phase2(numChunks), freq2(numChunks);
@@ -400,10 +365,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         }
 
         IQDemodulator<float, Resampling<256U, 1U, false>> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = 10000.f;
-        demod.f_low_pass       = 100000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 10000.f}, {"f_low_pass", 100000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         std::vector<float> amp(numChunks), phase(numChunks), freqOut(numChunks);
@@ -434,11 +396,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
         for (auto method : {DerivativeMethod::SymmetricDifference, DerivativeMethod::SavitzkyGolay5, DerivativeMethod::SavitzkyGolay7}) {
             IQDemodulator<float, Resampling<512U, 1U, false>> demod;
-            demod.sample_rate       = fs;
-            demod.f_high_pass       = 50.f;
-            demod.f_low_pass        = 20000.f;
-            demod.derivative_method = method;
-            demod.input_chunk_size  = chunkSize;
+            expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 50.f}, {"f_low_pass", 20000.f}, {"derivative_method", std::string(gr::meta::enumName(method).value_or(""))}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
             demod.start();
 
             std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
@@ -463,10 +421,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         std::vector<float> resp(numSamples, 0.f);
 
         IQDemodulator<float, Resampling<256U, 1U, false>> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = 100.f;
-        demod.f_low_pass       = 10000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
@@ -496,10 +451,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         std::vector<float> resp(numSamples, dcLevel * 0.8f);
 
         IQDemodulator<float, Resampling<256U, 1U, false>> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = 100.f;
-        demod.f_low_pass       = 10000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
@@ -528,10 +480,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         auto [refSignal, respSignal] = generateIQTestSignals<float>(freq, fs, ampRatio, 0.3f, 0.f, 0.f, numSamples);
 
         IQDemodulator<float, Resampling<1024U, 1U, false>> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = f_hp;
-        demod.f_low_pass       = 10000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", f_hp}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
@@ -558,10 +507,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         auto [refSignal, respSignal] = generateIQTestSignals<float>(freq, fs, 0.9f, 0.4f, 0.f, 0.f, numSamples);
 
         IQDemodulator<float, Resampling<512U, 1U, false>> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = 100.f;
-        demod.f_low_pass       = 50000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 50000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
@@ -618,11 +564,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         }
 
         IQDemodulator<float, Resampling<1024U, 1U, false>> demod;
-        demod.sample_rate       = fs;
-        demod.f_high_pass       = 1000.f;  // low HP for 0.1 MHz carrier
-        demod.f_low_pass        = 10000.f; // 10 kHz LP bandwidth
-        demod.input_chunk_size  = chunkSize;
-        demod.derivative_method = derivative_method;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 1000.f}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}, {"derivative_method", std::string(gr::meta::enumName(derivative_method).value_or(""))}}).has_value()); // low HP for 0.1 MHz carrier; 10 kHz LP bandwidth
         demod.start();
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
@@ -671,7 +613,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
             freqReference[i] = trueFreq[i] / 1e6f; // MHz
         }
 
-        std::println("\n=== IQDemodulator Frequency Sweep Statistics (0.1-5 MHz, 62.5 MHz fs) derivative_method: {} ===", demod.derivative_method);
+        std::println("\n=== IQDemodulator Frequency Sweep Statistics (0.1-5 MHz, 62.5 MHz fs) derivative_method: {} ===", demod.settings.derivative_method);
         // plots
         {
             auto chart = gr::graphs::ImChart<130UZ, 16UZ>({{0., timeMs.back()}, {0., 5.5}});
@@ -725,9 +667,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
         // static decimation: Resampling<512U, 1U, true> - compile-time fixed
         IQDemodulator<float, Resampling<512U, 1U, true>> demod;
-        demod.sample_rate = fs;
-        demod.f_high_pass = 100.f;
-        demod.f_low_pass  = 10000.f;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}}).has_value());
         // input_chunk_size should be set from NTTP, but we verify it's correct
         expect(demod.input_chunk_size == 512U) << "static decimation chunk size should be 512";
         demod.start();
@@ -757,14 +697,11 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
         // use IQDemodulatorFixed alias with compile-time fixed SavitzkyGolay5
         IQDemodulatorFixed<float, DerivativeMethod::SavitzkyGolay5> demod;
-        demod.sample_rate      = fs;
-        demod.f_high_pass      = 100.f;
-        demod.f_low_pass       = 10000.f;
-        demod.input_chunk_size = chunkSize;
+        expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         // verify derivative_method is set correctly from NTTP
-        expect(demod.derivative_method == DerivativeMethod::SavitzkyGolay5) << "derivative method should be SG5 from NTTP";
+        expect(demod.settings.derivative_method == DerivativeMethod::SavitzkyGolay5) << "derivative method should be SG5 from NTTP";
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
         auto               status = demod.processBulk(refSignal, respSignal, ampOut, phaseOut, freqOut);
@@ -773,10 +710,8 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         const float ampMean = std::accumulate(ampOut.begin() + 30, ampOut.end(), 0.f) / static_cast<float>(numChunks - 30);
         expect(approx(ampMean, 0.8f, 0.05f)) << "fixed derivative amplitude:" << ampMean;
 
-        // verify that changing derivative_method at runtime throws
-        property_map oldSettings, newSettings;
-        newSettings["derivative_method"] = static_cast<int>(DerivativeMethod::SymmetricDifference);
-        expect(throws([&] { demod.settingsChanged(oldSettings, newSettings); })) << "changing fixed derivative_method should throw";
+        // verify that changing derivative_method at runtime is refused
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(demod), {{"derivative_method", std::string("SymmetricDifference")}}).empty()) << "changing fixed derivative_method is refused";
     };
 };
 

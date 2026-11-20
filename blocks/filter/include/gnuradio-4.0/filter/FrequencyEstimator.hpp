@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <execution>
+#include <format>
 #include <numbers>
 #include <numeric>
 #include <ranges>
@@ -36,6 +37,8 @@ This block estimates the frequency of a signal using the time-domain algorithm d
       "A simple and fast algorithm for measuring power system frequency",
       Measurement, Volume 201, 2022,
       https://doi.org/10.1016/j.measurement.2022.111673
+
+An `f_max` of -1 disables the lowpass.
 )"">;
     using TParent     = Block<FrequencyEstimatorTimeDomain<T, Args...>, Args...>;
 
@@ -43,14 +46,18 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     PortOut<T> out;
 
     // settings
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>            sample_rate{1e3f};
-    Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>            f_min{40.f};
-    Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">>      f_expected{50.f};
-    Annotated<float, "f_max", Doc<"exp. max/LP frequency (-1: disable)">, Unit<"Hz">> f_max{60.f};
-    Annotated<gr::Size_t, "n periods rate", Doc<"number of periods to average over">> n_periods{4U};
-    Annotated<T, "epsilon", Doc<"numerical error threshold">>                         epsilon{T(1e-8)};
+    struct Settings {
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">, Limits<Over<0.f>>>               sample_rate{1e3f};
+        Annotated<float, Doc<"expected minimum frequency">, Unit<"Hz">, Limits<Min<0.f>>> f_min{40.f};
+        Annotated<float, Doc<"expected frequency">, Unit<"Hz">, Limits<Over<0.f>>>        f_expected{50.f};
+        Annotated<float, Doc<"expected maximum frequency (-1 = off)">, Unit<"Hz">>        f_max{60.f};
+        Annotated<gr::Size_t, Doc<"averaged periods">>                                    n_periods{4U};
+        Annotated<T, Doc<"numerical threshold">>                                          epsilon{T(1e-8)};
 
-    GR_MAKE_REFLECTABLE(FrequencyEstimatorTimeDomain, in, out, sample_rate, f_expected, f_min, f_max, n_periods, epsilon);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, f_expected, f_min, f_max, n_periods, epsilon);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(FrequencyEstimatorTimeDomain, in, out, settings);
 
     // private internal state
     T          _prevFrequency{T(50)};   // previous frequency value for continuity
@@ -60,11 +67,18 @@ This block estimates the frequency of a signal using the time-domain algorithm d
     HistoryBuffer<T>                  _inputHistory{32UZ};
     HistoryBuffer<T>                  _outputHistory{32UZ};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("n_periods") || newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max")) {
-            if (f_min < 0.f || f_max >= sample_rate / 2.f || f_expected < 0.f || f_expected >= sample_rate / 2.f) {
-                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate/2: {} (Nyquist limit, N.B. f_max < 0 -> disable low-pass)", f_min, f_expected, f_max, sample_rate / 2.f));
-            }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.f_expected >= s.sample_rate / 2.f) {
+            return gr::Refused(s.f_expected, "must be < sample_rate / 2");
+        }
+        if (s.f_max >= s.sample_rate / 2.f) {
+            return gr::Refused(s.f_max, "must be < sample_rate / 2");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.n_periods.changed() || s.sample_rate.changed() || s.f_expected.changed() || s.f_min.changed() || s.f_max.changed()) {
             initialiseFilter();
         }
     }
@@ -73,18 +87,18 @@ This block estimates the frequency of a signal using the time-domain algorithm d
         // Calculate filter coefficients
         // * IIR over FIR: reduced numerical complexity and minimizes group delay
         // * BESSEL: optimizes phase linearity in the pass-band and in turn frequency accuracy
-        _n_period_estimate   = n_periods * static_cast<gr::Size_t>(f_min > 0.f ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value);
-        _singleFilterSection = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, gr::filter::FilterParameters{.order = 2UZ, .fLow = static_cast<double>(f_max), .fs = static_cast<double>(sample_rate)}, gr::filter::iir::Design::BESSEL);
+        _n_period_estimate   = settings.n_periods * static_cast<gr::Size_t>(settings.f_min > 0.f ? settings.sample_rate / std::min(settings.f_min.value, settings.f_expected.value) : settings.sample_rate / settings.f_expected.value);
+        _singleFilterSection = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, gr::filter::FilterParameters{.order = 2UZ, .fLow = static_cast<double>(settings.f_max), .fs = static_cast<double>(settings.sample_rate)}, gr::filter::iir::Design::BESSEL);
         _inputHistory        = HistoryBuffer<T>(std::bit_ceil(_singleFilterSection.b.size()));
         _outputHistory       = HistoryBuffer<T>(std::bit_ceil(std::max(_singleFilterSection.a.size(), std::size_t(_n_period_estimate))));
     }
 
     void reset() {
-        _prevFrequency = static_cast<T>(f_expected);
+        _prevFrequency = static_cast<T>(settings.f_expected);
         initialiseFilter();
     }
 
-    // `settingsChanged` is not reached by a batch that moves no value, so the filter is also designed at start.
+    // a restart begins with the filter's history cleared
     void start() { initialiseFilter(); }
 
     [[nodiscard]] constexpr T processOne(T input) noexcept
@@ -147,7 +161,7 @@ private:
             T denominator   = T(4) * data[n];
 
             // Avoid division by zero or very small values
-            if (std::abs(denominator) < epsilon) {
+            if (std::abs(denominator) < settings.epsilon) {
                 continue;
             }
 
@@ -160,7 +174,7 @@ private:
             accC += T(2) * a_n * b_n;
         }
 
-        if (accB <= epsilon) {
+        if (accB <= settings.epsilon) {
             return _prevFrequency; // Return previous frequency if B is too small
         }
 
@@ -171,7 +185,7 @@ private:
         }
 
         // Frequency estimate according to equations (12)
-        T f = static_cast<T>(sample_rate) / (T(4) * std::numbers::pi_v<T>)*std::acos(z);
+        T f = static_cast<T>(settings.sample_rate) / (T(4) * std::numbers::pi_v<T>)*std::acos(z);
         return f;
     }
 };
@@ -199,14 +213,18 @@ This block estimates the frequency of a signal using the frequency-domain algori
     PortOut<T> out;
 
     // settings
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>       sample_rate{1e3f};
-    Annotated<float, "f_min", Doc<"exp. min frequency range">, Unit<"Hz">>       f_min{40.f};
-    Annotated<float, "f_expected", Doc<"expected likely frequency">, Unit<"Hz">> f_expected{50.f};
-    Annotated<float, "f_max", Doc<"exp. max frequency">, Unit<"Hz">>             f_max{60.f};
-    Annotated<gr::Size_t, "min FFT size", Doc<"minimum FFT size">>               min_fft_size{256U};
-    Annotated<T, "epsilon", Doc<"numerical error threshold">>                    epsilon{T(1e-8)};
+    struct Settings {
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">, Limits<Over<0.f>>>               sample_rate{1e3f};
+        Annotated<float, Doc<"expected minimum frequency">, Unit<"Hz">, Limits<Min<0.f>>> f_min{40.f};
+        Annotated<float, Doc<"expected frequency">, Unit<"Hz">, Limits<Over<0.f>>>        f_expected{50.f};
+        Annotated<float, Doc<"expected maximum frequency">, Unit<"Hz">>                   f_max{60.f};
+        Annotated<gr::Size_t, Doc<"minimum FFT size">>                                    min_fft_size{256U};
+        Annotated<T, Doc<"numerical threshold">>                                          epsilon{T(1e-8)};
 
-    GR_MAKE_REFLECTABLE(FrequencyEstimatorFrequencyDomain, in, out, sample_rate, f_expected, f_min, f_max, min_fft_size, epsilon);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, f_expected, f_min, f_max, min_fft_size, epsilon);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(FrequencyEstimatorFrequencyDomain, in, out, settings);
 
     // private internal state
     T           _prevFrequency{T(50)}; // previous frequency value for continuity
@@ -220,17 +238,24 @@ This block estimates the frequency of a signal using the frequency-domain algori
     std::vector<std::complex<T>, gr::allocator::Aligned<std::complex<T>>> _outData;
     std::vector<T>                                                        _magnitudeSpectrum;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("sample_rate") || newSettings.contains("f_expected") || newSettings.contains("f_min") || newSettings.contains("f_max") || newSettings.contains("min_fft_size")) {
-            if (f_min < 0.f || f_max >= sample_rate / 2.f || f_expected < 0.f || f_expected >= sample_rate / 2.f) {
-                throw gr::exception(std::format("Ill-formed block parameters: f_min: {} < f_expected: {} < f_max: {} < sample_rate/2: {} (Nyquist limit)", f_min, f_expected, f_max, sample_rate / 2.f));
-            }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.f_expected >= s.sample_rate / 2.f) {
+            return gr::Refused(s.f_expected, "must be < sample_rate / 2");
+        }
+        if (s.f_max >= s.sample_rate / 2.f) {
+            return gr::Refused(s.f_max, "must be < sample_rate / 2");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.sample_rate.changed() || s.f_expected.changed() || s.f_min.changed() || s.f_max.changed() || s.min_fft_size.changed()) {
             initialiseFFT();
         }
     }
 
     void initialiseFFT() {
-        _minFFT = std::bit_ceil(std::max(std::size_t(min_fft_size.value), std::size_t(f_min > 0.f ? sample_rate / std::min(f_min.value, f_expected.value) : sample_rate / f_expected.value)));
+        _minFFT = std::bit_ceil(std::max(std::size_t(settings.min_fft_size.value), std::size_t(settings.f_min > 0.f ? settings.sample_rate / std::min(settings.f_min.value, settings.f_expected.value) : settings.sample_rate / settings.f_expected.value)));
 
         _inputHistory = HistoryBuffer<T>(_minFFT);
         if constexpr (not TParent::ResamplingControl::kIsConst) {
@@ -243,11 +268,11 @@ This block estimates the frequency of a signal using the frequency-domain algori
     }
 
     void reset() {
-        _prevFrequency = static_cast<T>(f_expected);
+        _prevFrequency = static_cast<T>(settings.f_expected);
         initialiseFFT();
     }
 
-    // `settingsChanged` is not reached by a batch that moves no value, so the transform is also planned at start.
+    // a restart begins with the transform's input history cleared
     void start() { initialiseFFT(); }
 
     [[nodiscard]] T processOne(T input) noexcept
@@ -303,8 +328,8 @@ private:
         _magnitudeSpectrum = computeMagnitudeSpectrum(_fftImpl.compute(_inData, _outData), _magnitudeSpectrum, ConfigMagnitude{.computeHalfSpectrum = true, .outputInDb = false});
 
         const float scaled_size = static_cast<float>(_magnitudeSpectrum.size()) * 2.f;
-        std::size_t i_min       = static_cast<std::size_t>(std::floor((f_min / sample_rate) * scaled_size));
-        std::size_t i_max       = static_cast<std::size_t>(std::ceil((f_max / sample_rate) * scaled_size));
+        std::size_t i_min       = static_cast<std::size_t>(std::floor((settings.f_min / settings.sample_rate) * scaled_size));
+        std::size_t i_max       = static_cast<std::size_t>(std::ceil((settings.f_max / settings.sample_rate) * scaled_size));
 
         // ensure indices are within bounds
         i_min = std::clamp(i_min, 1UZ, _magnitudeSpectrum.size() - 1UZ);
@@ -335,7 +360,7 @@ private:
         const T log_S_kp1 = std::log(S_kp1);
 
         const T denominator = T(2) * log_S_k - log_S_km1 - log_S_kp1;
-        if (!std::isfinite(denominator) || std::abs(denominator) < epsilon) {
+        if (!std::isfinite(denominator) || std::abs(denominator) < settings.epsilon) {
             return _prevFrequency;
         }
 
@@ -350,7 +375,7 @@ private:
         // calculate the interpolated frequency
         T interpolated_freq_bin = static_cast<T>(k_max) + delta_k;
 
-        return interpolated_freq_bin * static_cast<T>(sample_rate) / static_cast<T>(_inData.size());
+        return interpolated_freq_bin * static_cast<T>(settings.sample_rate) / static_cast<T>(_inData.size());
     }
 };
 
@@ -418,6 +443,8 @@ Limitations:
   - Settling time ≈ 5/(2π·f_lp) samples after transient
 
 Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 MHz ADC rate.
+
+`f_high_pass` blocks DC and `f_low_pass` sets the averaging; `epsilon` keeps divisions safe.
 )"">;
 
     using TParent           = Block<IQDemodulator<T, Args...>, Args...>;
@@ -431,15 +458,19 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
     PortOut<T> frequency; // estimated carrier frequency
 
     // settings
-    Annotated<float, "sample_rate", Doc<"input sample rate">, Unit<"Hz">>                 sample_rate{62.5e6f};
-    Annotated<float, "f_high_pass", Doc<"high-pass cutoff for DC blocking">, Unit<"Hz">>  f_high_pass{100.f};
-    Annotated<float, "f_low_pass", Doc<"low-pass cutoff for averaging">, Unit<"Hz">>      f_low_pass{10000.f};
-    Annotated<PhaseUnit, "phase_unit", Doc<"output phase unit">>                          phase_unit{PhaseUnit::Radians};
-    Annotated<bool, "invert_phase", Doc<"invert phase sign (swap lead/lag)">>             invert_phase{false};
-    Annotated<DerivativeMethod, "derivative_method", Doc<"quadrature generation method">> derivative_method{DerivativeControl::kMethod};
-    Annotated<T, "epsilon", Doc<"numerical threshold for division safety">>               epsilon{T(1e-12)};
+    struct Settings {
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">, Limits<Over<0.f>>>     sample_rate{62.5e6f};
+        Annotated<float, Doc<"DC block cutoff">, Unit<"Hz">, Limits<Over<0.f>>> f_high_pass{100.f};
+        Annotated<float, Doc<"averaging cutoff">, Unit<"Hz">>                   f_low_pass{10000.f};
+        Annotated<PhaseUnit, Doc<"output phase unit">>                          phase_unit{PhaseUnit::Radians};
+        Annotated<bool, Doc<"phase sign inversion">>                            invert_phase{false};
+        Annotated<DerivativeMethod, Doc<"quadrature generation method">>        derivative_method{DerivativeControl::kMethod};
+        Annotated<T, Doc<"division threshold">>                                 epsilon{T(1e-12)};
 
-    GR_MAKE_REFLECTABLE(IQDemodulator, ref, resp, amplitude, phase, frequency, sample_rate, f_high_pass, f_low_pass, phase_unit, invert_phase, derivative_method, epsilon);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, f_high_pass, f_low_pass, phase_unit, invert_phase, derivative_method, epsilon);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(IQDemodulator, ref, resp, amplitude, phase, frequency, settings);
 
     // filter state variables
     T _hp_ref_state{}, _hp_ref_prev{};
@@ -455,26 +486,30 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
     std::size_t    _derivative_delay{};
     T              _derivative_gain_factor{T(2)}; // DC gain: |H(ω)|/sin(ω) as ω→0
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
         if constexpr (DerivativeControl::kIsConst) {
-            if (newSettings.contains("derivative_method")) {
-                throw gr::exception("derivative_method is compile-time fixed and cannot be changed at runtime");
+            if (s.derivative_method != DerivativeControl::kMethod) {
+                return gr::Refused(s.derivative_method, std::format("must be {}, fixed by this block type; IQDemodulator takes any method", magic_enum::enum_name(DerivativeControl::kMethod)));
             }
         }
-        if (newSettings.contains("sample_rate") || newSettings.contains("f_high_pass") || newSettings.contains("f_low_pass") || newSettings.contains("derivative_method")) {
-            if (f_high_pass <= 0.f || f_low_pass <= 0.f || f_high_pass >= f_low_pass || f_low_pass >= sample_rate / 2.f) {
-                throw gr::exception(std::format("invalid filter frequencies: 0 < f_hp({}) < f_lp({}) < fs/2({})", f_high_pass.value, f_low_pass.value, sample_rate / 2.f));
-            }
+        if (s.f_low_pass <= s.f_high_pass || s.f_low_pass >= s.sample_rate / 2.f) {
+            return gr::Refused(s.f_low_pass, "must be > f_high_pass and < sample_rate / 2");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.sample_rate.changed() || s.f_high_pass.changed() || s.f_low_pass.changed() || s.derivative_method.changed()) {
             initialiseFilters();
         }
     }
 
     void initialiseFilters() {
-        const T fs = static_cast<T>(sample_rate);
+        const T fs = static_cast<T>(settings.sample_rate);
 
         // compute filter coefficients
-        _alpha_hp = std::exp(T(-2) * std::numbers::pi_v<T> * static_cast<T>(f_high_pass) / fs);
-        _alpha_lp = T(1) - std::exp(T(-2) * std::numbers::pi_v<T> * static_cast<T>(f_low_pass) / fs);
+        _alpha_hp = std::exp(T(-2) * std::numbers::pi_v<T> * static_cast<T>(settings.f_high_pass) / fs);
+        _alpha_lp = T(1) - std::exp(T(-2) * std::numbers::pi_v<T> * static_cast<T>(settings.f_low_pass) / fs);
 
         // reset filter states
         _hp_ref_state = _hp_ref_prev = T(0);
@@ -483,7 +518,7 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
 
         // configure derivative kernel (stored time-reversed for direct inner_product)
         // gain factor = lim_{ω→0} |H(ω)|/sin(ω), used for frequency estimation
-        switch (derivative_method.value) {
+        switch (settings.derivative_method.value) {
         case DerivativeMethod::SymmetricDifference:
             // H(ω) = 2j·sin(ω), |H(ω)| = 2·sin(ω)
             _derivative_kernel      = {T(1), T(0), T(-1)};
@@ -581,19 +616,19 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
             const T Px = _lp_Px;
 
             // amplitude ratio: √(P_x / P_r)
-            const T amp = (Pr > epsilon && Px > epsilon) ? std::sqrt(Px / Pr) : T(0);
+            const T amp = (Pr > settings.epsilon && Px > settings.epsilon) ? std::sqrt(Px / Pr) : T(0);
 
             // frequency from derivative power ratio with iterative gain correction
             // solve: G(ω)·sin(ω) = √(P_d/P_r) where G(ω) is method-specific
             T freq = T(0);
-            if (Pr > epsilon && Pd > epsilon) {
+            if (Pr > settings.epsilon && Pd > settings.epsilon) {
                 const T measured_ratio = std::sqrt(Pd / Pr);
-                const T fs             = static_cast<T>(sample_rate);
+                const T fs             = static_cast<T>(settings.sample_rate);
 
                 // compute frequency-dependent gain: G(ω) = |H(ω)|/sin(ω)
                 auto computeGainFactor = [this](T omega) -> T {
                     const T c = std::cos(omega);
-                    switch (derivative_method.value) {
+                    switch (settings.derivative_method.value) {
                     case DerivativeMethod::SymmetricDifference: return T(2);                               // |H(ω)| = 2·sin(ω)
                     case DerivativeMethod::SavitzkyGolay5: return T(0.8) * c + T(0.2);                     // |H(ω)| = sin(ω)·(0.8c + 0.2)
                     case DerivativeMethod::SavitzkyGolay7: return (T(6) * c * c + T(2) * c - T(1)) / T(7); // |H(ω)| = sin(ω)·(6c²+2c-1)/7
@@ -614,7 +649,7 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
 
                     // Aitken's delta-squared acceleration
                     const T denom = omega3 - T(2) * omega2 + omega1;
-                    if (std::abs(denom) > epsilon) {
+                    if (std::abs(denom) > settings.epsilon) {
                         const T delta = omega2 - omega1;
                         omega0        = omega1 - (delta * delta) / denom;
                     } else {
@@ -627,18 +662,18 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
 
             // phase: atan2(Q, I·√(P_d/P_r)) with gain compensation
             T ph = T(0);
-            if (Pr > epsilon && Pd > epsilon && (std::abs(I) > epsilon || std::abs(Q) > epsilon)) {
+            if (Pr > settings.epsilon && Pd > settings.epsilon && (std::abs(I) > settings.epsilon || std::abs(Q) > settings.epsilon)) {
                 const T sqrt_ratio = std::sqrt(Pd / Pr);
                 ph                 = std::atan2(Q, I * sqrt_ratio);
             }
 
             // apply phase sign convention
-            if (invert_phase) {
+            if (settings.invert_phase) {
                 ph = -ph;
             }
 
             // convert to degrees if requested
-            if (phase_unit == PhaseUnit::Degrees) {
+            if (settings.phase_unit == PhaseUnit::Degrees) {
                 ph *= T(180) / std::numbers::pi_v<T>;
             }
 

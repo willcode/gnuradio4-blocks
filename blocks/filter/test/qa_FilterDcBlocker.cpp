@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/YamlPmt.hpp>
 #include <gnuradio-4.0/filter/DcBlocker.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "StreamEndSink.hpp"
@@ -39,8 +40,9 @@ constexpr gr::Size_t kReseed = 4096U;
 template<typename T>
 [[nodiscard]] DcBlocker<T> makeBlock(gr::property_map settings) {
     DcBlocker<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     return block;
 }
 
@@ -85,13 +87,19 @@ template<typename T>
 template<typename TBlock>
 [[nodiscard]] gr::property_map savedSettings(TBlock& block) {
     gr::property_map stored;
-    const auto&      writable = block.settings().writableMembers();
-    for (const auto& [key, value] : block.settings().get()) {
+    const auto&      writable = block.writableMembers();
+    for (const auto& [key, value] : gr::testing::inForce(gr::settings::detail::settingsOf(block))) {
         if (writable.contains(std::string(key))) {
             stored.insert_or_assign(key, value);
         }
     }
     return gr::pmt::yaml::deserialize(gr::pmt::yaml::serialize(stored)).value_or(gr::property_map{});
+}
+
+/// Moves @p block through @p states in order, as a scheduler does. True when every move succeeds.
+template<typename TBlock>
+[[nodiscard]] bool moveThrough(TBlock& block, std::initializer_list<gr::lifecycle::State> states) {
+    return std::ranges::all_of(states, [&block](gr::lifecycle::State state) { return block.changeStateTo(state).has_value(); });
 }
 
 /// A block built from `settings`, after `init()`.
@@ -163,22 +171,11 @@ template<typename TBlock>
     return run;
 }
 
-/// The value `settings().get()` returns for `key` as a `gr::Size_t`, or the largest value when it holds none.
-[[nodiscard]] gr::Size_t reported(DcBlocker<float>& block, const char* key) {
-    const gr::property_map active = block.settings().get();
-    const auto             found  = active.find(gr::property_map::key_type{key});
-    if (found == active.end() || found->second.get_if<gr::Size_t>() == nullptr) {
-        return std::numeric_limits<gr::Size_t>::max();
-    }
-    return *found->second.get_if<gr::Size_t>();
-}
+/// The value `get()` returns for `key` as a `gr::Size_t`, or the largest value when it holds none.
+[[nodiscard]] gr::Size_t reported(DcBlocker<float>& block, const char* key) { return block.get<gr::Size_t>(key).value_or(std::numeric_limits<gr::Size_t>::max()); }
 
-/// Stages and applies `settings`. True when every key is refused.
-[[nodiscard]] bool refused(DcBlocker<float>& block, gr::property_map settings) {
-    const std::size_t keys = settings.size();
-    std::ignore            = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters.size() == keys;
-}
+/// Sets and applies `settings`. True when every key is refused.
+[[nodiscard]] bool refused(DcBlocker<float>& block, gr::property_map settings) { return gr::testing::refusesAll(block, std::move(settings)); }
 
 /// What a scheduled run of a `DcBlocker<float>` delivered, and the `reseed_interval` it held at the end.
 struct RetunedRun {
@@ -196,20 +193,20 @@ struct RetunedRun {
     using gr::blocks::testing::TagSource;
 
     gr::Graph graph;
-    auto&     source = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 8192U}, {"mark_tag", false}});
-    source._tags     = tags;
-    auto& block      = graph.emplaceBlock<DcBlocker<float>>({{"length", kLength}, {"long_form", true}});
-    block.settings().setTagCouplings({{"length", std::string("length")}, {"reseed_interval", std::string("reseed_interval")}});
-    auto& sink = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+    auto&     source   = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 8192U}, {"mark_tag", false}});
+    source._tags       = tags;
+    auto&      block   = graph.emplaceBlock<DcBlocker<float>>({{"length", kLength}, {"long_form", true}});
+    const bool coupled = block.setTagCouplings({{"length", std::string("length")}, {"reseed_interval", std::string("reseed_interval")}}).has_value();
+    auto&      sink    = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
     RetunedRun run;
-    if (!graph.connect<"out", "in">(source, block).has_value() || !graph.connect<"out", "in">(block, sink).has_value()) {
+    if (!coupled || !graph.connect<"out", "in">(source, block).has_value() || !graph.connect<"out", "in">(block, sink).has_value()) {
         return run;
     }
     gr::scheduler::Simple scheduler;
     run.ran              = scheduler.exchange(std::move(graph)).has_value() && scheduler.runAndWait().has_value();
     run.samples          = std::vector<float>(sink._samples.begin(), sink._samples.end());
-    run.interval         = block.reseed_interval.value;
+    run.interval         = block.settings.reseed_interval.value;
     run.reportedInterval = reported(block, "reseed_interval");
     return run;
 }
@@ -255,49 +252,40 @@ struct DcBlocker : gr::Block<DcBlocker<T>>, gr::blocks::filter::detail::DelayedT
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    gr::Annotated<gr::Size_t, "length", gr::Limits<2U, std::numeric_limits<gr::Size_t>::max()>>          length          = 32U;
-    gr::Annotated<bool, "long_form">                                                                     long_form       = true;
-    gr::Annotated<gr::Size_t, "reseed_interval", gr::Limits<1U, std::numeric_limits<gr::Size_t>::max()>> reseed_interval = 4096U;
-    gr::Annotated<gr::Size_t, "group_delay">                                                             group_delay     = 62U;
+    struct Settings {
+        gr::Annotated<gr::Size_t, gr::Limits<gr::Min<2U>>, gr::StoppedOnly> length          = 32U;
+        gr::Annotated<bool, gr::StoppedOnly>                                long_form       = true;
+        gr::Annotated<gr::Size_t, gr::Limits<gr::Min<1U>>>                  reseed_interval = 4096U;
 
-    GR_MAKE_REFLECTABLE(DcBlocker, in, out, length, long_form, reseed_interval, group_delay);
+        GR_MAKE_REFLECTABLE(Settings, length, long_form, reseed_interval);
+    } settings;
+
+    struct Status {
+        gr::Annotated<gr::Size_t> group_delay = 62U;
+
+        GR_MAKE_REFLECTABLE(Status, group_delay);
+    } status;
+
+    GR_MAKE_REFLECTABLE(DcBlocker, in, out, settings, status);
 
     std::vector<Boxcar<T>> _stages{};
     std::vector<T>         _delay{};
     std::size_t            _cursor        = 0UZ;
     std::uint64_t          _offset        = 0ULL;
-    bool                   _running       = false;
-    gr::Size_t             _builtLength   = length.value;
-    bool                   _builtLongForm = long_form.value;
-    gr::Size_t             _interval      = reseed_interval.value;
+    gr::Size_t             _builtLength   = settings.length.value;
+    bool                   _builtLongForm = settings.long_form.value;
+    gr::Size_t             _interval      = settings.reseed_interval.value;
 
     explicit DcBlocker(gr::property_map init = {}) : gr::Block<DcBlocker<T>>(std::move(init)) { build(_builtLength, _builtLongForm); }
 
-    void start() {
-        _running = true;
-        this->tagsStart();
-    }
+    void start() { this->tagsStart(); }
 
-    void stop() { _running = false; }
-
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        const bool       shapeWritten = newSettings.contains("length") || newSettings.contains("long_form");
-        const gr::Size_t builtDelay   = static_cast<gr::Size_t>(_delay.size());
-        if (!shapeWritten && newSettings.contains("group_delay") && group_delay.value != builtDelay) {
-            throw gr::exception("group_delay follows from length and long_form");
+    void applySettings(const Settings& s) {
+        _interval = s.reseed_interval;
+        if (s.length != _builtLength || s.long_form != _builtLongForm) {
+            build(s.length, s.long_form);
         }
-        const gr::Size_t nextLength   = newSettings.contains("length") ? length.value : _builtLength;
-        const bool       nextLongForm = newSettings.contains("long_form") ? long_form.value : _builtLongForm;
-        const gr::Size_t nextInterval = newSettings.contains("reseed_interval") ? reseed_interval.value : _interval;
-        const bool       rebuild      = nextLength != _builtLength || nextLongForm != _builtLongForm;
-        if (rebuild && _running) {
-            throw gr::exception("length and long_form are fixed while the block runs");
-        }
-        _interval = nextInterval;
-        if (rebuild) {
-            build(nextLength, nextLongForm);
-        }
-        group_delay = static_cast<gr::Size_t>(_delay.size());
+        status.group_delay = static_cast<gr::Size_t>(_delay.size());
     }
 
     void reset() { build(_builtLength, _builtLongForm); }
@@ -334,7 +322,6 @@ private:
         _offset        = 0ULL;
         _builtLength   = newLength;
         _builtLongForm = newLongForm;
-        group_delay    = static_cast<gr::Size_t>(_delay.size());
     }
 };
 
@@ -373,16 +360,16 @@ struct Leg {
 template<typename TBlock, typename T>
 [[nodiscard]] std::vector<T> runLegs(std::span<const T> input, std::initializer_list<Leg> legs) {
     TBlock block(gr::property_map{});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
 
     constexpr std::size_t kChunks[] = {1UZ, 7UZ, 100UZ, 333UZ, 4096UZ, 2UZ};
     std::vector<T>        output(input.size());
     std::size_t           at    = 0UZ;
     std::size_t           chunk = 0UZ;
     for (const Leg& leg : legs) {
-        std::ignore = block.settings().setStaged(leg.settings);
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), leg.settings);
         for (const std::size_t end = std::min(at + leg.nSamples, input.size()); at < end; chunk = (chunk + 1UZ) % std::size(kChunks)) {
             const std::size_t count = std::min(kChunks[chunk], end - at);
             std::ignore             = block.processBulk(input.subspan(at, count), std::span<T>(output).subspan(at, count));
@@ -406,14 +393,14 @@ template<typename TBlock>
     using gr::blocks::testing::TagSource;
 
     gr::Graph graph;
-    auto&     source = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(values.size())}, {"values", gr::Tensor<float>(values.begin(), values.end())}});
-    source._tags     = tags;
-    auto& block      = graph.emplaceBlock<TBlock>({{"length", kLength}, {"long_form", true}, {"reseed_interval", gr::Size_t(100)}});
-    block.settings().setTagCouplings({{"reseed_interval", std::string("reseed_interval")}});
-    auto sinks = gr::blocks::filter::testing::connectEndSinks<float>(graph, block);
+    auto&     source   = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(values.size())}, {"values", gr::Tensor<float>(values.begin(), values.end())}});
+    source._tags       = tags;
+    auto&      block   = graph.emplaceBlock<TBlock>({{"length", kLength}, {"long_form", true}, {"reseed_interval", gr::Size_t(100)}});
+    const bool coupled = block.setTagCouplings({{"reseed_interval", std::string("reseed_interval")}}).has_value();
+    auto       sinks   = gr::blocks::filter::testing::connectEndSinks<float>(graph, block);
 
     ComparedRun run;
-    if (!graph.connect<"out", "in">(source, block).has_value() || !sinks.has_value()) {
+    if (!coupled || !graph.connect<"out", "in">(source, block).has_value() || !sinks.has_value()) {
         return run;
     }
     gr::scheduler::Simple scheduler;
@@ -456,7 +443,7 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
             const std::size_t delay  = stages / 2UZ * (kLength - 1UZ);
 
             DcBlocker<float> block = makeBlock<float>({{"length", kLength}, {"long_form", longForm}});
-            expect(eq(block.group_delay.value, static_cast<gr::Size_t>(delay)));
+            expect(eq(block.status.group_delay.value, static_cast<gr::Size_t>(delay)));
 
             const std::vector<float> input(2000UZ, 1.f);
             const std::vector<float> output = run<float>(block, std::span<const float>(input));
@@ -642,41 +629,38 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
     "length and long_form are refused while the block runs and accepted while it is stopped"_test = [] {
         const auto running = [](gr::property_map settings) {
             auto block = std::make_unique<DcBlocker<float>>(std::move(settings));
-            block->settings().init();
-            std::ignore = block->settings().applyStagedParameters();
-            block->start();
+            if (const auto first = block->check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
+            expect(moveThrough(*block, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}));
             return block;
         };
-        const auto live = [](DcBlocker<float>& block, gr::property_map changes) {
-            std::ignore = block.settings().set(std::move(changes));
-            std::ignore = block.settings().activateContext();
-            std::ignore = block.settings().applyStagedParameters();
-        };
+        const auto live = [](DcBlocker<float>& block, gr::property_map changes) { return gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(changes)); };
 
         {
             auto block = running({{"length", gr::Size_t(32)}, {"long_form", true}});
-            expect(throws([&] { live(*block, {{"length", gr::Size_t(64)}}); })) << "a running block refuses a new length";
+            expect(!live(*block, {{"length", gr::Size_t(64)}}).empty()) << "a running block refuses a new length";
         }
         {
             auto block = running({{"length", gr::Size_t(32)}, {"long_form", true}});
-            expect(throws([&] { live(*block, {{"long_form", false}}); })) << "and a new form";
+            expect(!live(*block, {{"long_form", false}}).empty()) << "and a new form";
         }
         {
             // reseed_interval touches no pipeline state and stays live
             auto             block  = running({{"length", gr::Size_t(32)}, {"long_form", true}});
-            const gr::Size_t before = block->group_delay;
-            expect(nothrow([&] { live(*block, {{"reseed_interval", gr::Size_t(2048)}}); }));
-            expect(eq(block->reseed_interval.value, gr::Size_t(2048)));
-            expect(eq(block->group_delay.value, before)) << "and moves nothing the refusals protect";
+            const gr::Size_t before = block->status.group_delay;
+            expect(live(*block, {{"reseed_interval", gr::Size_t(2048)}}).empty());
+            expect(eq(block->settings.reseed_interval.value, gr::Size_t(2048)));
+            expect(eq(block->status.group_delay.value, before)) << "and moves nothing the refusals protect";
         }
         {
             // a stopped block takes both
             auto             block  = running({{"length", gr::Size_t(32)}, {"long_form", true}});
-            const gr::Size_t before = block->group_delay;
-            block->stop();
-            expect(nothrow([&] { live(*block, {{"length", gr::Size_t(64)}}); }));
-            expect(eq(block->length.value, gr::Size_t(64)));
-            expect(block->group_delay.value != before) << "and the rebuilt pipeline states its new delay";
+            const gr::Size_t before = block->status.group_delay;
+            expect(moveThrough(*block, {gr::lifecycle::State::REQUESTED_STOP, gr::lifecycle::State::STOPPED}));
+            expect(live(*block, {{"length", gr::Size_t(64)}}).empty());
+            expect(eq(block->settings.length.value, gr::Size_t(64)));
+            expect(block->status.group_delay.value != before) << "and the rebuilt pipeline states its new delay";
         }
     };
 
@@ -715,15 +699,13 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
         const std::vector<float> x       = pseudoRandom(6UZ * 8192UZ);
         const auto               started = [] {
             auto block = std::make_unique<DcBlocker<float>>(gr::property_map{{"length", kLength}, {"long_form", true}});
-            block->settings().init();
-            std::ignore = block->settings().applyStagedParameters();
-            block->start();
+            if (const auto first = block->check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
+            expect(moveThrough(*block, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}));
             return block;
         };
-        const auto apply = [](DcBlocker<float>& block, gr::property_map changes) {
-            std::ignore = block.settings().setStaged(std::move(changes));
-            std::ignore = block.settings().applyStagedParameters();
-        };
+        const auto  apply     = [](DcBlocker<float>& block, gr::property_map changes) { return gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(changes)); };
         auto        block     = started();
         auto        reference = started();
         std::size_t at        = 0UZ;
@@ -735,100 +717,94 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
         expect(same(5000UZ));
 
         expect(refused(*block, {{"reseed_interval", gr::Size_t(0)}})) << "the limits refuse reseed_interval = 0";
-        expect(eq(block->reseed_interval.value, kReseed) && eq(reported(*block, "reseed_interval"), kReseed)) << "the member and settings().get() keep the accepted interval";
+        expect(eq(block->settings.reseed_interval.value, kReseed) && eq(reported(*block, "reseed_interval"), kReseed)) << "the member and get() keep the accepted interval";
         expect(same(8192UZ)) << "the block reseeds at the accepted interval";
 
-        expect(throws([&] { apply(*block, {{"length", gr::Size_t(64)}}); })) << "a running block refuses a new length";
-        expect(eq(block->group_delay.value, gr::Size_t(62))) << "and keeps the pipeline it runs";
-        expect(nothrow([&] { apply(*block, {{"reseed_interval", gr::Size_t(2048)}}); })) << "a later change of another setting is checked on its own";
-        apply(*reference, {{"reseed_interval", gr::Size_t(2048)}});
+        expect(!apply(*block, {{"length", gr::Size_t(64)}}).empty()) << "a running block refuses a new length";
+        expect(eq(block->status.group_delay.value, gr::Size_t(62))) << "and keeps the pipeline it runs";
+        expect(apply(*block, {{"reseed_interval", gr::Size_t(2048)}}).empty()) << "a later change of another setting is checked on its own";
+        std::ignore = apply(*reference, {{"reseed_interval", gr::Size_t(2048)}});
         expect(same(8192UZ)) << "after a refused length";
 
-        expect(throws([&] { apply(*block, {{"group_delay", gr::Size_t(5)}}); })) << "group_delay follows from length and long_form and takes no write";
-        expect(eq(reported(*block, "group_delay"), gr::Size_t(62))) << "settings().get() returns the derived group_delay";
+        expect(!apply(*block, {{"group_delay", gr::Size_t(5)}}).empty()) << "group_delay is read-only: the block derives it from length and long_form";
+        expect(eq(reported(*block, "group_delay"), gr::Size_t(62))) << "get() returns the derived group_delay";
         expect(same(4096UZ)) << "after a refused write to group_delay";
-        apply(*block, {{"reseed_interval", gr::Size_t(1024)}});
-        apply(*reference, {{"reseed_interval", gr::Size_t(1024)}});
-        expect(eq(block->group_delay.value, gr::Size_t(62))) << "an accepted application writes group_delay again";
+        std::ignore = apply(*block, {{"reseed_interval", gr::Size_t(1024)}});
+        std::ignore = apply(*reference, {{"reseed_interval", gr::Size_t(1024)}});
+        expect(eq(block->status.group_delay.value, gr::Size_t(62))) << "an accepted application leaves group_delay at the pipeline's delay";
 
         for (auto* restarted : {block.get(), reference.get()}) {
-            restarted->stop();
             restarted->reset();
             restarted->start();
         }
-        expect(eq(block->group_delay.value, gr::Size_t(62))) << "a restart rebuilds the accepted pipeline, not the refused length";
+        expect(eq(block->status.group_delay.value, gr::Size_t(62))) << "a restart rebuilds the accepted pipeline, not the refused length";
         expect(same(8192UZ)) << "after a restart";
     };
 
     "a block made from the settings saved from a configured block filters as that block"_test = [] {
         DcBlocker<float>       configured = makeBlock<float>({{"length", gr::Size_t(64)}, {"long_form", false}, {"reseed_interval", gr::Size_t(512)}});
         const gr::property_map stored     = savedSettings(configured);
-        expect(stored.contains(gr::property_map::key_type{"group_delay"})) << "the saved settings carry the derived delay";
+        expect(!stored.contains(gr::property_map::key_type{"group_delay"})) << "the saved settings hold no read-only key";
 
         const auto reloaded = loaded<DcBlocker<float>>(stored);
         expect(reloaded->state() == gr::lifecycle::State::INITIALISED) << "the block accepts the delay its pipeline has";
-        expect(eq(reloaded->group_delay.value, gr::Size_t(63)) && eq(reloaded->_interval, gr::Size_t(512)));
+        expect(eq(reloaded->status.group_delay.value, gr::Size_t(63)) && eq(reloaded->settings.reseed_interval.value, gr::Size_t(512)));
         const std::vector<float> x = pseudoRandom(4096UZ);
         expect(std::ranges::equal(run<float>(*reloaded, std::span<const float>(x)), run<float>(configured, std::span<const float>(x)))) << "and filters on the saved pipeline";
 
-        // The framework leaves a key equal to its member out of the application. A map saved at the default length and
-        // form therefore applies its group_delay without them.
+        // A map that names the read-only group_delay is refused whole.
         DcBlocker<float> atDefaults = makeBlock<float>({{"reseed_interval", gr::Size_t(512)}});
         gr::property_map edited     = savedSettings(atDefaults);
         edited.insert_or_assign(gr::property_map::key_type{"group_delay"}, gr::Size_t(5));
-        expect(loaded<DcBlocker<float>>(edited)->state() == gr::lifecycle::State::ERROR) << "a saved group_delay other than the pipeline's is refused";
+        expect(throws([&edited] { std::ignore = loaded<DcBlocker<float>>(edited); })) << "a saved group_delay is refused";
     };
 
     "a block saved after it refused a change of length loads again at the accepted length"_test = [] {
         constexpr gr::Size_t kAccepted = 64U;
         auto                 block     = std::make_unique<DcBlocker<float>>(gr::property_map{{"length", kAccepted}, {"long_form", false}});
-        block->settings().init();
-        std::ignore = block->settings().applyStagedParameters();
-        block->start();
-        expect(throws([&] {
-            std::ignore = block->settings().setStaged({{"length", 2U * kAccepted}});
-            std::ignore = block->settings().applyStagedParameters();
-        })) << "a running block refuses a new length";
+        if (const auto first = block->check({}); !first.has_value()) {
+            throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+        }
+        expect(moveThrough(*block, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}));
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(*block), {{"length", 2U * kAccepted}}).empty()) << "a running block refuses a new length";
         expect(eq(reported(*block, "length"), kAccepted) && eq(reported(*block, "group_delay"), kAccepted - 1U)) << "the saved settings pair the accepted length with the running pipeline's delay";
 
         const gr::property_map stored   = savedSettings(*block);
         const auto             reloaded = loaded<DcBlocker<float>>(stored);
         expect(reloaded->state() == gr::lifecycle::State::INITIALISED) << "the saved settings load again";
-        expect(eq(reloaded->group_delay.value, kAccepted - 1U)) << "group_delay takes the delay D-1 of the pipeline the saved length builds";
+        expect(eq(reloaded->status.group_delay.value, kAccepted - 1U)) << "group_delay takes the delay D-1 of the pipeline the saved length builds";
         DcBlocker<float>         want = makeBlock<float>({{"length", kAccepted}, {"long_form", false}});
         const std::vector<float> x    = pseudoRandom(4096UZ);
         expect(std::ranges::equal(run<float>(*reloaded, std::span<const float>(x)), run<float>(want, std::span<const float>(x)))) << "and filters at the saved length";
 
         gr::property_map edited = stored;
         edited.insert_or_assign(gr::property_map::key_type{"group_delay"}, gr::Size_t(5));
-        const auto withLength = loaded<DcBlocker<float>>(edited);
-        expect(withLength->state() == gr::lifecycle::State::INITIALISED && eq(withLength->group_delay.value, kAccepted - 1U)) << "a group_delay written with length takes the delay of the pipeline that application builds";
+        expect(throws([&edited] { std::ignore = loaded<DcBlocker<float>>(edited); })) << "a saved group_delay is refused with length too: the key is read-only";
     };
 
     "a reset to defaults that moves length back is refused while the block runs, and the block keeps its history"_test = [] {
-        // init() stores the defaults with length 32. Each block then takes length 64 through settings().set() while it is
+        // The initialization stores the defaults with length 32. Each block then takes length 64 through set() while it is
         // stopped. The reference is made the same way and sees no reset.
         const std::vector<float> x       = pseudoRandom(2UZ * 8192UZ);
         const auto               retuned = [] {
             auto block = std::make_unique<DcBlocker<float>>(gr::property_map{{"length", kLength}, {"long_form", true}});
-            block->settings().init();
-            std::ignore = block->settings().applyStagedParameters();
-            std::ignore = block->settings().set({{"length", gr::Size_t(64)}});
-            std::ignore = block->settings().activateContext();
-            std::ignore = block->settings().applyStagedParameters();
+            if (const auto first = block->check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
+            expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(*block), {{"length", gr::Size_t(64)}}).empty());
             return block;
         };
         {
             auto stopped = retuned();
-            expect(eq(stopped->group_delay.value, gr::Size_t(126)));
-            expect(nothrow([&] { stopped->settings().resetDefaults(); })) << "a stopped block takes the reset";
-            expect(eq(stopped->length.value, kLength) && eq(stopped->group_delay.value, gr::Size_t(62))) << "and rebuilds at the default length";
+            expect(eq(stopped->status.group_delay.value, gr::Size_t(126)));
+            expect(stopped->resetDefaults().has_value()) << "a stopped block takes the reset";
+            expect(eq(stopped->settings.length.value, kLength) && eq(stopped->status.group_delay.value, gr::Size_t(62))) << "and rebuilds at the default length";
         }
 
         auto block     = retuned();
         auto reference = retuned();
-        block->start();
-        reference->start();
+        expect(moveThrough(*block, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}));
+        expect(moveThrough(*reference, {gr::lifecycle::State::INITIALISED, gr::lifecycle::State::RUNNING}));
         std::size_t at   = 0UZ;
         const auto  same = [&](std::size_t count) {
             const std::span<const float> part = std::span<const float>(x).subspan(at, count);
@@ -837,9 +813,9 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
         };
         expect(same(5000UZ));
 
-        expect(throws([&] { block->settings().resetDefaults(); })) << "a running block refuses the reset that moves length back";
-        expect(eq(block->length.value, gr::Size_t(64))) << "the member takes back the length the block runs";
-        expect(eq(block->group_delay.value, gr::Size_t(126))) << "and the block keeps the pipeline it runs";
+        expect(!block->resetDefaults(gr::settings::noWait).has_value()) << "a running block refuses the reset that moves length back";
+        expect(eq(block->settings.length.value, gr::Size_t(64))) << "the member takes back the length the block runs";
+        expect(eq(block->status.group_delay.value, gr::Size_t(126))) << "and the block keeps the pipeline it runs";
         expect(same(8192UZ)) << "with its history, since reset() did not run";
     };
 
@@ -851,7 +827,7 @@ const boost::ut::suite<"DcBlocker"> dcBlockerTests = [] {
         expect(got.ran) << "the refusals go out as plain messages, and the run completes";
         expect(eq(got.samples.size(), 8192UZ));
         expect(std::ranges::equal(got.samples, clean.samples)) << "the block reseeds at the accepted interval from the refused tags on";
-        expect(eq(got.interval, gr::Size_t(16)) && eq(got.reportedInterval, gr::Size_t(16))) << "the member and settings().get() keep the accepted interval";
+        expect(eq(got.interval, gr::Size_t(16)) && eq(got.reportedInterval, gr::Size_t(16))) << "the member and get() keep the accepted interval";
     };
 };
 

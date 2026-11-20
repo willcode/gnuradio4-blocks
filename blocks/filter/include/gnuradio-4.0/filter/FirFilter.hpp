@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <optional>
 #include <span>
 #include <utility>
@@ -63,13 +64,6 @@ struct FirFilterCore {
      * but it runs on the settings path and never on the sample path.
      */
     void coreRebuild(std::span<const TTap> taps, gr::Size_t decimation, bool carryHistory) {
-        if (decimation < 1U) {
-            throw gr::exception(std::format("decimation ({}) must be at least one", decimation));
-        }
-        if (taps.empty()) {
-            throw gr::exception("taps is empty; a pass-through is taps = {1}");
-        }
-
         const std::vector<TSample> carried = std::move(_history);
 
         _fir.emplace(1UZ, static_cast<std::size_t>(decimation), taps);
@@ -229,34 +223,47 @@ A symmetric or antisymmetric tap set delays by `(N-1)/2`. An asymmetric set move
 energy, rounded to the whole input sample. A tag keeps the output it was given when it crossed, through any later taps
 or decimation change. A tag whose output lies past the stream's last output leaves at the end-of-stream index, one past
 that output. A forwarded `sample_rate` tag is divided by the decimation, so downstream reads the rate of the stream this
-block hands it. )"">;
+block hands it.
+
+taps[0] multiplies the newest sample; a real tap set belongs in a real tap type.
+)"">;
 
     PortIn<TSample> in;
     PortOut<TOut>   out;
 
-    Annotated<std::vector<TTap>, "taps", Doc<"the impulse response in natural order; taps[0] multiplies the newest sample. A real-valued tap set belongs in a real tap type">> taps{std::vector<TTap>{TTap{1}}};
-    Annotated<gr::Size_t, "decimation", Doc<"M: input samples consumed per output; at least one">, Visible>                                                                    decimation = 1U;
+    struct Settings {
+        Annotated<std::vector<TTap>, Doc<"taps">>                          taps{std::vector<TTap>{TTap{1}}};
+        Annotated<gr::Size_t, Doc<"decimation">, Visible, Limits<Min<1U>>> decimation = 1U;
 
-    GR_MAKE_REFLECTABLE(FirFilter, in, out, taps, decimation);
+        GR_MAKE_REFLECTABLE(Settings, taps, decimation);
+    } settings;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const bool live        = this->coreLive();
-        const bool rateChanged = newSettings.contains("decimation");
-        if (!live || rateChanged || newSettings.contains("taps")) {
-            this->coreRebuild(std::span<const TTap>(taps.value), decimation, live);
+    GR_MAKE_REFLECTABLE(FirFilter, in, out, settings);
+
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.taps.value.empty()) {
+            return gr::Refused(s.taps, "required");
         }
-        if (live && rateChanged) {
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        const bool live = this->coreLive();
+        if (s.decimation.changed() || s.taps.changed()) {
+            this->coreRebuild(std::span<const TTap>(s.taps.value), s.decimation, live);
+        }
+        if (live && s.decimation.changed()) {
             this->coreMarkReorigin();
         }
     }
 
-    void start() { this->coreStart(std::span<const TTap>(taps.value), decimation); }
+    void start() { this->coreStart(std::span<const TTap>(settings.taps.value), settings.decimation); }
 
     /// @brief The delay every forwarded tag moves by, in input samples. It is `(N-1)/2` for a symmetric or
     /// antisymmetric set and the energy centroid otherwise.
-    [[nodiscard]] double groupDelaySamples() const noexcept { return 0.5 * static_cast<double>(detail::twiceTapDelay(std::span<const TTap>(taps.value))); }
+    [[nodiscard]] double groupDelaySamples() const noexcept { return 0.5 * static_cast<double>(detail::twiceTapDelay(std::span<const TTap>(settings.taps.value))); }
 
-    [[nodiscard]] std::size_t tapCount() const noexcept { return taps.value.size(); }
+    [[nodiscard]] std::size_t tapCount() const noexcept { return settings.taps.value.size(); }
 };
 
 } // namespace gr::blocks::filter

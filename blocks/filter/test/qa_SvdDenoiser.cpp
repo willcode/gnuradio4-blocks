@@ -16,6 +16,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/filter/SvdDenoiser.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "StreamEndSink.hpp"
@@ -34,9 +35,9 @@ const boost::ut::suite<"SvdDenoiser Block"> svdDenoiserBlockTests = [] {
 
     "SvdDenoiser float default parameters"_test = [] {
         SvdDenoiser<float> denoiser;
-        expect(eq(denoiser.window_size.value, static_cast<gr::Size_t>(64)));
-        expect(eq(denoiser.energy_fraction.value, 0.95f));
-        expect(eq(denoiser.hop_fraction.value, 0.25f));
+        expect(eq(denoiser.settings.window_size.value, static_cast<gr::Size_t>(64)));
+        expect(eq(denoiser.settings.energy_fraction.value, 0.95f));
+        expect(eq(denoiser.settings.hop_fraction.value, 0.25f));
     };
 
     "SvdDenoiser float processOne"_test = [] {
@@ -97,9 +98,7 @@ const boost::ut::suite<"SvdDenoiser Block"> svdDenoiserBlockTests = [] {
         }
 
         SvdDenoiser<double> denoiser;
-        denoiser.window_size     = 64;
-        denoiser.max_rank        = 3;
-        denoiser.energy_fraction = 0.95;
+        expect(denoiser.set({{"window_size", 64U}, {"max_rank", 3U}, {"energy_fraction", 0.95}}).has_value());
         denoiser.start();
 
         std::vector<double> denoised(N);
@@ -107,8 +106,8 @@ const boost::ut::suite<"SvdDenoiser Block"> svdDenoiserBlockTests = [] {
             denoised[i] = filterOne(denoiser, noisy[i]);
         }
 
-        const std::size_t filterDelay = (denoiser.window_size.value - 1UZ) / 2UZ;
-        const std::size_t skipSamples = std::max(128UZ, filterDelay + denoiser.window_size.value);
+        const std::size_t filterDelay = (denoiser.settings.window_size.value - 1UZ) / 2UZ;
+        const std::size_t skipSamples = std::max(128UZ, filterDelay + denoiser.settings.window_size.value);
         double            noisyRms = 0.0, denoisedRms = 0.0;
         std::size_t       count = 0UZ;
 
@@ -125,18 +124,14 @@ const boost::ut::suite<"SvdDenoiser Block"> svdDenoiserBlockTests = [] {
         expect(lt(denoisedRms, noisyRms)) << "denoised=" << denoisedRms << " noisy=" << noisyRms;
     };
 
-    "SvdDenoiser settingsChanged"_test = [] {
+    "SvdDenoiser settings change"_test = [] {
         SvdDenoiser<float> denoiser;
-        denoiser.window_size     = 32;
-        denoiser.max_rank        = 2;
-        denoiser.energy_fraction = 0.9f;
-        denoiser.hop_fraction    = 0.5f;
-        denoiser.settingsChanged({}, {{"window_size", 32U}, {"max_rank", static_cast<gr::Size_t>(2)}, {"energy_fraction", 0.9f}, {"hop_fraction", 0.5f}});
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(denoiser), {{"window_size", 32U}, {"max_rank", static_cast<gr::Size_t>(2)}, {"energy_fraction", 0.9f}, {"hop_fraction", 0.5f}}).empty());
 
-        expect(eq(denoiser.window_size.value, static_cast<gr::Size_t>(32)));
-        expect(eq(denoiser.max_rank.value, static_cast<gr::Size_t>(2)));
-        expect(eq(denoiser.energy_fraction.value, 0.9f));
-        expect(eq(denoiser.hop_fraction.value, 0.5f));
+        expect(eq(denoiser.settings.window_size.value, static_cast<gr::Size_t>(32)));
+        expect(eq(denoiser.settings.max_rank.value, static_cast<gr::Size_t>(2)));
+        expect(eq(denoiser.settings.energy_fraction.value, 0.9f));
+        expect(eq(denoiser.settings.hop_fraction.value, 0.5f));
     };
 
     "SvdDenoiser reset"_test = [] {
@@ -161,9 +156,7 @@ const boost::ut::suite<"SvdDenoiser complex support"> svdDenoiserComplexTests = 
     "complex float"_test = [] {
         using C = std::complex<float>;
         SvdDenoiser<C> denoiser;
-        denoiser.window_size     = 32;
-        denoiser.max_rank        = 2;
-        denoiser.energy_fraction = 0.95f;
+        expect(denoiser.set({{"window_size", 32U}, {"max_rank", 2U}, {"energy_fraction", 0.95f}}).has_value());
         denoiser.start();
 
         std::vector<C> output;
@@ -178,9 +171,7 @@ const boost::ut::suite<"SvdDenoiser complex support"> svdDenoiserComplexTests = 
     "complex double"_test = [] {
         using C = std::complex<double>;
         SvdDenoiser<C> denoiser;
-        denoiser.window_size     = 32;
-        denoiser.max_rank        = 2;
-        denoiser.energy_fraction = 0.95;
+        expect(denoiser.set({{"window_size", 32U}, {"max_rank", 2U}, {"energy_fraction", 0.95}}).has_value());
         denoiser.start();
 
         std::vector<C> output;
@@ -200,8 +191,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
     "hankel_rows parameter"_test = [] {
         "default hankel_rows = 0 uses window_size/2"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size = 64;
-            denoiser.hankel_rows = 0; // default: use window_size / 2
+            expect(denoiser.set({{"window_size", 64U}, {"hankel_rows", 0U}}).has_value()); // default: use window_size / 2
             denoiser.start();
 
             std::vector<double> outputs;
@@ -213,8 +203,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
 
         "custom hankel_rows"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size = 32;
-            denoiser.hankel_rows = 8; // custom value
+            expect(denoiser.set({{"window_size", 32U}, {"hankel_rows", 8U}}).has_value()); // custom value
             denoiser.start();
 
             std::vector<double> outputs;
@@ -228,8 +217,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
     "threshold parameters"_test = [] {
         "relative_threshold effect"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size        = 32;
-            denoiser.relative_threshold = 0.1; // 10% of max singular value
+            expect(denoiser.set({{"window_size", 32U}, {"relative_threshold", 0.1}}).has_value()); // 10% of max singular value
             denoiser.start();
 
             std::vector<double> outputs;
@@ -241,8 +229,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
 
         "absolute_threshold effect"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size        = 32;
-            denoiser.absolute_threshold = 0.01;
+            expect(denoiser.set({{"window_size", 32U}, {"absolute_threshold", 0.01}}).has_value());
             denoiser.start();
 
             std::vector<double> outputs;
@@ -254,11 +241,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
 
         "combined thresholds"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size        = 32;
-            denoiser.max_rank           = 3;
-            denoiser.relative_threshold = 0.05;
-            denoiser.absolute_threshold = 0.001;
-            denoiser.energy_fraction    = 0.9;
+            expect(denoiser.set({{"window_size", 32U}, {"max_rank", 3U}, {"relative_threshold", 0.05}, {"absolute_threshold", 0.001}, {"energy_fraction", 0.9}}).has_value());
             denoiser.start();
 
             std::vector<double> outputs;
@@ -271,8 +254,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
 
     "minimum window_size"_test = [] {
         SvdDenoiser<float> denoiser;
-        denoiser.window_size = 4; // very small window
-        denoiser.max_rank    = 1;
+        expect(denoiser.set({{"window_size", 4U}, {"max_rank", 1U}}).has_value()); // very small window
         denoiser.start();
 
         std::vector<float> outputs;
@@ -285,8 +267,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
     "hop_fraction variations"_test = [] {
         "small hop_fraction"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size  = 32;
-            denoiser.hop_fraction = 0.1; // recompute SVD frequently
+            expect(denoiser.set({{"window_size", 32U}, {"hop_fraction", 0.1}}).has_value()); // recompute SVD frequently
             denoiser.start();
 
             std::vector<double> outputs;
@@ -298,8 +279,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
 
         "large hop_fraction"_test = [] {
             SvdDenoiser<double> denoiser;
-            denoiser.window_size  = 32;
-            denoiser.hop_fraction = 0.75; // recompute SVD less frequently
+            expect(denoiser.set({{"window_size", 32U}, {"hop_fraction", 0.75}}).has_value()); // recompute SVD less frequently
             denoiser.start();
 
             std::vector<double> outputs;
@@ -313,8 +293,7 @@ const boost::ut::suite<"SvdDenoiser edge cases"> svdDenoiserEdgeCaseTests = [] {
     "near-constant input handling"_test = [] {
         // Pure constant input creates degenerate Hankel matrix, add tiny variation
         SvdDenoiser<double> denoiser;
-        denoiser.window_size = 16;
-        denoiser.max_rank    = 2;
+        expect(denoiser.set({{"window_size", 16U}, {"max_rank", 2U}}).has_value());
         denoiser.start();
 
         std::vector<double> outputs;

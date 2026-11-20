@@ -19,6 +19,7 @@
 #include <gnuradio-4.0/algorithm/filter/FilterTool.hpp>
 #include <gnuradio-4.0/filter/SavitzkyGolayFilter.hpp>
 #include <gnuradio-4.0/filter/SvdDenoiser.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include "StreamEndSink.hpp"
@@ -37,9 +38,9 @@ const boost::ut::suite<"SavitzkyGolayFilter block"> sgFilterBlockTests = [] {
 
     "float default parameters"_test = [] {
         SavitzkyGolayFilter<float> filter;
-        expect(eq(filter.window_size.value, static_cast<gr::Size_t>(11)));
-        expect(eq(filter.poly_order.value, static_cast<gr::Size_t>(4)));
-        expect(eq(filter.deriv_order.value, static_cast<gr::Size_t>(0)));
+        expect(eq(filter.settings.window_size.value, static_cast<gr::Size_t>(11)));
+        expect(eq(filter.settings.poly_order.value, static_cast<gr::Size_t>(4)));
+        expect(eq(filter.settings.deriv_order.value, static_cast<gr::Size_t>(0)));
     };
 
     "float processOne"_test = [] {
@@ -81,9 +82,7 @@ const boost::ut::suite<"SavitzkyGolayFilter block"> sgFilterBlockTests = [] {
         }
 
         SavitzkyGolayFilter<double> filter;
-        filter.window_size = 11;
-        filter.poly_order  = 3;
-        filter.deriv_order = 0;
+        expect(filter.set({{"window_size", 11U}, {"poly_order", 3U}, {"deriv_order", 0U}}).has_value());
         filter.start();
 
         std::vector<double> filtered(N);
@@ -104,15 +103,12 @@ const boost::ut::suite<"SavitzkyGolayFilter block"> sgFilterBlockTests = [] {
         expect(lt(filteredRms, noisyRms)) << "filtering reduces noise";
     };
 
-    "settingsChanged"_test = [] {
+    "a settings change"_test = [] {
         SavitzkyGolayFilter<float> filter;
-        filter.window_size = 21;
-        filter.poly_order  = 4;
-        filter.alignment   = "Causal";
-        filter.settingsChanged({}, {{"window_size", 21U}, {"poly_order", static_cast<gr::Size_t>(4)}, {"alignment", std::string("Causal")}});
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"window_size", 21U}, {"poly_order", static_cast<gr::Size_t>(4)}, {"alignment", std::string("Causal")}}).empty());
 
-        expect(eq(filter.window_size.value, static_cast<gr::Size_t>(21)));
-        expect(eq(filter.poly_order.value, static_cast<gr::Size_t>(4)));
+        expect(eq(filter.settings.window_size.value, static_cast<gr::Size_t>(21)));
+        expect(eq(filter.settings.poly_order.value, static_cast<gr::Size_t>(4)));
     };
 
     "reset"_test = [] {
@@ -153,8 +149,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
         }
 
         SavitzkyGolayDataSetFilter<double> filter;
-        filter.window_size = 5;
-        filter.poly_order  = 2;
+        expect(filter.set({{"window_size", 5U}, {"poly_order", 2U}}).has_value());
         filter.start();
 
         auto output = filter.processOne(input);
@@ -177,8 +172,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
         input.signal_ranges.resize(2UZ);
 
         SavitzkyGolayDataSetFilter<double> filter;
-        filter.window_size = 9;
-        filter.poly_order  = 2;
+        expect(filter.set({{"window_size", 9U}, {"poly_order", 2U}}).has_value());
         filter.start();
 
         const auto output = filter.processOne(input);
@@ -214,8 +208,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
         }
 
         SavitzkyGolayDataSetFilter<double> filter;
-        filter.window_size = 11;
-        filter.poly_order  = 3;
+        expect(filter.set({{"window_size", 11U}, {"poly_order", 3U}}).has_value());
         filter.start();
 
         auto output = filter.processOne(input);
@@ -229,14 +222,12 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
         expect(le(std::abs(static_cast<std::ptrdiff_t>(outIdx) - static_cast<std::ptrdiff_t>(centre)), 1)) << "zero-phase preserves peak";
     };
 
-    "settingsChanged"_test = [] {
+    "a settings change"_test = [] {
         SavitzkyGolayDataSetFilter<float> filter;
-        filter.window_size     = 15;
-        filter.boundary_policy = "Replicate";
-        filter.settingsChanged({}, {{"window_size", 15U}, {"boundary_policy", std::string("Replicate")}});
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"window_size", 15U}, {"boundary_policy", std::string("Replicate")}}).empty());
 
-        expect(eq(filter.window_size.value, static_cast<gr::Size_t>(15)));
-        expect(eq(filter.boundary_policy.value, std::string("Replicate")));
+        expect(eq(filter.settings.window_size.value, static_cast<gr::Size_t>(15)));
+        expect(filter.settings.boundary_policy.value == gr::algorithm::savitzky_golay::BoundaryPolicy::Replicate);
     };
 };
 
@@ -247,10 +238,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
     "sample_rate parameter"_test = [] {
         "sample_rate affects derivative scaling"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            filter.window_size = 11;
-            filter.poly_order  = 3;
-            filter.deriv_order = 1;
-            filter.sample_rate = 1000.0f; // 1 kHz
+            expect(filter.set({{"window_size", 11U}, {"poly_order", 3U}, {"deriv_order", 1U}, {"sample_rate", 1000.0f}}).has_value()); // 1 kHz
             filter.start();
 
             std::vector<double> outputs;
@@ -262,8 +250,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
 
         "sample_rate = 0 handled gracefully"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            filter.window_size = 11;
-            filter.sample_rate = 0.0f; // edge case
+            expect(filter.set({{"window_size", 11U}, {"sample_rate", 0.0f}}).has_value()); // edge case
             filter.start();
 
             std::vector<double> outputs;
@@ -277,8 +264,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
 
     "minimum window_size"_test = [] {
         SavitzkyGolayFilter<float> filter;
-        filter.window_size = 3;
-        filter.poly_order  = 2;
+        expect(filter.set({{"window_size", 3U}, {"poly_order", 2U}}).has_value());
         filter.start();
 
         std::vector<float> outputs;
@@ -291,8 +277,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
     "alignment modes"_test = [] {
         "Centred alignment"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            filter.window_size = 11;
-            filter.alignment   = "Centred";
+            expect(filter.set({{"window_size", 11U}, {"alignment", "Centred"}}).has_value());
             filter.start();
 
             std::vector<double> outputs;
@@ -304,8 +289,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
 
         "Causal alignment"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            filter.window_size = 11;
-            filter.alignment   = "Causal";
+            expect(filter.set({{"window_size", 11U}, {"alignment", "Causal"}}).has_value());
             filter.start();
 
             std::vector<double> outputs;
@@ -315,26 +299,16 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
             expect(std::isfinite(outputs.back()));
         };
 
-        "invalid alignment defaults to Centred"_test = [] {
+        "an unknown alignment is refused"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            filter.window_size = 11;
-            filter.alignment   = "Invalid"; // not recognized
-            filter.start();
-
-            std::vector<double> outputs;
-            for (std::size_t i = 0UZ; i < 30UZ; ++i) {
-                outputs.push_back(filterOne(filter, static_cast<double>(i)));
-            }
-            expect(std::isfinite(outputs.back()));
+            expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"alignment", std::string("Invalid")}}).empty());
+            expect(filter.settings.alignment.value == gr::algorithm::savitzky_golay::Alignment::Centred);
         };
     };
 
     "derivative order"_test = [] {
         SavitzkyGolayFilter<double> filter;
-        filter.window_size = 11;
-        filter.poly_order  = 4;
-        filter.deriv_order = 2; // second derivative
-        filter.sample_rate = 100.0f;
+        expect(filter.set({{"window_size", 11U}, {"poly_order", 4U}, {"deriv_order", 2U}, {"sample_rate", 100.0f}}).has_value()); // second derivative
         filter.start();
 
         std::vector<double> outputs;
@@ -362,7 +336,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         input.extents           = {0};
 
         SavitzkyGolayDataSetFilter<double> filter;
-        filter.window_size = 5;
+        expect(filter.set({{"window_size", 5U}}).has_value());
         filter.start();
 
         auto output = filter.processOne(input);
@@ -388,7 +362,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         }
 
         SavitzkyGolayDataSetFilter<double> filter;
-        filter.window_size = 11; // larger than input
+        expect(filter.set({{"window_size", 11U}}).has_value()); // larger than input
         filter.start();
 
         auto output = filter.processOne(input);
@@ -418,9 +392,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
         }
 
         SavitzkyGolayDataSetFilter<double> filter;
-        filter.window_size = 11;
-        filter.poly_order  = 3;
-        filter.deriv_order = 1; // first derivative
+        expect(filter.set({{"window_size", 11U}, {"poly_order", 3U}, {"deriv_order", 1U}}).has_value()); // first derivative
         filter.start();
 
         auto output = filter.processOne(input);
@@ -454,8 +426,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
 
         "Reflect policy"_test = [&] {
             SavitzkyGolayDataSetFilter<double> filter;
-            filter.window_size     = 7;
-            filter.boundary_policy = "Reflect";
+            expect(filter.set({{"window_size", 7U}, {"boundary_policy", "Reflect"}}).has_value());
             filter.start();
 
             auto output = filter.processOne(makeInput());
@@ -464,8 +435,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
 
         "Replicate policy"_test = [&] {
             SavitzkyGolayDataSetFilter<double> filter;
-            filter.window_size     = 7;
-            filter.boundary_policy = "Replicate";
+            expect(filter.set({{"window_size", 7U}, {"boundary_policy", "Replicate"}}).has_value());
             filter.start();
 
             auto output = filter.processOne(makeInput());
@@ -512,14 +482,11 @@ const boost::ut::suite<"SG vs SVD comparison"> comparisonTests = [] {
         }
 
         SavitzkyGolayFilter<double> sgFilter;
-        sgFilter.window_size = 21;
-        sgFilter.poly_order  = 3;
+        expect(sgFilter.set({{"window_size", 21U}, {"poly_order", 3U}}).has_value());
         sgFilter.start();
 
         SvdDenoiser<double> svdFilter;
-        svdFilter.window_size     = 40;
-        svdFilter.max_rank        = 2;
-        svdFilter.energy_fraction = 0.85;
+        expect(svdFilter.set({{"window_size", 40U}, {"max_rank", 2U}, {"energy_fraction", 0.85}}).has_value());
         svdFilter.start();
 
         std::vector<double> sgFiltered(N), svdFiltered(N);
@@ -560,14 +527,11 @@ const boost::ut::suite<"SG vs SVD comparison"> comparisonTests = [] {
         }
 
         SavitzkyGolayFilter<double> sgFilter;
-        sgFilter.window_size = 11;
-        sgFilter.poly_order  = 3;
+        expect(sgFilter.set({{"window_size", 11U}, {"poly_order", 3U}}).has_value());
         sgFilter.start();
 
         SvdDenoiser<double> svdFilter;
-        svdFilter.window_size     = 24;
-        svdFilter.max_rank        = 2;
-        svdFilter.energy_fraction = 0.90;
+        expect(svdFilter.set({{"window_size", 24U}, {"max_rank", 2U}, {"energy_fraction", 0.90}}).has_value());
         svdFilter.start();
 
         std::vector<double> sgFiltered(N), svdFiltered(N);
@@ -601,14 +565,11 @@ const boost::ut::suite<"SG vs SVD comparison"> comparisonTests = [] {
         }
 
         SavitzkyGolayFilter<double> sgFilter;
-        sgFilter.window_size = 15;
-        sgFilter.poly_order  = 3;
+        expect(sgFilter.set({{"window_size", 15U}, {"poly_order", 3U}}).has_value());
         sgFilter.start();
 
         SvdDenoiser<double> svdFilter;
-        svdFilter.window_size     = 32;
-        svdFilter.max_rank        = 3;
-        svdFilter.energy_fraction = 0.95;
+        expect(svdFilter.set({{"window_size", 32U}, {"max_rank", 3U}, {"energy_fraction", 0.95}}).has_value());
         svdFilter.start();
 
         std::vector<double> sgFiltered(N), svdFiltered(N);
@@ -655,14 +616,11 @@ const boost::ut::suite<"SG vs SVD comparison"> comparisonTests = [] {
         }
 
         SavitzkyGolayFilter<double> sgFilter;
-        sgFilter.window_size = 15;
-        sgFilter.poly_order  = 4;
+        expect(sgFilter.set({{"window_size", 15U}, {"poly_order", 4U}}).has_value());
         sgFilter.start();
 
         SvdDenoiser<double> svdFilter;
-        svdFilter.window_size     = 48;
-        svdFilter.max_rank        = 3;
-        svdFilter.energy_fraction = 0.85;
+        expect(svdFilter.set({{"window_size", 48U}, {"max_rank", 3U}, {"energy_fraction", 0.85}}).has_value());
         svdFilter.start();
 
         std::vector<double> sgFiltered(N), svdFiltered(N);

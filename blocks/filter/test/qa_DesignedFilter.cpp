@@ -17,32 +17,35 @@
 #include <gnuradio-4.0/filter/DesignedFilter.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
 
 using gr::blocks::filter::DesignedFilter;
+using gr::blocks::filter::FilterProfile;
 using CF       = std::complex<float>;
 namespace test = gr::blocks::testing::span;
 
 template<typename TSample, typename TTap>
 [[nodiscard]] DesignedFilter<TSample, TTap> make(gr::property_map settings) {
     DesignedFilter<TSample, TTap> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
     return block;
 }
 
+/// Sets @p settings and applies them. Returns the keys refused or failed, empty when the block took every value.
 template<typename TBlock>
-void apply(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
+gr::settings::Rejected apply(TBlock& block, gr::property_map settings) {
+    return gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings));
 }
 
 template<typename TSample, typename TTap>
 [[nodiscard]] auto run(DesignedFilter<TSample, TTap>& block, const std::vector<TSample>& input, std::size_t chunkOutputs = 0UZ) {
-    const std::size_t m = block.decimation;
+    const std::size_t m = block.settings.decimation;
     return test::runDecimating<typename DesignedFilter<TSample, TTap>::TOut>(block, std::span<const TSample>(input), chunkOutputs * m, m).samples;
 }
 
@@ -92,7 +95,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
             const auto want  = gr::filter::fir::design::designLowpass({.sampleRate = 240000.0, .cutoff = 17000.0, .transitionWidth = 2000.0, .window = Type::Hamming, .taps = n});
             expect(eq(block._designed.size(), want.size()));
             expect(eq(worstDelta(std::span<const float>(block._designed), std::span<const float>(want)), 0.0)) << "same designer, same floats";
-            expect(eq(static_cast<std::size_t>(block.designed_taps.value), want.size())) << "the observable states the length";
+            expect(eq(static_cast<std::size_t>(block.status.designed_taps.value), want.size())) << "the observable states the length";
         }
         // The sharp CW complex band (fs 96k, 575..825 Hz, 20 Hz transition — the receiver's largest filter).
         {
@@ -116,6 +119,38 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
             const std::size_t want  = gr::filter::fir::design::tapCountOf({.sampleRate = 96000.0, .cutoff = 10000.0, .transitionWidth = 2000.0});
             expect(eq(block._designed.size(), want));
         }
+    };
+
+    "window_param: a negative value derives the parameter, a stated one is used"_test = [] {
+        using gr::filter::fir::design::FilterSpec;
+        // a stated length: the transition-width estimate exists for Kaiser alone
+        const gr::property_map lowpass{{"profile", std::string("lowpass")}, {"sample_rate", 48000.f}, {"cutoff", 4000.0}, {"attenuation_db", 50.0}, {"taps", gr::Size_t{101U}}};
+        const FilterSpec       spec{.sampleRate = 48000.0, .cutoff = 4000.0, .attenuationDb = 50.0, .taps = 101UZ};
+
+        auto derived = make<float, float>(lowpass);
+        expect(eq(derived.settings.window_param.value, -1.0)) << "the default derives";
+        const auto kaiser = gr::filter::fir::design::designLowpass(spec);
+        expect(fatal(eq(derived._designed.size(), kaiser.size())));
+        expect(eq(worstDelta(std::span<const float>(derived._designed), std::span<const float>(kaiser)), 0.0)) << "Kaiser's beta follows attenuation_db";
+
+        gr::property_map tukeySettings = lowpass;
+        tukeySettings.insert_or_assign(gr::property_map::key_type{"window"}, std::string("Tukey"));
+        auto       tukey     = make<float, float>(tukeySettings);
+        FilterSpec tukeySpec = spec;
+        tukeySpec.window     = Type::Tukey;
+        const auto tukeyWant = gr::filter::fir::design::designLowpass(tukeySpec);
+        expect(fatal(eq(tukey._designed.size(), tukeyWant.size())));
+        expect(eq(worstDelta(std::span<const float>(tukey._designed), std::span<const float>(tukeyWant)), 0.0)) << "Tukey takes its own default";
+
+        gr::property_map statedSettings = lowpass;
+        statedSettings.insert_or_assign(gr::property_map::key_type{"window_param"}, 3.0);
+        auto       stated      = make<float, float>(statedSettings);
+        FilterSpec statedSpec  = spec;
+        statedSpec.windowParam = 3.0;
+        const auto statedWant  = gr::filter::fir::design::designLowpass(statedSpec);
+        expect(fatal(eq(stated._designed.size(), statedWant.size())));
+        expect(eq(worstDelta(std::span<const float>(stated._designed), std::span<const float>(statedWant)), 0.0)) << "a stated beta is used";
+        expect(worstDelta(std::span<const float>(stated._designed), std::span<const float>(kaiser)) > 0.0) << "a stated beta is not the derived one";
     };
 
     "behavioral: the low-pass passes and stops what its edges say"_test = [] {
@@ -212,16 +247,16 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
     "a live edge change redesigns; an unrelated write does not"_test = [] {
         auto block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 96000.f}, {"cutoff", 10000.0}, {"transition_width", 2000.0}});
 
-        const gr::Size_t   firstLength = block.designed_taps;
+        const gr::Size_t   firstLength = block.status.designed_taps;
         std::vector<float> in(4096UZ, 1.0f);
         std::ignore = run(block, in);
 
         apply(block, {{"transition_width", 1000.0}});
-        expect(gt(block.designed_taps.value, firstLength)) << "a narrower transition designs a longer filter";
+        expect(gt(block.status.designed_taps.value, firstLength)) << "a narrower transition designs a longer filter";
 
-        const gr::Size_t after = block.designed_taps;
+        const gr::Size_t after = block.status.designed_taps;
         apply(block, {{"name", std::string("renamed")}});
-        expect(eq(block.designed_taps.value, after)) << "an unrelated setting does not redesign";
+        expect(eq(block.status.designed_taps.value, after)) << "an unrelated setting does not redesign";
 
         std::ignore = run(block, in);
         // A constant through a redesigned unity-DC-gain low-pass stays a constant: the stream continued.
@@ -253,7 +288,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         // The graph couples no setting to a tag. The stream's 48 kHz tag leaves the design alone.
         // A redesign to a new rate arrives by restaging the setting, which the settings-path
         // leg above proves.
-        expect(eq(static_cast<std::size_t>(filter.designed_taps.value), at96k)) << "the stated rate keeps the design";
+        expect(eq(static_cast<std::size_t>(filter.status.designed_taps.value), at96k)) << "the stated rate keeps the design";
 
         bool sawUpstream = false;
         for (const gr::Tag& seenTag : sink._tags) {
@@ -279,7 +314,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         constexpr Row kRows[] = {{1U, 59UZ}, {3U, 58UZ}};
         for (const auto& [m, at] : kRows) {
             auto block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 96000.f}, {"cutoff", 10000.0}, {"taps", gr::Size_t(41)}, {"decimation", m}});
-            expect(eq(block.designed_taps.value, 41U));
+            expect(eq(block.status.designed_taps.value, 41U));
             expect(eq(block.groupDelaySamples(), static_cast<double>(kDelay)));
 
             std::vector<float> x(240UZ, 0.0f);
@@ -327,14 +362,14 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         expect(throws([] { std::ignore = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 0.f}, {"cutoff", 1000.0}, {"transition_width", 100.0}}); }));
 
         auto             block    = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 96000.f}, {"cutoff", 10000.0}, {"transition_width", 2000.0}});
-        const gr::Size_t designed = block.designed_taps;
-        expect(throws([&block] { apply(block, {{"profile", std::string("no_such_profile")}}); })) << "a live refusal throws";
-        expect(eq(block.designed_taps.value, designed)) << "and the previous design keeps running";
-        expect(eq(block.profile.value, std::string("lowpass"))) << "the accepted profile is written back to its member";
-        expect(throws([&block] { apply(block, {{"profile", std::string("no_such_profile")}}); })) << "the refused value stated again is refused again";
-        expect(eq(block.designed_taps.value, designed)) << "and the previous design is still the one running";
+        const gr::Size_t designed = block.status.designed_taps;
+        expect(!apply(block, {{"profile", std::string("no_such_profile")}}).empty()) << "a live refusal fails the key";
+        expect(eq(block.status.designed_taps.value, designed)) << "and the previous design keeps running";
+        expect(block.settings.profile.value == FilterProfile::lowpass) << "the accepted profile is written back to its member";
+        expect(!apply(block, {{"profile", std::string("no_such_profile")}}).empty()) << "the refused value stated again is refused again";
+        expect(eq(block.status.designed_taps.value, designed)) << "and the previous design is still the one running";
         expect(nothrow([&block] { block.start(); })) << "the next start designs from the accepted values";
-        expect(eq(block.designed_taps.value, designed)) << "and builds the previous design";
+        expect(eq(block.status.designed_taps.value, designed)) << "and builds the previous design";
     };
 };
 
@@ -360,7 +395,7 @@ const boost::ut::suite<"the hilbert profile"> hilbertTests = [] {
     "the taps are antisymmetric, odd, and zero at the center"_test = [] {
         for (const gr::Size_t length : {31U, 63U, 127U}) {
             auto block = make<float, float>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}, {"taps", length}});
-            expect(eq(block.designed_taps.value, length)) << "the stated length is the designed length";
+            expect(eq(block.status.designed_taps.value, length)) << "the stated length is the designed length";
             expect(eq(block._designed.size(), static_cast<std::size_t>(length)));
 
             const std::size_t mid = (block._designed.size() - 1UZ) / 2UZ;
@@ -438,9 +473,11 @@ const boost::ut::suite<"the hilbert profile"> hilbertTests = [] {
         }
     };
 
-    "the profile refuses a length it cannot use"_test = [] {
+    "the profile refuses what it cannot design and rounds an even length up"_test = [] {
         expect(throws([] { std::ignore = make<float, float>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}}); })) << "there is no transition-width estimate for a Hilbert transformer";
-        expect(throws([] { std::ignore = make<float, float>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}, {"taps", 64U}}); })) << "an even length has no whole-sample group delay";
+        const auto even = make<float, float>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}, {"taps", 64U}});
+        expect(eq(even.status.designed_taps.value, 65U)) << "an even length is rounded up to odd, so the group delay is a whole sample";
+        expect(eq(even.groupDelaySamples(), 32.0));
         expect(throws([] { std::ignore = make<CF, CF>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}, {"taps", 63U}}); })) << "the taps are real, so the profile belongs to the real tap type";
         expect(nothrow([] { std::ignore = make<float, float>({{"profile", std::string("hilbert")}, {"sample_rate", 48000.f}, {"taps", 63U}}); }));
     };

@@ -22,6 +22,7 @@
 #include <gnuradio-4.0/filter/FirFilter.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 #include "StreamEndSink.hpp"
@@ -45,8 +46,9 @@ constexpr double kNineteenTwentyFourths = 19.0 / 24.0;
 template<typename T>
 [[nodiscard]] ArbitraryRateResampler<T> makeResampler(gr::property_map settings) {
     ArbitraryRateResampler<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
     return block;
 }
@@ -264,8 +266,8 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         constexpr std::size_t kBank = 32UZ;
         for (const double rate : {0.2, kNineteenTwentyFourths, 1.7}) {
             const std::vector<float> taps = prototypeFor(kBank, rate);
-            for (const gr::Size_t order : {1U, 3U}) {
-                const gr::property_map settings{{"rate", rate}, {"bank_size", static_cast<gr::Size_t>(kBank)}, {"interpolation_order", order}, {"taps", taps}};
+            for (const std::string_view order : {"linear", "cubic"}) {
+                const gr::property_map settings{{"rate", rate}, {"bank_size", static_cast<gr::Size_t>(kBank)}, {"interpolation", std::string(order)}, {"taps", taps}};
 
                 ArbitraryRateResampler<CF> whole     = makeResampler<CF>(settings);
                 const std::vector<CF>      x         = noise<CF>(4096UZ, 0x2545F4914F6CDD1DULL);
@@ -442,8 +444,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
 
         const std::int64_t before = block.kernel().phase();
         const std::size_t  arm    = block.tapsPerArm();
-        std::ignore               = block.settings().setStaged({{"rate", 0.75}});
-        std::ignore               = block.settings().applyStagedParameters();
+        std::ignore               = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"rate", 0.75}});
 
         expect(that % (block.kernel().phase() == before)) << "the step changed, not where the block is";
         expect(lt(std::abs(block.realizedRate() - 0.75) / 0.75, 1.2e-10)) << "and realizedRate() reports the new value";
@@ -477,8 +478,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         expect(lt(prefix, 80UZ)) << "and stops well short of the tag's sample";
         expect(probeRun.result.offsetsOf("tag0").empty()) << "so the tag cannot have been published yet";
 
-        std::ignore = probe.settings().setStaged({{"rate", kAfter}});
-        std::ignore = probe.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(probe), {{"rate", kAfter}});
         for (std::size_t guard = 0UZ; probeRun.more() && guard < 200UZ; ++guard) { // eight outputs a call over what is left
             probeRun.call(probe, 100UZ, 8UZ);
         }
@@ -491,8 +491,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         controlRun.call(control, 4UZ, 1UZ);
         expect(eq(controlRun.result.consumed, prefix)) << "the two runs stand at the same sample when the rate changes";
 
-        std::ignore = control.settings().setStaged({{"rate", kAfter}});
-        std::ignore = control.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(control), {{"rate", kAfter}});
         for (std::size_t guard = 0UZ; controlRun.more() && guard < 200UZ; ++guard) {
             controlRun.call(control, 4UZ, 8UZ);
         }
@@ -693,8 +692,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
         const auto               head = test::runAsync<float>(block, std::span<const float>(x), 0UZ, 5000UZ);
         expect(gt(head.samples.size(), 1000UZ));
 
-        std::ignore = block.settings().setStaged({{"rate", 0.5}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"rate", 0.5}});
 
         expect(gt(block.tapsPerArm(), designed)) << "the prototype was rebuilt for the lower rate, not left cut for the old one";
 
@@ -708,8 +706,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
 
         // a rate that rises back inside the designed band leaves the prototype alone
         const std::size_t widened = block.tapsPerArm();
-        std::ignore               = block.settings().setStaged({{"rate", 0.9}});
-        std::ignore               = block.settings().applyStagedParameters();
+        std::ignore               = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"rate", 0.9}});
         expect(eq(block.tapsPerArm(), widened)) << "the prototype is narrower than the higher rate needs but cannot alias, so it is kept";
     };
 
@@ -754,7 +751,7 @@ const boost::ut::suite<"arbitrary resampler"> arbitraryResamplerTests = [] {
     "degenerate settings"_test = [] {
         expect(throws([] { std::ignore = makeResampler<float>({{"rate", 0.0}}); }));
         expect(throws([] { std::ignore = makeResampler<float>({{"rate", -1.0}}); }));
-        expect(throws([] { std::ignore = makeResampler<float>({{"interpolation_order", 2U}}); })) << "0, 1 or 3";
+        expect(throws([] { std::ignore = makeResampler<float>({{"interpolation", std::string("quadratic")}}); })) << "nearest, linear or cubic";
         expect(throws([] { std::ignore = makeResampler<float>({{"rate", 1e30}, {"bank_size", 32U}, {"taps", std::vector<float>{1.0f}}}); })) << "a rate above L*2^32 rounds the step to nothing";
 
         // a bank of one is legal and is a plain fractional-delay filter

@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/filter/StagedDecimator.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 #include "StreamEndSink.hpp"
@@ -45,8 +46,9 @@ template<std::integral To, std::integral From>
 template<typename T>
 [[nodiscard]] StagedDecimator<T> makeBlock(gr::property_map settings) {
     StagedDecimator<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
     return block;
 }
@@ -54,7 +56,7 @@ template<typename T>
 /// @brief Drive the block over @p input in calls of @p chunkOutputs outputs, which is what the framework hands it.
 template<typename T>
 [[nodiscard]] auto run(StagedDecimator<T>& block, const std::vector<T>& input, std::size_t chunkOutputs = 0UZ, std::span<const gr::Tag> tags = {}) {
-    const std::size_t d = static_cast<std::size_t>(block.decimation);
+    const std::size_t d = static_cast<std::size_t>(block.settings.decimation);
     return test::runDecimating<T>(block, std::span<const T>(input), chunkOutputs * d, d, tags);
 }
 
@@ -358,7 +360,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
                     peak  = std::max(peak, static_cast<double>(std::abs(whole.samples[k])));
                     worst = std::max(worst, static_cast<double>(std::abs(part.samples[k] - whole.samples[k])));
                 }
-                expect(lt(worst, peak * std::pow(10.0, -(static_cast<double>(block.attenuation_db) + 20.0) / 20.0))) << "D = " << d << " in calls of " << chunkOutputs << " outputs: worst difference " << worst << " at peak " << peak;
+                expect(lt(worst, peak * std::pow(10.0, -(static_cast<double>(block.settings.attenuation_db) + 20.0) / 20.0))) << "D = " << d << " in calls of " << chunkOutputs << " outputs: worst difference " << worst << " at peak " << peak;
             }
         }
     } | std::tuple<CF, float>{};
@@ -630,8 +632,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
         expect(eq(block.stages(), 3UZ));
         const std::uint64_t before = block.groupDelaySamples();
 
-        std::ignore = block.settings().setStaged({{"decimation", 16U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"decimation", 16U}});
         expect(eq(block.stages(), 4UZ)) << "the ladder is rebuilt, not adjusted";
         expect(block.groupDelaySamples() != before) << "and the delay changes with it";
 
@@ -655,8 +656,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
         expect(that % (head.offsetsOf("tag0") == std::vector<std::size_t>{})) << "its output is not produced yet, so it is held";
 
         const std::size_t stages = block.stages();
-        std::ignore              = block.settings().setStaged({{"ripple_db", 0.04f}}); // a rebuild key that changes neither the rate nor the tag map's origin
-        std::ignore              = block.settings().applyStagedParameters();
+        std::ignore              = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"ripple_db", 0.04f}}); // a rebuild key that changes neither the rate nor the tag map's origin
         expect(eq(block.stages(), stages));
 
         const auto tail = test::runDecimating<CF>(block, std::span<const CF>(x).subspan(1000UZ), kD, kD, {}, 1000UZ, 100UZ);
@@ -739,8 +739,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
         }
 
         for (const gr::Size_t d : {8U, 16U}) {
-            std::ignore = block.settings().setStaged({{"decimation", d}});
-            std::ignore = block.settings().applyStagedParameters();
+            std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"decimation", d}});
         }
 
         expect(eq(block.stages(), first.size()));
@@ -756,10 +755,7 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
         expect(throws([] { std::ignore = makeBlock<CF>({{"decimation", 8U}, {"passband_width", -0.5f}}); }));
 
         StagedDecimator<CF> live = makeBlock<CF>({{"decimation", 8U}});
-        expect(throws([&live] {
-            std::ignore = live.settings().setStaged({{"decimation", 0U}});
-            std::ignore = live.settings().applyStagedParameters();
-        })) << "and on a live change";
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(live), {{"decimation", 0U}}).empty()) << "and on a live change";
 
         // An odd prime above the bound warns and works: refusing a legal decimation is worse than a long
         // last stage, and factoring cannot help a prime.
@@ -823,8 +819,9 @@ const boost::ut::suite<"staged decimator"> stagedDecimatorTests = [] {
             const std::size_t                       single = arm.decimation;
             const gr::filter::StagedDecimatorDesign one    = gr::filter::designDecimatorLadder(std::span<const std::size_t>(&single, 1UZ), d, 0.90);
             FirFilter<CF, float>                    flat(gr::property_map{{"taps", one.stages[0UZ].taps}, {"decimation", arm.decimation}});
-            flat.settings().init();
-            std::ignore = flat.settings().applyStagedParameters();
+            if (const auto first = flat.check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
             flat.start();
 
             const auto [ladder, plain] = interleaved(staged, flat, x, d);

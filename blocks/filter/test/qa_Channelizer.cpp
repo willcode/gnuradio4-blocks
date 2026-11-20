@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/filter/Channelizer.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 #include "StreamEndSink.hpp"
@@ -48,8 +49,9 @@ using ChannelSink = TagSink<CF, ProcessFunction::USE_PROCESS_ONE>;
 template<typename TBlock>
 [[nodiscard]] std::unique_ptr<TBlock> make(gr::property_map settings) {
     auto block = std::make_unique<TBlock>(std::move(settings));
-    block->settings().init();
-    std::ignore = block->settings().applyStagedParameters();
+    if (const auto first = block->check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block->start();
     return block;
 }
@@ -57,19 +59,14 @@ template<typename TBlock>
 /// Restages settings on a block that is already running, the way a live change arrives.
 template<typename TBlock>
 void apply(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings));
 }
 
-/// Stages @p settings and applies them. Returns the refusal, empty when the block took every value.
+/// Sets @p settings and applies them. Returns the first refusal's reason, empty when the block took every value.
 template<typename TBlock>
 [[nodiscard]] std::string refusalOf(TBlock& block, gr::property_map settings) {
-    try {
-        std::ignore = block.settings().setStaged(std::move(settings));
-        return block.settings().applyStagedParameters().refusal;
-    } catch (const gr::exception& error) {
-        return error.message;
-    }
+    const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings));
+    return refused.empty() ? std::string{} : refused.front().reason;
 }
 
 /**
@@ -179,7 +176,7 @@ struct BankRun {
     gr::Graph graph;
     auto&     source = graph.emplaceBlock<TagSource<CF>>({{"n_samples_max", nSamples}, {"mark_tag", false}, {"values", gr::Tensor<CF>(gr::data_from, values)}});
     source._tags.assign(inputTags.begin(), inputTags.end());
-    const float sourceRate = source.sample_rate;
+    const float sourceRate = source.settings.sample_rate;
 
     auto& bank = graph.emplaceBlock<PolyphaseChannelizer<float>>(std::move(settings));
     expect(graph.connect(source, "out"s, bank, "in"s).has_value()) << "the single input connects";
@@ -228,7 +225,7 @@ struct CascadeRun {
     }
     expect(graph.connect(synth, "out"s, sink, "in"s).has_value());
 
-    const std::size_t prototypeLength = bank.designed_taps.value.size();
+    const std::size_t prototypeLength = bank.status.designed_taps.value.size();
 
     gr::scheduler::Simple scheduler;
     expect(scheduler.exchange(std::move(graph)).has_value());
@@ -357,41 +354,41 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             const auto bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}});
             const auto designed = gr::filter::fir::design::rootRaisedCosine(static_cast<int>(16U * channels) - 1, static_cast<double>(channels), 0.5, 1.0);
 
-            expect(eq(bank->prototype.value, std::string("root_nyquist"))) << "the default family";
-            expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(16U * channels))) << "a span of sixteen spacings over four branches runs sixty-four taps";
-            expect(std::ranges::equal(std::span(bank->designed_taps.value).first(designed.size()), designed)) << "at the default span of sixteen and rolloff of a half";
-            expect(bank->taps.value.empty()) << "and with nothing in the supplied setting";
+            expect(bank->settings.prototype.value == gr::filter::ChannelizerPrototype::root_nyquist) << "the default family";
+            expect(eq(bank->status.designed_taps.value.size(), static_cast<std::size_t>(16U * channels))) << "a span of sixteen spacings over four branches runs sixty-four taps";
+            expect(std::ranges::equal(std::span(bank->status.designed_taps.value).first(designed.size()), designed)) << "at the default span of sixteen and rolloff of a half";
+            expect(bank->settings.taps.value.empty()) << "and with nothing in the supplied setting";
             // This family's length is the caller's span, not a search against attenuation_db. It is measured and not
             // aimed, and design_ok has nothing to fail against. stopband_db holds what the span achieved.
-            expect(bank->design_ok.value) << "a family that was never given a target reports no failure to meet one";
-            expect(lt(bank->stopband_db.value, 0.0)) << "and reports the rejection its span did achieve";
+            expect(bank->status.design_ok.value) << "a family that was never given a target reports no failure to meet one";
+            expect(lt(bank->status.stopband_db.value, 0.0)) << "and reports the rejection its span did achieve";
         }
 
         // Asked for the lowpass family, the observable holds the searched Kaiser the library designs.
         {
-            const auto  design   = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(channels), "lowpass", 80.0, 0.2, 16UZ, 1UZ).value();
+            const auto  design   = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(channels), gr::filter::ChannelizerPrototype::lowpass, 80.0, 0.2, 16UZ, 1UZ).value();
             const auto  bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"attenuation_db", 80.0}, {"transition", 0.2}});
             const auto  expected = ((design.taps.size() + channels - 1UZ) / channels) * channels;
-            const auto& running  = bank->designed_taps.value;
+            const auto& running  = bank->status.designed_taps.value;
 
             expect(eq(running.size(), expected)) << "the running prototype is the design zero-padded to a whole number of branches";
             expect(std::ranges::equal(std::span(running).first(design.taps.size()), design.taps)) << "and holds the library designer's own taps";
             expect(std::ranges::all_of(std::span(running).subspan(design.taps.size()), [](float tap) { return tap == 0.f; })) << "the padding is zero";
-            expect(bank->taps.value.empty()) << "a design leaves the supplied prototype empty, which is what makes the design settings live";
+            expect(bank->settings.taps.value.empty()) << "a design leaves the supplied prototype empty, which is what makes the design settings live";
 
-            expect(bank->design_ok.value) << "the lowpass search reaches the target it was given";
-            expect(le(bank->stopband_db.value, -80.0)) << "and the level it measured is at or past the eighty decibels asked for";
-            expect(eq(bank->stopband_db.value, design.stopbandDb)) << "the block reports what the library measured";
-            expect(eq(bank->ripple_db.value, design.rippleDb));
+            expect(bank->status.design_ok.value) << "the lowpass search reaches the target it was given";
+            expect(le(bank->status.stopband_db.value, -80.0)) << "and the level it measured is at or past the eighty decibels asked for";
+            expect(eq(bank->status.stopband_db.value, design.stopbandDb)) << "the block reports what the library measured";
+            expect(eq(bank->status.ripple_db.value, design.rippleDb));
         }
 
         // The lowpass family is the one with a target, and it meets the default target on the path a caller takes to it.
         {
             for (const gr::Size_t width : {gr::Size_t(4), gr::Size_t(16)}) {
                 const auto bank = make<PolyphaseChannelizer<float>>({{"n_channels", width}, {"prototype", std::string("lowpass")}, {"transition", 0.2}});
-                expect(eq(bank->attenuation_db.value, 60.0)) << "the default stopband target";
-                expect(bank->design_ok.value) << std::format("a {}-channel lowpass reaches the default target", width);
-                expect(le(bank->stopband_db.value, -60.0)) << std::format("and measures at or past it, at {} channels", width);
+                expect(eq(bank->settings.attenuation_db.value, 60.0)) << "the default stopband target";
+                expect(bank->status.design_ok.value) << std::format("a {}-channel lowpass reaches the default target", width);
+                expect(le(bank->status.stopband_db.value, -60.0)) << std::format("and measures at or past it, at {} channels", width);
             }
         }
 
@@ -399,8 +396,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         // and cannot bisect down from the estimate.
         {
             const auto bank = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"transition", 0.05}, {"attenuation_db", 80.0}});
-            expect(bank->design_ok.value) << "the search grows to meet a target its estimate falls short of";
-            expect(le(bank->stopband_db.value, -80.0)) << "and lands at or past the eighty decibels asked for";
+            expect(bank->status.design_ok.value) << "the search grows to meet a target its estimate falls short of";
+            expect(le(bank->status.stopband_db.value, -80.0)) << "and lands at or past the eighty decibels asked for";
         }
 
         // The alias band depends on the commutator stride. Decimating by M/oversample folds every multiple of
@@ -412,14 +409,14 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             const auto critical    = make<PolyphaseChannelizer<float>>({{"n_channels", wide}});
             const auto oversampled = make<PolyphaseChannelizer<float>>({{"n_channels", wide}, {"oversample", gr::Size_t(2)}});
 
-            const auto criticalDesign    = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(wide), "root_nyquist", 60.0, 0.5, 16UZ, 1UZ).value();
-            const auto oversampledDesign = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(wide), "root_nyquist", 60.0, 0.5, 16UZ, 2UZ).value();
+            const auto criticalDesign    = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(wide), gr::filter::ChannelizerPrototype::root_nyquist, 60.0, 0.5, 16UZ, 1UZ).value();
+            const auto oversampledDesign = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(wide), gr::filter::ChannelizerPrototype::root_nyquist, 60.0, 0.5, 16UZ, 2UZ).value();
 
-            expect(std::ranges::equal(critical->designed_taps.value, oversampled->designed_taps.value)) << "the stride does not change the prototype";
-            expect(eq(critical->stopband_db.value, criticalDesign.stopbandDb)) << "critically sampled the block reports the library's figure for a stride of M";
-            expect(eq(oversampled->stopband_db.value, oversampledDesign.stopbandDb)) << "oversampled by two it reports the figure for a stride of M/2";
-            expect(lt(oversampled->stopband_db.value, critical->stopband_db.value - 25.0)) << "which is where the second commutator stride earns its keep";
-            expect(critical->design_ok.value && oversampled->design_ok.value) << "neither was aimed at a target, so neither reports missing one";
+            expect(std::ranges::equal(critical->status.designed_taps.value, oversampled->status.designed_taps.value)) << "the stride does not change the prototype";
+            expect(eq(critical->status.stopband_db.value, criticalDesign.stopbandDb)) << "critically sampled the block reports the library's figure for a stride of M";
+            expect(eq(oversampled->status.stopband_db.value, oversampledDesign.stopbandDb)) << "oversampled by two it reports the figure for a stride of M/2";
+            expect(lt(oversampled->status.stopband_db.value, critical->status.stopband_db.value - 25.0)) << "which is where the second commutator stride earns its keep";
+            expect(critical->status.design_ok.value && oversampled->status.design_ok.value) << "neither was aimed at a target, so neither reports missing one";
         }
 
         // A harder lowpass is a longer one, in both of the settings that drive its length.
@@ -427,8 +424,8 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             const auto base    = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"attenuation_db", 80.0}, {"transition", 0.2}});
             const auto sharper = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"attenuation_db", 80.0}, {"transition", 0.05}});
             const auto deeper  = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"attenuation_db", 120.0}, {"transition", 0.2}});
-            expect(gt(sharper->designed_taps.value.size(), base->designed_taps.value.size())) << "a narrower transition designs a longer prototype";
-            expect(gt(deeper->designed_taps.value.size(), base->designed_taps.value.size())) << "a deeper stopband designs a longer prototype";
+            expect(gt(sharper->status.designed_taps.value.size(), base->status.designed_taps.value.size())) << "a narrower transition designs a longer prototype";
+            expect(gt(deeper->status.designed_taps.value.size(), base->status.designed_taps.value.size())) << "a deeper stopband designs a longer prototype";
         }
 
         // The root-Nyquist family takes its length from the span it covers instead, and its shape from the excess bandwidth.
@@ -437,37 +434,37 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
             const auto  bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("root_nyquist")}, {"span", span}, {"transition", 0.5}});
             const auto  designed = gr::filter::fir::design::rootRaisedCosine(static_cast<int>(span * channels) - 1, static_cast<double>(channels), 0.5, 1.0);
-            const auto& running  = bank->designed_taps.value;
+            const auto& running  = bank->status.designed_taps.value;
 
             expect(eq(running.size(), static_cast<std::size_t>(span * channels))) << "a span of sixteen spacings over four branches runs sixty-four taps";
             expect(std::ranges::equal(std::span(running).first(designed.size()), designed)) << "and holds the designer's own taps";
-            expect(bank->taps.value.empty()) << "the second family designs on the same terms";
+            expect(bank->settings.taps.value.empty()) << "the second family designs on the same terms";
 
             const auto wider = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"prototype", std::string("root_nyquist")}, {"span", gr::Size_t(32)}, {"transition", 0.5}});
-            expect(gt(wider->designed_taps.value.size(), running.size())) << "a wider span designs a longer prototype";
+            expect(gt(wider->status.designed_taps.value.size(), running.size())) << "a wider span designs a longer prototype";
         }
 
         // Supplied, the prototype runs zero-padded to a whole number of branches and the setting keeps the taps as they arrived.
         {
             const std::vector<float> supplied{0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.4f, 0.3f, 0.2f, 0.1f, 0.05f};
             const auto               bank    = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"taps", supplied}});
-            const auto&              running = bank->designed_taps.value;
+            const auto&              running = bank->status.designed_taps.value;
 
             expect(eq(running.size(), 12UZ)) << "ten taps across four branches pad to twelve";
             expect(std::ranges::equal(std::span(running).first(supplied.size()), supplied)) << "the supplied taps arrive unchanged";
             expect(std::ranges::all_of(std::span(running).subspan(supplied.size()), [](float tap) { return tap == 0.f; })) << "the padding is zero";
-            expect(std::ranges::equal(bank->taps.value, supplied)) << "and the setting still reads back exactly the ten that were supplied";
+            expect(std::ranges::equal(bank->settings.taps.value, supplied)) << "and the setting still reads back exactly the ten that were supplied";
 
             // A supplied prototype is measured on the same terms as a designed one. It has no target. The two figures
             // are the response of the supplied vector at the alias edge the stride implies.
             const auto measured = gr::filter::measureChannelizerPrototype(supplied, static_cast<std::size_t>(channels), 0.5, 1UZ).value();
-            expect(bank->design_ok.value) << "a supplied prototype is not reported as missing a target it never had";
-            expect(eq(bank->stopband_db.value, measured.stopbandDb)) << "the block reports what the library measured of the taps it was handed";
-            expect(eq(bank->ripple_db.value, measured.rippleDb));
+            expect(bank->status.design_ok.value) << "a supplied prototype is not reported as missing a target it never had";
+            expect(eq(bank->status.stopband_db.value, measured.stopbandDb)) << "the block reports what the library measured of the taps it was handed";
+            expect(eq(bank->status.ripple_db.value, measured.rippleDb));
 
             // The stride moves the alias edge for a supplied prototype exactly as it does for a designed one.
             const auto strided = make<PolyphaseChannelizer<float>>({{"n_channels", channels}, {"taps", supplied}, {"oversample", gr::Size_t(2)}});
-            expect(lt(strided->stopband_db.value, bank->stopband_db.value - 3.0)) << "the same taps measure lower against the wider stop edge";
+            expect(lt(strided->status.stopband_db.value, bank->status.stopband_db.value - 3.0)) << "the same taps measure lower against the wider stop edge";
         }
     };
 
@@ -478,62 +475,62 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
         const auto lengthOf = [](const gr::property_map& settings) {
             const auto fresh = make<PolyphaseChannelizer<float>>(settings);
-            return fresh->designed_taps.value.size();
+            return fresh->status.designed_taps.value.size();
         };
 
         // Started on the defaults, the bank runs the root-raised cosine its span asks for.
-        const std::size_t asRootNyquist = bank->designed_taps.value.size();
+        const std::size_t asRootNyquist = bank->status.designed_taps.value.size();
         expect(eq(asRootNyquist, static_cast<std::size_t>(16U * channels))) << "the default family takes its length from the span";
 
         // The family switches, and the bank runs the Kaiser its transition and attenuation ask for instead.
         apply(*bank, {{"prototype", std::string("lowpass")}, {"attenuation_db", 80.0}, {"transition", 0.2}});
-        const std::size_t asLowpass = bank->designed_taps.value.size();
+        const std::size_t asLowpass = bank->status.designed_taps.value.size();
         expect(neq(asLowpass, asRootNyquist)) << "the live change reached the running bank";
         expect(eq(asLowpass, lengthOf({{"n_channels", channels}, {"prototype", std::string("lowpass")}, {"attenuation_db", 80.0}, {"transition", 0.2}}))) << "and left it where a fresh block at those settings starts";
 
         // In the lowpass family the transition is a width, and a narrower one designs a longer filter.
         apply(*bank, {{"transition", 0.05}});
-        expect(gt(bank->designed_taps.value.size(), asLowpass)) << "a narrower transition lengthens the running prototype";
+        expect(gt(bank->status.designed_taps.value.size(), asLowpass)) << "a narrower transition lengthens the running prototype";
         apply(*bank, {{"transition", 0.2}, {"attenuation_db", 120.0}});
-        expect(gt(bank->designed_taps.value.size(), asLowpass)) << "so does a deeper stopband";
+        expect(gt(bank->status.designed_taps.value.size(), asLowpass)) << "so does a deeper stopband";
 
         // The boxcar family is one channel long and reads neither of the two settings the other families design from.
         apply(*bank, {{"prototype", std::string("boxcar")}});
-        expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(channels))) << "the boxcar prototype is exactly one channel long";
+        expect(eq(bank->status.designed_taps.value.size(), static_cast<std::size_t>(channels))) << "the boxcar prototype is exactly one channel long";
         const float flat = 1.f / static_cast<float>(channels);
-        expect(std::ranges::all_of(bank->designed_taps.value, [flat](float tap) { return tap == flat; })) << "and flat across it at unit gain";
+        expect(std::ranges::all_of(bank->status.designed_taps.value, [flat](float tap) { return tap == flat; })) << "and flat across it at unit gain";
         apply(*bank, {{"attenuation_db", 60.0}, {"span", gr::Size_t(8)}});
-        expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(channels))) << "neither the stopband target nor the span moves it";
+        expect(eq(bank->status.designed_taps.value.size(), static_cast<std::size_t>(channels))) << "neither the stopband target nor the span moves it";
 
         // Back in the root-Nyquist family, the span is live.
         apply(*bank, {{"prototype", std::string("root_nyquist")}, {"span", gr::Size_t(16)}, {"transition", 0.5}});
-        expect(eq(bank->designed_taps.value.size(), asRootNyquist)) << "the family switches back to the design it started on";
+        expect(eq(bank->status.designed_taps.value.size(), asRootNyquist)) << "the family switches back to the design it started on";
         apply(*bank, {{"span", gr::Size_t(32)}});
-        expect(eq(bank->designed_taps.value.size(), static_cast<std::size_t>(32U * channels))) << "a wider span lengthens the running prototype";
+        expect(eq(bank->status.designed_taps.value.size(), static_cast<std::size_t>(32U * channels))) << "a wider span lengthens the running prototype";
 
         // The root-Nyquist family sets its rejection by the span it covers and does not read the stopband target.
-        const std::vector<float> beforeAttenuation = bank->designed_taps.value;
+        const std::vector<float> beforeAttenuation = bank->status.designed_taps.value;
         apply(*bank, {{"attenuation_db", 40.0}});
-        expect(std::ranges::equal(bank->designed_taps.value, beforeAttenuation)) << "a stopband target does not reach the root-Nyquist design";
+        expect(std::ranges::equal(bank->status.designed_taps.value, beforeAttenuation)) << "a stopband target does not reach the root-Nyquist design";
         apply(*bank, {{"attenuation_db", 120.0}});
-        expect(std::ranges::equal(bank->designed_taps.value, beforeAttenuation)) << "in either direction";
+        expect(std::ranges::equal(bank->status.designed_taps.value, beforeAttenuation)) << "in either direction";
 
         // So is the transition, which is the rolloff here and changes the shape at a fixed length.
-        const std::vector<float> beforeRolloff = bank->designed_taps.value;
+        const std::vector<float> beforeRolloff = bank->status.designed_taps.value;
         apply(*bank, {{"transition", 0.25}});
-        expect(eq(bank->designed_taps.value.size(), beforeRolloff.size())) << "a different rolloff keeps the span's length";
-        expect(!std::ranges::equal(bank->designed_taps.value, beforeRolloff)) << "and changes the taps";
+        expect(eq(bank->status.designed_taps.value.size(), beforeRolloff.size())) << "a different rolloff keeps the span's length";
+        expect(!std::ranges::equal(bank->status.designed_taps.value, beforeRolloff)) << "and changes the taps";
 
-        expect(bank->taps.value.empty()) << "none of it wrote a prototype into the supplied setting";
+        expect(bank->settings.taps.value.empty()) << "none of it wrote a prototype into the supplied setting";
 
         // A supplied prototype outranks the design settings. Clearing it gives control back to them.
         const std::vector<float> supplied(64UZ, 0.5f);
         apply(*bank, {{"taps", supplied}});
-        expect(eq(bank->designed_taps.value.size(), supplied.size())) << "the supplied prototype runs";
+        expect(eq(bank->status.designed_taps.value.size(), supplied.size())) << "the supplied prototype runs";
         apply(*bank, {{"transition", 0.5}});
-        expect(std::ranges::equal(std::span(bank->designed_taps.value).first(supplied.size()), supplied)) << "and a design setting does not displace it";
+        expect(std::ranges::equal(std::span(bank->status.designed_taps.value).first(supplied.size()), supplied)) << "and a design setting does not displace it";
         apply(*bank, {{"taps", std::vector<float>{}}});
-        expect(gt(bank->designed_taps.value.size(), supplied.size())) << "clearing it returns the bank to its designed prototype";
+        expect(gt(bank->status.designed_taps.value.size(), supplied.size())) << "clearing it returns the bank to its designed prototype";
     };
 
     "an input tag lands on channel zero at its own step, and nowhere else"_test = [] {
@@ -690,9 +687,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         } catch (const std::exception& error) {
             offered = error.what();
         }
-        for (const std::string_view family : {"root_nyquist", "lowpass", "boxcar"}) {
-            expect(offered.find(family) != std::string::npos) << std::format("the refusal offers '{}'", family);
-        }
+        expect(offered.find("prototype: must be one of: root_nyquist, lowpass, boxcar") != std::string::npos) << std::format("the refusal names the setting: {}", offered);
 
         // The same shapes are refused by the synthesizer, which shares the settings and the checks.
         const auto refusedSynth = [](gr::property_map settings) { std::ignore = make<PolyphaseSynthesizer<float>>(std::move(settings)); };
@@ -703,7 +698,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
         // A span below two is only the root-Nyquist designer's business, so the lowpass family takes one without complaint.
         const auto narrowSpan = make<PolyphaseChannelizer<float>>({{"n_channels", gr::Size_t(4)}, {"prototype", std::string("lowpass")}, {"span", gr::Size_t(1)}});
-        expect(gt(narrowSpan->designed_taps.value.size(), 1UZ)) << "the lowpass design is unaffected by the span";
+        expect(gt(narrowSpan->status.designed_taps.value.size(), 1UZ)) << "the lowpass design is unaffected by the span";
 
         // An accepted set-up plumbs the ports and takes the commutator stride its width and oversampling state.
         const auto oversampled = make<PolyphaseChannelizer<float>>({{"n_channels", gr::Size_t(8)}, {"oversample", gr::Size_t(2)}});
@@ -760,33 +755,33 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
     "taps copied from designed_taps measure as the design that made them"_test = [] {
         auto         bank             = make<PolyphaseChannelizer<float>>({{"n_channels", gr::Size_t(8)}, {"prototype", std::string("lowpass")}, {"transition", 0.2}});
-        const auto   design           = gr::filter::designChannelizerPrototype(8UZ, "lowpass", 60.0, 0.2).value();
-        const double designedStopband = bank->stopband_db.value;
-        const double designedRipple   = bank->ripple_db.value;
-        expect(fatal(gt(bank->designed_taps.value.size(), design.taps.size()))) << "the running prototype carries padding the design does not";
+        const auto   design           = gr::filter::designChannelizerPrototype(8UZ, gr::filter::ChannelizerPrototype::lowpass, 60.0, 0.2).value();
+        const double designedStopband = bank->status.stopband_db.value;
+        const double designedRipple   = bank->status.ripple_db.value;
+        expect(fatal(gt(bank->status.designed_taps.value.size(), design.taps.size()))) << "the running prototype carries padding the design does not";
 
-        expect(refusalOf(*bank, {{"taps", bank->designed_taps.value}}).empty());
-        expect(approx(bank->stopband_db.value, designedStopband, 0.01)) << std::format("the padded copy reads {:.2f} dB against the design's {:.2f} dB", bank->stopband_db.value, designedStopband);
-        expect(approx(bank->ripple_db.value, designedRipple, 0.01));
+        expect(refusalOf(*bank, {{"taps", bank->status.designed_taps.value}}).empty());
+        expect(approx(bank->status.stopband_db.value, designedStopband, 0.01)) << std::format("the padded copy reads {:.2f} dB against the design's {:.2f} dB", bank->status.stopband_db.value, designedStopband);
+        expect(approx(bank->status.ripple_db.value, designedRipple, 0.01));
     };
 
     "a refused change leaves the bank on the settings it last accepted, and a later change is taken"_test = [] {
         constexpr gr::Size_t channels = 16U;
 
         auto                     bank     = make<PolyphaseChannelizer<float>>({{"n_channels", channels}});
-        const std::vector<float> running  = bank->designed_taps.value;
-        const double             stopband = bank->stopband_db.value;
+        const std::vector<float> running  = bank->status.designed_taps.value;
+        const double             stopband = bank->status.stopband_db.value;
         const std::size_t        stride   = bank->_stride;
 
         const auto onAccepted = [&](std::string_view refused) {
-            expect(eq(bank->n_channels.value, channels)) << refused;
-            expect(eq(bank->oversample.value, gr::Size_t(1))) << refused;
-            expect(eq(bank->transition.value, 0.5)) << refused;
-            expect(eq(bank->prototype.value, std::string("root_nyquist"))) << refused;
-            expect(eq(bank->span.value, gr::Size_t(16))) << refused;
-            expect(bank->taps.value.empty()) << refused;
-            expect(std::ranges::equal(bank->designed_taps.value, running)) << refused;
-            expect(eq(bank->stopband_db.value, stopband)) << refused << ": stopband_db reports the design that runs";
+            expect(eq(bank->settings.n_channels.value, channels)) << refused;
+            expect(eq(bank->settings.oversample.value, gr::Size_t(1))) << refused;
+            expect(eq(bank->settings.transition.value, 0.5)) << refused;
+            expect(bank->settings.prototype.value == gr::filter::ChannelizerPrototype::root_nyquist) << refused;
+            expect(eq(bank->settings.span.value, gr::Size_t(16))) << refused;
+            expect(bank->settings.taps.value.empty()) << refused;
+            expect(std::ranges::equal(bank->status.designed_taps.value, running)) << refused;
+            expect(eq(bank->status.stopband_db.value, stopband)) << refused << ": stopband_db reports the design that runs";
             expect(eq(bank->_stride, stride)) << refused;
             expect(eq(bank->out.size(), static_cast<std::size_t>(channels))) << refused;
         };
@@ -805,17 +800,17 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         onAccepted("after taps with no DC gain");
 
         expect(refusalOf(*bank, {{"span", gr::Size_t(8)}}).empty()) << "a valid change after the refusals is taken";
-        const auto design = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(channels), "root_nyquist", 60.0, 0.5, 8UZ, 1UZ).value();
-        expect(eq(bank->designed_taps.value.size(), 8UZ * static_cast<std::size_t>(channels))) << "the bank runs the span it was given";
-        expect(eq(bank->stopband_db.value, design.stopbandDb)) << "and reports that design";
+        const auto design = gr::filter::designChannelizerPrototype(static_cast<std::size_t>(channels), gr::filter::ChannelizerPrototype::root_nyquist, 60.0, 0.5, 8UZ, 1UZ).value();
+        expect(eq(bank->status.designed_taps.value.size(), 8UZ * static_cast<std::size_t>(channels))) << "the bank runs the span it was given";
+        expect(eq(bank->status.stopband_db.value, design.stopbandDb)) << "and reports that design";
         expect(nothrow([&bank] { bank->start(); })) << "a restart builds nothing that was refused";
 
         auto synth = make<PolyphaseSynthesizer<float>>({{"n_channels", channels}});
         expect(!refusalOf(*synth, {{"oversample", gr::Size_t(3)}}).empty());
-        expect(eq(synth->oversample.value, gr::Size_t(1))) << "the synthesizer keeps its accepted stride";
+        expect(eq(synth->settings.oversample.value, gr::Size_t(1))) << "the synthesizer keeps its accepted stride";
         expect(eq(synth->_stride, static_cast<std::size_t>(channels)));
         expect(refusalOf(*synth, {{"span", gr::Size_t(8)}}).empty()) << "and takes a valid change after it";
-        expect(eq(synth->designed_taps.value.size(), 8UZ * static_cast<std::size_t>(channels)));
+        expect(eq(synth->status.designed_taps.value.size(), 8UZ * static_cast<std::size_t>(channels)));
     };
 
     "a forwarded rate reaches every channel, and the bank's own setting keys stay behind"_test = [] {
@@ -910,7 +905,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
             expect(eq(synth->_stride, stride));
 
             gr::filter::PolyphaseSynthesizer<float> kernel;
-            expect(kernel.configure(channels, synth->designed_taps.value, static_cast<std::size_t>(oversample)).has_value());
+            expect(kernel.configure(channels, synth->status.designed_taps.value, static_cast<std::size_t>(oversample)).has_value());
 
             std::vector<std::vector<CF>> channelData;
             for (std::size_t channel = 0UZ; channel < channels; ++channel) {
@@ -948,7 +943,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
 
         // The width stays at its default. A setting named at construction does not follow tags.
         auto& bank = graph.emplaceBlock<PolyphaseChannelizer<float>>({});
-        expect(fatal(eq(bank.n_channels.value, channels)));
+        expect(fatal(eq(bank.settings.n_channels.value, channels)));
         expect(graph.connect(source, "out"s, bank, "in"s).has_value());
         for (std::size_t channel = 0UZ; channel < static_cast<std::size_t>(channels); ++channel) {
             auto& sink = graph.emplaceBlock<ChannelSink>({});
@@ -959,7 +954,7 @@ const boost::ut::suite<"Channelizer"> channelizerTests = [] {
         expect(scheduler.exchange(std::move(graph)).has_value());
         std::ignore = scheduler.runAndWait();
 
-        expect(eq(bank.n_channels.value, channels)) << "the setting keeps the accepted width";
+        expect(eq(bank.settings.n_channels.value, channels)) << "the setting keeps the accepted width";
         expect(eq(bank.out.size(), static_cast<std::size_t>(channels))) << "the connected ports stay as they were";
         expect(eq(bank._channels, static_cast<std::size_t>(channels))) << "and the bank runs the width it started with";
     };

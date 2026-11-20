@@ -6,10 +6,11 @@
 #include <cmath>
 #include <complex>
 #include <concepts>
+#include <cstdint>
+#include <format>
 #include <limits>
 #include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -22,6 +23,9 @@
 #include <gnuradio-4.0/filter/FirFilter.hpp>
 
 namespace gr::blocks::filter {
+
+/// @brief What DesignedFilter designs. The first six take real taps, the two complex ones complex taps.
+enum class FilterProfile : std::uint8_t { lowpass, highpass, bandpass, bandstop, root_raised_cosine, hilbert, complex_bandpass, complex_bandstop };
 
 GR_REGISTER_BLOCK(gr::blocks::filter::DesignedFilter, ([T], [U]), [ float, std::complex<float> ], [ float, std::complex<float> ])
 
@@ -36,9 +40,10 @@ struct DesignedFilter : Block<DesignedFilter<TSample, TTap>, Resampling<1UZ, 1UZ
 
 Parameters in, taps out: the block owns a design specification as settings - profile, -6 dB cutoffs in hertz, a
 transition width or an explicit odd length, a window or a Kaiser attenuation, gain, decimation - designs its taps in
-`settingsChanged` through `gr::filter::fir::design`, and filters with the same machinery the raw-taps FirFilter runs. Every
+its settings hook through `gr::filter::fir::design`, and filters with the same machinery the raw-taps FirFilter runs. Every
 design-affecting setting is live: a redesign keeps the input/output alignment exactly, and a `decimation` change moves
-the phase origin. `taps` here is an observable count, never a setting - a chain supplies a passband, not a vector.
+the phase origin. `taps` requests a length, not a vector: the design rounds it up to odd, and to three taps or to five
+for a band form, and `designed_taps` reports the length designed.
 
 Each tag moves with all its keys by the design's delay `d = (designed_taps - 1) / 2`. A tag on input `i` leaves on
 output `round((i + d) / decimation)`. A tag keeps the output it was given when it crossed, through any later redesign or
@@ -47,13 +52,13 @@ that output.
 
 The tap type states which family the block designs: real taps carry `lowpass`, `highpass`, `bandpass`, `bandstop`,
 `root_raised_cosine` and `hilbert`; complex taps carry `complex_bandpass` and `complex_bandstop`. A profile outside the
-tap type's family is refused by name. `root_raised_cosine` requires an explicit `taps` length and a positive
-`symbol_rate` - no transition-width estimate exists for it.
+tap type's family is refused, naming the taps it requires. `root_raised_cosine` requires an explicit `taps` length and
+a positive `symbol_rate` - no transition-width estimate exists for it.
 
 `hilbert` is the analytic-signal branch: antisymmetric type III taps, structurally zero at DC and at Nyquist, rotating
 every positive frequency by -90 degrees. An analytic signal is this output paired with the input delayed by the group
-delay `(taps - 1) / 2`, which is an integer because the length is odd. It requires an explicit odd `taps` and reads no
-band edge - a Hilbert transformer covers the whole open band and how much of it is usable follows from the length
+delay `(designed_taps - 1) / 2`, which is an integer because the length is odd. It requires an explicit `taps` and reads
+no band edge - a Hilbert transformer covers the whole open band and how much of it is usable follows from the length
 alone, which is what `gr::filter::fir::design::scanHilbert` measures. `cutoff` is therefore not read under this profile.
 
 `BasicFilter` is the module's other design-from-parameters filter and the one to reach for where an IIR response
@@ -64,129 +69,124 @@ profiles neither of the others offers.
 A graph may couple `sample_rate` to `gr:sample_rate`. A tag that changes it then redesigns the filter. A passing rate
 tag is forwarded divided by the decimation, so downstream reads the rate of the stream this block hands it. A refused
 settings change leaves the previous design running.
+
+`sample_rate` can follow gr:sample_rate. `cutoff` is the -6 dB point, the lower edge of a band form, and `high_cutoff`
+the upper edge. `transition_width` applies to every edge and sets the length unless `taps` states it. `attenuation_db`
+shapes a Kaiser window, which takes its beta from it unless `window_param` states one; a negative `window_param` selects
+each window's own default. `symbol_rate` and `alpha` serve root_raised_cosine.
 )"">;
 
     PortIn<TSample> in;
     PortOut<TOut>   out;
 
-    Annotated<std::string, "profile", Visible, Doc<"lowpass | highpass | bandpass | bandstop | hilbert | complex_bandpass | complex_bandstop | root_raised_cosine">>       profile          = "lowpass";
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Doc<"the design's rate reference; can follow gr:sample_rate">>                                                    sample_rate      = 1.0f;
-    Annotated<double, "cutoff", Unit<"Hz">, Visible, Doc<"-6 dB point; the lower edge of a band form">>                                                                    cutoff           = 0.0;
-    Annotated<double, "high_cutoff", Unit<"Hz">, Visible, Doc<"-6 dB point, band forms only">>                                                                             high_cutoff      = 0.0;
-    Annotated<double, "transition_width", Unit<"Hz">, Visible, Doc<"applied to every edge; sets the length unless taps is stated">>                                        transition_width = 0.0;
-    Annotated<double, "gain", Doc<"the value of the design's own normalization reference">>                                                                                gain             = 1.0;
-    Annotated<double, "attenuation_db", Unit<"dB">, Doc<"Kaiser only: what the window is shaped for">>                                                                     attenuation_db   = 60.0;
-    Annotated<gr::algorithm::window::Type, "window", Doc<"the window the taps are shaped with; Kaiser takes its beta from attenuation_db unless window_param states one">> window           = gr::algorithm::window::Type::Kaiser;
-    Annotated<double, "window_param", Doc<"NaN: Kaiser derives beta from attenuation_db, other windows take their own default">>                                           window_param     = std::numeric_limits<double>::quiet_NaN();
-    Annotated<gr::Size_t, "taps", Doc<"0: length estimated from transition_width; otherwise the odd length used">>                                                         taps             = 0U;
-    Annotated<double, "symbol_rate", Unit<"Hz">, Doc<"root_raised_cosine only">>                                                                                           symbol_rate      = 0.0;
-    Annotated<double, "alpha", Doc<"root_raised_cosine only: excess bandwidth">>                                                                                           alpha            = 0.35;
-    Annotated<gr::Size_t, "decimation", Doc<"M: input samples consumed per output; at least one">, Visible>                                                                decimation       = 1U;
-    Annotated<gr::Size_t, "designed_taps", Doc<"observable: the length the last design produced">>                                                                         designed_taps    = 0U;
+    struct Settings {
+        Annotated<FilterProfile, Visible, Doc<"filter profile">>                     profile          = FilterProfile::lowpass;
+        Annotated<float, Unit<"Hz">, Visible, Doc<"sample rate">, Limits<Over<0.f>>> sample_rate      = 1.0f;
+        Annotated<double, Unit<"Hz">, Visible, Doc<"cutoff">>                        cutoff           = 0.0;
+        Annotated<double, Unit<"Hz">, Visible, Doc<"upper cutoff">>                  high_cutoff      = 0.0;
+        Annotated<double, Unit<"Hz">, Visible, Doc<"transition width">>              transition_width = 0.0;
+        Annotated<double, Doc<"gain">>                                               gain             = 1.0;
+        Annotated<double, Unit<"dB">, Doc<"Kaiser stopband attenuation">>            attenuation_db   = 60.0;
+        Annotated<gr::algorithm::window::Type, Doc<"window">>                        window           = gr::algorithm::window::Type::Kaiser;
+        Annotated<double, Doc<"window parameter (< 0 = default)">>                   window_param     = -1.0;
+        Annotated<gr::Size_t, Doc<"requested length (0 = derived)">>                 taps             = 0U;
+        Annotated<double, Unit<"Hz">, Doc<"symbol rate">>                            symbol_rate      = 0.0;
+        Annotated<double, Doc<"excess bandwidth">>                                   alpha            = 0.35;
+        Annotated<gr::Size_t, Doc<"decimation">, Visible, Limits<Min<1U>>>           decimation       = 1U;
 
-    GR_MAKE_REFLECTABLE(DesignedFilter, in, out, profile, sample_rate, cutoff, high_cutoff, transition_width, gain, attenuation_db, window, window_param, taps, symbol_rate, alpha, decimation, designed_taps);
+        GR_MAKE_REFLECTABLE(Settings, profile, sample_rate, cutoff, high_cutoff, transition_width, gain, attenuation_db, window, window_param, taps, symbol_rate, alpha, decimation);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"designed length">> designed_taps = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, designed_taps);
+    } status;
+
+    GR_MAKE_REFLECTABLE(DesignedFilter, in, out, settings, status);
 
     std::vector<TTap> _designed;
-    bool              _designStale = true; /// set by a change of a design key, or by any change before the core is live, and kept by a design that throws; the next change or start designs again
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
+    // a design takes well under a millisecond at common lengths, so the check designs and the library refuses the band
+    // edges it cannot meet
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const FilterProfile which = s.profile.value;
+        if (std::same_as<TTap, float> && isComplexProfile(which)) {
+            return gr::Refused(s.profile, std::format("{} requires complex taps", gr::meta::enumName(which).value_or("")));
+        }
+        if (!std::same_as<TTap, float> && !isComplexProfile(which)) {
+            return gr::Refused(s.profile, std::format("{} requires real taps", gr::meta::enumName(which).value_or("")));
+        }
+        if ((which == FilterProfile::root_raised_cosine || which == FilterProfile::hilbert) && s.taps.value == 0U) {
+            return gr::Refused(s.taps, "required");
+        }
+        if (which == FilterProfile::root_raised_cosine && s.symbol_rate.value <= 0.0) {
+            return gr::Refused(s.symbol_rate, "must be > 0");
+        }
+        std::ignore = designedTaps(s);
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
         const bool live = this->coreLive();
-        // Everything except the decimation is design-affecting; redesigning on an unrelated
-        // key is harmless (the same inputs produce the same taps) but the alignment replay is
-        // not free. A named change triggers it. A design that throws builds nothing. The flag stays set, and the next
-        // change or start designs again.
-        static constexpr std::array<std::string_view, 12UZ> kDesignKeys{"profile", "sample_rate", "cutoff", "high_cutoff", "transition_width", "gain", "attenuation_db", "window", "window_param", "taps", "symbol_rate", "alpha"};
-        _designStale = _designStale || !live || std::ranges::any_of(kDesignKeys, [&newSettings](std::string_view key) { return newSettings.contains(gr::property_map::key_type{key}); });
-
-        const bool designChanged = _designStale;
-        const bool rateChanged   = newSettings.contains("decimation");
-        if (designChanged) {
-            design();
-            _designStale = false;
+        // everything except the decimation is design-affecting, and a redesign replays the alignment
+        const bool redesign = s.profile.changed() || s.sample_rate.changed() || s.cutoff.changed() || s.high_cutoff.changed() || s.transition_width.changed() || s.gain.changed() || s.attenuation_db.changed() || s.window.changed() || s.window_param.changed() || s.taps.changed() || s.symbol_rate.changed() || s.alpha.changed();
+        if (redesign) {
+            _designed            = designedTaps(s);
+            status.designed_taps = static_cast<gr::Size_t>(_designed.size());
         }
-        if (designChanged || rateChanged) {
-            this->coreRebuild(std::span<const TTap>(_designed), decimation, live);
+        if (redesign || s.decimation.changed()) {
+            this->coreRebuild(std::span<const TTap>(_designed), s.decimation, live);
         }
-        if (live && rateChanged) {
+        if (live && s.decimation.changed()) {
             this->coreMarkReorigin();
         }
     }
 
-    void start() {
-        if (_designStale) {
-            design();
-            _designStale = false;
-        }
-        this->coreStart(std::span<const TTap>(_designed), decimation);
-    }
+    void start() { this->coreStart(std::span<const TTap>(_designed), settings.decimation); }
 
     /// @brief The delay every forwarded tag moves by, in input samples. Every profile designs a symmetric or
     /// antisymmetric set.
     [[nodiscard]] double groupDelaySamples() const noexcept { return 0.5 * static_cast<double>(_designed.size() - 1UZ); }
 
 private:
-    void design() {
-        if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
-            throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
-        }
+    [[nodiscard]] static bool isComplexProfile(FilterProfile which) { return which == FilterProfile::complex_bandpass || which == FilterProfile::complex_bandstop; }
+
+    /// @brief The taps the settings @p given design, after the check's rules; a band the library cannot design throws.
+    [[nodiscard]] std::vector<TTap> designedTaps(const Settings& given) const {
+        // every window that reads the parameter refuses a negative one: a negative value is free to mean "derive it"
+        const double                        windowParam = given.window_param.value < 0.0 ? std::numeric_limits<double>::quiet_NaN() : given.window_param.value;
         gr::filter::fir::design::FilterSpec spec{
-            .sampleRate      = static_cast<double>(sample_rate),
-            .cutoff          = cutoff,
-            .highCutoff      = high_cutoff,
-            .transitionWidth = transition_width,
-            .gain            = gain,
-            .attenuationDb   = attenuation_db,
-            .window          = window,
-            .windowParam     = window_param,
-            .taps            = static_cast<std::size_t>(taps.value),
+            .sampleRate      = static_cast<double>(given.sample_rate.value),
+            .cutoff          = given.cutoff.value,
+            .highCutoff      = given.high_cutoff.value,
+            .transitionWidth = given.transition_width.value,
+            .gain            = given.gain.value,
+            .attenuationDb   = given.attenuation_db.value,
+            .window          = given.window.value,
+            .windowParam     = windowParam,
+            .taps            = static_cast<std::size_t>(given.taps.value),
         };
 
-        const std::string_view which = profile.value;
-        std::vector<TTap>      designed;
+        const FilterProfile which = given.profile.value;
         if constexpr (std::same_as<TTap, float>) {
-            if (which == "lowpass") {
-                designed = gr::filter::fir::design::designLowpass(spec);
-            } else if (which == "highpass") {
-                designed = gr::filter::fir::design::designHighpass(spec);
-            } else if (which == "bandpass") {
-                designed = gr::filter::fir::design::designBandpass(spec);
-            } else if (which == "bandstop") {
-                designed = gr::filter::fir::design::designBandstop(spec);
-            } else if (which == "root_raised_cosine") {
-                if (taps.value == 0U) {
-                    throw gr::exception("root_raised_cosine has no transition-width length estimate; state taps");
-                }
-                if (!(symbol_rate > 0.0)) {
-                    throw gr::exception(std::format("root_raised_cosine needs a positive symbol_rate, got {}", symbol_rate.value));
-                }
-                designed = gr::filter::fir::design::designRootRaisedCosine(static_cast<std::size_t>(taps.value), static_cast<double>(sample_rate), symbol_rate, alpha, gain);
-            } else if (which == "hilbert") {
-                if (taps.value == 0U) {
-                    throw gr::exception("hilbert has no transition-width length estimate: the usable band is a trade against the length, so state taps");
-                }
-                if (taps.value % 2U == 0U) {
-                    throw gr::exception(std::format("hilbert is a type III antisymmetric design and needs an odd length, so that its group delay is a whole sample; got taps {}", taps.value));
-                }
-                designed = gr::filter::fir::design::hilbert(static_cast<std::size_t>(taps.value), gr::filter::fir::design::windowOf(spec), gain);
-            } else if (which == "complex_bandpass" || which == "complex_bandstop") {
-                throw gr::exception(std::format("profile '{}' needs the complex tap type", which));
-            } else {
-                throw gr::exception(std::format("unknown profile '{}'", which));
+            switch (which) {
+            case FilterProfile::lowpass: return gr::filter::fir::design::designLowpass(spec);
+            case FilterProfile::highpass: return gr::filter::fir::design::designHighpass(spec);
+            case FilterProfile::bandpass: return gr::filter::fir::design::designBandpass(spec);
+            case FilterProfile::bandstop: return gr::filter::fir::design::designBandstop(spec);
+            case FilterProfile::root_raised_cosine: return gr::filter::fir::design::designRootRaisedCosine(spec.taps, spec.sampleRate, given.symbol_rate.value, given.alpha.value, spec.gain);
+            case FilterProfile::hilbert: return gr::filter::fir::design::hilbert(spec.taps, gr::filter::fir::design::windowOf(spec), spec.gain);
+            case FilterProfile::complex_bandpass:
+            case FilterProfile::complex_bandstop: break; // the check admits no complex profile with real taps
             }
+            return {};
         } else {
-            if (which == "complex_bandpass") {
-                designed = gr::filter::fir::design::designComplexBandpass(spec);
-            } else if (which == "complex_bandstop") {
-                designed = gr::filter::fir::design::designComplexBandstop(spec);
-            } else if (which == "lowpass" || which == "highpass" || which == "bandpass" || which == "bandstop" || which == "root_raised_cosine" || which == "hilbert") {
-                throw gr::exception(std::format("profile '{}' needs the real tap type", which));
-            } else {
-                throw gr::exception(std::format("unknown profile '{}'", which));
+            if (which == FilterProfile::complex_bandpass) {
+                return gr::filter::fir::design::designComplexBandpass(spec);
             }
+            return gr::filter::fir::design::designComplexBandstop(spec); // the check admits no real profile with complex taps
         }
-
-        _designed     = std::move(designed);
-        designed_taps = static_cast<gr::Size_t>(_designed.size());
     }
 };
 

@@ -23,6 +23,7 @@
 #include <gnuradio-4.0/filter/FirFilter.hpp>
 #include <gnuradio-4.0/filter/TagDelay.hpp>
 #include <gnuradio-4.0/filter/time_domain_filter.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -126,14 +127,12 @@ const boost::ut::suite SequenceTests = [] {
 
         // Create FIR and IIR filter instances
         fir_filter<double> fir_filter;
-        fir_filter.b = fir_coeffs;
+        expect(fir_filter.set({{"b", fir_coeffs}}).has_value());
 
         iir_filter<double, IIRForm::DF_I> iir_filter1;
-        iir_filter1.b = iir_coeffs_b;
-        iir_filter1.a = iir_coeffs_a;
+        expect(iir_filter1.set({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}}).has_value());
         iir_filter<double, IIRForm::DF_II> iir_filter2;
-        iir_filter2.b = iir_coeffs_b;
-        iir_filter2.a = iir_coeffs_a;
+        expect(iir_filter2.set({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}}).has_value());
 
         std::vector<double> fir_response;
         std::vector<double> iir_response1;
@@ -166,17 +165,13 @@ const boost::ut::suite SequenceTests = [] {
         Tensor<double> iir_coeffs_a(data_from, {1.0, -1.561018075800718, 0.641351538057563});
 
         iir_filter<double, IIRForm::DF_I> iir_filter_I;
-        iir_filter_I.b = iir_coeffs_b;
-        iir_filter_I.a = iir_coeffs_a;
+        expect(iir_filter_I.set({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}}).has_value());
         iir_filter<double, IIRForm::DF_II> iir_filter_II;
-        iir_filter_II.b = iir_coeffs_b;
-        iir_filter_II.a = iir_coeffs_a;
+        expect(iir_filter_II.set({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}}).has_value());
         iir_filter<double, IIRForm::DF_I_TRANSPOSED> iir_filter_IT;
-        iir_filter_IT.b = iir_coeffs_b;
-        iir_filter_IT.a = iir_coeffs_a;
+        expect(iir_filter_IT.set({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}}).has_value());
         iir_filter<double, IIRForm::DF_II_TRANSPOSED> iir_filter_IIT;
-        iir_filter_IIT.b = iir_coeffs_b;
-        iir_filter_IIT.a = iir_coeffs_a;
+        expect(iir_filter_IIT.set({{"b", iir_coeffs_b}, {"a", iir_coeffs_a}}).has_value());
 
         constexpr double tolerance = 0.00001;
         for (std::size_t i = 0UL; i < 20; ++i) {
@@ -203,8 +198,7 @@ const boost::ut::suite SequenceTests = [] {
         Tensor<float> coeffs_a(data_from, {1.0f, -1.561018076f, 0.641351538f});
 
         const auto settled = [&](auto& filter) {
-            filter.b = coeffs_b;
-            filter.a = coeffs_a;
+            expect(filter.set({{"b", coeffs_b}, {"a", coeffs_a}}).has_value());
             for (std::size_t i = 0UZ; i < 64UZ; ++i) {
                 std::ignore = filter.processOne(1.f);
             }
@@ -252,13 +246,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             auto filterType = TTestParameter::filter_type;
 
             BasicFilter<T> filter;
-            filter.filter_type       = filterType;
-            filter.filter_response   = filter::Type::LOWPASS;
-            filter.filter_order      = filterOrder;
-            filter.f_low             = f_low;
-            filter.sample_rate       = sampleRate;
-            filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
-            filter.fir_design_method = algorithm::window::Type::Hamming;
+            expect(filter.set({{"filter_type", std::string(gr::meta::enumName(filterType).value_or(""))}, {"filter_response", "LOWPASS"}, {"filter_order", static_cast<gr::Size_t>(filterOrder)}, {"f_low", f_low}, {"sample_rate", sampleRate}, {"iir_design_method", "CHEBYSHEV1"}, {"fir_design_method", "Hamming"}}).has_value());
             filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
             "verify in-band signal passes through"_test = [&filter] {
@@ -276,7 +264,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 }
 
                 ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
-                expect(ge(maxOutput, static_cast<ValueType>(.9f))) << std::format("{} filter should pass in-band frequencies: max output {}", filter.filter_type, maxOutput);
+                expect(ge(maxOutput, static_cast<ValueType>(.9f))) << std::format("{} filter should pass in-band frequencies: max output {}", filter.settings.filter_type, maxOutput);
             };
 
             "verify out-of-band signal is attenuated"_test = [&filter] {
@@ -294,7 +282,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 }
 
                 ValueType maxOutput = std::abs(gr::value(*std::ranges::max_element(outputSignal, maxOp)));
-                expect(le(maxOutput, static_cast<ValueType>(.2f))) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+                expect(le(maxOutput, static_cast<ValueType>(.2f))) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.settings.filter_type, maxOutput);
             };
         } |
         std::tuple<FilterTestParam<float, FilterType::FIR>,          //
@@ -307,7 +295,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
     "UncertainValue<double> header type smoke test"_test = [] {
         static_assert(BlockLike<BasicFilter<UncertainValue<double>>>);
         BasicFilter<UncertainValue<double>> filter;
-        expect(filter.filter_type == FilterType::IIR);
+        expect(filter.settings.filter_type == FilterType::IIR);
     };
 
     "BasicDecimatingFilter - Low-pass Filter Test"_test = [](const FilterType& filterType) {
@@ -315,14 +303,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
         // Instantiate the BasicDecimatingFilter with the desired decimation rate
         BasicDecimatingFilter<T> filter;
-        filter.filter_type       = filterType;
-        filter.filter_response   = filter::Type::LOWPASS;
-        filter.filter_order      = filterOrder;
-        filter.f_low             = f_low;
-        filter.sample_rate       = sampleRate;
-        filter.iir_design_method = filter::iir::Design::CHEBYSHEV1;
-        filter.fir_design_method = algorithm::window::Type::Hamming;
-        filter.decimate          = decimationRate;
+        expect(filter.set({{"filter_type", std::string(gr::meta::enumName(filterType).value_or(""))}, {"filter_response", "LOWPASS"}, {"filter_order", static_cast<gr::Size_t>(filterOrder)}, {"f_low", f_low}, {"sample_rate", sampleRate}, {"iir_design_method", "CHEBYSHEV1"}, {"fir_design_method", "Hamming"}, {"decimate", static_cast<gr::Size_t>(decimationRate)}}).has_value());
         filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
         expect(eq(filter.input_chunk_size, decimationRate)) << "decimationRate type mismatch";
@@ -347,7 +328,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 sumSq += static_cast<double>(v) * static_cast<double>(v);
             }
             double amplitude = std::sqrt(2.0 * sumSq / static_cast<double>(outputSignal.size()));
-            expect(ge(amplitude, T{0.9})) << std::format("{} filter should pass in-band frequencies: amplitude {}", filter.filter_type, amplitude);
+            expect(ge(amplitude, T{0.9})) << std::format("{} filter should pass in-band frequencies: amplitude {}", filter.settings.filter_type, amplitude);
         };
 
         "verify out-of-band signal is attenuated"_test = [&filter] {
@@ -366,7 +347,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             expect(filter.processBulk(inputSignal, outputSignal) == work::Status::OK) << "second processing failed";
 
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
-            expect(le(maxOutput, T{0.2})) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.filter_type, maxOutput);
+            expect(le(maxOutput, T{0.2})) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.settings.filter_type, maxOutput);
         };
     } | std::vector<FilterType>({FilterType::FIR, FilterType::IIR});
 
@@ -390,28 +371,22 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(decimator.decim, decimationFactor));
+        expect(eq(decimator.settings.decim, decimationFactor));
         expect(eq(decimator.output_chunk_size, static_cast<gr::Size_t>(1)));
         expect(eq(decimator.input_chunk_size, decimationFactor));
 
-        expect(eq(sink.count, static_cast<gr::Size_t>(10)));
+        expect(eq(sink.status.count.value, std::uint64_t{10U}));
     };
 
     "Decimator refuses a factor of zero and keeps the factor it had"_test = [] {
         constexpr gr::Size_t                 kFactor = 5U;
         gr::blocks::filter::Decimator<float> decimator({{"decim", kFactor}});
         decimator.init(decimator.progress);
-        expect(fatal(eq(decimator.decim, kFactor)));
+        expect(fatal(eq(decimator.settings.decim, kFactor)));
 
-        std::ignore  = decimator.settings().setStaged({{"decim", gr::Size_t{0U}}});
-        bool refused = false;
-        try {
-            refused = !decimator.settings().applyStagedParameters().failedParameters.empty();
-        } catch (const std::exception&) {
-            refused = true;
-        }
+        const bool refused = !gr::testing::setAndApply(gr::settings::detail::settingsOf(decimator), {{"decim", gr::Size_t{0U}}}).empty();
         expect(refused) << "the factor of zero is refused";
-        expect(fatal(eq(decimator.decim, kFactor))) << "the refused factor leaves the factor the block had";
+        expect(fatal(eq(decimator.settings.decim, kFactor))) << "the refused factor leaves the factor the block had";
         expect(eq(decimator.input_chunk_size, kFactor));
 
         const std::vector<float> input(4UZ * kFactor, 1.0f);
@@ -424,17 +399,11 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
         constexpr gr::Size_t                             kFactor = 5U;
         gr::blocks::filter::BasicDecimatingFilter<float> filter({{"decimate", kFactor}});
         filter.init(filter.progress);
-        expect(fatal(eq(filter.decimate, kFactor)));
+        expect(fatal(eq(filter.settings.decimate, kFactor)));
 
-        std::ignore  = filter.settings().setStaged({{"decimate", gr::Size_t{0U}}});
-        bool refused = false;
-        try {
-            refused = !filter.settings().applyStagedParameters().failedParameters.empty();
-        } catch (const std::exception&) {
-            refused = true;
-        }
+        const bool refused = !gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"decimate", gr::Size_t{0U}}}).empty();
         expect(refused) << "the factor of zero is refused";
-        expect(fatal(eq(filter.decimate, kFactor))) << "the refused factor leaves the factor the block had";
+        expect(fatal(eq(filter.settings.decimate, kFactor))) << "the refused factor leaves the factor the block had";
         expect(eq(filter.input_chunk_size, kFactor));
 
         const std::vector<float> input(4UZ * kFactor, 1.0f);
@@ -583,8 +552,9 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         namespace filter_test = gr::blocks::filter::testing;
         const auto make       = [] {
             fir_filter<float> block({{"b", std::vector<float>(5UZ, 0.2f)}});
-            block.settings().init();
-            std::ignore = block.settings().applyStagedParameters();
+            if (const auto first = block.check({}); !first.has_value()) {
+                throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+            }
             block.start();
             return block;
         };
@@ -599,12 +569,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         // mode and starts on a tag, which the framework places on output 100. The held trigger leaves there too.
         namespace test = gr::blocks::testing::span;
         BasicFilter<float> block;
-        block.filter_type       = FilterType::FIR;
-        block.filter_response   = gr::filter::Type::LOWPASS;
-        block.filter_order      = 4U;
-        block.f_low             = 100.0f;
-        block.sample_rate       = 1000.0f;
-        block.fir_design_method = gr::algorithm::window::Type::Hamming;
+        expect(block.set({{"filter_type", "FIR"}, {"filter_response", "LOWPASS"}, {"filter_order", 4U}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}, {"fir_design_method", "Hamming"}}).has_value());
         block.start();
         expect(gt(block.twiceTagDelay().value_or(0ULL), 0ULL)) << "the FIR design delays its tags";
 
@@ -615,7 +580,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         const std::vector<gr::Tag> secondTags{{100UZ, gr::property_map{{gr::property_map::key_type{"gr:trigger_meta_info"}, std::string("next")}}}};
         for (const auto& [at, tags] : {std::pair{0UZ, std::span<const gr::Tag>(firstTags)}, std::pair{100UZ, std::span<const gr::Tag>(secondTags)}}) {
             if (at > 0UZ) {
-                block.filter_type = FilterType::IIR;
+                expect(block.set({{"filter_type", "IIR"}}).has_value());
                 block.designFilter();
             }
             test::InputSpan<float>  inSpan(std::span<const float>(input), at, tags);
