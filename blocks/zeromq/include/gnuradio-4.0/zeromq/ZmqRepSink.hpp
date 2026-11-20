@@ -55,16 +55,20 @@ This block receives stream items and replies to REQ requests using a REP socket.
 )"">;
 
     gr::PortIn<T> in;
-    std::string   endpoint        = "tcp://*:5555";
-    int           timeout         = 100;
-    bool          bind            = true;
-    bool          pass_tags       = false;
-    PmtWireFormat pmt_wire_format = PmtWireFormat::GR4_YAML_V1;
-    int           linger          = 1000;
-    int           hwm             = -1;
-    // Covers ZMTP handshake metadata, identities and correlated REQ envelopes,
-    // while bounding allocation before the four-byte body validation below.
-    std::int64_t max_message_size = 4096;
+    struct Settings {
+        std::string   endpoint        = "tcp://*:5555";
+        int           timeout         = 100;
+        bool          bind            = true;
+        bool          pass_tags       = false;
+        PmtWireFormat pmt_wire_format = PmtWireFormat::GR4_YAML_V1;
+        int           linger          = 1000;
+        int           hwm             = -1;
+        // Covers ZMTP handshake metadata, identities and correlated REQ envelopes,
+        // while bounding allocation before the four-byte body validation below.
+        std::int64_t max_message_size = 4096;
+
+        GR_MAKE_REFLECTABLE(Settings, endpoint, timeout, bind, pass_tags, pmt_wire_format, linger, hwm, max_message_size);
+    } settings;
 
     detail::ZmqSocketTransport _transport{zmq::socket_type::rep};
     detail::ZmqSendCounters    _send_counters;
@@ -74,16 +78,16 @@ This block receives stream items and replies to REQ requests using a REP socket.
     std::optional<zmq::message_t> _pending_reply;
     std::size_t                   _pending_reply_items = 0;
 
-    GR_MAKE_REFLECTABLE(ZmqRepSink, in, endpoint, timeout, bind, pass_tags, pmt_wire_format, linger, hwm, max_message_size);
+    GR_MAKE_REFLECTABLE(ZmqRepSink, in, settings);
 
     // processBulk() waits on the socket for up to `timeout`. stop() ends that wait from another thread.
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::ZmqSocketTransport::require_nonnegative_timeout(settings.timeout);
         clear_run_state();
         _send_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, true, max_message_size);
+        _transport.open(settings.endpoint, settings.bind, settings.linger, settings.hwm, true, settings.max_message_size);
     }
 
     void stop() {
@@ -104,14 +108,14 @@ This block receives stream items and replies to REQ requests using a REP socket.
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inData) {
         auto                             operation = _transport.acquire_operation_guard();
-        const detail::InvocationDeadline deadline{timeout};
+        const detail::InvocationDeadline deadline{settings.timeout};
         auto                             cancelled = detail::cancellation_check(*this);
         std::size_t                      messages  = 0;
 
         auto make_empty_reply = [&]() {
-            const auto header = pass_tags ? detail::serialize_tag_header(0, {}, pmt_wire_format) : std::vector<std::uint8_t>{};
+            const auto header = settings.pass_tags ? detail::serialize_tag_header(0, {}, settings.pmt_wire_format) : std::vector<std::uint8_t>{};
             if constexpr (std::is_same_v<T, gr::pmt::Value>) {
-                const auto     serialized = detail::serialize_pmt(gr::pmt::Value{}, pmt_wire_format);
+                const auto     serialized = detail::serialize_pmt(gr::pmt::Value{}, settings.pmt_wire_format);
                 zmq::message_t reply(header.size() + serialized.size());
                 if (!header.empty()) {
                     std::memcpy(reply.data(), header.data(), header.size());
@@ -138,9 +142,9 @@ This block receives stream items and replies to REQ requests using a REP socket.
 
             if constexpr (is_arithmetic_or_complex_v<T>) {
                 const std::size_t nsend    = std::min(requested, inData.size());
-                const auto        all_tags = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto        tags     = pass_tags ? detail::select_pending_tags(all_tags, nsend) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto        header   = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : std::vector<std::uint8_t>{};
+                const auto        all_tags = settings.pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
+                const auto        tags     = settings.pass_tags ? detail::select_pending_tags(all_tags, nsend) : std::vector<detail::ZmqTagHeaderRecord>{};
+                const auto        header   = settings.pass_tags ? detail::serialize_tag_header(0, tags, settings.pmt_wire_format) : std::vector<std::uint8_t>{};
                 zmq::message_t    reply(header.size() + nsend * sizeof(T));
                 if (!header.empty()) {
                     std::memcpy(reply.data(), header.data(), header.size());
@@ -150,9 +154,9 @@ This block receives stream items and replies to REQ requests using a REP socket.
                 _pending_reply_items = nsend;
             } else if constexpr (is_vector_of_arithmetic_or_complex_v<T>) {
                 const auto&    vec      = inData.front();
-                const auto     all_tags = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     tags     = pass_tags ? detail::select_pending_tags(all_tags, 1) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     header   = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : std::vector<std::uint8_t>{};
+                const auto     all_tags = settings.pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
+                const auto     tags     = settings.pass_tags ? detail::select_pending_tags(all_tags, 1) : std::vector<detail::ZmqTagHeaderRecord>{};
+                const auto     header   = settings.pass_tags ? detail::serialize_tag_header(0, tags, settings.pmt_wire_format) : std::vector<std::uint8_t>{};
                 zmq::message_t reply(header.size() + vec.size() * sizeof(typename T::value_type));
                 if (!header.empty()) {
                     std::memcpy(reply.data(), header.data(), header.size());
@@ -163,10 +167,10 @@ This block receives stream items and replies to REQ requests using a REP socket.
                 _pending_reply       = std::move(reply);
                 _pending_reply_items = 1;
             } else {
-                const auto     all_tags   = pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     tags       = pass_tags ? detail::select_pending_tags(all_tags, 1) : std::vector<detail::ZmqTagHeaderRecord>{};
-                const auto     header     = pass_tags ? detail::serialize_tag_header(0, tags, pmt_wire_format) : std::vector<std::uint8_t>{};
-                const auto     serialized = detail::serialize_pmt(inData.front(), pmt_wire_format);
+                const auto     all_tags   = settings.pass_tags ? detail::collect_tag_records(inData) : std::vector<detail::ZmqTagHeaderRecord>{};
+                const auto     tags       = settings.pass_tags ? detail::select_pending_tags(all_tags, 1) : std::vector<detail::ZmqTagHeaderRecord>{};
+                const auto     header     = settings.pass_tags ? detail::serialize_tag_header(0, tags, settings.pmt_wire_format) : std::vector<std::uint8_t>{};
+                const auto     serialized = detail::serialize_pmt(inData.front(), settings.pmt_wire_format);
                 zmq::message_t reply(header.size() + serialized.size());
                 if (!header.empty()) {
                     std::memcpy(reply.data(), header.data(), header.size());

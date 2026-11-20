@@ -50,11 +50,7 @@ void send(zmq::socket_t& peer, const std::vector<std::uint8_t>& bytes) { expect(
 template<template<typename> typename Source, typename T>
 void refusal_prefix() {
     Source<T> source;
-    source.endpoint  = "inproc://refusal";
-    source.bind      = true;
-    source.linger    = 0;
-    source.timeout   = 0;
-    source.pass_tags = true;
+    expect(source.set({{"endpoint", std::string("inproc://refusal")}, {"bind", true}, {"linger", 0}, {"timeout", 0}, {"pass_tags", true}}).has_value());
     source.start();
     constexpr bool sub  = std::same_as<Source<T>, ZmqSubSource<T>>;
     auto           peer = zd::ZmqTransportTestAccess::peer(source._transport, sub ? zmq::socket_type::xpub : zmq::socket_type::push);
@@ -126,15 +122,10 @@ void refusal_prefix() {
 template<template<typename> typename Sink, typename T>
 void message_tags_retry(const std::string& key = {}, std::size_t tagged_item = 1) {
     Sink<T> sink;
-    sink.endpoint      = "inproc://retry";
-    sink.timeout       = 0;
-    sink.linger        = 0;
-    sink.hwm           = 2;
-    sink.pass_tags     = true;
+    expect(sink.set({{"endpoint", std::string("inproc://retry")}, {"timeout", 0}, {"linger", 0}, {"hwm", 2}, {"pass_tags", true}}).has_value());
     constexpr bool pub = std::same_as<Sink<T>, ZmqPubSink<T>>;
     if constexpr (pub) {
-        sink.drop_on_hwm = false;
-        sink.key         = key;
+        expect(sink.set({{"drop_on_hwm", false}, {"key", std::string(key)}}).has_value());
     }
     sink.start();
     auto peer = zd::ZmqTransportTestAccess::peer(sink._transport, pub ? zmq::socket_type::sub : zmq::socket_type::pull);
@@ -234,11 +225,7 @@ void message_tags_retry(const std::string& key = {}, std::size_t tagged_item = 1
 template<typename T>
 void req_refusal_recovery() {
     ZmqReqSource<T> source;
-    source.endpoint  = "inproc://req-recovery";
-    source.bind      = true;
-    source.timeout   = 0;
-    source.linger    = 0;
-    source.pass_tags = true;
+    expect(source.set({{"endpoint", std::string("inproc://req-recovery")}, {"bind", true}, {"timeout", 0}, {"linger", 0}, {"pass_tags", true}}).has_value());
     source.start();
     auto peer = zd::ZmqTransportTestAccess::peer(source._transport, zmq::socket_type::rep);
     peer.set(zmq::sockopt::linger, 0);
@@ -297,11 +284,7 @@ struct PublicationError : std::runtime_error {
 template<template<typename> typename Source, typename T, typename Error>
 void publication_error() {
     Source<T> source;
-    source.endpoint  = "inproc://exception";
-    source.bind      = true;
-    source.timeout   = 0;
-    source.linger    = 0;
-    source.pass_tags = true;
+    expect(source.set({{"endpoint", std::string("inproc://exception")}, {"bind", true}, {"timeout", 0}, {"linger", 0}, {"pass_tags", true}}).has_value());
     source.start();
     constexpr bool req  = std::same_as<Source<T>, ZmqReqSource<T>>;
     constexpr bool sub  = std::same_as<Source<T>, ZmqSubSource<T>>;
@@ -341,9 +324,7 @@ void publication_error() {
 
 void rep_request_limit() {
     ZmqRepSink<float> sink;
-    sink.endpoint = "tcp://127.0.0.1:0";
-    sink.timeout  = 20;
-    sink.linger   = 0;
+    expect(sink.set({{"endpoint", std::string("tcp://127.0.0.1:0")}, {"timeout", 20}, {"linger", 0}}).has_value());
     sink.start();
     expect(eq(sink._transport.socket().get(zmq::sockopt::maxmsgsize), std::int64_t{4096}));
     gr::PortOut<float> writer;
@@ -425,10 +406,7 @@ struct DefaultResourceGuard {
 };
 void decode_allocation_error() {
     ZmqPullSource<gr::pmt::Value> source;
-    source.endpoint = "inproc://allocation";
-    source.bind     = true;
-    source.timeout  = 0;
-    source.linger   = 0;
+    expect(source.set({{"endpoint", std::string("inproc://allocation")}, {"bind", true}, {"timeout", 0}, {"linger", 0}}).has_value());
     source.start();
     auto peer = zd::ZmqTransportTestAccess::peer(source._transport, zmq::socket_type::push);
     peer.connect(source.last_endpoint());
@@ -456,9 +434,7 @@ void decode_allocation_error() {
 const suite remediation = [] {
     "Transport failure propagates instead of becoming a refusal"_test = [] {
         ZmqPullSource<float> source;
-        source.endpoint = "inproc://transport-failure";
-        source.bind     = true;
-        source.linger   = 0;
+        expect(source.set({{"endpoint", std::string("inproc://transport-failure")}, {"bind", true}, {"linger", 0}}).has_value());
         source.start();
         zd::ZmqTransportTestAccess::shutdown(source._transport);
         bool propagated = false;

@@ -100,25 +100,31 @@ std::string shell_quote(std::string_view value) {
 template<typename T>
 struct SequenceSource : gr::Block<SequenceSource<T>> {
     gr::PortOut<T> out;
-    std::vector<T> values;
-    std::size_t    index            = 0;
-    gr::Size_t     startup_delay_ms = 50;
-    bool           started          = false;
 
-    GR_MAKE_REFLECTABLE(SequenceSource, out, values, startup_delay_ms);
+    struct Settings {
+        std::vector<T> values;
+        gr::Size_t     startup_delay_ms = 50;
+
+        GR_MAKE_REFLECTABLE(Settings, values, startup_delay_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SequenceSource, out, settings);
+
+    std::size_t index   = 0;
+    bool        started = false;
 
     [[nodiscard]] T processOne() {
         if (!started) {
             started = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(startup_delay_ms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(settings.startup_delay_ms));
         }
-        if (index >= values.size()) {
+        if (index >= settings.values.size()) {
             this->requestStop();
             return T{};
         }
 
-        auto value = values[index++];
-        if (index >= values.size()) {
+        auto value = settings.values[index++];
+        if (index >= settings.values.size()) {
             this->requestStop();
         }
         return value;
@@ -128,23 +134,29 @@ struct SequenceSource : gr::Block<SequenceSource<T>> {
 template<typename T>
 struct LoopingSource : gr::Block<LoopingSource<T>> {
     gr::PortOut<T> out;
-    std::vector<T> values;
-    std::size_t    index            = 0;
-    gr::Size_t     startup_delay_ms = 50;
-    bool           started          = false;
 
-    GR_MAKE_REFLECTABLE(LoopingSource, out, values, startup_delay_ms);
+    struct Settings {
+        std::vector<T> values;
+        gr::Size_t     startup_delay_ms = 50;
+
+        GR_MAKE_REFLECTABLE(Settings, values, startup_delay_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(LoopingSource, out, settings);
+
+    std::size_t index   = 0;
+    bool        started = false;
 
     [[nodiscard]] T processOne() {
         if (!started) {
             started = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(startup_delay_ms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(settings.startup_delay_ms));
         }
-        if (values.empty()) {
+        if (settings.values.empty()) {
             this->requestStop();
             return T{};
         }
-        const auto value = values[index % values.size()];
+        const auto value = settings.values[index % settings.values.size()];
         ++index;
         return value;
     }
@@ -152,28 +164,40 @@ struct LoopingSource : gr::Block<LoopingSource<T>> {
 
 template<typename T>
 struct RecordingSink : gr::Block<RecordingSink<T>> {
-    gr::PortIn<T>  in;
-    gr::Size_t     n_samples_max = 0;
-    std::vector<T> received;
+    gr::PortIn<T> in;
 
-    GR_MAKE_REFLECTABLE(RecordingSink, in, n_samples_max);
+    struct Settings {
+        gr::Size_t n_samples_max = 0;
+
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(RecordingSink, in, settings);
+
+    std::vector<T> received;
 
     void processOne(const T& value) {
         received.push_back(value);
-        if (n_samples_max > 0 && received.size() >= n_samples_max) {
+        if (settings.n_samples_max > 0 && received.size() >= settings.n_samples_max) {
             this->requestStop();
         }
     }
 };
 
 struct RecordingTaggedSink : gr::Block<RecordingTaggedSink> {
-    gr::PortIn<float>                                     in;
-    gr::Size_t                                            n_samples_max = 0;
+    gr::PortIn<float> in;
+
+    struct Settings {
+        gr::Size_t n_samples_max = 0;
+
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(RecordingTaggedSink, in, settings);
+
     std::vector<float>                                    received;
     std::vector<std::pair<std::size_t, gr::property_map>> tags;
     std::size_t                                           consumed_total = 0;
-
-    GR_MAKE_REFLECTABLE(RecordingTaggedSink, in, n_samples_max);
 
     [[nodiscard]] gr::work::Status processBulk(gr::InputSpanLike auto& input) {
         const auto base_offset = consumed_total;
@@ -186,7 +210,7 @@ struct RecordingTaggedSink : gr::Block<RecordingTaggedSink> {
             }
         }
         consumed_total += input.size();
-        if (n_samples_max > 0 && received.size() >= n_samples_max) {
+        if (settings.n_samples_max > 0 && received.size() >= settings.n_samples_max) {
             this->requestStop();
         }
         return gr::work::Status::OK;
@@ -195,23 +219,29 @@ struct RecordingTaggedSink : gr::Block<RecordingTaggedSink> {
 
 template<typename T>
 struct TaggedBulkSource : gr::Block<TaggedBulkSource<T>> {
-    gr::PortOut<T>                                        out;
-    std::vector<T>                                        values;
-    std::vector<std::pair<std::size_t, gr::property_map>> tags;
-    std::size_t                                           emitted          = 0;
-    gr::Size_t                                            startup_delay_ms = 50;
-    bool                                                  started          = false;
+    gr::PortOut<T> out;
 
-    GR_MAKE_REFLECTABLE(TaggedBulkSource, out, values, startup_delay_ms);
+    struct Settings {
+        std::vector<T> values;
+        gr::Size_t     startup_delay_ms = 50;
+
+        GR_MAKE_REFLECTABLE(Settings, values, startup_delay_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TaggedBulkSource, out, settings);
+
+    std::vector<std::pair<std::size_t, gr::property_map>> tags;
+    std::size_t                                           emitted = 0;
+    bool                                                  started = false;
 
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& output) {
         if (!started) {
             started = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(startup_delay_ms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(settings.startup_delay_ms));
         }
-        const auto n = std::min(output.size(), values.size() - emitted);
+        const auto n = std::min(output.size(), settings.values.size() - emitted);
         for (std::size_t i = 0; i < n; ++i) {
-            output[i] = values[emitted + i];
+            output[i] = settings.values[emitted + i];
         }
         for (const auto& [tag_index, tag_map] : tags) {
             if (tag_index >= emitted && tag_index < emitted + n) {
@@ -220,7 +250,7 @@ struct TaggedBulkSource : gr::Block<TaggedBulkSource<T>> {
         }
         emitted += n;
         output.publish(n);
-        if (emitted >= values.size()) {
+        if (emitted >= settings.values.size()) {
             this->requestStop();
             return gr::work::Status::DONE;
         }
@@ -230,21 +260,27 @@ struct TaggedBulkSource : gr::Block<TaggedBulkSource<T>> {
 
 template<typename T>
 struct RepeatingTaggedBulkSource : gr::Block<RepeatingTaggedBulkSource<T>> {
-    gr::PortOut<T>                                        out;
-    T                                                     value{};
-    std::vector<std::pair<std::size_t, gr::property_map>> tags;
-    gr::Size_t                                            startup_delay_ms = 50;
-    bool                                                  started          = false;
+    gr::PortOut<T> out;
 
-    GR_MAKE_REFLECTABLE(RepeatingTaggedBulkSource, out, value, startup_delay_ms);
+    struct Settings {
+        T          value{};
+        gr::Size_t startup_delay_ms = 50;
+
+        GR_MAKE_REFLECTABLE(Settings, value, startup_delay_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(RepeatingTaggedBulkSource, out, settings);
+
+    std::vector<std::pair<std::size_t, gr::property_map>> tags;
+    bool                                                  started = false;
 
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& output) {
         if (!started) {
             started = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(startup_delay_ms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(settings.startup_delay_ms));
         }
         for (auto& item : output) {
-            item = value;
+            item = settings.value;
         }
         for (const auto& [tag_index, tag_map] : tags) {
             if (tag_index < output.size()) {
@@ -345,19 +381,18 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(0);
         const auto expected = std::vector<float>{1.f, 2.f, 3.f, 4.f};
 
-        auto& pull         = fg.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<float>>({
+        auto& pull = fg.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<float>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
         });
-        auto& sink         = fg.emplaceBlock<RecordingSink<float>>();
-        sink.n_samples_max = static_cast<gr::Size_t>(expected.size());
+        auto& sink = fg.emplaceBlock<RecordingSink<float>>({{"n_samples_max", static_cast<gr::Size_t>(expected.size())}});
 
         expect(fg.connect<"out", "in">(pull, sink).has_value());
 
         auto peer = spawn_peer("raw_push_connect", TestEndpoint::bound_by(pull));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return sink.received.size() >= expected.size(); }, std::chrono::milliseconds(5000)));
         expect(sink.received == expected);
@@ -383,7 +418,7 @@ const suite ZmqInteropTests = [] {
 
         auto peer = spawn_peer("raw_pull_connect", TestEndpoint::bound_by(push));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return peer.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; }, std::chrono::milliseconds(10000)));
         expect(eq(peer.get(), 0));
@@ -394,19 +429,18 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(4);
         const auto expected = std::vector<float>{1.f, 2.f, 3.f, 4.f};
 
-        auto& sub          = fg.emplaceBlock<gr::blocks::zeromq::ZmqSubSource<float>>({
+        auto& sub  = fg.emplaceBlock<gr::blocks::zeromq::ZmqSubSource<float>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
         });
-        auto& sink         = fg.emplaceBlock<RecordingSink<float>>();
-        sink.n_samples_max = static_cast<gr::Size_t>(expected.size());
+        auto& sink = fg.emplaceBlock<RecordingSink<float>>({{"n_samples_max", static_cast<gr::Size_t>(expected.size())}});
 
         expect(fg.connect<"out", "in">(sub, sink).has_value());
 
         auto peer = spawn_peer("raw_pub_connect", TestEndpoint::bound_by(sub));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return sink.received.size() >= expected.size(); }, std::chrono::milliseconds(5000)));
         expect(sink.received == expected);
@@ -418,10 +452,8 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(5);
         const auto expected = std::vector<float>{5.f, 6.f, 7.f, 8.f};
 
-        auto& source            = fg.emplaceBlock<LoopingSource<float>>();
-        source.values           = expected;
-        source.startup_delay_ms = 300;
-        auto& pub               = fg.emplaceBlock<gr::blocks::zeromq::ZmqPubSink<float>>({
+        auto& source = fg.emplaceBlock<LoopingSource<float>>({{"values", expected}, {"startup_delay_ms", 300U}});
+        auto& pub    = fg.emplaceBlock<gr::blocks::zeromq::ZmqPubSink<float>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
@@ -431,7 +463,7 @@ const suite ZmqInteropTests = [] {
 
         auto peer = spawn_peer("raw_sub_connect", TestEndpoint::bound_by(pub));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return peer.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; }, std::chrono::milliseconds(10000)));
         expect(eq(peer.get(), 0));
@@ -442,10 +474,8 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(6);
         const auto expected = std::vector<float>{5.f, 6.f, 7.f, 8.f};
 
-        auto& source            = fg.emplaceBlock<LoopingSource<float>>();
-        source.values           = expected;
-        source.startup_delay_ms = 300;
-        auto& rep               = fg.emplaceBlock<gr::blocks::zeromq::ZmqRepSink<float>>({
+        auto& source = fg.emplaceBlock<LoopingSource<float>>({{"values", expected}, {"startup_delay_ms", 300U}});
+        auto& rep    = fg.emplaceBlock<gr::blocks::zeromq::ZmqRepSink<float>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
@@ -455,7 +485,7 @@ const suite ZmqInteropTests = [] {
 
         auto peer = spawn_peer("raw_req_source", TestEndpoint::bound_by(rep));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return peer.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; }, std::chrono::milliseconds(10000)));
         expect(eq(peer.get(), 0));
@@ -466,19 +496,18 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(7);
         const auto expected = std::vector<float>{5.f, 6.f, 7.f, 8.f};
 
-        auto& req          = fg.emplaceBlock<gr::blocks::zeromq::ZmqReqSource<float>>({
+        auto& req  = fg.emplaceBlock<gr::blocks::zeromq::ZmqReqSource<float>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
         });
-        auto& sink         = fg.emplaceBlock<RecordingSink<float>>();
-        sink.n_samples_max = static_cast<gr::Size_t>(expected.size());
+        auto& sink = fg.emplaceBlock<RecordingSink<float>>({{"n_samples_max", static_cast<gr::Size_t>(expected.size())}});
 
         expect(fg.connect<"out", "in">(req, sink).has_value());
 
         auto peer = spawn_peer("raw_rep_sink", TestEndpoint::bound_by(req));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return sink.received.size() >= expected.size(); }, std::chrono::milliseconds(10000)));
         expect(sink.received == expected);
@@ -490,20 +519,19 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(2);
         const auto expected = make_nested_pair();
 
-        auto& pull         = fg.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<gr::pmt::Value>>({
+        auto& pull = fg.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<gr::pmt::Value>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"pmt_wire_format", gr::pmt::Value("GR3")},
         });
-        auto& sink         = fg.emplaceBlock<RecordingSink<gr::pmt::Value>>();
-        sink.n_samples_max = 1;
+        auto& sink = fg.emplaceBlock<RecordingSink<gr::pmt::Value>>({{"n_samples_max", 1U}});
 
         expect(fg.connect<"out", "in">(pull, sink).has_value());
 
         auto peer = spawn_peer("pmt_push_connect", TestEndpoint::bound_by(pull));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return sink.received.size() >= 1; }, std::chrono::milliseconds(5000)));
         expect(legacy_pmt::serialize_to_legacy(sink.received.front()) == legacy_pmt::serialize_to_legacy(expected));
@@ -515,10 +543,8 @@ const suite ZmqInteropTests = [] {
         const auto endpoint = endpoint_for(3);
         const auto expected = make_nested_pair();
 
-        auto& source            = fg.emplaceBlock<LoopingSource<gr::pmt::Value>>();
-        source.values           = std::vector<gr::pmt::Value>{expected};
-        source.startup_delay_ms = 300;
-        auto& push              = fg.emplaceBlock<gr::blocks::zeromq::ZmqPushSink<gr::pmt::Value>>({
+        auto& source = fg.emplaceBlock<LoopingSource<gr::pmt::Value>>({{"values", gr::Tensor<gr::pmt::Value>(gr::data_from, std::vector<gr::pmt::Value>{expected})}, {"startup_delay_ms", 300U}});
+        auto& push   = fg.emplaceBlock<gr::blocks::zeromq::ZmqPushSink<gr::pmt::Value>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
@@ -529,7 +555,7 @@ const suite ZmqInteropTests = [] {
 
         auto peer = spawn_peer("pmt_pull_connect", TestEndpoint::bound_by(push));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return peer.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; }, std::chrono::milliseconds(10000)));
         expect(eq(peer.get(), 0));
@@ -539,21 +565,20 @@ const suite ZmqInteropTests = [] {
         gr::Graph  fg;
         const auto endpoint = endpoint_for(8);
 
-        auto& pull         = fg.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<float>>({
+        auto& pull = fg.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<float>>({
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"pass_tags", gr::pmt::Value(true)},
             {"pmt_wire_format", gr::pmt::Value("GR3")},
         });
-        auto& sink         = fg.emplaceBlock<RecordingTaggedSink>();
-        sink.n_samples_max = 4;
+        auto& sink = fg.emplaceBlock<RecordingTaggedSink>({{"n_samples_max", 4U}});
 
         expect(fg.connect<"out", "in">(pull, sink).has_value());
 
         auto peer = spawn_peer("tagged_push_connect", TestEndpoint::bound_by(pull));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return sink.received.size() >= 4; }, std::chrono::milliseconds(5000)));
         expect(eq(peer.get(), 0));
@@ -570,10 +595,8 @@ const suite ZmqInteropTests = [] {
         gr::Graph  fg;
         const auto endpoint = endpoint_for(9);
 
-        auto& source            = fg.emplaceBlock<RepeatingTaggedBulkSource<float>>();
-        source.value            = 1.f;
-        source.startup_delay_ms = 300;
-        source.tags             = {
+        auto& source = fg.emplaceBlock<RepeatingTaggedBulkSource<float>>({{"value", 1.f}, {"startup_delay_ms", 300U}});
+        source.tags  = {
             {0UZ, wire_tag("alpha", gr::pmt::Value(int32_t{11}), gr::pmt::Value("src-a"))},
             {0UZ, wire_tag("beta", gr::pmt::Value(int32_t{22}), gr::pmt::Value("src-b"))},
         };
@@ -589,7 +612,7 @@ const suite ZmqInteropTests = [] {
 
         auto peer = spawn_peer("tagged_pull_multi_connect", TestEndpoint::bound_by(push));
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         expect(sched.exchange(std::move(fg)).has_value());
         expect(run_until_then_stop(sched, [&] { return peer.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready; }, std::chrono::milliseconds(10000)));
         expect(eq(peer.get(), 0));

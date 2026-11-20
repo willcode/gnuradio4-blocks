@@ -17,47 +17,59 @@ namespace gr::blocks::zeromq::examples {
 template<typename T>
 struct SequenceSource : gr::Block<SequenceSource<T>> {
     gr::PortOut<T> out;
-    std::vector<T> values;
-    std::size_t    index            = 0;
-    gr::Size_t     startup_delay_ms = 100;
-    bool           repeat           = false;
-    bool           started          = false;
 
-    GR_MAKE_REFLECTABLE(SequenceSource, out, values, startup_delay_ms, repeat);
+    struct Settings {
+        std::vector<T> values;
+        gr::Size_t     startup_delay_ms = 100;
+        bool           repeat           = false;
+
+        GR_MAKE_REFLECTABLE(Settings, values, startup_delay_ms, repeat);
+    } settings;
+
+    std::size_t index   = 0;
+    bool        started = false;
+
+    GR_MAKE_REFLECTABLE(SequenceSource, out, settings);
 
     [[nodiscard]] T processOne() {
         if (!started) {
             started = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(startup_delay_ms));
+            std::this_thread::sleep_for(std::chrono::milliseconds(settings.startup_delay_ms));
         }
-        if (values.empty()) {
+        if (settings.values.empty()) {
             this->requestStop();
             return T{};
         }
-        if (index >= values.size()) {
-            if (!repeat) {
+        if (index >= settings.values.size()) {
+            if (!settings.repeat) {
                 this->requestStop();
                 return T{};
             }
             index = 0;
         }
-        return values[index++];
+        return settings.values[index++];
     }
 };
 
 template<typename T>
 struct PrintingSink : gr::Block<PrintingSink<T>> {
     gr::PortIn<T> in;
-    gr::Size_t    n_items_max = 16;
-    std::size_t   count       = 0;
-    std::string   label       = "recv";
 
-    GR_MAKE_REFLECTABLE(PrintingSink, in, n_items_max, label);
+    struct Settings {
+        gr::Size_t  n_items_max = 16;
+        std::string label       = "recv";
+
+        GR_MAKE_REFLECTABLE(Settings, n_items_max, label);
+    } settings;
+
+    std::size_t count = 0;
+
+    GR_MAKE_REFLECTABLE(PrintingSink, in, settings);
 
     void processOne(const T& value) {
-        std::cout << label << "[" << count << "] = " << value << '\n';
+        std::cout << settings.label << "[" << count << "] = " << value << '\n';
         ++count;
-        if (n_items_max > 0 && count >= n_items_max) {
+        if (settings.n_items_max > 0 && count >= settings.n_items_max) {
             this->requestStop();
         }
     }

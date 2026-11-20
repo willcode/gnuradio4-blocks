@@ -6,16 +6,22 @@
 
 struct PmtPrintingSink : gr::Block<PmtPrintingSink> {
     gr::PortIn<gr::pmt::Value> in;
-    gr::Size_t                 n_items_max = 4;
-    std::size_t                count       = 0;
 
-    GR_MAKE_REFLECTABLE(PmtPrintingSink, in, n_items_max);
+    struct Settings {
+        gr::Size_t n_items_max = 4;
+
+        GR_MAKE_REFLECTABLE(Settings, n_items_max);
+    } settings;
+
+    std::size_t count = 0;
+
+    GR_MAKE_REFLECTABLE(PmtPrintingSink, in, settings);
 
     void processOne(const gr::pmt::Value& value) {
         const auto bytes = legacy_pmt::serialize_to_legacy(value);
         std::cout << "pmt[" << count << "] legacy_size=" << bytes.size() << '\n';
         ++count;
-        if (n_items_max > 0 && count >= n_items_max) {
+        if (settings.n_items_max > 0 && count >= settings.n_items_max) {
             this->requestStop();
         }
     }
@@ -30,14 +36,11 @@ int main(int argc, char** argv) {
 
     gr::Graph graph;
     if (role == "push") {
-        auto& source  = graph.emplaceBlock<SequenceSource<gr::pmt::Value>>();
-        source.values = {
-            gr::pmt::Value(std::string{"hello"}),
-            gr::pmt::Value(int32_t{42}),
-            gr::pmt::Value(std::string{"from gr4"}),
-        };
-        source.repeat = true;
-        auto& push    = graph.emplaceBlock<gr::blocks::zeromq::ZmqPushSink<gr::pmt::Value>>({
+        auto& source = graph.emplaceBlock<SequenceSource<gr::pmt::Value>>({
+            {"values", gr::Tensor<gr::pmt::Value>(gr::data_from, std::vector<gr::pmt::Value>{gr::pmt::Value(std::string{"hello"}), gr::pmt::Value(int32_t{42}), gr::pmt::Value(std::string{"from gr4"})})},
+            {"repeat", true},
+        });
+        auto& push   = graph.emplaceBlock<gr::blocks::zeromq::ZmqPushSink<gr::pmt::Value>>({
             {"endpoint", endpoint},
             {"timeout", 100},
             {"pmt_wire_format", "GR3"},
@@ -61,5 +64,5 @@ int main(int argc, char** argv) {
         throw std::runtime_error("role must be push or pull");
     }
 
-    run_graph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>>(std::move(graph));
+    run_graph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::single_threaded>>(std::move(graph));
 }

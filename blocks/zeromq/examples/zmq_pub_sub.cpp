@@ -13,10 +13,8 @@ int main(int argc, char** argv) {
 
     gr::Graph graph;
     if (role == "pub") {
-        auto& source  = graph.emplaceBlock<SequenceSource<float>>();
-        source.values = {10.f, 20.f, 30.f, 40.f};
-        source.repeat = true;
-        auto& pub     = graph.emplaceBlock<gr::blocks::zeromq::ZmqPubSink<float>>({
+        auto& source = graph.emplaceBlock<SequenceSource<float>>({{"values", std::vector<float>{10.f, 20.f, 30.f, 40.f}}, {"repeat", true}});
+        auto& pub    = graph.emplaceBlock<gr::blocks::zeromq::ZmqPubSink<float>>({
             {"endpoint", endpoint},
             {"timeout", 100},
             {"bind", true},
@@ -26,15 +24,13 @@ int main(int argc, char** argv) {
             throw std::runtime_error(conn.error().message);
         }
     } else if (role == "sub") {
-        auto& sub        = graph.emplaceBlock<gr::blocks::zeromq::ZmqSubSource<float>>({
+        auto& sub  = graph.emplaceBlock<gr::blocks::zeromq::ZmqSubSource<float>>({
             {"endpoint", endpoint},
             {"timeout", 100},
             {"bind", false},
             {"key", topic},
         });
-        auto& sink       = graph.emplaceBlock<PrintingSink<float>>();
-        sink.n_items_max = 16;
-        sink.label       = "sub";
+        auto& sink = graph.emplaceBlock<PrintingSink<float>>({{"n_items_max", 16U}, {"label", std::string("sub")}});
         if (auto conn = graph.connect<"out", "in">(sub, sink); !conn) {
             throw std::runtime_error(conn.error().message);
         }
@@ -42,5 +38,5 @@ int main(int argc, char** argv) {
         throw std::runtime_error("role must be pub or sub");
     }
 
-    run_graph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>>(std::move(graph));
+    run_graph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::single_threaded>>(std::move(graph));
 }

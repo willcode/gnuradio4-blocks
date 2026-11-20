@@ -30,14 +30,18 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
 )"">;
 
     gr::PortOut<T> out;
-    std::string    endpoint         = "tcp://127.0.0.1:5555";
-    int            timeout          = 100;
-    bool           bind             = false;
-    bool           pass_tags        = false;
-    PmtWireFormat  pmt_wire_format  = PmtWireFormat::GR4_YAML_V1;
-    int            linger           = 1000;
-    int            hwm              = -1;
-    std::int64_t   max_message_size = 64 * 1024 * 1024;
+    struct Settings {
+        std::string   endpoint         = "tcp://127.0.0.1:5555";
+        int           timeout          = 100;
+        bool          bind             = false;
+        bool          pass_tags        = false;
+        PmtWireFormat pmt_wire_format  = PmtWireFormat::GR4_YAML_V1;
+        int           linger           = 1000;
+        int           hwm              = -1;
+        std::int64_t  max_message_size = 64 * 1024 * 1024;
+
+        GR_MAKE_REFLECTABLE(Settings, endpoint, timeout, bind, pass_tags, pmt_wire_format, linger, hwm, max_message_size);
+    } settings;
 
     detail::ZmqSocketTransport _transport{zmq::socket_type::req};
     detail::ZmqReceiveCounters _receive_counters;
@@ -48,16 +52,16 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
     bool                                                     _req_pending    = false;
     std::optional<std::chrono::steady_clock::time_point>     _req_pending_since;
 
-    GR_MAKE_REFLECTABLE(ZmqReqSource, out, endpoint, timeout, bind, pass_tags, pmt_wire_format, linger, hwm, max_message_size);
+    GR_MAKE_REFLECTABLE(ZmqReqSource, out, settings);
 
     // processBulk() waits on the socket for up to `timeout`. stop() ends that wait from another thread.
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::ZmqSocketTransport::require_nonnegative_timeout(settings.timeout);
         clear_run_state();
         _receive_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, false, max_message_size);
+        _transport.open(settings.endpoint, settings.bind, settings.linger, settings.hwm, false, settings.max_message_size);
     }
 
     void stop() {
@@ -80,7 +84,7 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
 
     [[nodiscard]] work::Status processBulk(OutputSpanLike auto& outputSpan) {
         auto                             operation = _transport.acquire_operation_guard();
-        const detail::InvocationDeadline deadline{timeout};
+        const detail::InvocationDeadline deadline{settings.timeout};
         auto                             cancelled    = detail::cancellation_check(*this);
         const std::size_t                nProcessOut  = outputSpan.size();
         std::size_t                      npublished   = 0;
@@ -142,7 +146,7 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
                 // release their listening endpoint quickly enough for an immediate rebind.
                 // `timeout` is also the scheduler polling budget and is commonly very short.
                 // Give an already-connected but not-yet-running peer a small startup grace.
-                const auto recovery_timeout = std::max(std::chrono::milliseconds{timeout}, std::chrono::milliseconds{500});
+                const auto recovery_timeout = std::max(std::chrono::milliseconds{settings.timeout}, std::chrono::milliseconds{500});
                 const bool recovery_expired = _req_pending_since.has_value() && std::chrono::steady_clock::now() - *_req_pending_since >= recovery_timeout;
                 if (_req_pending && recovery_expired && !cancelled()) {
                     _req_pending = false;
@@ -165,7 +169,7 @@ This block sends REQ requests and converts the returned ZMQ replies to type T.
 
             const auto& msg = parts->parts.front();
             {
-                auto decoded = detail::decode_frame<T>(msg, pass_tags, pmt_wire_format, _receive_counters);
+                auto decoded = detail::decode_frame<T>(msg, settings.pass_tags, settings.pmt_wire_format, _receive_counters);
                 if (!decoded) {
                     continue;
                 }

@@ -95,7 +95,7 @@ void run_loopback(const Options& options) {
 
     std::cout << "zmq_loopback type=" << options.type << " in=" << options.in_endpoint << (options.in_bind ? " bind" : " connect") << " out=" << options.out_endpoint << (options.out_bind ? " bind" : " connect") << " pass_tags=" << (options.pass_tags ? "true" : "false") << '\n';
 
-    gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> scheduler;
+    gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> scheduler;
     if (auto ret = scheduler.exchange(std::move(graph)); !ret) {
         throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
     }

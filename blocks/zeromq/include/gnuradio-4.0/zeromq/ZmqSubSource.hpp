@@ -30,15 +30,19 @@ This block receives messages on a ZMQ SUB socket and converts them to type T.
 
 public:
     gr::PortOut<T> out;
-    std::string    endpoint         = "tcp://127.0.0.1:5555";
-    int            timeout          = 100;
-    bool           bind             = false;
-    bool           pass_tags        = false;
-    PmtWireFormat  pmt_wire_format  = PmtWireFormat::GR4_YAML_V1;
-    int            linger           = 1000;
-    int            hwm              = -1;
-    std::int64_t   max_message_size = 64 * 1024 * 1024;
-    std::string    key;
+    struct Settings {
+        std::string   endpoint         = "tcp://127.0.0.1:5555";
+        int           timeout          = 100;
+        bool          bind             = false;
+        bool          pass_tags        = false;
+        PmtWireFormat pmt_wire_format  = PmtWireFormat::GR4_YAML_V1;
+        int           linger           = 1000;
+        int           hwm              = -1;
+        std::int64_t  max_message_size = 64 * 1024 * 1024;
+        std::string   key;
+
+        GR_MAKE_REFLECTABLE(Settings, endpoint, timeout, bind, pass_tags, pmt_wire_format, linger, hwm, max_message_size, key);
+    } settings;
 
     detail::ZmqSocketTransport _transport{zmq::socket_type::sub};
     detail::ZmqReceiveCounters _receive_counters;
@@ -47,19 +51,19 @@ public:
     [[maybe_unused]] std::vector<detail::ZmqTagHeaderRecord> _pending_tags;
     std::size_t                                              _pending_offset = 0;
 
-    GR_MAKE_REFLECTABLE(ZmqSubSource, out, endpoint, timeout, bind, pass_tags, pmt_wire_format, linger, hwm, max_message_size, key);
+    GR_MAKE_REFLECTABLE(ZmqSubSource, out, settings);
 
     // processBulk() waits on the socket for up to `timeout`. stop() ends that wait from another thread.
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
     void start() {
-        detail::ZmqSocketTransport::require_nonnegative_timeout(timeout);
+        detail::ZmqSocketTransport::require_nonnegative_timeout(settings.timeout);
         _pending_items.clear();
         _pending_tags.clear();
         _pending_offset = 0;
         _receive_counters.reset();
-        _transport.open(endpoint, bind, linger, hwm, false, max_message_size);
-        _transport.socket().set(zmq::sockopt::subscribe, key);
+        _transport.open(settings.endpoint, settings.bind, settings.linger, settings.hwm, false, settings.max_message_size);
+        _transport.socket().set(zmq::sockopt::subscribe, settings.key);
     }
 
     void stop() {
@@ -76,7 +80,7 @@ public:
 
     [[nodiscard]] work::Status processBulk(OutputSpanLike auto& outputSpan) {
         auto                             operation = _transport.acquire_operation_guard();
-        const detail::InvocationDeadline deadline{timeout};
+        const detail::InvocationDeadline deadline{settings.timeout};
         auto                             cancelled   = detail::cancellation_check(*this);
         const std::size_t                nProcessOut = outputSpan.size();
         size_t                           npublished  = 0;
@@ -113,7 +117,7 @@ public:
                 }
                 const auto& payload = parts->parts.back();
                 {
-                    auto decoded = detail::decode_frame<T>(payload, pass_tags, pmt_wire_format, _receive_counters);
+                    auto decoded = detail::decode_frame<T>(payload, settings.pass_tags, settings.pmt_wire_format, _receive_counters);
                     if (!decoded) {
                         continue;
                     }
@@ -123,7 +127,7 @@ public:
                     size_t                      nels           = (payload.size() - consumed_bytes) / sizeof(typename T::value_type);
                     vec.resize(nels);
                     detail::copy_items_from_bytes(static_cast<const std::uint8_t*>(payload.data()) + consumed_bytes, nels, vec.data());
-                    if (pass_tags) {
+                    if (settings.pass_tags) {
                         for (const auto& tag : tags) {
                             outputSpan.publishTag(detail::tag_map_from_record(tag), npublished);
                         }
@@ -171,7 +175,7 @@ public:
                 }
                 const auto& payload = parts->parts.back();
                 {
-                    auto decoded = detail::decode_frame<T>(payload, pass_tags, pmt_wire_format, _receive_counters);
+                    auto decoded = detail::decode_frame<T>(payload, settings.pass_tags, settings.pmt_wire_format, _receive_counters);
                     if (!decoded) {
                         continue;
                     }
@@ -215,14 +219,14 @@ public:
                     }
                     const auto& payload = parts->parts.back();
                     {
-                        auto decoded = detail::decode_frame<T>(payload, pass_tags, pmt_wire_format, _receive_counters);
+                        auto decoded = detail::decode_frame<T>(payload, settings.pass_tags, settings.pmt_wire_format, _receive_counters);
                         if (!decoded) {
                             continue;
                         }
                         auto&                       tags           = decoded->tags;
                         [[maybe_unused]] const auto consumed_bytes = decoded->consumed_bytes;
                         outputSpan[npublished]                     = std::move(decoded->pmt);
-                        if (pass_tags) {
+                        if (settings.pass_tags) {
                             for (const auto& tag : tags) {
                                 outputSpan.publishTag(detail::tag_map_from_record(tag), npublished);
                             }

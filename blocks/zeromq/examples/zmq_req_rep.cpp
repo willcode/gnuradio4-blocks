@@ -12,10 +12,8 @@ int main(int argc, char** argv) {
 
     gr::Graph graph;
     if (role == "rep") {
-        auto& source  = graph.emplaceBlock<SequenceSource<float>>();
-        source.values = {100.f, 200.f, 300.f, 400.f};
-        source.repeat = true;
-        auto& rep     = graph.emplaceBlock<gr::blocks::zeromq::ZmqRepSink<float>>({
+        auto& source = graph.emplaceBlock<SequenceSource<float>>({{"values", std::vector<float>{100.f, 200.f, 300.f, 400.f}}, {"repeat", true}});
+        auto& rep    = graph.emplaceBlock<gr::blocks::zeromq::ZmqRepSink<float>>({
             {"endpoint", endpoint},
             {"timeout", 100},
             {"bind", true},
@@ -24,14 +22,12 @@ int main(int argc, char** argv) {
             throw std::runtime_error(conn.error().message);
         }
     } else if (role == "req") {
-        auto& req        = graph.emplaceBlock<gr::blocks::zeromq::ZmqReqSource<float>>({
+        auto& req  = graph.emplaceBlock<gr::blocks::zeromq::ZmqReqSource<float>>({
             {"endpoint", endpoint},
             {"timeout", 100},
             {"bind", false},
         });
-        auto& sink       = graph.emplaceBlock<PrintingSink<float>>();
-        sink.n_items_max = 16;
-        sink.label       = "req";
+        auto& sink = graph.emplaceBlock<PrintingSink<float>>({{"n_items_max", 16U}, {"label", std::string("req")}});
         if (auto conn = graph.connect<"out", "in">(req, sink); !conn) {
             throw std::runtime_error(conn.error().message);
         }
@@ -39,5 +35,5 @@ int main(int argc, char** argv) {
         throw std::runtime_error("role must be req or rep");
     }
 
-    run_graph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>>(std::move(graph));
+    run_graph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::single_threaded>>(std::move(graph));
 }
