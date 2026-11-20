@@ -178,7 +178,7 @@ const boost::ut::suite HttpBlocktests = [] {
         expect(graph.connect<"out", "in">(source, sink).has_value());
         sink.in.max_samples = chunkSize;
 
-        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded> sched;
+        gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded> sched;
         if (auto ret = sched.exchange(std::move(graph)); !ret) {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }

@@ -56,11 +56,15 @@ Internally this uses FileIo.
 
     PortOut<pmt::Value::Map> out;
 
-    gr::Annotated<std::string, "URI">                                                       url;
-    gr::Annotated<gr::blocks::http::SourceMode, "type", gr::Doc<"GET, SUBSCRIBE">>          type        = gr::blocks::http::SourceMode::GET;
-    gr::Annotated<gr::Size_t, "chunk_bytes", gr::Doc<"Chunk size in bytes, 0 = no limits">> chunk_bytes = 0U;
+    struct Settings {
+        gr::Annotated<std::string>                                                               url;
+        gr::Annotated<gr::blocks::http::SourceMode, gr::Doc<"request type">>                     type        = gr::blocks::http::SourceMode::GET;
+        gr::Annotated<gr::Size_t, gr::Unit<"byte">, gr::Doc<"chunk size limit (0 = unlimited)">> chunk_bytes = 0U;
 
-    GR_MAKE_REFLECTABLE(HttpSource, out, url, type, chunk_bytes);
+        GR_MAKE_REFLECTABLE(Settings, url, type, chunk_bytes);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(HttpSource, out, settings);
 
     fileio::Reader _reader;
     bool           _emscriptenRunOnMainThread = true; // used in Emscripten unit-tests only
@@ -84,31 +88,50 @@ Internally this uses FileIo.
 
     [[nodiscard]] fileio::ReaderConfig readerConfig() const {
         fileio::ReaderConfig config;
-        if (chunk_bytes.value != 0U) {
-            config.chunkBytes = static_cast<std::size_t>(chunk_bytes.value);
+        if (settings.chunk_bytes.value != 0U) {
+            config.chunkBytes = static_cast<std::size_t>(settings.chunk_bytes.value);
         }
-        config.longPolling               = type.value == SourceMode::SUBSCRIBE;
+        config.longPolling               = settings.type.value == SourceMode::SUBSCRIBE;
         config.emscriptenRunOnMainThread = _emscriptenRunOnMainThread;
         return config;
     }
 
     void openReader() {
-        auto readerExp = fileio::readAsync(url.value, readerConfig());
+        auto readerExp = fileio::readAsync(settings.url.value, readerConfig());
         if (!readerExp.has_value()) {
             throw gr::exception(readerExp.error().message, readerExp.error().sourceLocation);
         }
         _reader = std::move(readerExp.value());
     }
 
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.url.value.empty()) {
+            return gr::Refused(s.url, "required");
+        }
+        return {};
+    }
+
     void start() { openReader(); }
 
     void stop() { _reader.cancel(); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (lifecycle::isActive(this->state()) && (newSettings.contains("url") || newSettings.contains("type") || newSettings.contains("chunk_bytes"))) {
-            _reader.cancel();
-            openReader();
+    // A running source reads the new endpoint once a key of the read changes. When the reader cannot start, the source
+    // keeps the reader it had and refuses the change.
+    void applySettings(const Settings& s) {
+        if (!lifecycle::isActive(this->state())) {
+            return; // start() opens the reader
         }
+        const bool reopen = s.url.changed() || s.type.changed() || s.chunk_bytes.changed();
+        if (!reopen) {
+            return;
+        }
+        auto readerExp = fileio::readAsync(s.url.value, readerConfig());
+        if (!readerExp.has_value()) { // only the endpoint can tell
+            this->fail(s.url, std::format("cannot read the endpoint: {}", readerExp.error().message));
+            return;
+        }
+        _reader.cancel();
+        _reader = std::move(readerExp.value());
     }
 
     [[nodiscard]] work::Status processBulk(OutputSpanLike auto& outSpan) {
@@ -164,10 +187,14 @@ Internally this uses FileIo.
 
     PortIn<std::uint8_t> in;
 
-    gr::Annotated<std::string, "URI">                                               url;
-    gr::Annotated<std::string, "content_type", gr::Doc<"HTTP Content-Type header">> content_type = "application/octet-stream";
+    struct Settings {
+        gr::Annotated<std::string>                          url;
+        gr::Annotated<std::string, gr::Doc<"content type">> content_type = "application/octet-stream";
 
-    GR_MAKE_REFLECTABLE(HttpSink, in, url, content_type);
+        GR_MAKE_REFLECTABLE(Settings, url, content_type);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(HttpSink, in, settings);
 
     std::optional<fileio::Writer> _writer;
     bool                          _emscriptenRunOnMainThread = true; // used in Emscripten unit-tests only
@@ -184,11 +211,18 @@ Internally this uses FileIo.
 
     [[nodiscard]] fileio::WriterConfig writerConfig() const {
         fileio::WriterConfig config;
-        if (!content_type.value.empty()) {
-            config.httpHeaders.emplace("Content-Type", content_type.value);
+        if (!settings.content_type.value.empty()) {
+            config.httpHeaders.emplace("Content-Type", settings.content_type.value);
         }
         config.emscriptenRunOnMainThread = _emscriptenRunOnMainThread;
         return config;
+    }
+
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.url.value.empty()) {
+            return gr::Refused(s.url, "required");
+        }
+        return {};
     }
 
     void start() { _writer.reset(); }
@@ -218,7 +252,7 @@ Internally this uses FileIo.
         }
 
         auto bytes     = std::span<const std::uint8_t>(inSpan.data(), inSpan.size());
-        auto writerExp = fileio::writeAsync(url.value, bytes, writerConfig());
+        auto writerExp = fileio::writeAsync(settings.url.value, bytes, writerConfig());
         if (!writerExp.has_value()) {
             throw gr::exception(writerExp.error().message, writerExp.error().sourceLocation);
         }
