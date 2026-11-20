@@ -42,7 +42,7 @@ const boost::ut::suite<"Savitzky-Golay coefficient computation"> coeffTests = []
     };
 
     "causal coefficients"_test = [] {
-        auto coeffs = computeCoefficients<double>(5UZ, 2UZ, {.alignment = Alignment::Causal});
+        auto coeffs = computeCoefficients<double>(5UZ, 2UZ, {.alignment = Alignment::causal});
         expect(eq(coeffs.size(), 5UZ));
         double sum = std::reduce(coeffs.begin(), coeffs.end());
         expect(approx(sum, 1.0, 1e-10));
@@ -131,7 +131,7 @@ const boost::ut::suite<"Savitzky-Golay edge cases"> sgEdgeCaseTests = [] {
             std::vector<double> in = {1.0, 2.0, 3.0};
             std::vector<double> out(3);
 
-            Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+            Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
             auto           coeffs = computeCoefficients<double>(5UZ, 2UZ, config);
             apply<double>(in, out, coeffs, config);
 
@@ -144,7 +144,7 @@ const boost::ut::suite<"Savitzky-Golay edge cases"> sgEdgeCaseTests = [] {
             std::vector<double> in = {42.0};
             std::vector<double> out(1);
 
-            Config<double> config{.boundaryPolicy = BoundaryPolicy::Replicate};
+            Config<double> config{.boundaryPolicy = BoundaryPolicy::replicate};
             auto           coeffs = computeCoefficients<double>(3UZ, 1UZ, config);
             apply<double>(in, out, coeffs, config);
 
@@ -167,8 +167,8 @@ const boost::ut::suite<"Savitzky-Golay edge cases"> sgEdgeCaseTests = [] {
         std::vector<double> in = {0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
         std::vector<double> outReflect(8), outReplicate(8);
 
-        Config<double> configReflect{.boundaryPolicy = BoundaryPolicy::Reflect};
-        Config<double> configReplicate{.boundaryPolicy = BoundaryPolicy::Replicate};
+        Config<double> configReflect{.boundaryPolicy = BoundaryPolicy::reflect};
+        Config<double> configReplicate{.boundaryPolicy = BoundaryPolicy::replicate};
 
         auto coeffsReflect   = computeCoefficients<double>(5UZ, 2UZ, configReflect);
         auto coeffsReplicate = computeCoefficients<double>(5UZ, 2UZ, configReplicate);
@@ -243,7 +243,7 @@ const boost::ut::suite<"Savitzky-Golay edge cases"> sgEdgeCaseTests = [] {
                 in[i]    = x * x; // f(x) = x^2
             }
 
-            Config<double> config{.derivOrder = 2UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::Reflect};
+            Config<double> config{.derivOrder = 2UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::reflect};
             auto           coeffs = computeCoefficients<double>(7UZ, 3UZ, config);
             apply<double>(in, out, coeffs, config);
 
@@ -265,7 +265,7 @@ const boost::ut::suite<"Savitzky-Golay edge cases"> sgEdgeCaseTests = [] {
                 in[i]    = std::sin(x);
             }
 
-            Config<double> config{.derivOrder = 1UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::Reflect};
+            Config<double> config{.derivOrder = 1UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::reflect};
             auto           coeffs = computeCoefficients<double>(9UZ, 4UZ, config);
             applyZeroPhase<double>(in, out, coeffs, config);
 
@@ -300,10 +300,10 @@ const boost::ut::suite<"Savitzky-Golay edge cases"> sgEdgeCaseTests = [] {
         expect(eq(filter.windowSize(), 5UZ));
         expect(eq(filter.polyOrder(), 2UZ));
 
-        filter.setParameters(11UZ, 4UZ, {.alignment = Alignment::Causal});
+        filter.setParameters(11UZ, 4UZ, {.alignment = Alignment::causal});
         expect(eq(filter.windowSize(), 11UZ));
         expect(eq(filter.polyOrder(), 4UZ));
-        expect(filter.alignment() == Alignment::Causal);
+        expect(filter.alignment() == Alignment::causal);
     };
 };
 
@@ -319,7 +319,7 @@ const boost::ut::suite<"Savitzky-Golay offline filtering"> offlineTests = [] {
             in[i]    = 2.0 + 3.0 * x + 0.5 * x * x;
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(5UZ, 2UZ, config);
         apply<double>(in, out, coeffs, config);
 
@@ -340,7 +340,7 @@ const boost::ut::suite<"Savitzky-Golay offline filtering"> offlineTests = [] {
             noisy[i] = clean[i] + noise(gen);
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(11UZ, 3UZ, config);
         apply<double>(noisy, smoothed, coeffs, config);
 
@@ -365,7 +365,7 @@ const boost::ut::suite<"Savitzky-Golay offline filtering"> offlineTests = [] {
             in[i]    = x * x;
         }
 
-        Config<double> config{.derivOrder = 1UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.derivOrder = 1UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(5UZ, 2UZ, config);
         apply<double>(in, out, coeffs, config);
 
@@ -389,7 +389,7 @@ const boost::ut::suite<"Savitzky-Golay zero-phase filtering"> zeroPhaseTests = [
             in[i] = std::sin(2.0 * std::numbers::pi_v<double> * static_cast<double>(i) / 40.0);
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(11UZ, 3UZ, config);
         applyZeroPhase<double>(in, out, coeffs, config);
 
@@ -408,7 +408,7 @@ const boost::ut::suite<"Savitzky-Golay zero-phase filtering"> zeroPhaseTests = [
             in[i]    = std::exp(-x * x / 50.0);
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(11UZ, 3UZ, config);
         applyZeroPhase<double>(in, out, coeffs, config);
 
@@ -435,7 +435,7 @@ const boost::ut::suite<"Savitzky-Golay streaming"> streamingTests = [] {
             streamOut[i] = filter.processOne(in[i]);
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(11UZ, 3UZ, config);
         apply<double>(in, batchOut, coeffs, config);
 
@@ -446,7 +446,7 @@ const boost::ut::suite<"Savitzky-Golay streaming"> streamingTests = [] {
     };
 
     "causal mode delay"_test = [] {
-        SavitzkyGolayFilter<double> causalFilter(11UZ, 3UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> causalFilter(11UZ, 3UZ, {.alignment = Alignment::causal});
         SavitzkyGolayFilter<double> centredFilter(11UZ, 3UZ);
 
         expect(eq(causalFilter.delay(), 0UZ)) << "causal has no delay";
@@ -469,9 +469,9 @@ const boost::ut::suite<"Savitzky-Golay streaming"> streamingTests = [] {
         SavitzkyGolayFilter<double> filter(5UZ, 2UZ);
         expect(eq(filter.windowSize(), 5UZ));
 
-        filter.setParameters(11UZ, 3UZ, {.alignment = Alignment::Causal});
+        filter.setParameters(11UZ, 3UZ, {.alignment = Alignment::causal});
         expect(eq(filter.windowSize(), 11UZ));
-        expect(filter.alignment() == Alignment::Causal);
+        expect(filter.alignment() == Alignment::causal);
     };
 };
 
@@ -512,7 +512,7 @@ const boost::ut::suite<"Savitzky-Golay visual comparison"> visualTests = [] {
             noisy[i]   = clean[i] + noise(gen);
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           c5  = computeCoefficients<double>(5UZ, 3UZ, config);
         auto           c11 = computeCoefficients<double>(11UZ, 3UZ, config);
         auto           c21 = computeCoefficients<double>(21UZ, 3UZ, config);
@@ -557,7 +557,7 @@ const boost::ut::suite<"Savitzky-Golay visual comparison"> visualTests = [] {
             trueDeriv[i] = std::cos(x);
         }
 
-        Config<double> config{.derivOrder = 1UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.derivOrder = 1UZ, .delta = delta, .boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(11UZ, 4UZ, config);
         apply<double>(noisy, deriv, coeffs, config);
 
@@ -594,7 +594,7 @@ const boost::ut::suite<"Savitzky-Golay visual comparison"> visualTests = [] {
             noisy[i]   = clean[i] + noise(gen);
         }
 
-        Config<double> config{.boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double> config{.boundaryPolicy = BoundaryPolicy::reflect};
         auto           coeffs = computeCoefficients<double>(15UZ, 3UZ, config);
         apply<double>(noisy, single, coeffs, config);
         applyZeroPhase<double>(noisy, zeroPhase, coeffs, config);
@@ -645,7 +645,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         const std::size_t     sgWindowSize   = firCoeffs.b.size();
@@ -654,7 +654,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
 
         Filter<double>              firFilter(firCoeffs);
         SavitzkyGolayFilter<double> sgCentredFilter(sgWindowSize, 4UZ);
-        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 4UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 4UZ, {.alignment = Alignment::causal});
         std::vector<double>         lpFiltered(N), sgCentredFiltered(N), sgCausalFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]        = firFilter.processOne(noisy[i]);
@@ -702,7 +702,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         const std::size_t     sgWindowSize   = firCoeffs.b.size();
@@ -711,7 +711,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
 
         Filter<double>              firFilter(firCoeffs);
         SavitzkyGolayFilter<double> sgCentredFilter(sgWindowSize, 4UZ);
-        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 4UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 4UZ, {.alignment = Alignment::causal});
         std::vector<double>         lpFiltered(N), sgCentredFiltered(N), sgCausalFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]        = firFilter.processOne(noisy[i]);
@@ -759,7 +759,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 4UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         const std::size_t     sgWindowSize   = firCoeffs.b.size();
@@ -768,7 +768,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
 
         Filter<double>              firFilter(firCoeffs);
         SavitzkyGolayFilter<double> sgCentredFilter(sgWindowSize, 3UZ);
-        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 3UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 3UZ, {.alignment = Alignment::causal});
         std::vector<double>         lpFiltered(N), sgCentredFiltered(N), sgCausalFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]        = firFilter.processOne(noisy[i]);
@@ -814,7 +814,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         const std::size_t     sgWindowSize   = firCoeffs.b.size();
@@ -823,7 +823,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
 
         Filter<double>              firFilter(firCoeffs);
         SavitzkyGolayFilter<double> sgCentredFilter(sgWindowSize, 2UZ);
-        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 2UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 2UZ, {.alignment = Alignment::causal});
         std::vector<double>         lpFiltered(N), sgCentredFiltered(N), sgCausalFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]        = firFilter.processOne(noisy[i]);
@@ -878,8 +878,8 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         auto noisyDs = gr::dataset::addNoise(cleanDs, 0.25, 0UZ, 321U);
 
         constexpr std::size_t sgWindowSize = 71UZ;
-        Config<double>        configCentred{.boundaryPolicy = BoundaryPolicy::Reflect};
-        Config<double>        configCausal{.alignment = Alignment::Causal, .boundaryPolicy = BoundaryPolicy::Reflect};
+        Config<double>        configCentred{.boundaryPolicy = BoundaryPolicy::reflect};
+        Config<double>        configCausal{.alignment = Alignment::causal, .boundaryPolicy = BoundaryPolicy::reflect};
         auto                  sgCentredCoeffs = computeCoefficients<double>(sgWindowSize, 3UZ, configCentred);
         auto                  sgCausalCoeffs  = computeCoefficients<double>(sgWindowSize, 3UZ, configCausal);
         std::vector<double>   sgCentredFiltered(N), sgCausalFiltered(N);
@@ -937,7 +937,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         const std::size_t     sgWindowSize   = firCoeffs.b.size();
@@ -946,7 +946,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
 
         Filter<double>              firFilter(firCoeffs);
         SavitzkyGolayFilter<double> sgCentredFilter(sgWindowSize, 3UZ);
-        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 3UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 3UZ, {.alignment = Alignment::causal});
         std::vector<double>         lpFiltered(N), sgCentredFiltered(N), sgCausalFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]        = firFilter.processOne(noisy[i]);
@@ -999,7 +999,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t sgWindowSize   = 51UZ;
@@ -1009,7 +1009,7 @@ const boost::ut::suite<"SG vs LP denoising comparison"> sgVsLpTests = [] {
 
         Filter<double>              firFilter(firCoeffs);
         SavitzkyGolayFilter<double> sgCentredFilter(sgWindowSize, 5UZ);
-        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 1UZ, {.alignment = Alignment::Causal});
+        SavitzkyGolayFilter<double> sgCausalFilter(sgWindowSize, 1UZ, {.alignment = Alignment::causal});
         std::vector<double>         lpFiltered(N), sgCentredFiltered(N), sgCausalFiltered(N);
         for (std::size_t i = 0UZ; i < N; ++i) {
             lpFiltered[i]        = firFilter.processOne(noisy[i]);

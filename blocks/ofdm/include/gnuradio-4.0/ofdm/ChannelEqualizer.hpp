@@ -112,7 +112,7 @@ struct ChannelEqualizer : Block<ChannelEqualizer, NoTagPropagation> {
         Annotated<float, Unit<"rad">, Doc<"psk rotation">>                                                  phase_offset  = 0.f;
         Annotated<gr::Size_t, Doc<"psk label offset">>                                                      label_xor     = 0U;
         Annotated<std::vector<float>, Doc<"custom points">>                                                 points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>                                   normalization = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                                   normalization = gr::digital::Normalization::power;
 
         GR_MAKE_REFLECTABLE(Settings, fft_len, data_carriers, pilot_carriers, pilot_symbols, sync_word, n_sync, sync_index, tracking, alpha, signal_name, constellation, arity, phase_offset, label_xor, points, normalization);
     } settings;

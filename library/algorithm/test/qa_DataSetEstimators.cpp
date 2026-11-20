@@ -643,7 +643,7 @@ const boost::ut::suite<"DataSet<T> math "> _dataSetMath = [] {
         using value_t                = gr::meta::fundamental_base_value_type_t<T>;
         constexpr value_t noiseLevel = value_t(0.05);
 
-        auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, {.order = 1UZ, .fLow = 0.05, .fs = 1.0});
+        auto response = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::lowpass, {.order = 1UZ, .fLow = 0.05, .fs = 1.0});
         auto val      = gr::dataset::filter::applyFilter<ProcessMode::InPlace>(generate::stepFunction<T>("damped step", 100, 20), response);
         auto ds_step  = gr::dataset::addNoise<ProcessMode::InPlace>(val, noiseLevel, 0UZ, 42U);
         auto metrics  = estimators::analyzeStepPulseResponse(ds_step);

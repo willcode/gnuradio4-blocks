@@ -72,15 +72,15 @@ unpacks that many bits per record item.
         Annotated<HeaderLayout, Doc<"header layout">, Visible>                                        header_format       = HeaderLayout::length_crc;
         Annotated<gr::Size_t, Unit<"items">, Doc<"fixed payload length">>                             fixed_payload_items = 0U;
         Annotated<gr::Size_t, Unit<"bit">, Doc<"length field width">>                                 length_bits         = 0U;
-        Annotated<gr::digital::HeaderByteOrder, Doc<"length field byte order">>                       byte_order          = gr::digital::HeaderByteOrder::Big;
-        Annotated<gr::digital::FlagsPosition, Doc<"Golay flags position">>                            flags_position      = gr::digital::FlagsPosition::High;
-        Annotated<gr::digital::CountCovers, Doc<"length field coverage">, Visible>                    count_covers        = gr::digital::CountCovers::Unset;
+        Annotated<gr::digital::HeaderByteOrder, Doc<"length field byte order">>                       byte_order          = gr::digital::HeaderByteOrder::big;
+        Annotated<gr::digital::FlagsPosition, Doc<"Golay flags position">>                            flags_position      = gr::digital::FlagsPosition::high;
+        Annotated<gr::digital::CountCovers, Doc<"length field coverage">, Visible>                    count_covers        = gr::digital::CountCovers::unset;
         Annotated<gr::Size_t, Unit<"items">, Doc<"items per length unit">, Limits<Min<1U>, Max<64U>>> count_unit_items    = 8U;
         Annotated<gr::Size_t, Unit<"items">, Doc<"trailing check length">>                            check_items         = 0U;
         Annotated<gr::Size_t, Unit<"items">, Doc<"counted prefix length (0 = header)">>               frame_prefix_items  = 0U;
         Annotated<gr::Size_t, Unit<"items">, Doc<"payload length limit">, Visible>                    max_payload_items   = 0U;
         Annotated<gr::Size_t, Doc<"payload pack width (0 = unpacked)">, Limits<Max<8U>>>              payload_pack_bits   = 0U;
-        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                                       payload_bit_order   = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                                       payload_bit_order   = gr::math::BitOrder::msb_first;
 
         GR_MAKE_REFLECTABLE(Settings, sync_word, header_format, fixed_payload_items, length_bits, byte_order, flags_position, count_covers, count_unit_items, check_items, frame_prefix_items, max_payload_items, payload_pack_bits, payload_bit_order);
     } settings;
@@ -120,7 +120,7 @@ unpacks that many bits per record item.
             _sync.push_back(static_cast<std::uint8_t>(character == '1' ? 1U : 0U));
         }
         if (s.payload_pack_bits != 0U) {
-            gr::math::configureRepack(_unpack, s.payload_pack_bits, 1U, s.payload_bit_order, gr::math::BitOrder::MsbFirst);
+            gr::math::configureRepack(_unpack, s.payload_pack_bits, 1U, s.payload_bit_order, gr::math::BitOrder::msb_first);
         }
         _format      = detail::headerLayoutOf(s);
         _headerItems = gr::digital::headerItemsOf(_format);

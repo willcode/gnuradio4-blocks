@@ -133,7 +133,7 @@ const boost::ut::suite<"basic blocks initialize at each setting"> settingsInitTe
         const auto failures = initFailures<SignalGenerator<float>>({
             {"sample_rate", 2000.f},
             {"chunk_size", Size_t{10U}},
-            {"signal_type", std::string("Cos")},
+            {"signal_type", std::string("cos")},
             {"tone_frequency", 2.f},
             {"amplitude", 2.f},
             {"offset", 1.f},

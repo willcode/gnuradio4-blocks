@@ -15,7 +15,7 @@ namespace signal_generator {
 using Type = gr::signal::SignalType; // same enum, reused from algorithm core
 using enum Type;
 constexpr auto                                 TypeList  = magic_enum::enum_values<Type>();
-inline static constexpr gr::meta::fixed_string TypeNames = "[Const, Sin, Cos, Square, Saw, Triangle, FastSin, FastCos, UniformNoise, TriangularNoise, GaussianNoise]";
+inline static constexpr gr::meta::fixed_string TypeNames = "[constant, sin, cos, square, saw, triangle, fast_sin, fast_cos, uniform_noise, triangular_noise, gaussian_noise]";
 
 } // namespace signal_generator
 
@@ -50,7 +50,7 @@ from the stream's.
     struct Settings {
         Annotated<float, Unit<"Hz">, Visible, Doc<"sample rate">, Limits<Over<0.f>>> sample_rate    = 1000.f;
         Annotated<gr::Size_t, Visible, Doc<"samples per update">>                    chunk_size     = 100;
-        Annotated<signal_generator::Type, Visible, Doc<"signal type">>               signal_type    = signal_generator::Type::Sin;
+        Annotated<signal_generator::Type, Visible, Doc<"signal type">>               signal_type    = signal_generator::Type::sin;
         Annotated<float, Visible, Unit<"Hz">, Doc<"tone frequency">>                 tone_frequency = 1.f;
         Annotated<float, Visible>                                                    amplitude      = 1.f;
         Annotated<float, Visible>                                                    offset         = 0.f;

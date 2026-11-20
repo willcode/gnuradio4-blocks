@@ -146,7 +146,7 @@ clock_est is counted and ignored. `clipped_errors` counts timing errors clipped 
         Annotated<double, Doc<"samples per symbol">, Limits<Over<1.0>>>                                samples_per_symbol = 4.0;
         Annotated<double, Unit<"samples">, Doc<"period deviation limit (0 = half)">, Limits<Min<0.0>>> max_deviation      = 0.0;
         Annotated<gr::Size_t, Doc<"outputs per symbol">, Limits<Min<1U>>>                              outputs_per_symbol = 1U;
-        Annotated<gr::sync::TimingDetector, Doc<"timing error detector">>                              detector           = gr::sync::TimingDetector::MuellerMuller;
+        Annotated<gr::sync::TimingDetector, Doc<"timing error detector">>                              detector           = gr::sync::TimingDetector::mueller_muller;
         Annotated<SlicerConstellation, Doc<"decision slicer">>                                         constellation      = std::same_as<T, float> ? SlicerConstellation::bpsk : SlicerConstellation::qpsk;
         Annotated<gr::Size_t, Unit<"symbols">, Doc<"psk order">>                                       arity              = 4U;
         Annotated<double, Doc<"detector gain (0 = derived)">, Limits<Min<0.0>>>                        detector_gain      = 0.0;
@@ -176,7 +176,7 @@ clock_est is counted and ignored. `clipped_errors` counts timing errors clipped 
     // Tap count follows `interpolator` (mmse6/8/12); the 128 phase steps and the 0.25 design band are
     // fixed here and are not settings. MmseInterpolator documents what each costs.
     gr::sync::MmseInterpolatorBank _bank{8, 128, 0.25, false};
-    gr::sync::TimingDetector       _kind = gr::sync::TimingDetector::MuellerMuller;
+    gr::sync::TimingDetector       _kind = gr::sync::TimingDetector::mueller_muller;
     gr::sync::TimingDetectorTraits _traits{};
 
     std::vector<float> _branches{}; /// the polyphase bank, branch-major and reversed
@@ -336,13 +336,13 @@ clock_est is counted and ignored. `clipped_errors` counts timing errors clipped 
             return detectorGain;
         }
         switch (kind) {
-        case gr::sync::TimingDetector::MuellerMuller: return gr::sync::muellerMullerGain(excessBandwidth);
-        case gr::sync::TimingDetector::ModifiedMuellerMuller: return gr::sync::modifiedMuellerMullerGain(excessBandwidth);
-        case gr::sync::TimingDetector::ZeroCrossing: return gr::sync::zeroCrossingGain(excessBandwidth);
-        case gr::sync::TimingDetector::Gardner: return gr::sync::gardnerGain(excessBandwidth);
-        case gr::sync::TimingDetector::EarlyLate: return gr::sync::earlyLateGain(excessBandwidth);
-        case gr::sync::TimingDetector::SignalTimesSlopeMl: return gr::sync::signalTimesSlopeGain(excessBandwidth);
-        case gr::sync::TimingDetector::SignumTimesSlopeMl: return gr::sync::signumTimesSlopeGain(excessBandwidth, meanAxisOf(shape));
+        case gr::sync::TimingDetector::mueller_muller: return gr::sync::muellerMullerGain(excessBandwidth);
+        case gr::sync::TimingDetector::modified_mueller_muller: return gr::sync::modifiedMuellerMullerGain(excessBandwidth);
+        case gr::sync::TimingDetector::zero_crossing: return gr::sync::zeroCrossingGain(excessBandwidth);
+        case gr::sync::TimingDetector::gardner: return gr::sync::gardnerGain(excessBandwidth);
+        case gr::sync::TimingDetector::early_late: return gr::sync::earlyLateGain(excessBandwidth);
+        case gr::sync::TimingDetector::signal_times_slope_ml: return gr::sync::signalTimesSlopeGain(excessBandwidth);
+        case gr::sync::TimingDetector::signum_times_slope_ml: return gr::sync::signumTimesSlopeGain(excessBandwidth, meanAxisOf(shape));
         }
         return 0.0;
     }
@@ -367,13 +367,13 @@ private:
     [[nodiscard]] work::Status sweepFor(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& errorSpan, OutputSpanLike auto& instantSpan, OutputSpanLike auto& averageSpan) {
         using gr::sync::TimingDetector;
         switch (_kind) {
-        case TimingDetector::MuellerMuller: return dispatch<TimingDetector::MuellerMuller>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
-        case TimingDetector::ModifiedMuellerMuller: return dispatch<TimingDetector::ModifiedMuellerMuller>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
-        case TimingDetector::ZeroCrossing: return dispatch<TimingDetector::ZeroCrossing>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
-        case TimingDetector::Gardner: return dispatch<TimingDetector::Gardner>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
-        case TimingDetector::EarlyLate: return dispatch<TimingDetector::EarlyLate>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
-        case TimingDetector::SignalTimesSlopeMl: return dispatch<TimingDetector::SignalTimesSlopeMl>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
-        default: return dispatch<TimingDetector::SignumTimesSlopeMl>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        case TimingDetector::mueller_muller: return dispatch<TimingDetector::mueller_muller>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        case TimingDetector::modified_mueller_muller: return dispatch<TimingDetector::modified_mueller_muller>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        case TimingDetector::zero_crossing: return dispatch<TimingDetector::zero_crossing>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        case TimingDetector::gardner: return dispatch<TimingDetector::gardner>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        case TimingDetector::early_late: return dispatch<TimingDetector::early_late>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        case TimingDetector::signal_times_slope_ml: return dispatch<TimingDetector::signal_times_slope_ml>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        default: return dispatch<TimingDetector::signum_times_slope_ml>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
         }
     }
 
@@ -673,17 +673,17 @@ private:
     template<gr::sync::TimingDetector D>
     [[nodiscard]] float errorOf(T late) const noexcept {
         using gr::sync::TimingDetector;
-        if constexpr (D == TimingDetector::MuellerMuller) {
+        if constexpr (D == TimingDetector::mueller_muller) {
             return gr::sync::muellerMullerError(_y[0], _y[1], _a[0], _a[1]);
-        } else if constexpr (D == TimingDetector::ModifiedMuellerMuller) {
+        } else if constexpr (D == TimingDetector::modified_mueller_muller) {
             return gr::sync::modifiedMuellerMullerError(_y[0], _y[1], _y[2], _a[0], _a[1], _a[2]);
-        } else if constexpr (D == TimingDetector::ZeroCrossing) {
+        } else if constexpr (D == TimingDetector::zero_crossing) {
             return gr::sync::zeroCrossingError(_midpoint, _a[0], _a[1]);
-        } else if constexpr (D == TimingDetector::Gardner) {
+        } else if constexpr (D == TimingDetector::gardner) {
             return gr::sync::gardnerError(_y[0], _y[1], _midpoint);
-        } else if constexpr (D == TimingDetector::EarlyLate) {
+        } else if constexpr (D == TimingDetector::early_late) {
             return gr::sync::earlyLateError(_y[0], _midpoint, late);
-        } else if constexpr (D == TimingDetector::SignalTimesSlopeMl) {
+        } else if constexpr (D == TimingDetector::signal_times_slope_ml) {
             return gr::sync::signalTimesSlopeError(_y[0], _slope);
         } else {
             return gr::sync::signumTimesSlopeError(_y[0], _slope);

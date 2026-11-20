@@ -72,7 +72,7 @@ template<typename TBlock>
 /// @brief The kernel the block of the same configuration holds, for the reference loop to run against.
 [[nodiscard]] gr::digital::ScramblerConfig kernelFor(const Entry& entry, gr::digital::ScramblerMode mode, unsigned bitsPerItem) {
     gr::digital::ScramblerConfig config;
-    gr::digital::configureScrambler(config, gr::digital::tapsFromDelayList(entry.taps), gr::digital::seedFromBitString(seedFor(entry), static_cast<std::uint8_t>(entry.degree)), mode, bitsPerItem, gr::math::BitOrder::MsbFirst);
+    gr::digital::configureScrambler(config, gr::digital::tapsFromDelayList(entry.taps), gr::digital::seedFromBitString(seedFor(entry), static_cast<std::uint8_t>(entry.degree)), mode, bitsPerItem, gr::math::BitOrder::msb_first);
     return config;
 }
 

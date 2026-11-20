@@ -220,7 +220,7 @@ const boost::ut::suite HttpBlocktests = [] {
 #endif
 
         gr::Graph graph;
-        auto&     httpSource = graph.emplaceBlock<gr::blocks::http::HttpSource>({{"url", gr::pmt::Value("http://127.0.0.1:8080/notify")}, {"type", gr::pmt::Value("SUBSCRIBE")}});
+        auto&     httpSource = graph.emplaceBlock<gr::blocks::http::HttpSource>({{"url", gr::pmt::Value("http://127.0.0.1:8080/notify")}, {"type", gr::pmt::Value("subscribe")}});
         auto&     sink       = graph.emplaceBlock<HttpTestSink<pmt::Value::Map>>();
 #ifdef __EMSCRIPTEN__
         httpSource._emscriptenRunOnMainThread = false;

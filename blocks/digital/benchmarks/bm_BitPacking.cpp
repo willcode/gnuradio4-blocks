@@ -73,10 +73,10 @@ int main() {
     std::vector<std::uint8_t>       copied(kItemsPerCall);
 
     // everything is built before anything is timed, so an arm times the sample path and never a configuration
-    PackBits   packMsb   = make<PackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("MsbFirst")}});
-    PackBits   packLsb   = make<PackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("LsbFirst")}});
-    UnpackBits unpackMsb = make<UnpackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("MsbFirst")}});
-    UnpackBits unpackLsb = make<UnpackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("LsbFirst")}});
+    PackBits   packMsb   = make<PackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("msb_first")}});
+    PackBits   packLsb   = make<PackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("lsb_first")}});
+    UnpackBits unpackMsb = make<UnpackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("msb_first")}});
+    UnpackBits unpackLsb = make<UnpackBits>({{"k", static_cast<gr::Size_t>(8)}, {"bit_order", std::string("lsb_first")}});
 
     struct Shape {
         unsigned    bitsIn;
@@ -84,7 +84,7 @@ int main() {
         BitOrder    orderOut;
         std::string label;
     };
-    const std::array<Shape, 5UZ> shapes{Shape{8U, 3U, BitOrder::MsbFirst, "RepackBits 8:3"}, Shape{3U, 8U, BitOrder::MsbFirst, "RepackBits 3:8"}, Shape{5U, 7U, BitOrder::MsbFirst, "RepackBits 5:7, a 35-bit period"}, Shape{8U, 8U, BitOrder::MsbFirst, "RepackBits 8:8, equal orders"}, Shape{8U, 8U, BitOrder::LsbFirst, "RepackBits 8:8, unequal orders"}};
+    const std::array<Shape, 5UZ> shapes{Shape{8U, 3U, BitOrder::msb_first, "RepackBits 8:3"}, Shape{3U, 8U, BitOrder::msb_first, "RepackBits 3:8"}, Shape{5U, 7U, BitOrder::msb_first, "RepackBits 5:7, a 35-bit period"}, Shape{8U, 8U, BitOrder::msb_first, "RepackBits 8:8, equal orders"}, Shape{8U, 8U, BitOrder::lsb_first, "RepackBits 8:8, unequal orders"}};
 
     std::vector<RepackBits> repackers;
     for (const Shape& shape : shapes) {
@@ -131,7 +131,7 @@ int main() {
         block(shapes[i].label, repackers[i], shapes[i].bitsIn, shapes[i].bitsOut);
     }
 
-    const std::array<gr::math::BitRepack, 4UZ> eightBit{kernelFor(1U, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst), kernelFor(1U, 8U, BitOrder::MsbFirst, BitOrder::LsbFirst), kernelFor(8U, 1U, BitOrder::MsbFirst, BitOrder::MsbFirst), kernelFor(8U, 1U, BitOrder::LsbFirst, BitOrder::MsbFirst)};
+    const std::array<gr::math::BitRepack, 4UZ> eightBit{kernelFor(1U, 8U, BitOrder::msb_first, BitOrder::msb_first), kernelFor(1U, 8U, BitOrder::msb_first, BitOrder::lsb_first), kernelFor(8U, 1U, BitOrder::msb_first, BitOrder::msb_first), kernelFor(8U, 1U, BitOrder::lsb_first, BitOrder::msb_first)};
     const std::array<std::string_view, 4UZ>    eightBitLabels{"pack 1:8 msb_first", "pack 1:8 lsb_first", "unpack 8:1 msb_first", "unpack 8:1 lsb_first"};
     for (std::size_t i = 0UZ; i < eightBit.size(); ++i) {
         kernel(std::format("{}, 64-bit form", eightBitLabels[i]), eightBit[i], false);

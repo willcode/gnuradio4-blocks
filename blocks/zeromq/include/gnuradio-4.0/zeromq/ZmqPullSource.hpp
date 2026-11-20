@@ -35,7 +35,7 @@ public:
         int           timeout          = 100;
         bool          bind             = false;
         bool          pass_tags        = false;
-        PmtWireFormat pmt_wire_format  = PmtWireFormat::GR4_YAML_V1;
+        PmtWireFormat pmt_wire_format  = PmtWireFormat::gr4_yaml_v1;
         int           linger           = 1000;
         int           hwm              = -1;
         std::int64_t  max_message_size = 64 * 1024 * 1024;

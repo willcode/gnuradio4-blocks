@@ -42,9 +42,9 @@ constexpr std::uint64_t kSymbolSeed      = 0x5EEDU;
 
 [[nodiscard]] constexpr std::string_view algorithmName(AdaptiveAlgorithm algorithm) noexcept {
     switch (algorithm) {
-    case AdaptiveAlgorithm::Lms: return "lms";
-    case AdaptiveAlgorithm::Nlms: return "nlms";
-    case AdaptiveAlgorithm::Cma: return "cma";
+    case AdaptiveAlgorithm::lms: return "lms";
+    case AdaptiveAlgorithm::nlms: return "nlms";
+    case AdaptiveAlgorithm::cma: return "cma";
     }
     return "unknown";
 }
@@ -161,7 +161,7 @@ const boost::ut::suite<"AdaptiveFir response"> adaptiveFirResponseTests = [] {
     "the unadapted filter is a delay of groupDelay samples"_test = []<std::floating_point F> {
         for (const std::size_t nTaps : {1UZ, 3UZ, 11UZ, 31UZ, 127UZ}) {
             AdaptiveFir<F> filter;
-            filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.);
+            filter.configure(nTaps, AdaptiveAlgorithm::lms, 0.01, 1.);
 
             const std::size_t delay = filter.groupDelay();
             expect(eq(filter.size(), nTaps)) << std::format("{} taps", nTaps);
@@ -184,7 +184,7 @@ const boost::ut::suite<"AdaptiveFir response"> adaptiveFirResponseTests = [] {
 
         gr::rng::Xoshiro256pp rng(0xC0FFEEU);
         AdaptiveFir<double>   filter;
-        filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.);
+        filter.configure(nTaps, AdaptiveAlgorithm::lms, 0.01, 1.);
         for (Complex& tap : filter._taps) {
             tap = Complex(rng.uniformM11<double>(), rng.uniformM11<double>());
         }
@@ -227,7 +227,7 @@ const boost::ut::suite<"AdaptiveFir adaptation"> adaptiveFirAdaptationTests = []
             double            errorBound;
         };
         constexpr std::size_t           groupDelay = (kEqualizerTaps - 1UZ) / 2UZ;
-        constexpr std::array<Case, 4UZ> cases{Case{AdaptiveAlgorithm::Lms, 0.01, groupDelay, 3e-3}, Case{AdaptiveAlgorithm::Lms, 0.01, 0UZ, 5e-5}, Case{AdaptiveAlgorithm::Nlms, 0.3, groupDelay, 3e-3}, Case{AdaptiveAlgorithm::Nlms, 0.3, 0UZ, 5e-5}};
+        constexpr std::array<Case, 4UZ> cases{Case{AdaptiveAlgorithm::lms, 0.01, groupDelay, 3e-3}, Case{AdaptiveAlgorithm::lms, 0.01, 0UZ, 5e-5}, Case{AdaptiveAlgorithm::nlms, 0.3, groupDelay, 3e-3}, Case{AdaptiveAlgorithm::nlms, 0.3, 0UZ, 5e-5}};
 
         for (const Case& one : cases) {
             const TrainedRun run   = runTrained(one.algorithm, one.stepSize, one.referenceDelay);
@@ -248,7 +248,7 @@ const boost::ut::suite<"AdaptiveFir adaptation"> adaptiveFirAdaptationTests = []
         constexpr double stepSize = 0.003;
 
         AdaptiveFir<double> filter;
-        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Cma, stepSize, 1., kDivergenceBound);
+        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::cma, stepSize, 1., kDivergenceBound);
 
         const auto symbols  = qpskSymbols(kTrainSymbols, kSymbolSeed);
         const auto received = throughChannel(symbols, kChannel);
@@ -290,7 +290,7 @@ const boost::ut::suite<"AdaptiveFir adaptation"> adaptiveFirAdaptationTests = []
         constexpr double stepSize = 0.5;
 
         AdaptiveFir<double> filter;
-        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, stepSize, 1., kDivergenceBound);
+        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, stepSize, 1., kDivergenceBound);
         const std::size_t delay = filter.groupDelay();
 
         const auto symbols  = qpskSymbols(kTrainSymbols, kSymbolSeed);
@@ -344,7 +344,7 @@ const boost::ut::suite<"AdaptiveFir state"> adaptiveFirStateTests = [] {
         const auto received = throughChannel(symbols, kChannel);
 
         AdaptiveFir<double> filter;
-        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1.);
+        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, 0.01, 1.);
         const std::size_t delay = filter.groupDelay();
 
         const auto run = [&] {
@@ -378,7 +378,7 @@ const boost::ut::suite<"AdaptiveFir state"> adaptiveFirStateTests = [] {
         const auto received = throughChannel(symbols, kChannel);
 
         AdaptiveFir<double> filter;
-        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1.);
+        filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, 0.01, 1.);
         const std::size_t delay = filter.groupDelay();
 
         for (std::size_t k = 0UZ; k < kStateSymbols; ++k) {
@@ -441,10 +441,10 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
         AdaptiveFir<double> filter;
 
         for (const std::size_t nTaps : {0UZ, 2UZ, 10UZ, kMaxTaps + 1UZ, kMaxTaps + 2UZ, 1000UZ}) {
-            expect(throws<std::invalid_argument>([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
+            expect(throws<std::invalid_argument>([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
         }
         for (const std::size_t nTaps : {1UZ, 3UZ, kMaxTaps}) {
-            expect(nothrow([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::Lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
+            expect(nothrow([&filter, nTaps] { filter.configure(nTaps, AdaptiveAlgorithm::lms, 0.01, 1.); })) << std::format("{} taps", nTaps);
         }
     };
 
@@ -452,30 +452,30 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
         AdaptiveFir<double> filter;
 
         for (const double stepSize : {0., 1., -0.1, 1.5, std::numeric_limits<double>::quiet_NaN()}) {
-            expect(throws<std::invalid_argument>([&filter, stepSize] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, stepSize, 1.); })) << std::format("step size {}", stepSize);
+            expect(throws<std::invalid_argument>([&filter, stepSize] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, stepSize, 1.); })) << std::format("step size {}", stepSize);
         }
-        expect(nothrow([&filter] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.5, 1.); })) << "a step size in range";
+        expect(nothrow([&filter] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, 0.5, 1.); })) << "a step size in range";
     };
 
     "configure refuses a modulus reference and a divergence bound the rules cannot use"_test = [] {
         AdaptiveFir<double> filter;
 
         for (const double referenceRatio : {0., -1., std::numeric_limits<double>::quiet_NaN()}) {
-            expect(throws<std::invalid_argument>([&filter, referenceRatio] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Cma, 0.01, referenceRatio); })) << std::format("modulus reference {}", referenceRatio);
+            expect(throws<std::invalid_argument>([&filter, referenceRatio] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::cma, 0.01, referenceRatio); })) << std::format("modulus reference {}", referenceRatio);
         }
         for (const double bound : {1., 0.5, 0., -10.}) {
-            expect(throws<std::invalid_argument>([&filter, bound] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1., bound); })) << std::format("divergence bound {}", bound);
+            expect(throws<std::invalid_argument>([&filter, bound] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, 0.01, 1., bound); })) << std::format("divergence bound {}", bound);
         }
-        expect(nothrow([&filter] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::Lms, 0.01, 1., 1.0001); })) << "a divergence bound just above the spike's own energy";
+        expect(nothrow([&filter] { filter.configure(kEqualizerTaps, AdaptiveAlgorithm::lms, 0.01, 1., 1.0001); })) << "a divergence bound just above the spike's own energy";
     };
 
     "configure reports back what the filter was given"_test = [] {
         AdaptiveFir<double> filter;
-        filter.configure(31UZ, AdaptiveAlgorithm::Cma, 0.02, 1.32, 50.);
+        filter.configure(31UZ, AdaptiveAlgorithm::cma, 0.02, 1.32, 50.);
 
         expect(eq(filter.size(), 31UZ));
         expect(eq(filter.groupDelay(), 15UZ));
-        expect(filter.algorithm() == AdaptiveAlgorithm::Cma) << "the algorithm the filter runs";
+        expect(filter.algorithm() == AdaptiveAlgorithm::cma) << "the algorithm the filter runs";
         expect(eq(filter.stepSize(), 0.02));
         expect(eq(filter.referenceRatio(), 1.32));
         expect(eq(filter.tapEnergy(), 1.)) << std::format("a freshly configured filter carries the spike's energy, and it reports {:g}", filter.tapEnergy());
@@ -484,9 +484,9 @@ const boost::ut::suite<"AdaptiveFir configuration"> adaptiveFirConfigurationTest
     "adaptiveAlgorithmFrom maps the algorithm names"_test = [] {
         using gr::digital::adaptiveAlgorithmFrom;
 
-        expect(adaptiveAlgorithmFrom("lms") == AdaptiveAlgorithm::Lms);
-        expect(adaptiveAlgorithmFrom("nlms") == AdaptiveAlgorithm::Nlms);
-        expect(adaptiveAlgorithmFrom("cma") == AdaptiveAlgorithm::Cma);
+        expect(adaptiveAlgorithmFrom("lms") == AdaptiveAlgorithm::lms);
+        expect(adaptiveAlgorithmFrom("nlms") == AdaptiveAlgorithm::nlms);
+        expect(adaptiveAlgorithmFrom("cma") == AdaptiveAlgorithm::cma);
 
         for (const std::string_view name : {"", "LMS", "Lms", "rls", "cma ", " lms", "constant_modulus"}) {
             expect(throws<std::invalid_argument>([name] { std::ignore = adaptiveAlgorithmFrom(name); })) << std::format("'{}' is not an algorithm name", name);

@@ -127,7 +127,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
         constexpr double kRate = 48'000.0;
         expect(eq(RealToComplex::outputRate(kRate), kRate / 2.0));
         expect(eq(RealToComplex::centerFrequency(kRate), kRate / 4.0));
-        const double stopbandDb = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::Hamming).attenuationDb;
+        const double stopbandDb = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::hamming).attenuationDb;
         for (const double f : {3'000.0, 9'000.0, 20'000.0}) {
             RealToComplex     conversion = make(kRate, 200.0);
             const auto        y          = convert(conversion, tone(f, kRate, 16'384UZ));
@@ -170,7 +170,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
         const std::size_t first      = conversion.taps().size();
         const double      wanted     = levelAt(y, (f - RealToComplex::centerFrequency(kRate)) / outRate, first);
         const double      mirror     = levelAt(y, (-f - RealToComplex::centerFrequency(kRate)) / outRate, first);
-        const double      stopbandDb = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::Hamming).attenuationDb;
+        const double      stopbandDb = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::hamming).attenuationDb;
         expect(lt(std::abs(wanted - 0.5), 0.005)) << std::format("the edge tone leaves at {:.5f}", wanted);
         expect(lt(20.0 * std::log10(mirror / wanted), -(stopbandDb - 3.0))) << std::format("its mirror is {:.1f} dB down", 20.0 * std::log10(mirror / wanted));
 
@@ -233,7 +233,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
     };
 
     "the design follows the Hamming transition constant up to the cap"_test = [] {
-        const double constant = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::Hamming).transitionConstant;
+        const double constant = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::hamming).transitionConstant;
         for (const auto& [rate, transition] : {std::pair{48'000.0, 200.0}, std::pair{500'000.0, 20'000.0}, std::pair{2.0e6, 3'000.0}}) {
             const std::size_t n = RealToComplex::tapCount(rate, transition).value();
             expect(eq(n, oddAtLeast(constant * rate / transition))) << std::format("{} Hz at {} Hz", transition, rate);

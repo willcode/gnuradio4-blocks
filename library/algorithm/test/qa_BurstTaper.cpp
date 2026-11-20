@@ -26,21 +26,21 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
     "coefficient generation"_test = [] {
         "generateEdge produces correct length"_test = [] {
-            for (auto type : {TaperType::None, TaperType::Linear, TaperType::RaisedCosine, TaperType::Tukey, TaperType::Gaussian, TaperType::Mushroom, TaperType::MushroomSine}) {
+            for (auto type : {TaperType::none, TaperType::linear, TaperType::raised_cosine, TaperType::tukey, TaperType::gaussian, TaperType::mushroom, TaperType::mushroom_sine}) {
                 expect(eq(Taper::generateEdge(type, 64).size(), 64UZ));
             }
         };
 
         "nSamples=0 returns empty"_test = [] {
-            for (auto type : {TaperType::None, TaperType::Linear, TaperType::RaisedCosine, TaperType::Mushroom, TaperType::MushroomSine}) {
+            for (auto type : {TaperType::none, TaperType::linear, TaperType::raised_cosine, TaperType::mushroom, TaperType::mushroom_sine}) {
                 expect(Taper::generateEdge(type, 0).empty());
             }
         };
 
-        "nSamples=1 returns single value"_test = [] { expect(eq(Taper::generateEdge(TaperType::Linear, 1, true).size(), 1UZ)); };
+        "nSamples=1 returns single value"_test = [] { expect(eq(Taper::generateEdge(TaperType::linear, 1, true).size(), 1UZ)); };
 
         "rising edge starts at 0 and ends at 1"_test = [] {
-            for (auto type : {TaperType::Linear, TaperType::RaisedCosine, TaperType::Gaussian, TaperType::Mushroom, TaperType::MushroomSine}) {
+            for (auto type : {TaperType::linear, TaperType::raised_cosine, TaperType::gaussian, TaperType::mushroom, TaperType::mushroom_sine}) {
                 auto edge = Taper::generateEdge(type, 128, true);
                 expect(approx(edge.front(), 0.f, 1e-6f)) << "rise start";
                 expect(approx(edge.back(), 1.f, 1e-6f)) << "rise end";
@@ -48,7 +48,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         };
 
         "falling edge starts at 1 and ends at 0"_test = [] {
-            for (auto type : {TaperType::Linear, TaperType::RaisedCosine, TaperType::Gaussian, TaperType::Mushroom, TaperType::MushroomSine}) {
+            for (auto type : {TaperType::linear, TaperType::raised_cosine, TaperType::gaussian, TaperType::mushroom, TaperType::mushroom_sine}) {
                 auto edge = Taper::generateEdge(type, 128, false);
                 expect(approx(edge.front(), 1.f, 1e-6f)) << "fall start";
                 expect(approx(edge.back(), 0.f, 1e-6f)) << "fall end";
@@ -56,7 +56,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         };
 
         "rise and reversed fall are symmetric"_test = [] {
-            for (auto type : {TaperType::Linear, TaperType::RaisedCosine, TaperType::Mushroom, TaperType::MushroomSine}) {
+            for (auto type : {TaperType::linear, TaperType::raised_cosine, TaperType::mushroom, TaperType::mushroom_sine}) {
                 auto rise = Taper::generateEdge(type, 128, true);
                 auto fall = Taper::generateEdge(type, 128, false);
                 std::ranges::reverse(fall);
@@ -67,29 +67,29 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         };
 
         "None taper is all ones"_test = [] {
-            for (auto v : Taper::generateEdge(TaperType::None, 64, true)) {
+            for (auto v : Taper::generateEdge(TaperType::none, 64, true)) {
                 expect(approx(v, 1.f, 1e-6f));
             }
         };
 
         "Linear is monotonically increasing"_test = [] {
-            auto edge = Taper::generateEdge(TaperType::Linear, 128, true);
+            auto edge = Taper::generateEdge(TaperType::linear, 128, true);
             for (std::size_t i = 1UZ; i < edge.size(); ++i) {
                 expect(ge(edge[i], edge[i - 1]));
             }
         };
 
         "RaisedCosine is monotonically increasing"_test = [] {
-            auto edge = Taper::generateEdge(TaperType::RaisedCosine, 128, true);
+            auto edge = Taper::generateEdge(TaperType::raised_cosine, 128, true);
             for (std::size_t i = 1UZ; i < edge.size(); ++i) {
                 expect(ge(edge[i], edge[i - 1]));
             }
         };
 
         "RaisedCosine power parameter changes curvature"_test = [] {
-            auto base = Taper::generateEdge(TaperType::RaisedCosine, 128, true);
-            auto slow = Taper::generateEdge(TaperType::RaisedCosine, 128, true, 2.0f);
-            auto fast = Taper::generateEdge(TaperType::RaisedCosine, 128, true, 0.5f);
+            auto base = Taper::generateEdge(TaperType::raised_cosine, 128, true);
+            auto slow = Taper::generateEdge(TaperType::raised_cosine, 128, true, 2.0f);
+            auto fast = Taper::generateEdge(TaperType::raised_cosine, 128, true, 0.5f);
             expect(lt(slow[64], base[64])) << "p=2 rises slower at midpoint";
             expect(gt(fast[64], base[64])) << "p=0.5 rises faster at midpoint";
             expect(approx(slow.front(), 0.f, 1e-6f));
@@ -99,22 +99,22 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         };
 
         "Tukey with alpha=2 equals RaisedCosine"_test = [] {
-            auto tukey  = Taper::generateEdge(TaperType::Tukey, 128, true, 2.0f);
-            auto cosine = Taper::generateEdge(TaperType::RaisedCosine, 128, true);
+            auto tukey  = Taper::generateEdge(TaperType::tukey, 128, true, 2.0f);
+            auto cosine = Taper::generateEdge(TaperType::raised_cosine, 128, true);
             for (std::size_t i = 0UZ; i < tukey.size(); ++i) {
                 expect(approx(tukey[i], cosine[i], 1e-5f));
             }
         };
 
         "Gaussian g(0)=0 and g(1)=1"_test = [] {
-            auto edge = Taper::generateEdge(TaperType::Gaussian, 128, true);
+            auto edge = Taper::generateEdge(TaperType::gaussian, 128, true);
             expect(approx(edge.front(), 0.f, 1e-6f));
             expect(approx(edge.back(), 1.f, 1e-6f));
         };
 
         "Mushroom has zero integral"_test = [] {
             constexpr std::size_t n    = 10'000;
-            auto                  edge = Taper::generateEdge(TaperType::Mushroom, n, true);
+            auto                  edge = Taper::generateEdge(TaperType::mushroom, n, true);
             double                sum  = std::accumulate(edge.begin(), edge.end(), 0.0) - (static_cast<double>(edge.front()) + static_cast<double>(edge.back())) / 2.0;
             sum /= static_cast<double>(n - 1);
             expect(approx(sum, 0.0, 1e-3)) << std::format("integral = {}", sum);
@@ -122,14 +122,14 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "MushroomSine has zero integral"_test = [] {
             constexpr std::size_t n    = 10'000;
-            auto                  edge = Taper::generateEdge(TaperType::MushroomSine, n, true);
+            auto                  edge = Taper::generateEdge(TaperType::mushroom_sine, n, true);
             double                sum  = std::accumulate(edge.begin(), edge.end(), 0.0) - (static_cast<double>(edge.front()) + static_cast<double>(edge.back())) / 2.0;
             sum /= static_cast<double>(n - 1);
             expect(approx(sum, 0.0, 1e-3)) << std::format("integral = {}", sum);
         };
 
         "Mushroom g(0)=0, g(1)=1 and goes negative"_test = [] {
-            auto  edge   = Taper::generateEdge(TaperType::Mushroom, 256, true);
+            auto  edge   = Taper::generateEdge(TaperType::mushroom, 256, true);
             float minVal = *std::ranges::min_element(edge);
             expect(approx(edge.front(), 0.f, 1e-6f));
             expect(approx(edge.back(), 1.f, 1e-6f));
@@ -137,7 +137,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         };
 
         "MushroomSine g(0)=0, g(1)=1 and goes negative"_test = [] {
-            auto  edge   = Taper::generateEdge(TaperType::MushroomSine, 256, true);
+            auto  edge   = Taper::generateEdge(TaperType::mushroom_sine, 256, true);
             float minVal = *std::ranges::min_element(edge);
             expect(approx(edge.front(), 0.f, 1e-6f));
             expect(approx(edge.back(), 1.f, 1e-6f));
@@ -146,7 +146,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "generateTaper correct length and flat region"_test = [] {
             constexpr std::size_t nRise = 32, nFlat = 100, nFall = 32;
-            auto                  taper = Taper::generateTaper(TaperType::RaisedCosine, nRise, nFlat, nFall);
+            auto                  taper = Taper::generateTaper(TaperType::raised_cosine, nRise, nFlat, nFall);
             expect(eq(taper.size(), 164UZ));
             for (std::size_t i = nRise; i < nRise + nFlat; ++i) {
                 expect(approx(taper[i], 1.f, 1e-6f));
@@ -154,7 +154,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         };
 
         "generateTaper with zero edges is all ones"_test = [] {
-            auto taper = Taper::generateTaper(TaperType::Mushroom, 0, 50, 0);
+            auto taper = Taper::generateTaper(TaperType::mushroom, 0, 50, 0);
             expect(eq(taper.size(), 50UZ));
             for (auto v : taper) {
                 expect(approx(v, 1.f, 1e-6f));
@@ -163,7 +163,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "double precision"_test = [] {
             using TaperD = BurstTaper<double>;
-            auto edge    = TaperD::generateEdge(TaperType::MushroomSine, 10'000, true);
+            auto edge    = TaperD::generateEdge(TaperType::mushroom_sine, 10'000, true);
             expect(approx(edge.front(), 0.0, 1e-12));
             expect(approx(edge.back(), 1.0, 1e-12));
             double sum = std::accumulate(edge.begin(), edge.end(), 0.0) - (edge.front() + edge.back()) / 2.0;
@@ -173,14 +173,14 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "span-based generateEdge"_test = [] {
             std::array<float, 128> buffer{};
-            Taper::generateEdge(TaperType::RaisedCosine, buffer);
+            Taper::generateEdge(TaperType::raised_cosine, buffer);
             expect(approx(buffer.front(), 0.f, 1e-6f));
             expect(approx(buffer.back(), 1.f, 1e-6f));
         };
 
         "span-based generateTaper"_test = [] {
             std::array<float, 164> buffer{};
-            Taper::generateTaper(TaperType::Linear, buffer, 32, 100, 32);
+            Taper::generateTaper(TaperType::linear, buffer, 32, 100, 32);
             expect(approx(buffer[0], 0.f, 1e-6f));
             expect(approx(buffer[31], 1.f, 1e-6f));
             expect(approx(buffer[32], 1.f, 1e-6f));
@@ -193,17 +193,17 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         "fixed-size BurstTaper<float, 48>"_test = [] {
             BurstTaper<float, 48> taper;
             expect(eq(taper.rampLength(), 48UZ));
-            expect(taper.configure(TaperType::RaisedCosine, 0.001f, 48000.f).has_value());
+            expect(taper.configure(TaperType::raised_cosine, 0.001f, 48000.f).has_value());
         };
 
         "fixed-size rejects mismatched ramp length"_test = [] {
             BurstTaper<float, 48> taper;
-            expect(!taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(!taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
         };
 
         "fixed-size processOne"_test = [] {
             BurstTaper<float, 4> taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
             expect(approx(taper.processOne(), 1.f / 3.f, 1e-5f));
@@ -214,7 +214,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "PMR-backed BurstTaper"_test = [] {
             BurstTaper<float, std::dynamic_extent, std::pmr::polymorphic_allocator<float>> taper;
-            expect(taper.configure(TaperType::RaisedCosine, 0.001f, 48000.f).has_value());
+            expect(taper.configure(TaperType::raised_cosine, 0.001f, 48000.f).has_value());
             expect(eq(taper.rampLength(), 48UZ));
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
@@ -226,37 +226,37 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
             Taper taper;
             expect(taper.isOff());
             expect(eq(taper.rampLength(), 0UZ));
-            expect(taper.type() == TaperType::Linear);
+            expect(taper.type() == TaperType::linear);
             expect(!taper.targetOn());
         };
 
         "explicit constructor builds LUT"_test = [] {
-            Taper taper(TaperType::RaisedCosine, 0.001f, 48000.f);
+            Taper taper(TaperType::raised_cosine, 0.001f, 48000.f);
             expect(eq(taper.rampLength(), 48UZ));
-            expect(taper.type() == TaperType::RaisedCosine);
+            expect(taper.type() == TaperType::raised_cosine);
             expect(taper.isOff());
         };
 
         "explicit constructor with zero rampTime is instant"_test = [] {
-            Taper taper(TaperType::Mushroom, 0.f, 48000.f);
+            Taper taper(TaperType::mushroom, 0.f, 48000.f);
             expect(eq(taper.rampLength(), 0UZ));
             expect(taper.setTarget(true));
             expect(taper.isOn());
         };
 
         "constructor with invalid params stays at defaults"_test = [] {
-            Taper taper(TaperType::RaisedCosine, -1.f, 1000.f); // negative rampTime
+            Taper taper(TaperType::raised_cosine, -1.f, 1000.f); // negative rampTime
             expect(eq(taper.rampLength(), 0UZ));
-            expect(taper.type() == TaperType::Linear); // unchanged from default
+            expect(taper.type() == TaperType::linear); // unchanged from default
 
-            Taper taper2(TaperType::Gaussian, 0.01f, 0.f); // zero sampleRate
+            Taper taper2(TaperType::gaussian, 0.01f, 0.f); // zero sampleRate
             expect(eq(taper2.rampLength(), 0UZ));
-            expect(taper2.type() == TaperType::Linear);
+            expect(taper2.type() == TaperType::linear);
         };
 
         "usable as member field with brace init"_test = [] {
             struct MockBlock {
-                BurstTaper<float> taper{TaperType::Linear, 0.01f, 1000.f};
+                BurstTaper<float> taper{TaperType::linear, 0.01f, 1000.f};
             };
             MockBlock block;
             expect(eq(block.taper.rampLength(), 10UZ));
@@ -293,39 +293,39 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
     "configure"_test = [] {
         "sets ramp length from physical units"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::RaisedCosine, 0.001f, 48000.f).has_value());
+            expect(taper.configure(TaperType::raised_cosine, 0.001f, 48000.f).has_value());
             expect(eq(taper.rampLength(), 48UZ));
             expect(taper.isOff());
         };
 
         "very small rampTime produces rampLength=0 (instant transition)"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 1e-6f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 1e-6f, 1000.f).has_value());
             expect(eq(taper.rampLength(), 0UZ));
         };
 
         "rejects negative rampTime"_test = [] {
             Taper taper;
-            expect(!taper.configure(TaperType::Linear, -1.f, 1000.f).has_value());
+            expect(!taper.configure(TaperType::linear, -1.f, 1000.f).has_value());
         };
 
         "rejects zero sampleRate"_test = [] {
             Taper taper;
-            expect(!taper.configure(TaperType::Linear, 0.01f, 0.f).has_value());
+            expect(!taper.configure(TaperType::linear, 0.01f, 0.f).has_value());
         };
 
         "rejects negative sampleRate"_test = [] {
             Taper taper;
-            expect(!taper.configure(TaperType::Linear, 0.01f, -1000.f).has_value());
+            expect(!taper.configure(TaperType::linear, 0.01f, -1000.f).has_value());
         };
 
         "rejects a NaN sampleRate or rampTime and keeps the ramp it had"_test = [] {
             constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
             for (const auto& [rampTime, sampleRate] : {std::pair{0.01f, kNaN}, std::pair{kNaN, 1000.f}, std::pair{0.f, kNaN}}) {
                 Taper taper;
-                expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+                expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
                 const std::size_t configured = taper.rampLength();
-                expect(!taper.configure(TaperType::Linear, rampTime, sampleRate).has_value()) << std::format("rampTime {} s at {} Hz", rampTime, sampleRate);
+                expect(!taper.configure(TaperType::linear, rampTime, sampleRate).has_value()) << std::format("rampTime {} s at {} Hz", rampTime, sampleRate);
                 expect(eq(taper.rampLength(), configured)) << std::format("rampTime {} s at {} Hz", rampTime, sampleRate);
             }
         };
@@ -333,12 +333,12 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
         "rejects an infinite sampleRate as a sample rate"_test = [] {
             constexpr float kInf = std::numeric_limits<float>::infinity();
             Taper           reference;
-            const auto      nonPositive = reference.configure(TaperType::Linear, 0.f, 0.f);
+            const auto      nonPositive = reference.configure(TaperType::linear, 0.f, 0.f);
             expect(fatal(!nonPositive.has_value()));
             const std::string rateReason = nonPositive.error().message.substr(0UZ, nonPositive.error().message.find(' '));
             for (const float rampTime : {0.f, 0.01f}) {
                 Taper      taper;
-                const auto refused = taper.configure(TaperType::Linear, rampTime, kInf);
+                const auto refused = taper.configure(TaperType::linear, rampTime, kInf);
                 expect(!refused.has_value() && refused.error().message.starts_with(rateReason)) << std::format("rampTime {} s at an infinite rate is refused for its rate", rampTime);
             }
         };
@@ -348,13 +348,13 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
             const float sampleRate = 1000.f;
             Taper       taper;
             expect(gt(static_cast<double>(rampTime) * static_cast<double>(sampleRate), static_cast<double>(std::numeric_limits<std::size_t>::max())));
-            expect(!taper.configure(TaperType::Linear, rampTime, sampleRate).has_value());
+            expect(!taper.configure(TaperType::linear, rampTime, sampleRate).has_value());
             expect(eq(taper.rampLength(), 0UZ));
         };
 
         "rampTime=0 produces instant transition (rampLength=0)"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.f, 48000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.f, 48000.f).has_value());
             expect(eq(taper.rampLength(), 0UZ));
             expect(taper.setTarget(true));
             expect(taper.isOn());
@@ -364,10 +364,10 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "resets state when called mid-ramp"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
-            expect(taper.configure(TaperType::RaisedCosine, 0.002f, 48000.f).has_value());
+            expect(taper.configure(TaperType::raised_cosine, 0.002f, 48000.f).has_value());
             expect(taper.isOff());
         };
     };
@@ -375,7 +375,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
     "state machine"_test = [] {
         "full on/off cycle"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
             auto r1 = taper.setTarget(true);
             expect(r1);
             expect(eq(taper.rampLength(), 10UZ));
@@ -389,7 +389,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "setTarget(true) when On returns false"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.002f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.002f, 1000.f).has_value());
             expect(taper.setTarget(true));
             consumeSamples(taper, 2);
             auto r = taper.setTarget(true);
@@ -398,14 +398,14 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "setTarget(false) when Off returns false"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.001f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.001f, 1000.f).has_value());
             auto r = taper.setTarget(false);
             expect(!r);
         };
 
         "setTarget(true) when RampUp returns false"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
             auto r = taper.setTarget(true);
@@ -414,7 +414,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "setTarget(false) when RampDown returns false"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.002f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.002f, 1000.f).has_value());
             expect(taper.setTarget(true));
             consumeSamples(taper, 2);
             expect(taper.setTarget(false));
@@ -425,7 +425,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "reset returns to Off"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::RaisedCosine, 0.01f, 48000.f).has_value());
+            expect(taper.configure(TaperType::raised_cosine, 0.01f, 48000.f).has_value());
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
             taper.reset();
@@ -434,7 +434,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "remainingSamples decreases mid-ramp"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
             expect(eq(taper.remainingSamples(), 0UZ));
             expect(taper.setTarget(true));
             expect(eq(taper.remainingSamples(), 10UZ));
@@ -447,7 +447,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "targetOn is latched immediately on non-force setTarget"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(taper.targetOn());
             expect(approx(taper.processOne(), 0.f, 1e-6f));
@@ -459,7 +459,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
     "processOne envelope values"_test = [] {
         Taper taper;
-        expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+        expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
         expect(taper.setTarget(true));
 
         expect(approx(taper.processOne(), 0.f, 1e-6f));
@@ -480,7 +480,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
     "bulk processing"_test = [] {
         "applyInPlace ramps and zeros"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
 
             std::vector<float> data(20, 1.0f);
             taper.applyInPlace(data);
@@ -496,7 +496,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "applyInPlace mid-chunk ramp-down"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             consumeSamples(taper, 4);
             expect(taper.setTarget(false));
@@ -510,7 +510,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "applyInPlace ramp split across two calls resumes correctly"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value()); // 10 samples
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value()); // 10 samples
             expect(taper.setTarget(true));
 
             std::vector<float> chunk1(4, 1.0f);
@@ -528,7 +528,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "applyTo spans ramp-up through target-change to ramp-down in one call"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(taper.setTarget(false)); // queue deactivate during ramp-up
 
@@ -546,7 +546,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "applyTo copies with envelope"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             const std::vector<float> input(10, 3.0f);
             std::vector<float>       output(10, -1.0f);
 
@@ -566,7 +566,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "applyTo does not modify input"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             const std::vector<float> input(10, 5.0f);
             std::vector<float>       output(10);
@@ -578,7 +578,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
     "force transitions"_test = [] {
         "force on during RampDown"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
             expect(taper.setTarget(true));
             consumeSamples(taper, 10);
             expect(taper.setTarget(false));
@@ -594,7 +594,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "force off during RampUp"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.01f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.01f, 1000.f).has_value());
             expect(taper.setTarget(true));
             float lastVal = 0.f;
             for (std::size_t i = 0UZ; i < 4UZ; ++i) {
@@ -610,7 +610,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
     "target-driven transitions"_test = [] {
         "off during RampUp queues ramp-down"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
             expect(taper.setTarget(false));
@@ -622,7 +622,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "on during RampDown queues ramp-up"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             consumeSamples(taper, 4);
             expect(taper.setTarget(false));
@@ -636,7 +636,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "last setTarget determines outcome"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));
             expect(approx(taper.processOne(), 0.f, 1e-6f));
             expect(taper.setTarget(false));
@@ -651,7 +651,7 @@ const boost::ut::suite<"BurstTaper"> burstTaperTests = [] {
 
         "rapid toggle settles to last state"_test = [] {
             Taper taper;
-            expect(taper.configure(TaperType::Linear, 0.004f, 1000.f).has_value());
+            expect(taper.configure(TaperType::linear, 0.004f, 1000.f).has_value());
             expect(taper.setTarget(true));  // Off → RampUp: true (started)
             expect(taper.setTarget(false)); // RampUp, target=off: true (queued)
             expect(!taper.setTarget(true)); // RampUp, target=on: false (already heading there)
@@ -708,12 +708,12 @@ const boost::ut::suite<"BurstTaper visual"> burstTaperVisualTests = [] {
         chart.draw();
     };
 
-    "Linear taper"_test       = [&] { plotTaper(TaperType::Linear); };
-    "RaisedCosine taper"_test = [&] { plotTaper(TaperType::RaisedCosine, {0.0, 0.5, 2.0}); };
-    "Tukey taper"_test        = [&] { plotTaper(TaperType::Tukey, {0.0, 1.0, 2.0}); };
-    "Gaussian taper"_test     = [&] { plotTaper(TaperType::Gaussian, {0.0, 0.2, 0.8}); };
-    "Mushroom taper"_test     = [&] { plotTaper(TaperType::Mushroom); };
-    "MushroomSine taper"_test = [&] { plotTaper(TaperType::MushroomSine); };
+    "Linear taper"_test       = [&] { plotTaper(TaperType::linear); };
+    "RaisedCosine taper"_test = [&] { plotTaper(TaperType::raised_cosine, {0.0, 0.5, 2.0}); };
+    "Tukey taper"_test        = [&] { plotTaper(TaperType::tukey, {0.0, 1.0, 2.0}); };
+    "Gaussian taper"_test     = [&] { plotTaper(TaperType::gaussian, {0.0, 0.2, 0.8}); };
+    "Mushroom taper"_test     = [&] { plotTaper(TaperType::mushroom); };
+    "MushroomSine taper"_test = [&] { plotTaper(TaperType::mushroom_sine); };
 
     "all tapers comparison"_test = [] {
         constexpr std::size_t nEdge  = 500UZ;
@@ -734,7 +734,7 @@ const boost::ut::suite<"BurstTaper visual"> burstTaperVisualTests = [] {
         chart.axis_name_y = "amplitude";
         chart.draw(x, rectangular, "rectangular");
 
-        constexpr std::array taperTypes = {TaperType::Linear, TaperType::RaisedCosine, TaperType::Tukey, TaperType::Gaussian, TaperType::Mushroom};
+        constexpr std::array taperTypes = {TaperType::linear, TaperType::raised_cosine, TaperType::tukey, TaperType::gaussian, TaperType::mushroom};
 
         for (auto type : taperTypes) {
             auto burst = BurstTaper<double>::generateTaper(type, nEdge, nFlat, nEdge);

@@ -54,33 +54,33 @@
 namespace gr::analysis {
 
 /// @brief The sequence the estimator correlates, the samples themselves or their squared magnitude.
-enum class AcfKind : std::uint8_t { Complex, Envelope };
+enum class AcfKind : std::uint8_t { complex, envelope };
 
 /// @brief Which divisor turns the accumulated products into an estimate of `R(tau)`.
-enum class AcfNormalization : std::uint8_t { Biased, Unbiased };
+enum class AcfNormalization : std::uint8_t { biased, unbiased };
 
-[[nodiscard]] inline constexpr std::string_view acfKindName(AcfKind kind) noexcept { return kind == AcfKind::Complex ? "complex" : "envelope"; }
+[[nodiscard]] inline constexpr std::string_view acfKindName(AcfKind kind) noexcept { return kind == AcfKind::complex ? "complex" : "envelope"; }
 
 /// @brief The kind named by a setting's text, `complex` or `envelope`, or no value for any other text.
 [[nodiscard]] inline constexpr std::optional<AcfKind> acfKindFrom(std::string_view name) noexcept {
     if (name == "complex") {
-        return AcfKind::Complex;
+        return AcfKind::complex;
     }
     if (name == "envelope") {
-        return AcfKind::Envelope;
+        return AcfKind::envelope;
     }
     return std::nullopt;
 }
 
-[[nodiscard]] inline constexpr std::string_view acfNormalizationName(AcfNormalization normalization) noexcept { return normalization == AcfNormalization::Biased ? "biased" : "unbiased"; }
+[[nodiscard]] inline constexpr std::string_view acfNormalizationName(AcfNormalization normalization) noexcept { return normalization == AcfNormalization::biased ? "biased" : "unbiased"; }
 
 /// @brief The normalization named by a setting's text, `biased` or `unbiased`, or no value for any other text.
 [[nodiscard]] inline constexpr std::optional<AcfNormalization> acfNormalizationFrom(std::string_view name) noexcept {
     if (name == "biased") {
-        return AcfNormalization::Biased;
+        return AcfNormalization::biased;
     }
     if (name == "unbiased") {
-        return AcfNormalization::Unbiased;
+        return AcfNormalization::unbiased;
     }
     return std::nullopt;
 }
@@ -89,12 +89,12 @@ enum class AcfNormalization : std::uint8_t { Biased, Unbiased };
 struct AcfConfig {
     std::size_t                 windowLength{}; ///< `N`, samples per window
     std::size_t                 maxLag{};       ///< `L`, the longest published lag, in samples
-    AcfKind                     kind           = AcfKind::Envelope;
-    AcfNormalization            normalization  = AcfNormalization::Unbiased;
+    AcfKind                     kind           = AcfKind::envelope;
+    AcfNormalization            normalization  = AcfNormalization::unbiased;
     double                      overlap        = 0.5;  ///< fraction a window shares with the next, in [0, 1)
     std::size_t                 nAverages      = 16UZ; ///< windows per published record
     bool                        removeMean     = true;
-    gr::algorithm::window::Type window         = gr::algorithm::window::Type::Rectangular;
+    gr::algorithm::window::Type window         = gr::algorithm::window::Type::rectangular;
     double                      falseAlarmRate = 1e-3; ///< probability per published record that noise alone clears the threshold
 };
 
@@ -304,7 +304,7 @@ struct WindowedSegmenter {
     std::size_t                 maxLag       = 0UZ;
     double                      overlap      = 0.;
     std::size_t                 hop          = 1UZ;
-    gr::algorithm::window::Type windowType   = gr::algorithm::window::Type::Rectangular;
+    gr::algorithm::window::Type windowType   = gr::algorithm::window::Type::rectangular;
 
     std::vector<float>  taper{};    ///< `w[0..windowLength-1]`
     std::vector<double> taperAcf{}; ///< `r_w(tau) = sum_n w[n] w[n+tau]` for `tau = 0..maxLag`
@@ -566,7 +566,7 @@ struct Autocorrelation {
 
     /// @brief True when the correlated sequence is real, under the envelope kind or for a real input. The thresholds
     /// then use the folded normal tail.
-    [[nodiscard]] bool                    realValued() const noexcept { return _config.kind == AcfKind::Envelope || std::is_same_v<T, float>; }
+    [[nodiscard]] bool                    realValued() const noexcept { return _config.kind == AcfKind::envelope || std::is_same_v<T, float>; }
     [[nodiscard]] std::uint64_t           streamAt() const noexcept { return _segmenter.streamAt; }
     [[nodiscard]] std::uint64_t           coveredUntil() const noexcept { return _segmenter.coveredUntil; }
     [[nodiscard]] std::span<const double> lagScatter() const noexcept { return std::span<const double>(_lagScatter); }
@@ -702,11 +702,11 @@ private:
     [[nodiscard]] Transform sequence(const T& sample) const noexcept {
         if constexpr (std::is_same_v<T, float>) {
             const Scalar value = static_cast<Scalar>(sample);
-            return _config.kind == AcfKind::Envelope ? Transform(value * value, Scalar{0}) : Transform(value, Scalar{0});
+            return _config.kind == AcfKind::envelope ? Transform(value * value, Scalar{0}) : Transform(value, Scalar{0});
         } else {
             const Scalar re = static_cast<Scalar>(sample.real());
             const Scalar im = static_cast<Scalar>(sample.imag());
-            return _config.kind == AcfKind::Envelope ? Transform(re * re + im * im, Scalar{0}) : Transform(re, im);
+            return _config.kind == AcfKind::envelope ? Transform(re * re + im * im, Scalar{0}) : Transform(re, im);
         }
     }
 
@@ -733,7 +733,7 @@ private:
         const Scalar resolution = kModelResolution * std::log2(static_cast<Scalar>(_transformLength)) * _lagScatter[0UZ];
         const auto   count      = static_cast<Scalar>(windows);
         for (std::size_t lag = 0UZ; lag <= lags; ++lag) {
-            const Scalar divisor = count * (_config.normalization == AcfNormalization::Biased ? _segmenter.taperAcf[0UZ] : _segmenter.taperAcf[lag]);
+            const Scalar divisor = count * (_config.normalization == AcfNormalization::biased ? _segmenter.taperAcf[0UZ] : _segmenter.taperAcf[lag]);
             _lagScatter[lag]     = lag > 0UZ && divisor > Scalar{0} && _lagScatter[lag] > resolution ? std::sqrt(_lagScatter[lag]) / divisor : Scalar{0};
         }
     }
@@ -747,14 +747,14 @@ private:
             const auto noisiest = std::ranges::max_element(_lagScatter);
             _modelLag           = static_cast<std::size_t>(std::distance(_lagScatter.begin(), noisiest));
             _modelScatter       = *noisiest;
-            const Scalar norm   = _config.normalization == AcfNormalization::Biased ? _segmenter.taperAcf[0UZ] : _segmenter.taperAcf[_modelLag];
+            const Scalar norm   = _config.normalization == AcfNormalization::biased ? _segmenter.taperAcf[0UZ] : _segmenter.taperAcf[_modelLag];
             const Scalar ratio  = norm > Scalar{0} ? _segmenter.taperAcf[_modelLag] / norm : Scalar{0};
             _modelPairs         = _modelScatter > Scalar{0} ? ratio * ratio / (_modelScatter * _modelScatter) : Scalar{0};
         }
         if (_config.falseAlarmRate != _modelRate) {
             const bool                    real   = realValued();
             const std::span<const double> search = std::span<const double>(_lagScatter).subspan(1UZ);
-            if (_config.kind == AcfKind::Envelope && !_config.removeMean) {
+            if (_config.kind == AcfKind::envelope && !_config.removeMean) {
                 // a noise envelope with its mean kept carries the squared mean at every lag
                 _modelThreshold   = std::numeric_limits<double>::infinity();
                 _modelThresholdDb = std::numeric_limits<double>::infinity();
@@ -780,7 +780,7 @@ private:
             Scalar phase = Scalar{0};
             if (zeroLag > Scalar{0} && (lag == 0UZ || _lagScatter[lag] > Scalar{0})) {
                 ratio = std::abs(_accumulator[lag]) / zeroLag;
-                if (_config.normalization == AcfNormalization::Unbiased) {
+                if (_config.normalization == AcfNormalization::unbiased) {
                     ratio *= taperAt0 / _segmenter.taperAcf[lag];
                 }
                 phase = std::arg(_accumulator[lag]);
@@ -791,7 +791,7 @@ private:
 
         const AcfResult result{
             .magnitude        = std::span<const float>(_magnitude),
-            .phase            = _config.kind == AcfKind::Complex ? std::span<const float>(_phase) : std::span<const float>{},
+            .phase            = _config.kind == AcfKind::complex ? std::span<const float>(_phase) : std::span<const float>{},
             .zeroLag          = zeroLag / (static_cast<Scalar>(averaged) * taperAt0),
             .sampleStart      = _segmenter.groupStartAt,
             .nAveraged        = averaged,

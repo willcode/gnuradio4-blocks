@@ -87,7 +87,7 @@ each window's own default. `symbol_rate` and `alpha` serve root_raised_cosine.
         Annotated<double, Unit<"Hz">, Visible, Doc<"transition width">>              transition_width = 0.0;
         Annotated<double, Doc<"gain">>                                               gain             = 1.0;
         Annotated<double, Unit<"dB">, Doc<"Kaiser stopband attenuation">>            attenuation_db   = 60.0;
-        Annotated<gr::algorithm::window::Type, Doc<"window">>                        window           = gr::algorithm::window::Type::Kaiser;
+        Annotated<gr::algorithm::window::Type, Doc<"window">>                        window           = gr::algorithm::window::Type::kaiser;
         Annotated<double, Doc<"window parameter (< 0 = default)">>                   window_param     = -1.0;
         Annotated<gr::Size_t, Doc<"requested length (0 = derived)">>                 taps             = 0U;
         Annotated<double, Unit<"Hz">, Doc<"symbol rate">>                            symbol_rate      = 0.0;

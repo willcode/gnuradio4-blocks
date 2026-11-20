@@ -59,7 +59,7 @@ struct ScramblerSettings {
     std::string        sequence{};
     bool               sequenceRepeat = true;
     gr::Size_t         bitsPerItem    = 8U;
-    gr::math::BitOrder bitOrder       = gr::math::BitOrder::MsbFirst;
+    gr::math::BitOrder bitOrder       = gr::math::BitOrder::msb_first;
     gr::Size_t         resetPeriod    = 0U;
     bool               invertOutput   = false;
     gr::Size_t         forceAfter     = 0U;
@@ -338,7 +338,7 @@ E1", and `sequence_repeat` tiles it over the epoch. A tag at `reset_tag_key` sta
         Annotated<std::string, Doc<"explicit mask">, Visible>                              sequence{};
         Annotated<bool, Doc<"sequence tiling">>                                            sequence_repeat = true;
         Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item   = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order       = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order       = gr::math::BitOrder::msb_first;
         detail::ResetTagKey                                                                reset_tag_key   = std::string(gr::tag::TRIGGER_NAME.key());
         Annotated<std::string, Doc<"reset tag value (empty = any)">>                       reset_tag_value{};
         Annotated<gr::Size_t, Unit<"items">, Doc<"reset period (0 = off)">>                reset_period = 0U;
@@ -477,7 +477,7 @@ is injected; `monitor_delays` names the two transmitted-stream delays 'p,q' it c
         Annotated<std::string, Doc<"feedback delays">, Visible>                            taps{};
         Annotated<std::string, Doc<"initial history bits (empty = zeros)">, Visible>       seed{};
         Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item          = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order              = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order              = gr::math::BitOrder::msb_first;
         Annotated<bool, Doc<"output inversion">>                                           invert_output          = false;
         Annotated<gr::Size_t, Unit<"items">, Doc<"run length limit (0 = off)">>            force_transition_after = 0U;
         Annotated<std::string, Doc<"monitor delays">>                                      monitor_delays{};
@@ -578,7 +578,7 @@ consumed, and `sample_rate` leaves with the value it arrived with.
         Annotated<std::string, Doc<"feedback delays">, Visible>                            taps{};
         Annotated<std::string, Doc<"initial history bits (empty = zeros)">, Visible>       seed{};
         Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item          = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order              = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order              = gr::math::BitOrder::msb_first;
         Annotated<bool, Doc<"output inversion">>                                           invert_output          = false;
         Annotated<gr::Size_t, Unit<"items">, Doc<"run length limit (0 = off)">>            force_transition_after = 0U;
         Annotated<std::string, Doc<"monitor delays">>                                      monitor_delays{};

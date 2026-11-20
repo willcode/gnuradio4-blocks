@@ -395,7 +395,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         // window's measured transition constant asks for, the design delivers the window's figure.
         constexpr double width  = 0.02;
         constexpr double cutoff = 0.25;
-        for (const Type type : {Type::Rectangular, Type::Bartlett, Type::Welch, Type::Hann, Type::Hamming, Type::Parzen, Type::Blackman, Type::FlatTop, Type::BlackmanHarris, Type::Nuttall, Type::BlackmanNuttall}) {
+        for (const Type type : {Type::rectangular, Type::bartlett, Type::welch, Type::hann, Type::hamming, Type::parzen, Type::blackman, Type::flat_top, Type::blackman_harris, Type::nuttall, Type::blackman_nuttall}) {
             const WindowFigures      figures  = windowFigures(type);
             const std::size_t        n        = oddLength(windowLength(type, width));
             const std::vector<float> taps     = lowpass(n, cutoff, {type, std::numeric_limits<double>::quiet_NaN()});
@@ -404,8 +404,8 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
             expect(gt(figures.transitionConstant, 0.0));
             expect(approx(measured, figures.attenuationDb, 1.5)) << "window " << static_cast<int>(type) << " at " << n << " taps delivers " << measured << " dB against a tabled " << figures.attenuationDb;
         }
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const WindowFigures unused = windowFigures(Type::Kaiser); })) << "asking a shape-parameter window for a fixed figure is a category error";
-        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const WindowFigures unused = windowFigures(Type::Gaussian); }));
+        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const WindowFigures unused = windowFigures(Type::kaiser); })) << "asking a shape-parameter window for a fixed figure is a category error";
+        expect(throws<std::invalid_argument>([] { [[maybe_unused]] const WindowFigures unused = windowFigures(Type::gaussian); }));
     };
 
     "the tabled attenuation is the figure at the length it was measured at"_test = [] {
@@ -421,7 +421,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         constexpr std::size_t grid   = 1UZ << 18;
         constexpr double      cutoff = 0.25;
 
-        const std::vector<float> taps = lowpass(1023UZ, cutoff, {Type::FlatTop, std::numeric_limits<double>::quiet_NaN()});
+        const std::vector<float> taps = lowpass(1023UZ, cutoff, {Type::flat_top, std::numeric_limits<double>::quiet_NaN()});
         std::vector<double>      mag;
         halfResponse(taps, mag, grid);
 
@@ -435,7 +435,7 @@ const boost::ut::suite<"FIR lowpass design"> filterDesignTests = [] {
         }
 
         const double measured = -20.0 * std::log10(worst);
-        expect(approx(measured, windowFigures(Type::FlatTop).attenuationDb, 0.3)) << "FlatTop at 1023 taps delivers " << measured << " dB against a tabled " << windowFigures(Type::FlatTop).attenuationDb;
+        expect(approx(measured, windowFigures(Type::flat_top).attenuationDb, 0.3)) << "FlatTop at 1023 taps delivers " << measured << " dB against a tabled " << windowFigures(Type::flat_top).attenuationDb;
     };
 
     "the tap-count estimate and the search pin each other"_test = [] {
@@ -967,7 +967,7 @@ const boost::ut::suite<"Hilbert transformer design"> hilbertDesignTests = [] {
     using namespace gr::filter::fir::design;
     using gr::algorithm::window::Type;
 
-    const std::array<WindowSpec, 3> windows{WindowSpec{Type::Hamming, std::numeric_limits<double>::quiet_NaN()}, WindowSpec{Type::BlackmanHarris, std::numeric_limits<double>::quiet_NaN()}, WindowSpec{Type::Kaiser, 7.0}};
+    const std::array<WindowSpec, 3> windows{WindowSpec{Type::hamming, std::numeric_limits<double>::quiet_NaN()}, WindowSpec{Type::blackman_harris, std::numeric_limits<double>::quiet_NaN()}, WindowSpec{Type::kaiser, 7.0}};
 
     "half a Hilbert transformer's taps are exactly zero"_test = [&] {
         for (const int n : {11, 31, 63, 127}) {

@@ -36,7 +36,7 @@ std::vector<std::uint8_t> frame(int n) {
     auto bytes = zd::serialize_tag_header(10, {{10, gr::pmt::Value{"label"}, gr::pmt::Value{n}, {}}});
     auto v     = value<T>(n);
     if constexpr (std::same_as<T, gr::pmt::Value>) {
-        auto payload = zd::serialize_pmt(v, PmtWireFormat::GR4_YAML_V1);
+        auto payload = zd::serialize_pmt(v, PmtWireFormat::gr4_yaml_v1);
         bytes.insert(bytes.end(), payload.begin(), payload.end());
     } else if constexpr (std::same_as<T, std::vector<float>>) {
         zd::append_bytes(bytes, v.data(), v.size() * sizeof(float));
@@ -199,7 +199,7 @@ void message_tags_retry(const std::string& key = {}, std::size_t tagged_item = 1
             const auto                          consumed_bytes = zd::parse_tag_header(static_cast<const std::uint8_t*>(msg.data()), msg.size(), offset, tags);
             // Decode payload independently of the receiving blocks.
             if constexpr (std::same_as<T, gr::pmt::Value>) {
-                expect(zd::deserialize_pmt(static_cast<const std::uint8_t*>(msg.data()) + consumed_bytes, msg.size() - consumed_bytes, PmtWireFormat::GR4_YAML_V1) == value<T>(static_cast<int>(received + 1)));
+                expect(zd::deserialize_pmt(static_cast<const std::uint8_t*>(msg.data()) + consumed_bytes, msg.size() - consumed_bytes, PmtWireFormat::gr4_yaml_v1) == value<T>(static_cast<int>(received + 1)));
             } else {
                 T v((msg.size() - consumed_bytes) / sizeof(float));
                 std::memcpy(v.data(), static_cast<const std::uint8_t*>(msg.data()) + consumed_bytes, v.size() * sizeof(float));
@@ -410,7 +410,7 @@ void decode_allocation_error() {
     source.start();
     auto peer = zd::ZmqTransportTestAccess::peer(source._transport, zmq::socket_type::push);
     peer.connect(source.last_endpoint());
-    send(peer, zd::serialize_pmt(gr::pmt::Value{"value requiring a map allocation"}, PmtWireFormat::GR4_YAML_V1));
+    send(peer, zd::serialize_pmt(gr::pmt::Value{"value requiring a map allocation"}, PmtWireFormat::gr4_yaml_v1));
     gr::PortIn<gr::pmt::Value> reader;
     expect(source.out.connect(reader).has_value());
     bool propagated = false;
@@ -460,7 +460,7 @@ const suite remediation = [] {
         {
             DefaultResourceGuard guard{&resource};
             try {
-                std::ignore = zd::deserialize_pmt(huge_yaml.data(), huge_yaml.size(), PmtWireFormat::GR4_YAML_V1);
+                std::ignore = zd::deserialize_pmt(huge_yaml.data(), huge_yaml.size(), PmtWireFormat::gr4_yaml_v1);
             } catch (const std::runtime_error&) {
                 yaml_refused = true;
             }

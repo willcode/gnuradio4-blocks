@@ -574,14 +574,14 @@ const boost::ut::suite<"open termination"> openTerminationTests = [] {
 
     "the open length arithmetic, and the initial-state refusal"_test = [] {
         const ConvolutionalCode code = classicCode();
-        expect(eq(convolutionalInfoBits(code, 24UZ, ConvTermination::Open), 12UZ)) << "every step of an open record carries an information bit";
+        expect(eq(convolutionalInfoBits(code, 24UZ, ConvTermination::open), 12UZ)) << "every step of an open record carries an information bit";
         expect(eq(convolutionalInfoBits(code, 24UZ), 6UZ)) << "the terminated reading is unchanged";
-        expect(eq(convolutionalInfoBits(code, 2UZ, ConvTermination::Open), 1UZ)) << "one step is a record";
-        expect(eq(convolutionalInfoBits(code, 3UZ, ConvTermination::Open), 0UZ)) << "a length that is not whole steps is not a record";
+        expect(eq(convolutionalInfoBits(code, 2UZ, ConvTermination::open), 1UZ)) << "one step is a record";
+        expect(eq(convolutionalInfoBits(code, 3UZ, ConvTermination::open), 0UZ)) << "a length that is not whole steps is not a record";
 
         ViterbiDecoder decoder;
-        expect(!decoder.configure(code, ConvTermination::Open, 64U)) << "64 names a state a 64-state code does not have";
-        expect(decoder.configure(code, ConvTermination::Open, 63U)) << "63 is the last state there is";
+        expect(!decoder.configure(code, ConvTermination::open, 64U)) << "64 names a state a 64-state code does not have";
+        expect(decoder.configure(code, ConvTermination::open, 63U)) << "63 is the last state there is";
     };
 
     // Section 4.2's mode: a record cut out of a continuous stream, neither end's state known.
@@ -602,7 +602,7 @@ const boost::ut::suite<"open termination"> openTerminationTests = [] {
         // record re-decoding those positions from its own span — and the third record's discard
         // is the terminated frame's tail
         ViterbiDecoder open;
-        expect(open.configure(code, ConvTermination::Open));
+        expect(open.configure(code, ConvTermination::open));
 
         struct Slice {
             std::size_t begin;
@@ -644,8 +644,8 @@ const boost::ut::suite<"open termination"> openTerminationTests = [] {
 
         ViterbiDecoder blind;
         ViterbiDecoder told;
-        expect(blind.configure(code, ConvTermination::Open));
-        expect(told.configure(code, ConvTermination::Open, state));
+        expect(blind.configure(code, ConvTermination::open));
+        expect(told.configure(code, ConvTermination::open, state));
 
         std::vector<std::uint8_t> fromBlind(kSteps);
         std::vector<std::uint8_t> fromTold(kSteps);

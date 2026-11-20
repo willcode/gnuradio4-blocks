@@ -133,9 +133,9 @@ int main() {
     };
     const std::vector<Mode> kModes{
         {"none, 8 bits/item, d=1", {{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"max_payload_items", gr::Size_t{4096}}}, 0xFFULL},
-        {"bit_stuffing, 1 bit/item, d=8", {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("BitStuffing")}, {"max_payload_items", gr::Size_t{4096}}}, 0x01ULL},
+        {"bit_stuffing, 1 bit/item, d=8", {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"max_payload_items", gr::Size_t{4096}}}, 0x01ULL},
         {"byte_escape, 8 bits/item, d=1",
-            {{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("ByteEscape")}, //
+            {{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("byte_escape")}, //
                 {"escape_item", gr::Size_t{0xDB}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{4096}}},
             0xFFULL},
     };

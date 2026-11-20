@@ -24,13 +24,13 @@ namespace gr::blocks::digital {
 namespace detail {
 
 /// @brief Which end of the appended field the most significant CRC byte sits at.
-enum class ByteOrder : std::uint8_t { Big, Little };
+enum class ByteOrder : std::uint8_t { big, little };
 
 [[nodiscard]] inline std::uint64_t readTrailingCrc(std::span<const std::uint8_t> bytes, std::size_t crcBytes, ByteOrder order) noexcept {
     const std::span<const std::uint8_t> field = bytes.last(crcBytes);
     std::uint64_t                       value = 0ULL;
     for (std::size_t i = 0UZ; i < crcBytes; ++i) {
-        const std::size_t which = order == ByteOrder::Big ? i : crcBytes - 1UZ - i;
+        const std::size_t which = order == ByteOrder::big ? i : crcBytes - 1UZ - i;
         value                   = (value << 8U) | static_cast<std::uint64_t>(field[which]);
     }
     return value;
@@ -38,7 +38,7 @@ enum class ByteOrder : std::uint8_t { Big, Little };
 
 inline void appendCrc(std::vector<std::uint8_t>& bytes, std::uint64_t value, std::size_t crcBytes, ByteOrder order) {
     for (std::size_t i = 0UZ; i < crcBytes; ++i) {
-        const std::size_t shift = order == ByteOrder::Big ? 8UZ * (crcBytes - 1UZ - i) : 8UZ * i;
+        const std::size_t shift = order == ByteOrder::big ? 8UZ * (crcBytes - 1UZ - i) : 8UZ * i;
         bytes.push_back(static_cast<std::uint8_t>((value >> shift) & 0xFFULL));
     }
 }
@@ -109,7 +109,7 @@ before final_xor. The leading `skip_header_bytes` are excluded from the computat
         Annotated<std::uint64_t, Doc<"final XOR value">>                                               final_xor         = 0xFFFFFFFFULL;
         Annotated<bool, Doc<"input reflection">>                                                       input_reflected   = true;
         Annotated<bool, Doc<"result reflection">>                                                      result_reflected  = true;
-        Annotated<detail::ByteOrder, Doc<"CRC byte order">>                                            crc_byte_order    = detail::ByteOrder::Big;
+        Annotated<detail::ByteOrder, Doc<"CRC byte order">>                                            crc_byte_order    = detail::ByteOrder::big;
         Annotated<gr::Size_t, Unit<"byte">, Doc<"skipped header length">>                              skip_header_bytes = 0U;
 
         GR_MAKE_REFLECTABLE(Settings, width, poly, initial_value, final_xor, input_reflected, result_reflected, crc_byte_order, skip_header_bytes);
@@ -207,7 +207,7 @@ strips the CRC bytes on both ports alike.
         Annotated<std::uint64_t, Doc<"final XOR value">>                                               final_xor         = 0xFFFFFFFFULL;
         Annotated<bool, Doc<"input reflection">>                                                       input_reflected   = true;
         Annotated<bool, Doc<"result reflection">>                                                      result_reflected  = true;
-        Annotated<detail::ByteOrder, Doc<"CRC byte order">>                                            crc_byte_order    = detail::ByteOrder::Big;
+        Annotated<detail::ByteOrder, Doc<"CRC byte order">>                                            crc_byte_order    = detail::ByteOrder::big;
         Annotated<gr::Size_t, Unit<"byte">, Doc<"skipped header length">>                              skip_header_bytes = 0U;
         Annotated<bool, Doc<"CRC removal">>                                                            discard_crc       = false;
 

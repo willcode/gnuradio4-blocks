@@ -50,7 +50,7 @@ blocks:
       name: pn9_staged_scrambler
       profile: pn9
       bits_per_item: !!uint32 8
-      bit_order: MsbFirst
+      bit_order: msb_first
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: pn9_staged_sink

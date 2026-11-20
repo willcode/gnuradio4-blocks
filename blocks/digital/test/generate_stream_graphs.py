@@ -436,7 +436,7 @@ complement of the input. Each sink expects its bits or symbols.
 """,
     )
     bits = symbols(64, 2, 0xBE5466CF34E90C6C)
-    nrzi = {"coding": "Nrzi"}
+    nrzi = {"coding": "nrzi"}
     coded = encode(bits, coding="nrzi")
     xored = encode(bits)
     assert all(coded[i] == xored[i] ^ (1 - i % 2) for i in range(len(bits)))
@@ -468,7 +468,7 @@ complement of the input. Each sink expects its bits or symbols.
             g.chain(src, blk, g.expect_sink(f"{name}_{label}_sink", "uint8", expected))
 
     data = symbols(64, 2, 0x9E3779B97F4A7C15)
-    differential = {"modulus": u32(2), "coding": "Differential"}
+    differential = {"modulus": u32(2), "coding": "differential"}
     coded = encode(data)
     inverted = [v ^ 1 for v in coded]
     flipped = decode(inverted)
@@ -608,11 +608,11 @@ either runs to the end with settings the block accepts or ends with the block's 
 BASIC = "gr::blocks::basic::"
 
 PROFILES = {
-    "ccsds131": ("additive", "1,3,5,8", "11111111", 8, "MsbFirst"),
-    "ccsds131_17": ("additive", "3,17", "00011100011100011", 8, "MsbFirst"),
-    "pn9": ("additive", "4,9", "111111111", 8, "LsbFirst"),
-    "si4463": ("additive", "4,9", "111100001", 8, "LsbFirst"),
-    "g3ruh": ("multiplicative", "12,17", "", 8, "MsbFirst"),
+    "ccsds131": ("additive", "1,3,5,8", "11111111", 8, "msb_first"),
+    "ccsds131_17": ("additive", "3,17", "00011100011100011", 8, "msb_first"),
+    "pn9": ("additive", "4,9", "111111111", 8, "lsb_first"),
+    "si4463": ("additive", "4,9", "111100001", 8, "lsb_first"),
+    "g3ruh": ("multiplicative", "12,17", "", 8, "msb_first"),
 }
 
 
@@ -634,7 +634,7 @@ class Scrambler:
         taps="",
         seed="",
         bits=8,
-        order="MsbFirst",
+        order="msb_first",
         profile="",
         sequence="",
         repeat=True,
@@ -704,7 +704,7 @@ class Scrambler:
         if self.sequence is not None and not self.repeat:
             if self.k >= len(self.sequence):
                 self.unscrambled += 1
-        positions = range(w - 1, -1, -1) if self.order == "MsbFirst" else range(w)
+        positions = range(w - 1, -1, -1) if self.order == "msb_first" else range(w)
         out = 0
         for pos in positions:
             out |= self.bit((value >> pos) & 1) << pos
@@ -1199,7 +1199,7 @@ scrambler gives what taps 12,17 and a seed of 17 zeros give. Each sink expects i
         (
             "pn9_staged",
             "AdditiveScrambler<uint8>",
-            {"profile": "pn9", "bits_per_item": u32(8), "bit_order": "MsbFirst"},
+            {"profile": "pn9", "bits_per_item": u32(8), "bit_order": "msb_first"},
             [0] * 16,
             PN9,
         ),

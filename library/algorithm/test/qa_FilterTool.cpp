@@ -135,10 +135,10 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             for (std::size_t order = 0UZ; order <= 10UZ; ++order) {
                 PoleZeroLocations analogPoleZeros;
                 switch (filterDesign) { // only the Elliptic and inverse Chebyshev (Type II) filters have zeros.
-                case BUTTERWORTH: analogPoleZeros = calculateFilterButterworth(order); break;
-                case CHEBYSHEV1: analogPoleZeros = calculateFilterChebyshevType1(order); break;
-                case CHEBYSHEV2: analogPoleZeros = calculateFilterChebyshevType2(order); break;
-                case BESSEL: analogPoleZeros = calculateFilterBessel(order); break;
+                case butterworth: analogPoleZeros = calculateFilterButterworth(order); break;
+                case chebyshev1: analogPoleZeros = calculateFilterChebyshevType1(order); break;
+                case chebyshev2: analogPoleZeros = calculateFilterChebyshevType2(order); break;
+                case bessel: analogPoleZeros = calculateFilterBessel(order); break;
                 default: throw std::invalid_argument("unknown filterType");
                 }
 
@@ -155,10 +155,10 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         };
 
         "IIR analog filter missing parameters"_test = [&filterDesign] {
-            expect(throws([&] { std::ignore = iir::designAnalogFilter(Type::LOWPASS, {}, filterDesign); })) << "undefined fLow should throw";
-            expect(throws([&] { std::ignore = iir::designAnalogFilter(Type::HIGHPASS, {}, filterDesign); })) << "undefined fLow should throw";
-            expect(throws([&] { std::ignore = iir::designAnalogFilter(Type::BANDPASS, {}, filterDesign); })) << "undefined fLow should throw";
-            expect(throws([&] { std::ignore = iir::designFilter<double>(Type::LOWPASS, {.fLow = 1.0}, filterDesign); })) << "undefined fs should throw";
+            expect(throws([&] { std::ignore = iir::designAnalogFilter(Type::lowpass, {}, filterDesign); })) << "undefined fLow should throw";
+            expect(throws([&] { std::ignore = iir::designAnalogFilter(Type::highpass, {}, filterDesign); })) << "undefined fLow should throw";
+            expect(throws([&] { std::ignore = iir::designAnalogFilter(Type::bandpass, {}, filterDesign); })) << "undefined fLow should throw";
+            expect(throws([&] { std::ignore = iir::designFilter<double>(Type::lowpass, {.fLow = 1.0}, filterDesign); })) << "undefined fs should throw";
         };
 
         using enum Type;
@@ -170,7 +170,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
                 const double     kOmega0       = std::sqrt(kFreqLow * kFreqHigh);
                 constexpr double kSampling     = 1000.0;
                 constexpr double kNyquist      = kSampling / 2.0;
-                const double     kTolerance    = ((filterDesign == CHEBYSHEV2) ? 10 : 1) * 0.01;
+                const double     kTolerance    = ((filterDesign == chebyshev2) ? 10 : 1) * 0.01;
                 const auto       kFilterParams = FilterParameters{.order = order, .fLow = kFreqLow, .fHigh = kFreqHigh, .attenuationDb = 30, .fs = kSampling};
 
                 // compute analog filter
@@ -179,23 +179,23 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
                 PoleZeroLocations analogPoleZeros = iir::designAnalogFilter(filterType, kFilterParams, filterDesign);
 
                 switch (filterType) {
-                case BANDSTOP: expect(le(iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros), kTolerance)) << std::format("{}({}) - order {} insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros)); [[fallthrough]];
-                case LOWPASS: expect(approx(1.0, iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros), kTolerance)) << std::format("{}({}) - order {} has non-unity gain at DC: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros)); break;
-                case HIGHPASS:
+                case bandstop: expect(le(iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros), kTolerance)) << std::format("{}({}) - order {} insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros)); [[fallthrough]];
+                case lowpass: expect(approx(1.0, iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros), kTolerance)) << std::format("{}({}) - order {} has non-unity gain at DC: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros)); break;
+                case highpass:
                     expect(approx(1.0, iir::calculateResponse<Hertz, Magnitude>(kNyquist, analogPoleZeros), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at NQ: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kNyquist, analogPoleZeros));
                     expect(le(iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros));
                     break;
-                case BANDPASS:
+                case bandpass:
                     expect(approx(1.0, iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at omega0: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kOmega0, analogPoleZeros));
                     expect(le(iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band (DC): {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kDC, analogPoleZeros));
                     expect(le(iir::calculateResponse<Hertz, Magnitude>(kNyquist, analogPoleZeros), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band (NQ): {:.4f}", enum_name(filterDesign), enum_name(filterType), order, iir::calculateResponse<Hertz, Magnitude>(kNyquist, analogPoleZeros));
                     break;
                 }
             }
-        } | std::vector{LOWPASS, HIGHPASS, BANDSTOP, BANDPASS};
+        } | std::vector{lowpass, highpass, bandstop, bandpass};
 
         "IIR digital filter"_test = [&filterDesign](Type filterType) {
-            const std::size_t startingOrder = filterDesign == CHEBYSHEV2 ? 3UZ : 1UZ; // Chebyshev with order <=2 has notorious poor performance for band-pass/stop and <=3 for high-pass at NQ
+            const std::size_t startingOrder = filterDesign == chebyshev2 ? 3UZ : 1UZ; // Chebyshev with order <=2 has notorious poor performance for band-pass/stop and <=3 for high-pass at NQ
             for (std::size_t order = startingOrder; order <= 5UZ; ++order) {
                 constexpr double kDC           = 0.0;
                 constexpr double kFreqLow      = 1.0;
@@ -216,16 +216,16 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
 
                 // coarse response test
                 switch (filterType) {
-                case BANDSTOP: expect(le(calculateResponse<Normalised, Magnitude>(kOmega0 / kSampling, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kOmega0, digitalPoleZerosBiquads)); [[fallthrough]];
-                case LOWPASS: expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at DC: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads)); break;
-                case HIGHPASS:
+                case bandstop: expect(le(calculateResponse<Normalised, Magnitude>(kOmega0 / kSampling, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kOmega0, digitalPoleZerosBiquads)); [[fallthrough]];
+                case lowpass: expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at DC: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads)); break;
+                case highpass:
                     expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kNyquist / kSampling, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at NQ: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kNyquist / kSampling, digitalPoleZerosBiquads));
                     expect(le(calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kOmega0 / kSampling, digitalPoleZerosBiquads));
                     break;
-                case BANDPASS:
+                case bandpass:
                     expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kOmega0 / kSampling, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at omega0: {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kOmega0 / kSampling, digitalPoleZerosBiquads));
                     expect(le(calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band (DC): {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kDC, digitalPoleZerosBiquads));
-                    const double relaxFactor = filterDesign == CHEBYSHEV1 ? 20 : (order <= 2 ? 3.0 : 1.0);
+                    const double relaxFactor = filterDesign == chebyshev1 ? 20 : (order <= 2 ? 3.0 : 1.0);
                     expect(le(calculateResponse<Normalised, Magnitude>(kNyquist / kSampling, digitalPoleZerosBiquads), relaxFactor * kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band (NQ): {:.4f}", enum_name(filterDesign), enum_name(filterType), order, calculateResponse<Normalised, Magnitude>(kNyquist / kSampling, digitalPoleZerosBiquads));
                     break;
                 }
@@ -253,21 +253,21 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
                     const double reference = filterResponse[i]; // N.B in [1]
                     // non-biquad representation is known to be numerically unstable for order > ~4 (N.B. order: 2 -> band-[pass,stop] order: 4
                     if (order <= 2 && reference > 0.01) {
-                        expect(le(std::abs(responseDigital1[i] - reference), (filterDesign == BESSEL || filterDesign == CHEBYSHEV2 || order <= 1UZ ? 10 : 1) * kTolerance)) //
+                        expect(le(std::abs(responseDigital1[i] - reference), (filterDesign == bessel || filterDesign == chebyshev2 || order <= 1UZ ? 10 : 1) * kTolerance)) //
                             << std::format("({}, {}, {})@f={}Hz analog-digital mismatch: {:.2f} vs {:.2f}",                                                                 //
                                    enum_name(filterDesign), enum_name(filterType), order, frequencies[i], reference, responseDigital1[i]);
                     }
 
                     // biquad style filter
                     if (reference > 0.01) { // BESSEL and CHEBYSHEV1 do not preserve the magnitude response perfectly (visually checked OK)
-                        const double relaxFactor = (filterDesign == BESSEL || order <= 1UZ || (filterDesign == CHEBYSHEV1 && filterType == HIGHPASS) || (filterDesign == CHEBYSHEV2 && filterType == BANDSTOP)) ? 10 : 1;
+                        const double relaxFactor = (filterDesign == bessel || order <= 1UZ || (filterDesign == chebyshev1 && filterType == highpass) || (filterDesign == chebyshev2 && filterType == bandstop)) ? 10 : 1;
                         expect(le(std::abs(responseDigital2[i] - reference), relaxFactor * kTolerance)) << std::format("({}, {}, {})@f={}Hz analog-digital biquad mismatch: {:.2f} vs {:.2f}", //
                             enum_name(filterDesign), enum_name(filterType), order, frequencies[i], reference, responseDigital2[i]);
                     }
                 }
             }
-        } | std::vector{LOWPASS, HIGHPASS, BANDPASS, BANDSTOP};
-    } | std::vector{BUTTERWORTH, BESSEL, CHEBYSHEV1, CHEBYSHEV2};
+        } | std::vector{lowpass, highpass, bandpass, bandstop};
+    } | std::vector{butterworth, bessel, chebyshev1, chebyshev2};
 
     // pre-warping places the -3 dB point at the requested corner; the zeros at z = -1 (z = +1) give the roll-off at Nyquist (DC)
     "IIR bilinear corner frequency and stop-band roll-off"_test = [] {
@@ -291,12 +291,12 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             return 0.5 * (lo + hi) * fs;
         };
 
-        const auto lowPass = iir::designFilter<double>(Type::LOWPASS, {.order = 4UZ, .fLow = fc, .fs = fs}, BUTTERWORTH);
+        const auto lowPass = iir::designFilter<double>(Type::lowpass, {.order = 4UZ, .fLow = fc, .fs = fs}, butterworth);
         expect(approx(cornerFrequency(lowPass, true), fc, 0.01 * fc)) << std::format("low-pass -3 dB point: {:.4f} Hz", cornerFrequency(lowPass, true));
         expect(approx(magnitude(lowPass, 0.), 1., 1.e-9)) << "low-pass unity gain at DC";
         expect(lt(magnitude(lowPass, 0.5), 1.e-3)) << std::format("low-pass rejects Nyquist by more than 60 dB: {:.3e}", magnitude(lowPass, 0.5));
 
-        const auto highPass = iir::designFilter<double>(Type::HIGHPASS, {.order = 4UZ, .fHigh = fc, .fs = fs}, BUTTERWORTH);
+        const auto highPass = iir::designFilter<double>(Type::highpass, {.order = 4UZ, .fHigh = fc, .fs = fs}, butterworth);
         expect(approx(cornerFrequency(highPass, false), fc, 0.01 * fc)) << std::format("high-pass -3 dB point: {:.4f} Hz", cornerFrequency(highPass, false));
         expect(approx(magnitude(highPass, 0.5), 1., 1.e-9)) << "high-pass unity gain at Nyquist";
         expect(lt(magnitude(highPass, 0.), 1.e-3)) << std::format("high-pass rejects DC by more than 60 dB: {:.3e}", magnitude(highPass, 0.));
@@ -317,7 +317,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         };
 
         // a 10 Hz corner at 2 MS/s puts the pole pair 2.2e-5 from z = 1, where a float ULP is 6e-8
-        const auto float10Hz = iir::designFilter<float>(Type::HIGHPASS, {.order = 2UZ, .fHigh = 10., .fs = fs}, BUTTERWORTH);
+        const auto float10Hz = iir::designFilter<float>(Type::highpass, {.order = 2UZ, .fHigh = 10., .fs = fs}, butterworth);
         expect(eq(float10Hz.size(), 1UZ)) << "a second-order design is one biquad";
         const float dcDenominator = std::accumulate(float10Hz[0].a.cbegin(), float10Hz[0].a.cend(), 0.f);
         expect(gt(dcDenominator, 0.f)) << std::format("A(1) = {:e} places a pole at or beyond z = 1, a = {}", dcDenominator, float10Hz[0].a);
@@ -326,8 +326,8 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
 
         // the coefficients a filter runs are the double design's, rounded once
         for (const double fc : {10., 100., 1000.}) {
-            const auto asFloat  = iir::designFilter<float>(Type::HIGHPASS, {.order = 2UZ, .fHigh = fc, .fs = fs}, BUTTERWORTH);
-            const auto asDouble = iir::designFilter<double, 2UZ>(Type::HIGHPASS, {.order = 2UZ, .fHigh = fc, .fs = fs}, BUTTERWORTH);
+            const auto asFloat  = iir::designFilter<float>(Type::highpass, {.order = 2UZ, .fHigh = fc, .fs = fs}, butterworth);
+            const auto asDouble = iir::designFilter<double, 2UZ>(Type::highpass, {.order = 2UZ, .fHigh = fc, .fs = fs}, butterworth);
             expect(eq(asFloat.size(), asDouble.size())) << std::format("fc = {} Hz section count", fc);
             std::vector<float> narrowed(asDouble[0].a.size());
             std::ranges::transform(asDouble[0].a, narrowed.begin(), [](double coefficient) { return static_cast<float>(coefficient); });
@@ -335,21 +335,21 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         }
 
         // at a corner the type can resolve, the pole angle survives the rounding
-        const auto   floatCorner  = iir::designFilter<float>(Type::HIGHPASS, {.order = 2UZ, .fHigh = 2000., .fs = fs}, BUTTERWORTH);
-        const auto   doubleCorner = iir::designFilter<double, 2UZ>(Type::HIGHPASS, {.order = 2UZ, .fHigh = 2000., .fs = fs}, BUTTERWORTH);
+        const auto   floatCorner  = iir::designFilter<float>(Type::highpass, {.order = 2UZ, .fHigh = 2000., .fs = fs}, butterworth);
+        const auto   doubleCorner = iir::designFilter<double, 2UZ>(Type::highpass, {.order = 2UZ, .fHigh = 2000., .fs = fs}, butterworth);
         const double floatAngle   = std::arg(biquadPole(floatCorner[0]));
         const double doubleAngle  = std::arg(biquadPole(doubleCorner[0]));
         expect(approx(floatAngle, doubleAngle, 0.01 * doubleAngle)) << std::format("pole angle {:e} rad against {:e} rad", floatAngle, doubleAngle);
 
         // a corner the type cannot resolve is refused, not returned: at fc/fs = 5e-10 the float coefficients are
         // {1, -2, 1}, a double pole at z = 1
-        expect(throws<std::invalid_argument>([] { std::ignore = iir::designFilter<float>(Type::HIGHPASS, {.order = 2UZ, .fHigh = 0.001, .fs = fs}, BUTTERWORTH); })) //
+        expect(throws<std::invalid_argument>([] { std::ignore = iir::designFilter<float>(Type::highpass, {.order = 2UZ, .fHigh = 0.001, .fs = fs}, butterworth); })) //
             << "a pole rounded onto the unit circle must not be returned";
         // double carries corners three decades below the float limit; at fc/fs = 5e-7 its A(1) is 1e-11, five
         // orders of magnitude above its own resolution there
-        expect(nothrow([] { std::ignore = iir::designFilter<double, 2UZ>(Type::HIGHPASS, {.order = 2UZ, .fHigh = 1., .fs = fs}, BUTTERWORTH); })) //
+        expect(nothrow([] { std::ignore = iir::designFilter<double, 2UZ>(Type::highpass, {.order = 2UZ, .fHigh = 1., .fs = fs}, butterworth); })) //
             << "a corner float cannot hold is still a valid double design";
-        expect(throws<std::invalid_argument>([] { std::ignore = iir::designFilter<float>(Type::HIGHPASS, {.order = 2UZ, .fHigh = 1., .fs = fs}, BUTTERWORTH); })) //
+        expect(throws<std::invalid_argument>([] { std::ignore = iir::designFilter<float>(Type::highpass, {.order = 2UZ, .fHigh = 1., .fs = fs}, butterworth); })) //
             << "the same corner in float puts the pole outside the circle";
     };
 
@@ -364,13 +364,13 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         };
 
         const std::vector<Reference> references{
-            {"HIGHPASS order 2, fHigh = 10 Hz, fs = 2 MHz", Type::HIGHPASS, {.order = 2UZ, .fHigh = 10., .fs = 2.e6}, //
+            {"HIGHPASS order 2, fHigh = 10 Hz, fs = 2 MHz", Type::highpass, {.order = 2UZ, .fHigh = 10., .fs = 2.e6}, //
                 {{1., -1.9999555711706254, 0.99995557215756392}},                                                     //
                 {{0.99997778583204722, -1.9999555716640944, 0.99997778583204722}}},
-            {"LOWPASS order 4, fLow = 250 Hz, fs = 1 kHz", Type::LOWPASS, {.order = 4UZ, .fLow = 250., .fs = 1000.},       //
+            {"LOWPASS order 4, fLow = 250 Hz, fs = 1 kHz", Type::lowpass, {.order = 4UZ, .fLow = 250., .fs = 1000.},       //
                 {{1., -1.2789769243681805e-16, 0.039566129896580066}, {1., -3.4106051316484815e-16, 0.44646269217168966}}, //
                 {{0.25989153247414498, 0.51978306494828996, 0.25989153247414498}, {0.3616156730429223, 0.72323134608584461, 0.3616156730429223}}},
-            {"BANDPASS order 2, f = [4, 6] Hz, fs = 1 kHz", Type::BANDPASS, {.order = 2UZ, .fLow = 4., .fHigh = 6., .fs = 1000.}, //
+            {"BANDPASS order 2, f = [4, 6] Hz, fs = 1 kHz", Type::bandpass, {.order = 2UZ, .fLow = 4., .fHigh = 6., .fs = 1000.}, //
                 {{1., -1.9886233366177961, 0.9898838585397981}, {1., -1.9917191721414462, 0.99242496191751817}},                  //
                 {{0.00011126818251529208, 0.00022253636503058417, 0.00011126818251529208}, {0.35167470623315972, -0.70334941246631943, 0.35167470623315972}}},
         };
@@ -393,7 +393,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         };
 
         for (const auto& reference : references) {
-            const auto sections = iir::designFilter<double, 2UZ>(reference.type, reference.params, BUTTERWORTH);
+            const auto sections = iir::designFilter<double, 2UZ>(reference.type, reference.params, butterworth);
             expect(eq(sections.size(), reference.a.size())) << std::format("{}: {} sections", reference.name, sections.size());
             for (std::size_t s = 0UZ; s < std::min(sections.size(), reference.a.size()); ++s) {
                 expectCoefficients(sections[s].a, reference.a[s], 1.e-12, std::format("{} section {}: a", reference.name, s));
@@ -467,7 +467,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
 
         // every section of the design holds its poles, and the cascade of their denominators decays: 2e6 samples are
         // 17 time constants of the slower pole, 8.3e-6 inside the circle, and carry 1.5e11 down to 5e5
-        const auto sections = iir::designFilter<double>(Type::BANDPASS, params, BUTTERWORTH);
+        const auto sections = iir::designFilter<double>(Type::bandpass, params, butterworth);
         expect(not sections.empty()) << "the design is returned, not refused";
         std::vector<std::vector<double>> denominators;
         for (const auto& section : sections) {
@@ -491,7 +491,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             expanded = product;
         }
         if (iir::hasPoleOnOrOutsideUnitCircle(expanded)) {
-            const auto forced = iir::designFilter<double, 2UZ>(Type::BANDPASS, params, BUTTERWORTH);
+            const auto forced = iir::designFilter<double, 2UZ>(Type::bandpass, params, butterworth);
             expect(eq(sections.size(), 2UZ)) << std::format("four poles no quartic can hold give two sections, not {}", sections.size());
             expect(eq(sections.size(), forced.size())) << std::format("{} sections against {} forced biquads", sections.size(), forced.size());
             for (const double frequency : {5., 10., 15., 20., 40.}) {
@@ -512,9 +512,9 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             constexpr double       fs     = 2.e6;
             const FilterParameters params = {.order = 2UZ, .fLow = 0.02, .fs = fs};
 
-            expect(nothrow([&params] { std::ignore = iir::designFilter<long double>(Type::LOWPASS, params, CHEBYSHEV2); })) //
+            expect(nothrow([&params] { std::ignore = iir::designFilter<long double>(Type::lowpass, params, chebyshev2); })) //
                 << "a corner double cannot hold is still a valid long double design";
-            const auto sections = iir::designFilter<long double>(Type::LOWPASS, params, CHEBYSHEV2);
+            const auto sections = iir::designFilter<long double>(Type::lowpass, params, chebyshev2);
             expect(eq(sections.size(), 1UZ)) << std::format("a second-order design is one biquad, not {}", sections.size());
 
             const std::vector<long double>& a         = sections[0].a;
@@ -532,7 +532,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             expect(not iir::hasPoleOnOrOutsideUnitCircle(a)) << std::format("a[1] = {:.20g} is not a stable denominator", static_cast<double>(a[1]));
 
             // the same corner in double: a[2] and a[1] round to equal magnitudes, A(1) is 0 and the pole sits at z = 1
-            expect(throws<std::invalid_argument>([&params] { std::ignore = iir::designFilter<double, 2UZ>(Type::LOWPASS, params, CHEBYSHEV2); })) //
+            expect(throws<std::invalid_argument>([&params] { std::ignore = iir::designFilter<double, 2UZ>(Type::lowpass, params, chebyshev2); })) //
                 << "the same corner in double puts the pole on the unit circle";
         }
     };
@@ -558,11 +558,11 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
     "IIR low-pass filter"_test = []<typename FilterType>(FilterType) {
         using namespace gr::filter::iir;
         constexpr double      fs           = 1000.;
-        constexpr Design      filterDesign = Design::BUTTERWORTH;
+        constexpr Design      filterDesign = Design::butterworth;
         constexpr std::size_t order        = 4UZ;
 
         constexpr std::array frequencies{3.0, 3.5, 5., 6.5, 7.0};
-        const auto           digitalBandPass = iir::designFilter<double>(Type::BANDPASS, {.order = order, .fLow = 4., .fHigh = 6., .fs = fs}, filterDesign);
+        const auto           digitalBandPass = iir::designFilter<double>(Type::bandpass, {.order = order, .fLow = 4., .fHigh = 6., .fs = fs}, filterDesign);
         for (const auto& frequency : frequencies) {
             auto                          filter       = FilterType(digitalBandPass);
             [[maybe_unused]] const double expectedGain = calculateResponse<Normalised, Magnitude>(frequency / fs, digitalBandPass);
@@ -591,7 +591,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         constexpr std::size_t nSamples  = 1'000'000UZ; // 0.5 s, three times the 0.1 % settling time of the 10 Hz corner
         constexpr std::size_t nSkip     = nSamples / 2UZ;
 
-        auto   filter         = Filter<float, 32UZ>(narrowToFloat(iir::designFilter<double>(Type::HIGHPASS, {.order = 2UZ, .fHigh = fc, .fs = fs}, BUTTERWORTH)));
+        auto   filter         = Filter<float, 32UZ>(narrowToFloat(iir::designFilter<double>(Type::highpass, {.order = 2UZ, .fHigh = fc, .fs = fs}, butterworth)));
         double errorPower     = 0.;
         double referencePower = 0.;
         for (std::size_t i = 0UZ; i < nSamples; ++i) {
@@ -615,7 +615,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         constexpr std::size_t nSamples = 20'000UZ; // two seconds, about 18 time constants of the 2 Hz corner
         constexpr std::size_t nSkip    = 19'000UZ;
 
-        auto  filter   = Filter<float, 32UZ>(narrowToFloat(iir::designFilter<double>(Type::HIGHPASS, {.order = 2UZ, .fHigh = fc, .fs = fs}, BUTTERWORTH)));
+        auto  filter   = Filter<float, 32UZ>(narrowToFloat(iir::designFilter<double>(Type::highpass, {.order = 2UZ, .fHigh = fc, .fs = fs}, butterworth)));
         float residual = 0.f;
         for (std::size_t i = 0UZ; i < nSamples; ++i) {
             const float output = filter.processOne(dcInput);
@@ -656,18 +656,18 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
             std::ranges::move(subrange, std::back_inserter(frequencies));
         }
 
-        constexpr iir::Design   filterDesign     = BUTTERWORTH;
+        constexpr iir::Design   filterDesign     = butterworth;
         constexpr std::size_t   order            = 5UZ;
-        const PoleZeroLocations filter1          = iir::designAnalogFilter(Type::LOWPASS, {.order = order, .fLow = 1., .attenuationDb = 40}, filterDesign);
-        const auto              digitalFilter1   = iir::designFilter<T>(Type::LOWPASS, {.order = order, .fLow = 1., .attenuationDb = 40, .fs = fMax}, filterDesign);
+        const PoleZeroLocations filter1          = iir::designAnalogFilter(Type::lowpass, {.order = order, .fLow = 1., .attenuationDb = 40}, filterDesign);
+        const auto              digitalFilter1   = iir::designFilter<T>(Type::lowpass, {.order = order, .fLow = 1., .attenuationDb = 40, .fs = fMax}, filterDesign);
         std::vector<double>     lowPassResponse  = calculateFrequencyResponse<MagnitudeDB>(frequencies, filter1);
         std::vector<double>     lowPassDigital   = calculateFrequencyResponse<MagnitudeDB>(frequencies, static_cast<T>(fMax), digitalFilter1);
-        const PoleZeroLocations filter2          = iir::designAnalogFilter(Type::HIGHPASS, {.order = order, .fHigh = 10., .attenuationDb = 40}, filterDesign);
-        const auto              digitalFilter2   = iir::designFilter<T>(Type::HIGHPASS, {.order = order, .fHigh = 10., .attenuationDb = 40, .fs = fMax}, filterDesign);
+        const PoleZeroLocations filter2          = iir::designAnalogFilter(Type::highpass, {.order = order, .fHigh = 10., .attenuationDb = 40}, filterDesign);
+        const auto              digitalFilter2   = iir::designFilter<T>(Type::highpass, {.order = order, .fHigh = 10., .attenuationDb = 40, .fs = fMax}, filterDesign);
         std::vector<double>     highPassResponse = calculateFrequencyResponse<MagnitudeDB>(frequencies, filter2);
         std::vector<double>     highPassDigital  = calculateFrequencyResponse<MagnitudeDB>(frequencies, static_cast<T>(fMax), digitalFilter2);
-        const PoleZeroLocations filter3          = iir::designAnalogFilter(Type::BANDPASS, {.order = order, .fLow = 1., .fHigh = 10., .attenuationDb = 40}, filterDesign);
-        const auto              digitalFilter3   = iir::designFilter<T>(Type::BANDPASS, {.order = order, .fLow = 1., .fHigh = 10., .attenuationDb = 40, .fs = fMax}, filterDesign);
+        const PoleZeroLocations filter3          = iir::designAnalogFilter(Type::bandpass, {.order = order, .fLow = 1., .fHigh = 10., .attenuationDb = 40}, filterDesign);
+        const auto              digitalFilter3   = iir::designFilter<T>(Type::bandpass, {.order = order, .fLow = 1., .fHigh = 10., .attenuationDb = 40, .fs = fMax}, filterDesign);
         std::vector<double>     bandPassResponse = calculateFrequencyResponse<MagnitudeDB>(frequencies, filter3);
         std::vector<double>     bandPassDigital  = calculateFrequencyResponse<MagnitudeDB>(frequencies, static_cast<T>(fMax), digitalFilter3);
 
@@ -696,7 +696,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         using namespace gr::filter::iir;
         using T                       = float;
         constexpr double fs           = 1000.;
-        constexpr Design filterDesign = BUTTERWORTH;
+        constexpr Design filterDesign = butterworth;
         constexpr double xMin         = 0.0;
         constexpr double xMax         = 2.01;
 
@@ -709,7 +709,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         chart.axis_name_x = "time [s]";
         chart.axis_name_y = "IIR filter amplitude [a.u.]";
 
-        const auto digitalBandPass = iir::designFilter<T>(Type::BANDPASS, {.order = 4UZ, .fLow = 4., .fHigh = 6., .fs = fs}, filterDesign);
+        const auto digitalBandPass = iir::designFilter<T>(Type::bandpass, {.order = 4UZ, .fLow = 4., .fHigh = 6., .fs = fs}, filterDesign);
 
         const auto secondOrderLowPass = FilterCoefficients<T>{{static_cast<T>(1. / 6474.5), static_cast<T>(2. / 6474.5), static_cast<T>(1. / 6474.5)}, {1, static_cast<T>(-1.96454), static_cast<T>(0.96515)}};
         printFilter("secondOrderLowPass", secondOrderLowPass);
@@ -749,7 +749,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
         std::println("");
         using Un = gr::UncertainValue<double>;
         for (const auto& frequency : {1.0, 2.0, 4.0}) {
-            std::vector<FilterCoefficients<double>> digitalLowPass = useFIR ? std::vector{fir::designFilter<double>(Type::LOWPASS, {.order = 1UZ, .fLow = frequency, .fs = fs}, Hamming)} : iir::designFilter<double>(Type::LOWPASS, {.order = 2UZ, .fLow = frequency, .fs = fs}, BESSEL);
+            std::vector<FilterCoefficients<double>> digitalLowPass = useFIR ? std::vector{fir::designFilter<double>(Type::lowpass, {.order = 1UZ, .fLow = frequency, .fs = fs}, hamming)} : iir::designFilter<double>(Type::lowpass, {.order = 2UZ, .fLow = frequency, .fs = fs}, bessel);
             auto                                    filter         = ErrorPropagatingFilter<Un>(digitalLowPass);
             filter.reset({0.0, noiseFigure});
 
@@ -802,7 +802,7 @@ const boost::ut::suite<"IIR FilterTool"> iirFilterToolTests = [] {
 
         using Un = gr::UncertainValue<double>;
 
-        std::vector<FilterCoefficients<double>> digitalLowPass = useFIR ? std::vector{fir::designFilter<double>(Type::LOWPASS, {.order = 1UZ, .fLow = flow, .fs = fs}, Hamming)} : iir::designFilter<double>(Type::LOWPASS, {.order = 2UZ, .fLow = flow, .fs = fs}, BESSEL);
+        std::vector<FilterCoefficients<double>> digitalLowPass = useFIR ? std::vector{fir::designFilter<double>(Type::lowpass, {.order = 1UZ, .fLow = flow, .fs = fs}, hamming)} : iir::designFilter<double>(Type::lowpass, {.order = 2UZ, .fLow = flow, .fs = fs}, bessel);
         auto                                    filter         = ErrorPropagatingFilter<Un>(digitalLowPass);
         filter.reset({0.0, noiseFigure});
 
@@ -851,13 +851,13 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
             constexpr double kNyquist   = 0.48;
             const double     kOmega0    = std::sqrt(kFilterParams.fLow * kFilterParams.fHigh) / kFilterParams.fs;
             switch (filterType) {
-            case BANDSTOP: expect(le(calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter), 5. * kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter)); [[fallthrough]];
-            case LOWPASS: expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kDC, digitalFilter), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at DC: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kDC, digitalFilter)); break;
-            case HIGHPASS:
+            case bandstop: expect(le(calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter), 5. * kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter)); [[fallthrough]];
+            case lowpass: expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kDC, digitalFilter), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at DC: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kDC, digitalFilter)); break;
+            case highpass:
                 expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kNyquist, digitalFilter), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at NQ: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kNyquist, digitalFilter));
                 expect(le(calculateResponse<Normalised, Magnitude>(kDC, digitalFilter), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter));
                 break;
-            case BANDPASS:
+            case bandpass:
                 expect(approx(1.0, calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter), kTolerance)) << std::format("({}, {}, {}) has non-unity gain at omega0: {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kOmega0, digitalFilter));
                 expect(le(calculateResponse<Normalised, Magnitude>(kDC, digitalFilter), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band (DC): {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kDC, digitalFilter));
                 expect(le(calculateResponse<Normalised, Magnitude>(kNyquist, digitalFilter), kTolerance)) << std::format("({}, {}, {}) insufficient gain in stop-band (NQ): {:.4f}", enum_name(filterDesign), enum_name(filterType), kFilterParams.order, calculateResponse<Normalised, Magnitude>(kNyquist, digitalFilter));
@@ -865,13 +865,13 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
             }
 
             // N.B. cannot test magnitude response shape since there are not analog-vs-digital equivalents to compare
-        } | std::vector{LOWPASS, HIGHPASS, BANDPASS, BANDSTOP}; //
-    } | std::vector{Kaiser, Hamming, Hann};
+        } | std::vector{lowpass, highpass, bandpass, bandstop}; //
+    } | std::vector{kaiser, hamming, hann};
 
     // 100-300 Hz band-stop at fs=1000: rejects the band and passes DC and Nyquist at +1
     "FIR band-stop rejection and polarity"_test = [] {
         constexpr auto kParams = FilterParameters{.order = 4UZ, .fLow = 100., .fHigh = 300., .fs = 1000.};
-        const auto     filter  = fir::designFilter<double>(gr::filter::Type::BANDSTOP, kParams, Kaiser);
+        const auto     filter  = fir::designFilter<double>(gr::filter::Type::bandstop, kParams, kaiser);
         const double   center  = std::sqrt(kParams.fLow * kParams.fHigh) / kParams.fs;
 
         expect(le(calculateResponse<Normalised, Magnitude>(center, filter), 0.01)) << std::format("stop-band rejection at the band center: {:.5f}", calculateResponse<Normalised, Magnitude>(center, filter));
@@ -884,7 +884,7 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
     // 100-300 Hz band-pass at fs=1000: passes the band at +1, sign included
     "FIR band-pass polarity"_test = [] {
         constexpr auto kParams = FilterParameters{.order = 4UZ, .fLow = 100., .fHigh = 300., .fs = 1000.};
-        const auto     filter  = fir::designFilter<double>(gr::filter::Type::BANDPASS, kParams, Kaiser);
+        const auto     filter  = fir::designFilter<double>(gr::filter::Type::bandpass, kParams, kaiser);
         const double   center  = std::sqrt(kParams.fLow * kParams.fHigh) / kParams.fs;
 
         expect(approx(calculateResponse<Normalised, Magnitude>(center, filter), 1., 0.05)) << "pass-band magnitude at the band center";
@@ -907,7 +907,7 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
     // A(f) against |H(f)|: the same size everywhere, and a sign the magnitude has thrown away
     "the signed amplitude carries the sign the magnitude drops"_test = [] {
         constexpr auto kParams  = FilterParameters{.order = 4UZ, .fLow = 100., .fHigh = 300., .fs = 1000.};
-        const auto     bandStop = fir::designFilter<double>(gr::filter::Type::BANDSTOP, kParams, Kaiser);
+        const auto     bandStop = fir::designFilter<double>(gr::filter::Type::bandstop, kParams, kaiser);
 
         for (const double f : {0., 0.1, 0.2, 0.3, 0.4, 0.5}) {
             expect(approx(std::abs(signedAmplitudeAt(bandStop, f)), calculateResponse<Normalised, Magnitude>(f, bandStop), 1e-12)) << std::format("|A| is |H| at {}", f);
@@ -944,7 +944,7 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
         constexpr auto kFilterParams = FilterParameters{.order = 4UZ, .fLow = 1.0, .fHigh = 10.0, .gain = 0.5, .attenuationDb = 50., .fs = 1000.0};
 
         using enum gr::algorithm::window::Type;
-        const auto window = Kaiser;
+        const auto window = kaiser;
         using enum gr::filter::Type;
 
         // generate test frequency range
@@ -956,9 +956,9 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
         for (auto subrange : {sequence_range(0.1, 0.9, 0.01), sequence_range(1.0, 9.0, 0.01), sequence_range(10.0, 90.0, 0.1), sequence_range(100.0, 490.0, 10.0)}) {
             std::ranges::move(subrange, std::back_inserter(frequencies));
         }
-        const auto          lowPassFilter    = fir::designFilter<double>(LOWPASS, kFilterParams, window);
-        const auto          highPassFilter   = fir::designFilter<double>(HIGHPASS, kFilterParams, window);
-        const auto          bandPassFilter   = fir::designFilter<double>(BANDPASS, kFilterParams, window);
+        const auto          lowPassFilter    = fir::designFilter<double>(lowpass, kFilterParams, window);
+        const auto          highPassFilter   = fir::designFilter<double>(highpass, kFilterParams, window);
+        const auto          bandPassFilter   = fir::designFilter<double>(bandpass, kFilterParams, window);
         std::vector<double> lowPassResponse  = calculateFrequencyResponse<MagnitudeDB>(frequencies, kFilterParams.fs, lowPassFilter);
         std::vector<double> highPassResponse = calculateFrequencyResponse<MagnitudeDB>(frequencies, kFilterParams.fs, highPassFilter);
         std::vector<double> bandPassResponse = calculateFrequencyResponse<MagnitudeDB>(frequencies, kFilterParams.fs, bandPassFilter);
@@ -975,8 +975,8 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
         auto highPassResponses        = gr::graphs::ImChart<119, 21, LogAxisTransform>({{0.1, kFilterParams.fs}, {-45., +5}});
         highPassResponses.axis_name_x = "[Hz]";
         highPassResponses.axis_name_y = "band-stop response [dB]";
-        for (auto& windowType : {Kaiser, Hamming, Rectangular, Hann, BlackmanNuttall}) {
-            auto                filter   = fir::designFilter<double>(BANDSTOP, kFilterParams, windowType);
+        for (auto& windowType : {kaiser, hamming, rectangular, hann, blackman_nuttall}) {
+            auto                filter   = fir::designFilter<double>(bandstop, kFilterParams, windowType);
             std::vector<double> response = calculateFrequencyResponse<MagnitudeDB>(frequencies, kFilterParams.fs, filter);
             highPassResponses.draw(frequencies, response, std::format("{}({})", enum_name(windowType), filter.b.size()));
         }
@@ -997,8 +997,8 @@ const boost::ut::suite<"FIR FilterTool"> firFilterToolTests = [] {
         chart.axis_name_x = "time [s]";
         chart.axis_name_y = "FIR filter amplitude [a.u.]";
 
-        const auto window          = gr::algorithm::window::Type::Kaiser;
-        const auto digitalBandPass = fir::designFilter<double>(Type::BANDPASS, kFilterParams, window);
+        const auto window          = gr::algorithm::window::Type::kaiser;
+        const auto digitalBandPass = fir::designFilter<double>(Type::bandpass, kFilterParams, window);
         // printFilter("digitalBandPass", digitalBandPass);
         for (const auto& frequency : {3.0, 3.5, 5., 6.5, 7.0}) {
             auto                filter = Filter<double>(digitalBandPass);
@@ -1177,17 +1177,17 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
         std::size_t                nFIR      = countFilterCoefficients(firFilter);
         expect(le(nIIR, nFIR)) << std::format("{} complexity: #IIR {} vs. #FIR {}", enum_name(filterType), nIIR, nFIR);
         tag("visual") / "filter benchmarks"_test = [&] { std::print("{} complexity: #IIR {} vs. #FIR {}\n", enum_name(filterType), nIIR, nFIR); };
-    } | std::vector{LOWPASS, HIGHPASS, BANDPASS, BANDSTOP};
+    } | std::vector{lowpass, highpass, bandpass, bandstop};
 
     "IIR vs. FIR magnitude and phase"_test = []() {
         using namespace gr::graphs;
         using enum gr::algorithm::window::Type;
 
         constexpr FilterParameters kFilterParameter{.order = 4UZ, .fLow = 10., .gain = 0.5, .fs = 1000.};
-        const auto                 iirFilter1 = iir::designFilter<double>(LOWPASS, kFilterParameter, BUTTERWORTH);
-        const auto                 iirFilter2 = iir::designFilter<double>(LOWPASS, kFilterParameter, BESSEL);
-        const auto                 firFilter1 = fir::designFilter<double>(LOWPASS, kFilterParameter, Kaiser);
-        const auto                 firFilter2 = fir::designFilter<double>(LOWPASS, kFilterParameter, Hamming);
+        const auto                 iirFilter1 = iir::designFilter<double>(lowpass, kFilterParameter, butterworth);
+        const auto                 iirFilter2 = iir::designFilter<double>(lowpass, kFilterParameter, bessel);
+        const auto                 firFilter1 = fir::designFilter<double>(lowpass, kFilterParameter, kaiser);
+        const auto                 firFilter2 = fir::designFilter<double>(lowpass, kFilterParameter, hamming);
 
         // generate test frequency range
         auto sequence_range = [](auto start, auto end, auto step) {
@@ -1236,7 +1236,7 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
         using namespace benchmark;
         using namespace gr::filter::iir;
         constexpr FilterParameters kFilterParameter{.order = 4UZ, .fLow = 4., .fHigh = 6., .attenuationDb = 50., .fs = 1000.};
-        constexpr Design           filterDesign = BUTTERWORTH;
+        constexpr Design           filterDesign = butterworth;
 
         // ut applies its tag filter to non-parameterized tests only, so the record length is the opt-in
         // here: the short default still settles every filter form and keeps its gain assertion
@@ -1284,7 +1284,7 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             };
             expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1)));
         }
-        const auto digitalBandPass = iir::designFilter<T>(Type::BANDPASS, kFilterParameter, filterDesign);
+        const auto digitalBandPass = iir::designFilter<T>(Type::bandpass, kFilterParameter, filterDesign);
         {
             T    actualGain                                       = 0.0;
             auto filter                                           = Filter<T, 32UZ, Form::DF_I, std::execution::unseq>(digitalBandPass);
@@ -1323,7 +1323,7 @@ const boost::ut::suite<"IIR & FIR Benchmarks"> filterBenchmarks = [] {
             expect(approx(actualGain, static_cast<T>(1), static_cast<T>(0.1))) << std::format("DF_II_TRANSPOSED exec::seq approx settling gain threshold for {}", gr::meta::type_name<T>());
         }
 #endif
-        const auto digitalBandPassFir = fir::designFilter<T>(Type::BANDPASS, kFilterParameter);
+        const auto digitalBandPassFir = fir::designFilter<T>(Type::bandpass, kFilterParameter);
         {
             T    actualGain                              = 0.0;
             auto filter                                  = Filter<T>(digitalBandPassFir);

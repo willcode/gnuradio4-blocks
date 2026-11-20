@@ -246,7 +246,7 @@ the explicit settings. termination terminated adds constraint_length - 1 tail bi
         Annotated<std::vector<gr::Size_t>, Doc<"generator polynomials">, Visible>     polynomials{};
         Annotated<ConvCode, Doc<"published convention (custom = explicit)">, Visible> code           = ConvCode::custom;
         Annotated<gr::Size_t, Doc<"output inversion mask">>                           invert_outputs = 0U;
-        Annotated<gr::fec::ConvTermination, Doc<"frame termination">>                 termination    = gr::fec::ConvTermination::Terminated;
+        Annotated<gr::fec::ConvTermination, Doc<"frame termination">>                 termination    = gr::fec::ConvTermination::terminated;
 
         GR_MAKE_REFLECTABLE(Settings, constraint_length, polynomials, code, invert_outputs, termination);
     } settings;
@@ -338,7 +338,7 @@ the explicit settings. termination terminated adds constraint_length - 1 tail bi
         Annotated<std::vector<gr::Size_t>, Doc<"generator polynomials">, Visible>     polynomials{};
         Annotated<ConvCode, Doc<"published convention (custom = explicit)">, Visible> code           = ConvCode::custom;
         Annotated<gr::Size_t, Doc<"output inversion mask">>                           invert_outputs = 0U;
-        Annotated<gr::fec::ConvTermination, Doc<"frame termination">>                 termination    = gr::fec::ConvTermination::Terminated;
+        Annotated<gr::fec::ConvTermination, Doc<"frame termination">>                 termination    = gr::fec::ConvTermination::terminated;
 
         GR_MAKE_REFLECTABLE(Settings, constraint_length, polynomials, code, invert_outputs, termination);
     } settings;

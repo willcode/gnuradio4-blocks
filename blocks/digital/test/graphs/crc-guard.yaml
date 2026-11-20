@@ -36,7 +36,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -73,7 +73,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -108,7 +108,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -145,7 +145,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -178,7 +178,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -215,7 +215,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -262,7 +262,7 @@ blocks:
       final_xor: !!uint64 18446744073709551615
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -299,7 +299,7 @@ blocks:
       final_xor: !!uint64 18446744073709551615
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -328,7 +328,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
       skip_header_bytes: !!uint32 4294967295
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:

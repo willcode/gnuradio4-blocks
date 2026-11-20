@@ -27,7 +27,7 @@ namespace detail {
 
 inline constexpr const char* kNoiseBlanked = "noise_blanked";
 
-enum class Replacement : std::uint8_t { Interpolate, Hold, Zero };
+enum class Replacement : std::uint8_t { interpolate, hold, zero };
 
 } // namespace detail
 
@@ -95,7 +95,7 @@ censored mean power the threshold is taken against; `blanked_fraction` is a slow
         Annotated<double, Doc<"tracker pole">, Limits<Over<0.0>, Max<1.0>>>                      alpha              = 1e-3;
         Annotated<gr::Size_t, Unit<"samples">, Doc<"blanked run length">, Limits<Min<1U>>>       blank_samples      = 7U;
         Annotated<gr::Size_t, Unit<"samples">, Doc<"lookback length">>                           lookback_samples   = 2U;
-        Annotated<detail::Replacement, Doc<"replacement">, Visible>                              replacement        = detail::Replacement::Interpolate;
+        Annotated<detail::Replacement, Doc<"replacement">, Visible>                              replacement        = detail::Replacement::interpolate;
         Annotated<bool, Doc<"retriggering">>                                                     retrigger          = false;
         Annotated<gr::Size_t, Unit<"samples">, Doc<"retriggered window limit (0 = derived)">>    max_window_samples = 0U;
         Annotated<bool, Doc<"blanking tags">>                                                    emit_tags          = false;
@@ -561,7 +561,7 @@ private:
         ++_runPosition;
         if (ahead > _delay) {
             _held = _runPosition;
-            return settings.replacement.value == detail::Replacement::Zero ? T{} : _anchor;
+            return settings.replacement.value == detail::Replacement::zero ? T{} : _anchor;
         }
 
         const std::uint32_t position = _runPosition - _held;
@@ -575,8 +575,8 @@ private:
         }
 
         switch (settings.replacement.value) {
-        case detail::Replacement::Zero: return T{};
-        case detail::Replacement::Hold: return _anchor;
+        case detail::Replacement::zero: return T{};
+        case detail::Replacement::hold: return _anchor;
         default: break;
         }
         const T      after  = _line[slot(ahead)];

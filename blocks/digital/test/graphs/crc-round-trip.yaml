@@ -23,7 +23,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc32_big_check
@@ -33,7 +33,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc32_big_ok
@@ -78,7 +78,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc32_little_check
@@ -88,7 +88,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc32_little_ok
@@ -133,7 +133,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc16_big_check
@@ -143,7 +143,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc16_big_ok
@@ -186,7 +186,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc16_little_check
@@ -196,7 +196,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc16_little_ok
@@ -239,7 +239,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc8_big_check
@@ -249,7 +249,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc8_big_ok
@@ -292,7 +292,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc8_little_check
@@ -302,7 +302,7 @@ blocks:
       final_xor: !!uint64 0
       input_reflected: false
       result_reflected: false
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc8_little_ok
@@ -345,7 +345,7 @@ blocks:
       final_xor: !!uint64 18446744073709551615
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc64_big_check
@@ -355,7 +355,7 @@ blocks:
       final_xor: !!uint64 18446744073709551615
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc64_big_ok
@@ -400,7 +400,7 @@ blocks:
       final_xor: !!uint64 18446744073709551615
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::digital::CrcCheck
     parameters:
       name: crc64_little_check
@@ -410,7 +410,7 @@ blocks:
       final_xor: !!uint64 18446744073709551615
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Little
+      crc_byte_order: little
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: crc64_little_ok

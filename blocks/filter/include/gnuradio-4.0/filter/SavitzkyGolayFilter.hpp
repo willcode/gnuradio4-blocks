@@ -52,7 +52,7 @@ A tag whose output lies past the stream's last output leaves at the end-of-strea
         Annotated<gr::Size_t, Doc<"polynomial order">>                       poly_order   = 4U;
         Annotated<gr::Size_t, Doc<"derivative order (0 = smoothing)">>     deriv_order  = 0U;
         Annotated<float, Doc<"sample rate">, Unit<"Hz">>        sample_rate  = 1.0f;
-        Annotated<algorithm::savitzky_golay::Alignment, Doc<"alignment">> alignment    = algorithm::savitzky_golay::Alignment::Centred;
+        Annotated<algorithm::savitzky_golay::Alignment, Doc<"alignment">> alignment    = algorithm::savitzky_golay::Alignment::centered;
 
         GR_MAKE_REFLECTABLE(Settings, window_size, poly_order, deriv_order, sample_rate, alignment);
     } settings;
@@ -101,7 +101,7 @@ public:
     /// @brief The lag in half samples. The centered fit is evaluated at index `(W-1)/2` of the window, counted from the
     /// oldest sample. That index is `W-1-(W-1)/2` samples behind the newest.
     [[nodiscard]] std::optional<std::uint64_t> twiceTagDelay() const noexcept {
-        if (_state.alignment() == algorithm::savitzky_golay::Alignment::Causal) {
+        if (_state.alignment() == algorithm::savitzky_golay::Alignment::causal) {
             return 0ULL;
         }
         const std::uint64_t window = _state.windowSize();
@@ -147,7 +147,7 @@ Boundary policy:
         Annotated<gr::Size_t, Unit<"samples">, Doc<"window size">>  window_size     = 11U;
         Annotated<gr::Size_t, Doc<"polynomial order">>                       poly_order      = 4U;
         Annotated<gr::Size_t, Doc<"derivative order (0 = smoothing)">>    deriv_order     = 0U;
-        Annotated<algorithm::savitzky_golay::BoundaryPolicy, Doc<"boundary policy">, Limits<OneOf<algorithm::savitzky_golay::BoundaryPolicy::Reflect, algorithm::savitzky_golay::BoundaryPolicy::Replicate>>> boundary_policy = algorithm::savitzky_golay::BoundaryPolicy::Reflect;
+        Annotated<algorithm::savitzky_golay::BoundaryPolicy, Doc<"boundary policy">, Limits<OneOf<algorithm::savitzky_golay::BoundaryPolicy::reflect, algorithm::savitzky_golay::BoundaryPolicy::replicate>>> boundary_policy = algorithm::savitzky_golay::BoundaryPolicy::reflect;
 
         GR_MAKE_REFLECTABLE(Settings, window_size, poly_order, deriv_order, boundary_policy);
     } settings;
@@ -161,7 +161,7 @@ private:
         return {
             .derivOrder     = static_cast<std::size_t>(s.deriv_order),
             .delta          = T{1},
-            .alignment      = algorithm::savitzky_golay::Alignment::Centred,
+            .alignment      = algorithm::savitzky_golay::Alignment::centered,
             .boundaryPolicy = s.boundary_policy.value
         };
     }

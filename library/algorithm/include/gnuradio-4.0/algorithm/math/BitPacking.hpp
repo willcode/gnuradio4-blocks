@@ -64,7 +64,7 @@
 namespace gr::math {
 
 /// @brief Which end of a `w`-bit field the stream's first bit occupies.
-enum class BitOrder : std::uint8_t { MsbFirst, LsbFirst };
+enum class BitOrder : std::uint8_t { msb_first, lsb_first };
 
 /// @brief The longest period over `[1, 8] x [1, 8]`, `lcm(7, 8)` bits.
 inline constexpr std::size_t kMaxRepackPeriod = 56UZ;
@@ -89,9 +89,9 @@ namespace detail {
         const unsigned sourcePosition      = b % bitsIn;
         const unsigned destinationPosition = b % bitsOut;
         moves[b]                           = BitMove{static_cast<std::uint8_t>(b / bitsIn),                                                      //
-            static_cast<std::uint8_t>(orderIn == BitOrder::MsbFirst ? bitsIn - 1U - sourcePosition : sourcePosition), //
+            static_cast<std::uint8_t>(orderIn == BitOrder::msb_first ? bitsIn - 1U - sourcePosition : sourcePosition), //
             static_cast<std::uint8_t>(b / bitsOut),                                                                    //
-            static_cast<std::uint8_t>(orderOut == BitOrder::MsbFirst ? bitsOut - 1U - destinationPosition : destinationPosition)};
+            static_cast<std::uint8_t>(orderOut == BitOrder::msb_first ? bitsOut - 1U - destinationPosition : destinationPosition)};
     }
     return moves;
 }
@@ -107,13 +107,13 @@ namespace detail {
 struct BitRepack {
     std::uint8_t bitsIn   = 1U;
     std::uint8_t bitsOut  = 8U;
-    BitOrder     orderIn  = BitOrder::MsbFirst;
-    BitOrder     orderOut = BitOrder::MsbFirst;
+    BitOrder     orderIn  = BitOrder::msb_first;
+    BitOrder     orderOut = BitOrder::msb_first;
 
     std::uint8_t                          inChunk  = 8U; ///< `M = bitsOut / gcd`, input items in one period
     std::uint8_t                          outChunk = 1U; ///< `L = bitsIn / gcd`, output items in one period
     std::uint8_t                          period   = 8U; ///< `lcm(bitsIn, bitsOut)`, at most 56 bits
-    std::array<BitMove, kMaxRepackPeriod> moves    = detail::bitMoves(1U, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst);
+    std::array<BitMove, kMaxRepackPeriod> moves    = detail::bitMoves(1U, 8U, BitOrder::msb_first, BitOrder::msb_first);
 };
 
 /**
@@ -173,7 +173,7 @@ inline void storeItemWord(std::uint8_t* items, std::uint64_t word) noexcept {
 /// @brief Eight one-bit items to one byte. The gathered byte holds item 0 at bit 7 under `msb_first`, and reversing the items moves it to bit 0.
 inline void packEightBits(std::span<const std::uint8_t> in, std::span<std::uint8_t> out, BitOrder orderOut) noexcept {
     const std::size_t count = std::min(in.size() / 8UZ, out.size());
-    if (orderOut == BitOrder::MsbFirst) {
+    if (orderOut == BitOrder::msb_first) {
         for (std::size_t i = 0UZ; i < count; ++i) {
             const std::uint64_t word = loadItemWord(in.data() + 8UZ * i) & kItemLowBits;
             out[i]                   = static_cast<std::uint8_t>((word * kBitSpread) >> 56U);
@@ -189,7 +189,7 @@ inline void packEightBits(std::span<const std::uint8_t> in, std::span<std::uint8
 /// @brief One byte to eight one-bit items, the same constant read the other way round: output item `i` carries bit `7-i` under `msb_first`.
 inline void unpackEightBits(std::span<const std::uint8_t> in, std::span<std::uint8_t> out, BitOrder orderIn) noexcept {
     const std::size_t count = std::min(in.size(), out.size() / 8UZ);
-    if (orderIn == BitOrder::MsbFirst) {
+    if (orderIn == BitOrder::msb_first) {
         for (std::size_t i = 0UZ; i < count; ++i) {
             storeItemWord(out.data() + 8UZ * i, ((static_cast<std::uint64_t>(in[i]) * kBitSpread) >> 7U) & kItemLowBits);
         }

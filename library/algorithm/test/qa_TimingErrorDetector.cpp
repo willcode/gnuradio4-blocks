@@ -132,14 +132,14 @@ struct NyquistChannel {
 
 [[nodiscard]] double errorAt(const NyquistChannel& channel, std::size_t k, TimingDetector detector) {
     switch (detector) {
-    case TimingDetector::MuellerMuller: return muellerMullerError(channel.sample[k], channel.sample[k - 1UZ], channel.decision[k], channel.decision[k - 1UZ]);
-    case TimingDetector::ModifiedMuellerMuller: return modifiedMuellerMullerError(channel.sample[k], channel.sample[k - 1UZ], channel.sample[k - 2UZ], channel.decision[k], channel.decision[k - 1UZ], channel.decision[k - 2UZ], 1.0e30);
-    case TimingDetector::ZeroCrossing: return zeroCrossingError(channel.midpoint[k], channel.decision[k], channel.decision[k - 1UZ]);
-    case TimingDetector::Gardner: return gardnerError(channel.sample[k], channel.sample[k - 1UZ], channel.midpoint[k]);
-    case TimingDetector::EarlyLate: return earlyLateError(channel.sample[k], channel.midpoint[k], channel.lookahead[k]);
+    case TimingDetector::mueller_muller: return muellerMullerError(channel.sample[k], channel.sample[k - 1UZ], channel.decision[k], channel.decision[k - 1UZ]);
+    case TimingDetector::modified_mueller_muller: return modifiedMuellerMullerError(channel.sample[k], channel.sample[k - 1UZ], channel.sample[k - 2UZ], channel.decision[k], channel.decision[k - 1UZ], channel.decision[k - 2UZ], 1.0e30);
+    case TimingDetector::zero_crossing: return zeroCrossingError(channel.midpoint[k], channel.decision[k], channel.decision[k - 1UZ]);
+    case TimingDetector::gardner: return gardnerError(channel.sample[k], channel.sample[k - 1UZ], channel.midpoint[k]);
+    case TimingDetector::early_late: return earlyLateError(channel.sample[k], channel.midpoint[k], channel.lookahead[k]);
     // The clip is opened out so the gain measured here is the S-curve slope rather than the clip's.
-    case TimingDetector::SignalTimesSlopeMl: return signalTimesSlopeError(channel.sample[k], channel.slope[k], 1.0e30);
-    case TimingDetector::SignumTimesSlopeMl: return signumTimesSlopeError(channel.sample[k], channel.slope[k], 1.0e30);
+    case TimingDetector::signal_times_slope_ml: return signalTimesSlopeError(channel.sample[k], channel.slope[k], 1.0e30);
+    case TimingDetector::signum_times_slope_ml: return signumTimesSlopeError(channel.sample[k], channel.slope[k], 1.0e30);
     }
     return 0.0;
 }
@@ -169,7 +169,7 @@ struct Statistics {
 
 /// The measured `Kted` table, one row per detector and modulation.
 struct GainRow {
-    TimingDetector detector   = TimingDetector::MuellerMuller;
+    TimingDetector detector   = TimingDetector::mueller_muller;
     Modulation     modulation = Modulation::Bpsk;
     double         at022      = 0.0;
     double         at035      = 0.0;
@@ -177,16 +177,16 @@ struct GainRow {
 };
 
 constexpr GainRow kGainTable[] = {
-    {TimingDetector::MuellerMuller, Modulation::Bpsk, 1.89141, 1.76397, 1.55758},          //
-    {TimingDetector::MuellerMuller, Modulation::Qpsk, 1.90283, 1.77355, 1.56435},          //
-    {TimingDetector::ModifiedMuellerMuller, Modulation::Bpsk, 3.78285, 3.52798, 3.11518}, //
-    {TimingDetector::ModifiedMuellerMuller, Modulation::Qpsk, 3.80566, 3.54714, 3.12875}, //
-    {TimingDetector::ZeroCrossing, Modulation::Bpsk, 2.53867, 2.57977, 2.64744},           //
-    {TimingDetector::ZeroCrossing, Modulation::Qpsk, 2.56109, 2.60278, 2.67137},           //
-    {TimingDetector::Gardner, Modulation::Bpsk, 0.67408, 1.05626, 1.47926},                 //
-    {TimingDetector::Gardner, Modulation::Qpsk, 0.68004, 1.06739, 1.49611},                 //
-    {TimingDetector::EarlyLate, Modulation::Bpsk, 0.67397, 1.05616, 1.47918},              //
-    {TimingDetector::EarlyLate, Modulation::Qpsk, 0.68008, 1.06743, 1.49614},              //
+    {TimingDetector::mueller_muller, Modulation::Bpsk, 1.89141, 1.76397, 1.55758},          //
+    {TimingDetector::mueller_muller, Modulation::Qpsk, 1.90283, 1.77355, 1.56435},          //
+    {TimingDetector::modified_mueller_muller, Modulation::Bpsk, 3.78285, 3.52798, 3.11518}, //
+    {TimingDetector::modified_mueller_muller, Modulation::Qpsk, 3.80566, 3.54714, 3.12875}, //
+    {TimingDetector::zero_crossing, Modulation::Bpsk, 2.53867, 2.57977, 2.64744},           //
+    {TimingDetector::zero_crossing, Modulation::Qpsk, 2.56109, 2.60278, 2.67137},           //
+    {TimingDetector::gardner, Modulation::Bpsk, 0.67408, 1.05626, 1.47926},                 //
+    {TimingDetector::gardner, Modulation::Qpsk, 0.68004, 1.06739, 1.49611},                 //
+    {TimingDetector::early_late, Modulation::Bpsk, 0.67397, 1.05616, 1.47918},              //
+    {TimingDetector::early_late, Modulation::Qpsk, 0.68008, 1.06743, 1.49614},              //
 };
 
 constexpr double kRolloffs[] = {0.22, 0.35, 0.50};
@@ -194,13 +194,13 @@ constexpr double kChord      = 0.02; /// the symmetric offset the S-curve slope 
 
 [[nodiscard]] const char* nameOf(TimingDetector detector) {
     switch (detector) {
-    case TimingDetector::MuellerMuller: return "M&M";
-    case TimingDetector::ModifiedMuellerMuller: return "modified M&M";
-    case TimingDetector::ZeroCrossing: return "zero crossing";
-    case TimingDetector::Gardner: return "gardner";
-    case TimingDetector::EarlyLate: return "early-late";
-    case TimingDetector::SignalTimesSlopeMl: return "signal x slope";
-    case TimingDetector::SignumTimesSlopeMl: return "signum x slope";
+    case TimingDetector::mueller_muller: return "M&M";
+    case TimingDetector::modified_mueller_muller: return "modified M&M";
+    case TimingDetector::zero_crossing: return "zero crossing";
+    case TimingDetector::gardner: return "gardner";
+    case TimingDetector::early_late: return "early-late";
+    case TimingDetector::signal_times_slope_ml: return "signal x slope";
+    case TimingDetector::signum_times_slope_ml: return "signum x slope";
     }
     return "?";
 }
@@ -252,10 +252,10 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
         for (double rolloff : {0.22, 0.35, 0.50}) {
             const NyquistChannel forward  = makeChannel(nSymbols, rolloff, +kChord, Modulation::Qpsk, 1.0, 5150U);
             const NyquistChannel backward = makeChannel(nSymbols, rolloff, -kChord, Modulation::Qpsk, 1.0, 5150U);
-            const double         measured = (statisticsOf(forward, TimingDetector::MuellerMuller).mean - statisticsOf(backward, TimingDetector::MuellerMuller).mean) / (2.0 * kChord);
+            const double         measured = (statisticsOf(forward, TimingDetector::mueller_muller).mean - statisticsOf(backward, TimingDetector::mueller_muller).mean) / (2.0 * kChord);
             expect(lt(std::abs(measured - muellerMullerGain(rolloff)) / muellerMullerGain(rolloff), 0.015)) << std::format("rolloff {}: measured {:.5f} against the closed form {:.5f}", rolloff, measured, muellerMullerGain(rolloff));
 
-            const double modified = (statisticsOf(forward, TimingDetector::ModifiedMuellerMuller).mean - statisticsOf(backward, TimingDetector::ModifiedMuellerMuller).mean) / (2.0 * kChord);
+            const double modified = (statisticsOf(forward, TimingDetector::modified_mueller_muller).mean - statisticsOf(backward, TimingDetector::modified_mueller_muller).mean) / (2.0 * kChord);
             expect(lt(std::abs(modified / measured - 2.0), 0.01)) << std::format("rolloff {}: the modified form is exactly twice, {:.5f} against {:.5f}", rolloff, modified, measured);
             expect(approx(modifiedMuellerMullerGain(rolloff), 2.0 * muellerMullerGain(rolloff), 1.0e-15));
         }
@@ -266,8 +266,8 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
         // kernels over a modulated channel and taking the secant of the S-curve. Agreement across all seven is what
         // proves the two share a sign convention and a scale, and it is the only check the two maximum-likelihood
         // forms have, their gains reaching no closed form the recorded table could hold.
-        constexpr TimingDetector kAll[] = {TimingDetector::MuellerMuller, TimingDetector::ModifiedMuellerMuller, TimingDetector::ZeroCrossing, //
-            TimingDetector::Gardner, TimingDetector::EarlyLate, TimingDetector::SignalTimesSlopeMl, TimingDetector::SignumTimesSlopeMl};
+        constexpr TimingDetector kAll[] = {TimingDetector::mueller_muller, TimingDetector::modified_mueller_muller, TimingDetector::zero_crossing, //
+            TimingDetector::gardner, TimingDetector::early_late, TimingDetector::signal_times_slope_ml, TimingDetector::signum_times_slope_ml};
 
         // The measurement is a mean over a finite draw, so its own error sets the tolerance: the blind forms on BPSK
         // are the noisiest of the twenty-one cases and the symbol count is chosen to bring them inside 2%.
@@ -279,13 +279,13 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
                 const double axis   = modulation == Modulation::Qpsk ? std::numbers::sqrt2 / 2.0 : 0.5;
                 const auto   gainOf = [rolloff, axis](TimingDetector detector) {
                     switch (detector) {
-                    case TimingDetector::MuellerMuller: return muellerMullerGain(rolloff);
-                    case TimingDetector::ModifiedMuellerMuller: return modifiedMuellerMullerGain(rolloff);
-                    case TimingDetector::ZeroCrossing: return zeroCrossingGain(rolloff);
-                    case TimingDetector::Gardner: return gardnerGain(rolloff);
-                    case TimingDetector::EarlyLate: return earlyLateGain(rolloff);
-                    case TimingDetector::SignalTimesSlopeMl: return signalTimesSlopeGain(rolloff);
-                    case TimingDetector::SignumTimesSlopeMl: return signumTimesSlopeGain(rolloff, axis);
+                    case TimingDetector::mueller_muller: return muellerMullerGain(rolloff);
+                    case TimingDetector::modified_mueller_muller: return modifiedMuellerMullerGain(rolloff);
+                    case TimingDetector::zero_crossing: return zeroCrossingGain(rolloff);
+                    case TimingDetector::gardner: return gardnerGain(rolloff);
+                    case TimingDetector::early_late: return earlyLateGain(rolloff);
+                    case TimingDetector::signal_times_slope_ml: return signalTimesSlopeGain(rolloff);
+                    case TimingDetector::signum_times_slope_ml: return signumTimesSlopeGain(rolloff, axis);
                     }
                     return 0.0;
                 };
@@ -369,10 +369,10 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
 
         for (std::size_t i = 0UZ; i < std::size(kTaus); ++i) {
             const NyquistChannel channel   = makeChannel(20000UZ, 0.35, kTaus[i], Modulation::Qpsk, 1.0, 5150U);
-            const double         muller    = statisticsOf(channel, TimingDetector::MuellerMuller).mean;
-            const double         gardner   = statisticsOf(channel, TimingDetector::Gardner).mean;
-            const double         crossing  = statisticsOf(channel, TimingDetector::ZeroCrossing).mean;
-            const double         earlyLate = statisticsOf(channel, TimingDetector::EarlyLate).mean;
+            const double         muller    = statisticsOf(channel, TimingDetector::mueller_muller).mean;
+            const double         gardner   = statisticsOf(channel, TimingDetector::gardner).mean;
+            const double         crossing  = statisticsOf(channel, TimingDetector::zero_crossing).mean;
+            const double         earlyLate = statisticsOf(channel, TimingDetector::early_late).mean;
 
             // Gardner and early-late are two arrangements of the same measurement.
             expect(lt(std::abs(gardner - earlyLate), 1.0e-3)) << std::format("tau={:+.3f}: Gardner {:+.5f} against early-late {:+.5f}", kTaus[i], gardner, earlyLate);
@@ -396,7 +396,7 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
         // One assertion per detector; the wrong sign makes the loop diverge rather than converge.
         const NyquistChannel early = makeChannel(8000UZ, 0.35, +0.02, Modulation::Qpsk, 1.0, 77U);
         const NyquistChannel late  = makeChannel(8000UZ, 0.35, -0.02, Modulation::Qpsk, 1.0, 77U);
-        for (TimingDetector detector : {TimingDetector::MuellerMuller, TimingDetector::ModifiedMuellerMuller, TimingDetector::ZeroCrossing, TimingDetector::Gardner, TimingDetector::EarlyLate}) {
+        for (TimingDetector detector : {TimingDetector::mueller_muller, TimingDetector::modified_mueller_muller, TimingDetector::zero_crossing, TimingDetector::gardner, TimingDetector::early_late}) {
             expect(gt(statisticsOf(early, detector).mean, 0.0)) << std::format("{}: E[e] at tau = +0.02 is positive", nameOf(detector));
             expect(lt(statisticsOf(late, detector).mean, 0.0)) << std::format("{}: E[e] at tau = -0.02 is negative", nameOf(detector));
         }
@@ -404,16 +404,16 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
 
     "self-noise, including the exact zero that makes M&M the default where decisions exist"_test = [] {
         struct NoiseRow {
-            TimingDetector detector = TimingDetector::Gardner;
+            TimingDetector detector = TimingDetector::gardner;
             double         bpsk     = 0.0;
             double         qpsk     = 0.0;
         };
-        constexpr NoiseRow kNoise[] = {{TimingDetector::Gardner, 0.34341, 0.24574}, {TimingDetector::ZeroCrossing, 0.34341, 0.24574}, {TimingDetector::EarlyLate, 1.14566, 0.81221}};
+        constexpr NoiseRow kNoise[] = {{TimingDetector::gardner, 0.34341, 0.24574}, {TimingDetector::zero_crossing, 0.34341, 0.24574}, {TimingDetector::early_late, 1.14566, 0.81221}};
 
         for (Modulation modulation : {Modulation::Bpsk, Modulation::Qpsk}) {
             const NyquistChannel channel = makeChannel(20000UZ, 0.35, 0.0, modulation, 1.0, 5150U);
 
-            for (TimingDetector detector : {TimingDetector::MuellerMuller, TimingDetector::ModifiedMuellerMuller}) {
+            for (TimingDetector detector : {TimingDetector::mueller_muller, TimingDetector::modified_mueller_muller}) {
                 const Statistics statistics = statisticsOf(channel, detector);
                 expect(lt(statistics.worst, 1.0e-6)) << std::format("{}: every single-symbol error is zero on an ideal Nyquist channel with correct decisions, worst {:.3g}", nameOf(detector), statistics.worst);
             }
@@ -424,11 +424,11 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
                 expect(lt(std::abs(measured - expected) / expected, 0.05)) << std::format("{} {}: self-noise {:.5f} against {:.5f}", nameOf(row.detector), modulation == Modulation::Qpsk ? "QPSK" : "BPSK", measured, expected);
             }
 
-            const double gardner  = statisticsOf(channel, TimingDetector::Gardner).deviation;
-            const double crossing = statisticsOf(channel, TimingDetector::ZeroCrossing).deviation;
+            const double gardner  = statisticsOf(channel, TimingDetector::gardner).deviation;
+            const double crossing = statisticsOf(channel, TimingDetector::zero_crossing).deviation;
             expect(lt(std::abs(gardner - crossing), 1.0e-9)) << "Gardner and zero crossing coincide exactly at tau = 0 with correct decisions, so their raw self-noise is the same number";
 
-            const double earlyLate = statisticsOf(channel, TimingDetector::EarlyLate).deviation;
+            const double earlyLate = statisticsOf(channel, TimingDetector::early_late).deviation;
             expect(gt(earlyLate / gardner, 3.2)) << std::format("early-late costs {:.2f}x Gardner's self-noise for an identical S-curve", earlyLate / gardner);
             expect(lt(earlyLate / gardner, 3.4));
         }
@@ -436,9 +436,9 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
 
     "Gardner and early-late are blind, and M&M is not"_test = [] {
         const NyquistChannel channel = makeChannel(4000UZ, 0.35, 0.05, Modulation::Qpsk, 1.0, 5150U);
-        const double         gardner = statisticsOf(channel, TimingDetector::Gardner).mean;
-        const double         late    = statisticsOf(channel, TimingDetector::EarlyLate).mean;
-        const double         muller  = statisticsOf(channel, TimingDetector::MuellerMuller).mean;
+        const double         gardner = statisticsOf(channel, TimingDetector::gardner).mean;
+        const double         late    = statisticsOf(channel, TimingDetector::early_late).mean;
+        const double         muller  = statisticsOf(channel, TimingDetector::mueller_muller).mean;
 
         std::mt19937                           rng(9U);
         std::uniform_real_distribution<double> angle(0.0, 2.0 * kPi);
@@ -456,9 +456,9 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
                 v *= rotation;
             }
             // The decisions are left unrotated, as they stand before a carrier loop runs.
-            expect(lt(std::abs(statisticsOf(rotated, TimingDetector::Gardner).mean - gardner), 1.0e-6)) << "a common rotation leaves Re{(u-v)conj(w)} unchanged";
-            expect(lt(std::abs(statisticsOf(rotated, TimingDetector::EarlyLate).mean - late), 1.0e-6));
-            mullerDrift = std::max(mullerDrift, std::abs(statisticsOf(rotated, TimingDetector::MuellerMuller).mean - muller));
+            expect(lt(std::abs(statisticsOf(rotated, TimingDetector::gardner).mean - gardner), 1.0e-6)) << "a common rotation leaves Re{(u-v)conj(w)} unchanged";
+            expect(lt(std::abs(statisticsOf(rotated, TimingDetector::early_late).mean - late), 1.0e-6));
+            mullerDrift = std::max(mullerDrift, std::abs(statisticsOf(rotated, TimingDetector::mueller_muller).mean - muller));
         }
         expect(gt(mullerDrift, 0.01)) << std::format("and M&M's error does move, by {:.4f}", mullerDrift);
     };
@@ -469,7 +469,7 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
         for (double amplitude : {0.5, 1.0, 2.0}) {
             const NyquistChannel forward  = makeChannel(20000UZ, 0.35, +kChord, Modulation::Qpsk, amplitude, 5150U);
             const NyquistChannel backward = makeChannel(20000UZ, 0.35, -kChord, Modulation::Qpsk, amplitude, 5150U);
-            gains[at++]                   = (statisticsOf(forward, TimingDetector::MuellerMuller).mean - statisticsOf(backward, TimingDetector::MuellerMuller).mean) / (2.0 * kChord);
+            gains[at++]                   = (statisticsOf(forward, TimingDetector::mueller_muller).mean - statisticsOf(backward, TimingDetector::mueller_muller).mean) / (2.0 * kChord);
         }
         expect(lt(std::abs(gains[1] / gains[0] - 4.0), 0.04)) << std::format("Kted at A = 0.5 and 1.0: {:.5f}, {:.5f}", gains[0], gains[1]);
         expect(lt(std::abs(gains[2] / gains[1] - 4.0), 0.04)) << std::format("Kted at A = 1.0 and 2.0: {:.5f}, {:.5f}", gains[1], gains[2]);
@@ -477,15 +477,15 @@ const boost::ut::suite<"timing error detectors"> timingDetectorTests = [] {
     };
 
     "the kernels are pure, and their traits describe what a scheduler needs"_test = [] {
-        expect(eq(traitsOf(TimingDetector::MuellerMuller).inputsPerSymbol, 1));
-        expect(that % traitsOf(TimingDetector::MuellerMuller).needsDecisions);
-        expect(eq(traitsOf(TimingDetector::ModifiedMuellerMuller).errorDepth, 3)) << "it spans two symbol intervals, so it reads three samples";
-        expect(eq(traitsOf(TimingDetector::Gardner).inputsPerSymbol, 2));
-        expect(that % !traitsOf(TimingDetector::Gardner).needsDecisions);
-        expect(that % !traitsOf(TimingDetector::Gardner).needsLookahead);
-        expect(that % traitsOf(TimingDetector::EarlyLate).needsLookahead) << "early-late alone reads a sample after the symbol instant";
-        expect(that % traitsOf(TimingDetector::SignalTimesSlopeMl).needsDerivative);
-        expect(that % traitsOf(TimingDetector::SignumTimesSlopeMl).needsDerivative);
+        expect(eq(traitsOf(TimingDetector::mueller_muller).inputsPerSymbol, 1));
+        expect(that % traitsOf(TimingDetector::mueller_muller).needsDecisions);
+        expect(eq(traitsOf(TimingDetector::modified_mueller_muller).errorDepth, 3)) << "it spans two symbol intervals, so it reads three samples";
+        expect(eq(traitsOf(TimingDetector::gardner).inputsPerSymbol, 2));
+        expect(that % !traitsOf(TimingDetector::gardner).needsDecisions);
+        expect(that % !traitsOf(TimingDetector::gardner).needsLookahead);
+        expect(that % traitsOf(TimingDetector::early_late).needsLookahead) << "early-late alone reads a sample after the symbol instant";
+        expect(that % traitsOf(TimingDetector::signal_times_slope_ml).needsDerivative);
+        expect(that % traitsOf(TimingDetector::signum_times_slope_ml).needsDerivative);
 
         // Real input is the same formula with the imaginary term absent, and it must compile as such.
         expect(approx(muellerMullerError(0.5f, 0.25f, 1.0f, 1.0f), 0.25f, 1.0e-7f));

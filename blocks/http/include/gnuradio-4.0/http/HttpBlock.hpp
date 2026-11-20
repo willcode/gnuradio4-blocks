@@ -34,8 +34,8 @@ namespace gr::blocks::http {
 namespace fileio = gr::algorithm::fileio;
 
 enum class SourceMode : char {
-    GET       = 1,
-    SUBSCRIBE = 2,
+    get       = 1,
+    subscribe = 2,
 };
 
 GR_REGISTER_BLOCK(gr::blocks::http::HttpSource)
@@ -58,7 +58,7 @@ Internally this uses FileIo.
 
     struct Settings {
         gr::Annotated<std::string>                                                               url;
-        gr::Annotated<gr::blocks::http::SourceMode, gr::Doc<"request type">>                     type        = gr::blocks::http::SourceMode::GET;
+        gr::Annotated<gr::blocks::http::SourceMode, gr::Doc<"request type">>                     type        = gr::blocks::http::SourceMode::get;
         gr::Annotated<gr::Size_t, gr::Unit<"byte">, gr::Doc<"chunk size limit (0 = unlimited)">> chunk_bytes = 0U;
 
         GR_MAKE_REFLECTABLE(Settings, url, type, chunk_bytes);
@@ -91,7 +91,7 @@ Internally this uses FileIo.
         if (settings.chunk_bytes.value != 0U) {
             config.chunkBytes = static_cast<std::size_t>(settings.chunk_bytes.value);
         }
-        config.longPolling               = settings.type.value == SourceMode::SUBSCRIBE;
+        config.longPolling               = settings.type.value == SourceMode::subscribe;
         config.emscriptenRunOnMainThread = _emscriptenRunOnMainThread;
         return config;
     }

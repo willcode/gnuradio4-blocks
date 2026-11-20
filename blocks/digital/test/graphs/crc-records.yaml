@@ -30,7 +30,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
       discard_crc: true
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -83,7 +83,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: carried_sink
@@ -147,7 +147,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: verdict_ok
@@ -192,7 +192,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: Big
+      crc_byte_order: big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: unconnected_ok

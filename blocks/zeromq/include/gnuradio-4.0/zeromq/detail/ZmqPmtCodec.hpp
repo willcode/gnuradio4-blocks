@@ -15,7 +15,7 @@
 
 namespace gr::blocks::zeromq {
 
-enum class PmtWireFormat : std::uint8_t { GR3, GR4_YAML_V1 };
+enum class PmtWireFormat : std::uint8_t { gr3, gr4_yaml_v1 };
 
 namespace detail {
 
@@ -66,15 +66,15 @@ inline gr::pmt::Value deserialize_gr4_yaml_v1_pmt(const std::uint8_t*& data, con
 
 inline std::vector<std::uint8_t> serialize_pmt(const gr::pmt::Value& value, PmtWireFormat format) {
     switch (format) {
-    case PmtWireFormat::GR4_YAML_V1: return serialize_gr4_yaml_v1_pmt(value);
-    case PmtWireFormat::GR3: return legacy_pmt::serialize_to_legacy(value);
+    case PmtWireFormat::gr4_yaml_v1: return serialize_gr4_yaml_v1_pmt(value);
+    case PmtWireFormat::gr3: return legacy_pmt::serialize_to_legacy(value);
     }
     throw std::invalid_argument("Unknown PMT wire format");
 }
 
 inline gr::pmt::Value deserialize_pmt(const std::uint8_t* data, std::size_t size, PmtWireFormat format) {
     switch (format) {
-    case PmtWireFormat::GR4_YAML_V1: {
+    case PmtWireFormat::gr4_yaml_v1: {
         if (data == nullptr || size < kGr4YamlV1PmtLengthSize) {
             throw DecodeError("truncated GR4 YAML v1 PMT payload");
         }
@@ -86,15 +86,15 @@ inline gr::pmt::Value deserialize_pmt(const std::uint8_t* data, std::size_t size
         }
         return value;
     }
-    case PmtWireFormat::GR3: return legacy_pmt::deserialize_from_legacy(data, size);
+    case PmtWireFormat::gr3: return legacy_pmt::deserialize_from_legacy(data, size);
     }
     throw std::invalid_argument("Unknown PMT wire format");
 }
 
 inline gr::pmt::Value deserialize_pmt(const std::uint8_t*& data, const std::uint8_t* end, PmtWireFormat format) {
     switch (format) {
-    case PmtWireFormat::GR4_YAML_V1: return deserialize_gr4_yaml_v1_pmt(data, end);
-    case PmtWireFormat::GR3: return legacy_pmt::deserialize_from_legacy(data, end);
+    case PmtWireFormat::gr4_yaml_v1: return deserialize_gr4_yaml_v1_pmt(data, end);
+    case PmtWireFormat::gr3: return legacy_pmt::deserialize_from_legacy(data, end);
     }
     throw std::invalid_argument("Unknown PMT wire format");
 }

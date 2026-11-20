@@ -42,14 +42,14 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: round_trip_2x1_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 2
       unit_delay: !!uint32 1
       fill_value: !!uint32 165
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: round_trip_2x1_deinterleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 2
       unit_delay: !!uint32 1
       fill_value: !!uint32 165
@@ -104,14 +104,14 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: round_trip_3x1_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 3
       unit_delay: !!uint32 1
       fill_value: !!uint32 165
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: round_trip_3x1_deinterleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 3
       unit_delay: !!uint32 1
       fill_value: !!uint32 165
@@ -186,14 +186,14 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: round_trip_4x3_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 4
       unit_delay: !!uint32 3
       fill_value: !!uint32 165
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: round_trip_4x3_deinterleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 4
       unit_delay: !!uint32 3
       fill_value: !!uint32 165
@@ -327,14 +327,14 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: round_trip_8x2_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 8
       unit_delay: !!uint32 2
       fill_value: !!uint32 165
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: round_trip_8x2_deinterleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 8
       unit_delay: !!uint32 2
       fill_value: !!uint32 165
@@ -419,7 +419,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: facts_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 4
       unit_delay: !!uint32 1
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -793,7 +793,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: split_interleave_1_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 5
       unit_delay: !!uint32 4
   - id: gr::blocks::basic::DataSetToStream<uint8>
@@ -887,7 +887,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: split_interleave_37_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 5
       unit_delay: !!uint32 4
   - id: gr::blocks::basic::DataSetToStream<uint8>
@@ -958,7 +958,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: split_interleave_200_interleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 5
       unit_delay: !!uint32 4
   - id: gr::blocks::basic::DataSetToStream<uint8>
@@ -1327,7 +1327,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: split_deinterleave_1_deinterleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 5
       unit_delay: !!uint32 4
   - id: gr::blocks::basic::DataSetToStream<uint8>
@@ -1384,7 +1384,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: split_deinterleave_200_deinterleave
-      kind: Convolutional
+      kind: convolutional
       branches: !!uint32 5
       unit_delay: !!uint32 4
   - id: gr::blocks::basic::DataSetToStream<uint8>

@@ -30,13 +30,13 @@ struct Row {
     gr::Size_t    length;
 };
 
-constexpr std::array<Row, 4UZ> kRows{Row{"rect, L=1", CpmPulseShape::Rect, 1U}, Row{"rect, L=3", CpmPulseShape::Rect, 3U}, Row{"raised_cosine, L=3", CpmPulseShape::RaisedCosine, 3U}, Row{"gaussian, L=3", CpmPulseShape::Gaussian, 3U}};
+constexpr std::array<Row, 4UZ> kRows{Row{"rect, L=1", CpmPulseShape::rect, 1U}, Row{"rect, L=3", CpmPulseShape::rect, 3U}, Row{"raised_cosine, L=3", CpmPulseShape::raised_cosine, 3U}, Row{"gaussian, L=3", CpmPulseShape::gaussian, 3U}};
 
 [[nodiscard]] const char* shapeName(CpmPulseShape shape) {
     switch (shape) {
-    case CpmPulseShape::Rect: return "Rect";
-    case CpmPulseShape::RaisedCosine: return "RaisedCosine";
-    case CpmPulseShape::Gaussian: return "Gaussian";
+    case CpmPulseShape::rect: return "Rect";
+    case CpmPulseShape::raised_cosine: return "RaisedCosine";
+    case CpmPulseShape::gaussian: return "Gaussian";
     }
     return "Rect";
 }

@@ -92,7 +92,7 @@ struct Payload {
     auto& matched = graph.emplaceBlock<DesignedFilter<CF, float>>({{"profile", std::string("root_raised_cosine")}, {"sample_rate", static_cast<float>(kSps)}, {"symbol_rate", 1.0}, {"alpha", kRolloff}, {"taps", static_cast<gr::Size_t>(11UZ * kSps + 1UZ)}});
     // Gardner rather than the default Mueller and Muller: it reads no decisions, so it recovers timing while the
     // constellation is still turning, which is the order this chain needs with the carrier loop behind it.
-    auto& timing = graph.emplaceBlock<SymbolSync<CF>>({{"samples_per_symbol", static_cast<double>(kSps)}, {"detector", std::string("Gardner")}, {"rolloff", kRolloff}, {"interpolator", std::string("mmse8")}, {"noise_bandwidth", 0.002}});
+    auto& timing = graph.emplaceBlock<SymbolSync<CF>>({{"samples_per_symbol", static_cast<double>(kSps)}, {"detector", std::string("gardner")}, {"rolloff", kRolloff}, {"interpolator", std::string("mmse8")}, {"noise_bandwidth", 0.002}});
     auto& costas = graph.emplaceBlock<CostasLoop>({{"order", gr::Size_t(4)}, {"noise_bandwidth", 0.005}});
     auto& sink   = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 

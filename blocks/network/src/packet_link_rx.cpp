@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
     auto& crc = graph.emplaceBlock<digital::CrcCheck>({
         {"name", std::string("record crc")},
         {"width", 32U},
-        {"crc_byte_order", std::string("Big")},
+        {"crc_byte_order", std::string("big")},
     });
 
     auto& flatten     = graph.emplaceBlock<basic::DataSetToStream<std::uint8_t>>({

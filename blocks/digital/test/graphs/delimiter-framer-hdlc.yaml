@@ -18,10 +18,10 @@ blocks:
     parameters:
       name: hdlc_framer
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 1024
       payload_pack_bits: !!uint32 8
-      payload_bit_order: LsbFirst
+      payload_bit_order: lsb_first
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: hdlc_framed
@@ -41,10 +41,10 @@ blocks:
     parameters:
       name: hdlc_extractor
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 1024
       payload_pack_bits: !!uint32 8
-      payload_bit_order: LsbFirst
+      payload_bit_order: lsb_first
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: hdlc_received

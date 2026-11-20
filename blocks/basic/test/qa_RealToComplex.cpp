@@ -219,7 +219,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
     "a transition too narrow for 4095 taps gets the width 4095 taps reach"_test = [] {
         constexpr float   kRequested = 2e-5f;
         const double      requested  = static_cast<double>(kRequested);
-        const auto        figures    = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::Hamming);
+        const auto        figures    = gr::filter::fir::design::windowFigures(gr::algorithm::window::Type::hamming);
         const double      achieved   = figures.transitionConstant / static_cast<double>(Kernel::kMaxTaps);
         const std::size_t taps       = Kernel::tapCount(1.0, requested).value();
         expect(eq(taps, Kernel::kMaxTaps)) << std::format("a transition of {} is held at the cap, a transition of {:.3g}", kRequested, achieved);

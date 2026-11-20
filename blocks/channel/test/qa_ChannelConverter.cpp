@@ -38,7 +38,7 @@ const boost::ut::suite<"converter models"> converterTests = [] {
 
     // the closed form is the oracle, so the block is checked against the equation itself
     "Rapp reproduces its closed AM/AM curve and leaves phase alone"_test = [] {
-        auto block = configured<Nonlinearity<C>>({{"model", "Rapp"}, {"saturation", 1.0}, {"smoothness", 2.0}});
+        auto block = configured<Nonlinearity<C>>({{"model", "rapp"}, {"saturation", 1.0}, {"smoothness", 2.0}});
 
         for (const double amplitude : {0.01, 0.1, 0.5, 0.9, 1.0, 1.5, 4.0}) {
             constexpr double phase   = 0.7;
@@ -56,7 +56,7 @@ const boost::ut::suite<"converter models"> converterTests = [] {
 
     // well below saturation the amplifier is linear to the order the knee implies
     "Rapp is unity gain far below saturation"_test = [] {
-        auto             block     = configured<Nonlinearity<C>>({{"model", "Rapp"}, {"saturation", 1.0}, {"smoothness", 2.0}});
+        auto             block     = configured<Nonlinearity<C>>({{"model", "rapp"}, {"saturation", 1.0}, {"smoothness", 2.0}});
         constexpr double amplitude = 0.01;
         const C          got       = block.processOne(C(static_cast<float>(amplitude), 0.f));
         // the leading error term is (A/A_sat)^(2p)/(2p) = 1e-8/4
@@ -65,7 +65,7 @@ const boost::ut::suite<"converter models"> converterTests = [] {
 
     "Saleh reproduces both its AM/AM and AM/PM curves"_test = [] {
         constexpr double alphaA = 2.1587, betaA = 1.1517, alphaP = 4.0033, betaP = 9.1040;
-        auto             block = configured<Nonlinearity<C>>({{"model", "Saleh"}});
+        auto             block = configured<Nonlinearity<C>>({{"model", "saleh"}});
 
         for (const double amplitude : {0.05, 0.2, 0.5, 1.0, 2.0}) {
             const C      got      = block.processOne(C(static_cast<float>(amplitude), 0.f));
@@ -83,8 +83,8 @@ const boost::ut::suite<"converter models"> converterTests = [] {
         // 20*log10(2), not the colloquial 6 dB: 6 dB is a factor of 0.50119, and asserting an exact halving
         // against it would be testing the rounding rather than the backoff
         const double halving  = 20. * std::log10(2.);
-        auto         plain    = configured<Nonlinearity<C>>({{"model", "Rapp"}, {"saturation", 1.0}});
-        auto         backedIn = configured<Nonlinearity<C>>({{"model", "Rapp"}, {"saturation", 1.0}, {"input_backoff_db", halving}});
+        auto         plain    = configured<Nonlinearity<C>>({{"model", "rapp"}, {"saturation", 1.0}});
+        auto         backedIn = configured<Nonlinearity<C>>({{"model", "rapp"}, {"saturation", 1.0}, {"input_backoff_db", halving}});
 
         const C direct = plain.processOne(C(0.5f, 0.f));
         const C backed = backedIn.processOne(C(1.0f, 0.f));
@@ -92,7 +92,7 @@ const boost::ut::suite<"converter models"> converterTests = [] {
     };
 
     "a zero envelope passes through exactly"_test = [] {
-        auto block = configured<Nonlinearity<C>>({{"model", "Saleh"}});
+        auto block = configured<Nonlinearity<C>>({{"model", "saleh"}});
         expect(eq(block.processOne(C(0.f, 0.f)), C(0.f, 0.f)));
     };
 
@@ -182,7 +182,7 @@ const boost::ut::suite<"converter models"> converterTests = [] {
         using gr::blocks::channel::test::keysOtherThan;
 
         expect(keysCrossing<gr::blocks::testing::Copy<C>>() == keysOtherThan({})) << "every test key crosses a block that drops none";
-        expect(keysCrossing<Nonlinearity<C>>({{"model", "Saleh"}}) == keysOtherThan({"phase_est"}));
+        expect(keysCrossing<Nonlinearity<C>>({{"model", "saleh"}}) == keysOtherThan({"phase_est"}));
     };
 };
 
@@ -191,7 +191,7 @@ const boost::ut::suite<"ChannelConverter settings at the initialization"> conver
 
     "Nonlinearity initializes at its defaults and with each setting off its default"_test = [] {
         const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::Nonlinearity<std::complex<float>>>({
-            {"model", std::string("Saleh")},
+            {"model", std::string("saleh")},
             {"input_backoff_db", 3.0},
             {"saturation", 0.8},
             {"smoothness", 3.0},

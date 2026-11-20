@@ -52,7 +52,7 @@ response. Only the gaussian pulse reads `bt`; 0.3 and 0.5 are usual.
     struct Settings {
         Annotated<double, Visible, Doc<"modulation index">, Limits<Over<0.0>, Max<4.0>>>                          modulation_index   = 0.5;
         Annotated<gr::Size_t, Visible, Doc<"samples per symbol">, Limits<Min<2U>>>                                samples_per_symbol = 8U;
-        Annotated<gr::digital::CpmPulseShape, Visible, Doc<"frequency pulse">>                                    pulse              = gr::digital::CpmPulseShape::Rect;
+        Annotated<gr::digital::CpmPulseShape, Visible, Doc<"frequency pulse">>                                    pulse              = gr::digital::CpmPulseShape::rect;
         Annotated<gr::Size_t, Unit<"symbols">, Doc<"pulse length (1 = full response)">, Limits<Min<1U>, Max<8U>>> pulse_length       = 1U;
         Annotated<double, Doc<"bandwidth-time product">>                                                          bt                 = 0.3;
         Annotated<T, Doc<"envelope amplitude">>                                                                   amplitude          = T(1);
@@ -67,7 +67,7 @@ response. Only the gaussian pulse reads `bt`; 0.3 and 0.5 are usual.
     std::vector<double>      _increments{};
 
     std::optional<gr::Refused> checkSettings(const Settings& s) const {
-        if (s.pulse == gr::digital::CpmPulseShape::Gaussian && s.bt <= 0.) {
+        if (s.pulse == gr::digital::CpmPulseShape::gaussian && s.bt <= 0.) {
             return gr::Refused(s.bt, "must be > 0 when pulse is gaussian");
         }
         return {};

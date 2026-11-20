@@ -18,10 +18,10 @@
 namespace gr::algorithm::svd_filter {
 
 enum class BoundaryPolicy : std::uint8_t {
-    Default,       /// pre-fill history with config.defaultValue
-    ZeroOrderHold, /// fill history with first sample (lazy)
-    Reflect,       /// streaming: same as ZeroOrderHold
-    Replicate      /// streaming: same as ZeroOrderHold
+    default_value,   /// pre-fill history with config.defaultValue
+    zero_order_hold, /// fill history with first sample (lazy)
+    reflect,         /// streaming: same as zero_order_hold
+    replicate        /// streaming: same as zero_order_hold
 };
 
 template<typename T>
@@ -33,8 +33,8 @@ struct Config {
     T              absoluteThreshold = std::numeric_limits<T>::epsilon();       /// minimum absolute σ_i to keep
     T              energyFraction    = static_cast<T>(0.95);                    /// fraction of total energy to retain (T{1} retains full rank, i.e. no denoising)
     T              hopFraction       = T{0.25};                                 /// SVD recomputation interval as fraction of windowSize
-    BoundaryPolicy boundaryPolicy    = BoundaryPolicy::Default;                 /// initialisation / boundary handling
-    T              defaultValue      = T{0};                                    /// fill value for BoundaryPolicy::Default
+    BoundaryPolicy boundaryPolicy    = BoundaryPolicy::default_value;           /// initialization / boundary handling
+    T              defaultValue      = T{0};                                    /// fill value for BoundaryPolicy::default_value
 };
 
 namespace detail {
@@ -156,7 +156,7 @@ private:
     std::size_t          _cacheIndex{0UZ};
     bool                 _initialized{false};
 
-    [[nodiscard]] bool needsLazyInit() const noexcept { return _config.boundaryPolicy != BoundaryPolicy::Default; }
+    [[nodiscard]] bool needsLazyInit() const noexcept { return _config.boundaryPolicy != BoundaryPolicy::default_value; }
 
     /// computeSvdAndCache reads hopSize samples out of a windowSize-long buffer, so the hop must stay
     /// inside the window; a NaN or negative fraction clamps to a single sample.
@@ -192,7 +192,7 @@ private:
 public:
     explicit SvdDenoiser(std::size_t windowSize = 64UZ, std::size_t hankelRows = 0UZ, const Config<RealT>& config = {}) : _windowSize(std::max(windowSize, 2UZ)), _hankelRows(hankelRows == 0UZ ? _windowSize / 2UZ : hankelRows), _hopSize(computeHopSize(_windowSize, config.hopFraction)), _config(config), _history(_windowSize), _initialized(!needsLazyInit()) {
         _outputCache.reserve(_hopSize);
-        if (_config.boundaryPolicy == BoundaryPolicy::Default) {
+        if (_config.boundaryPolicy == BoundaryPolicy::default_value) {
             fillHistory(static_cast<T>(_config.defaultValue));
         }
     }
@@ -216,7 +216,7 @@ public:
         _outputCache.clear();
         _cacheIndex  = 0UZ;
         _initialized = !needsLazyInit();
-        if (_config.boundaryPolicy == BoundaryPolicy::Default) {
+        if (_config.boundaryPolicy == BoundaryPolicy::default_value) {
             fillHistory(static_cast<T>(_config.defaultValue));
         }
     }

@@ -69,9 +69,9 @@ prefix items when it is whole_frame. `trigger` names the gr:trigger_name that st
         Annotated<HeaderLayout, Doc<"header layout">, Visible>                                        header_format       = HeaderLayout::length_crc;
         Annotated<gr::Size_t, Unit<"items">, Doc<"fixed payload length">>                             fixed_payload_items = 0U;
         Annotated<gr::Size_t, Unit<"bit">, Doc<"length field width">>                                 length_bits         = 0U;
-        Annotated<gr::digital::HeaderByteOrder, Doc<"length field byte order">>                       byte_order          = gr::digital::HeaderByteOrder::Big;
-        Annotated<gr::digital::FlagsPosition, Doc<"Golay flags position">>                            flags_position      = gr::digital::FlagsPosition::High;
-        Annotated<gr::digital::CountCovers, Doc<"length field coverage">, Visible>                    count_covers        = gr::digital::CountCovers::Unset;
+        Annotated<gr::digital::HeaderByteOrder, Doc<"length field byte order">>                       byte_order          = gr::digital::HeaderByteOrder::big;
+        Annotated<gr::digital::FlagsPosition, Doc<"Golay flags position">>                            flags_position      = gr::digital::FlagsPosition::high;
+        Annotated<gr::digital::CountCovers, Doc<"length field coverage">, Visible>                    count_covers        = gr::digital::CountCovers::unset;
         Annotated<gr::Size_t, Unit<"items">, Doc<"items per length unit">, Limits<Min<1U>, Max<64U>>> count_unit_items    = 8U;
         Annotated<gr::Size_t, Unit<"items">, Doc<"trailing check length">>                            check_items         = 0U;
         Annotated<gr::Size_t, Unit<"items">, Doc<"counted prefix length (0 = header)">>               frame_prefix_items  = 0U;

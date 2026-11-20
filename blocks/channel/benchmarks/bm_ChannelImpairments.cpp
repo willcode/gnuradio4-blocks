@@ -77,8 +77,8 @@ int main() {
     phaseNoise.start();
 
     const IqImbalance<CF>  imbalance = make<IqImbalance<CF>>({{"amplitude_imbalance_db", 0.5}, {"phase_imbalance", 0.02}});
-    const Nonlinearity<CF> rapp      = make<Nonlinearity<CF>>({{"model", "Rapp"}, {"saturation", 1.0}, {"smoothness", 2.0}});
-    const Nonlinearity<CF> saleh     = make<Nonlinearity<CF>>({{"model", "Saleh"}});
+    const Nonlinearity<CF> rapp      = make<Nonlinearity<CF>>({{"model", "rapp"}, {"saturation", 1.0}, {"smoothness", 2.0}});
+    const Nonlinearity<CF> saleh     = make<Nonlinearity<CF>>({{"model", "saleh"}});
     const Quantizer<CF>    quantizer = make<Quantizer<CF>>({{"bits", gr::Size_t{12U}}, {"full_scale", 1.0}});
 
     std::vector<gr::blocks::testing::bench::Arm> arms{

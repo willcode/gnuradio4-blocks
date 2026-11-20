@@ -75,18 +75,18 @@ that many bits per record item and needs bits_per_item 1.
 
     struct Settings {
         Annotated<std::string, Doc<"closing delimiter bits">, Visible>               end_delimiter{};
-        Annotated<gr::digital::FrameOpen, Doc<"frame opening">, Visible>             frame_open = gr::digital::FrameOpen::Delimiter;
+        Annotated<gr::digital::FrameOpen, Doc<"frame opening">, Visible>             frame_open = gr::digital::FrameOpen::delimiter;
         Annotated<std::string, Doc<"opening delimiter bits">>                        start_delimiter{};
         Annotated<gr::Size_t, Doc<"bits per output item">, Limits<Min<1U>, Max<8U>>> bits_per_item    = 1U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                              bit_order        = gr::math::BitOrder::MsbFirst;
-        Annotated<gr::digital::Transparency, Doc<"payload transparency">, Visible>   transparency     = gr::digital::Transparency::None;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                              bit_order        = gr::math::BitOrder::msb_first;
+        Annotated<gr::digital::Transparency, Doc<"payload transparency">, Visible>   transparency     = gr::digital::Transparency::none;
         Annotated<gr::Size_t, Doc<"ones before a stuffed bit">>                      stuff_after_ones = 5U;
         Annotated<gr::Size_t, Doc<"receiver abort run length">>                      abort_ones       = 7U;
         Annotated<gr::Size_t, Doc<"escape value">, Limits<Max<255U>>>                escape_item      = 0U;
         Annotated<std::vector<gr::Size_t>, Doc<"escape pairs">>                      escape_map{};
         Annotated<gr::Size_t, Unit<"items">, Doc<"payload length limit">, Visible>   max_payload_items = 0U;
         Annotated<gr::Size_t, Doc<"payload pack width (0 = unpacked)">>              payload_pack_bits = 0U;
-        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                      payload_bit_order = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"payload bit order">>                      payload_bit_order = gr::math::BitOrder::msb_first;
 
         GR_MAKE_REFLECTABLE(Settings, end_delimiter, frame_open, start_delimiter, bits_per_item, bit_order, transparency, stuff_after_ones, abort_ones, escape_item, escape_map, max_payload_items, payload_pack_bits, payload_bit_order);
     } settings;
@@ -113,10 +113,10 @@ that many bits per record item and needs bits_per_item 1.
         if (s.max_payload_items == 0U) {
             return gr::Refused(s.max_payload_items, "required");
         }
-        if (s.transparency == Transparency::ByteEscape && map.size() % 2UZ != 0UZ) {
+        if (s.transparency == Transparency::byte_escape && map.size() % 2UZ != 0UZ) {
             return gr::Refused(s.escape_map, "must have an even length");
         }
-        if (s.transparency == Transparency::ByteEscape && std::ranges::any_of(map, [](gr::Size_t value) { return value > 255U; })) {
+        if (s.transparency == Transparency::byte_escape && std::ranges::any_of(map, [](gr::Size_t value) { return value > 255U; })) {
             return gr::Refused(s.escape_map, "each value must be <= 255");
         }
         std::ignore = framing(s);
@@ -154,14 +154,14 @@ that many bits per record item and needs bits_per_item 1.
         cfg.maxPayloadItems = s.max_payload_items.value;
         cfg.packBits        = s.payload_pack_bits.value;
         // the settings of the other modes stay at the library's defaults
-        if (cfg.frameOpen == gr::digital::FrameOpen::Start) {
+        if (cfg.frameOpen == gr::digital::FrameOpen::start) {
             cfg.startDelimiter = s.start_delimiter.value;
         }
-        if (cfg.transparency == gr::digital::Transparency::BitStuffing) {
+        if (cfg.transparency == gr::digital::Transparency::bit_stuffing) {
             cfg.stuffAfterOnes = s.stuff_after_ones.value;
             cfg.abortOnes      = s.abort_ones.value;
         }
-        if (cfg.transparency == gr::digital::Transparency::ByteEscape) {
+        if (cfg.transparency == gr::digital::Transparency::byte_escape) {
             cfg.escapeItem                    = static_cast<std::uint8_t>(s.escape_item.value);
             const std::vector<gr::Size_t> map = s.escape_map.value;
             for (std::size_t i = 0UZ; i + 1UZ < map.size(); i += 2UZ) {
@@ -208,8 +208,8 @@ that many bits per record item and needs bits_per_item 1.
 
             const gr::digital::EncodeResult framed = _encoder.encode(payload, _framed);
             nItemsEmitted += static_cast<std::uint64_t>(framed.emitted);
-            nStuffedBits += _encoder.config.transparency == gr::digital::Transparency::BitStuffing ? static_cast<std::uint64_t>(framed.inserted) : 0ULL;
-            nEscapedItems += _encoder.config.transparency == gr::digital::Transparency::ByteEscape ? static_cast<std::uint64_t>(framed.inserted) : 0ULL;
+            nStuffedBits += _encoder.config.transparency == gr::digital::Transparency::bit_stuffing ? static_cast<std::uint64_t>(framed.inserted) : 0ULL;
+            nEscapedItems += _encoder.config.transparency == gr::digital::Transparency::byte_escape ? static_cast<std::uint64_t>(framed.inserted) : 0ULL;
             nForgedDelimiters += static_cast<std::uint64_t>(framed.forged);
             ++nRecords;
 

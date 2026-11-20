@@ -36,7 +36,7 @@ using CD = std::complex<double>;
 
 constexpr double kPi = std::numbers::pi;
 
-[[nodiscard]] std::vector<C> theSixConstellations(Normalization mode = Normalization::Power) {
+[[nodiscard]] std::vector<C> theSixConstellations(Normalization mode = Normalization::power) {
     std::vector<C> set;
     set.push_back(C::bpsk(mode));
     set.push_back(C::qpsk(mode));
@@ -267,7 +267,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             Row{64UZ, 6.086890469, 6.480740698, 0.164287497, 0.154303350, 1.064704668, 0.544583}};
 
         for (const Row& row : rows) {
-            const C raw          = C::qam(row.arity, Normalization::None);
+            const C raw          = C::qam(row.arity, Normalization::none);
             double  sumMagnitude = 0.0;
             double  sumPower     = 0.0;
             for (const CD& c : raw.points()) {
@@ -279,8 +279,8 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             expect(lt(std::abs(meanMagnitude - row.meanMagnitude), 1.0e-9)) << std::format("{}QAM mean|c| {:.9f}", row.arity, meanMagnitude);
             expect(lt(std::abs(rmsMagnitude - row.rmsMagnitude), 1.0e-9)) << std::format("{}QAM rms|c| {:.9f}", row.arity, rmsMagnitude);
 
-            const C amplitude = C::qam(row.arity, Normalization::Amplitude);
-            const C power     = C::qam(row.arity, Normalization::Power);
+            const C amplitude = C::qam(row.arity, Normalization::amplitude);
+            const C power     = C::qam(row.arity, Normalization::power);
             expect(lt(std::abs(amplitude.normalizationScale() - row.amplitudeScale), 1.0e-9));
             expect(lt(std::abs(power.normalizationScale() - row.powerScale), 1.0e-9));
 
@@ -293,7 +293,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
         }
 
         for (std::size_t arity : {2UZ, 4UZ, 8UZ, 16UZ}) {
-            const C constellation = C::psk(arity, 0.0, 0U, Normalization::Amplitude);
+            const C constellation = C::psk(arity, 0.0, 0U, Normalization::amplitude);
             expect(lt(std::abs(constellation.normalizationScale() - 1.0), 1.0e-12)) << "a constant-modulus constellation cannot tell the two conventions apart";
         }
     };
@@ -613,10 +613,10 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             for (std::size_t i = 0UZ; i < 20000UZ; ++i) {
                 const CD z = CD(gaussian(engine), gaussian(engine));
 
-                bpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::Exact);
+                bpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::exact);
                 worstBpsk = std::max(worstBpsk, std::abs(soft[0] - 4.0 * z.real() / noisePower));
 
-                qpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::Exact);
+                qpsk.softDecisionsExhaustive(z, noisePower, soft, SoftAlgorithm::exact);
                 worstQpsk = std::max(worstQpsk, std::abs(soft[0] - 4.0 * axis * z.imag() / noisePower));
                 worstQpsk = std::max(worstQpsk, std::abs(soft[1] - 4.0 * axis * z.real() / noisePower));
             }
@@ -673,7 +673,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             for (std::size_t i = 0UZ; i < 50000UZ; ++i) {
                 const CD   z      = CD(gaussian(engine), gaussian(engine));
                 const auto symbol = constellation.hardDecision(z);
-                constellation.softDecisions(z, 0.3, soft, SoftAlgorithm::MaxLog);
+                constellation.softDecisions(z, 0.3, soft, SoftAlgorithm::max_log);
                 for (std::size_t k = 0UZ; k < bits; ++k) {
                     const std::uint32_t bit = (static_cast<std::uint32_t>(symbol) >> (bits - 1UZ - k)) & 1U;
                     if (soft[k] == 0.0) {
@@ -716,8 +716,8 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
                     for (std::size_t b = 0UZ; b < kGrid; ++b) {
                         const double im = -kSpan + 2.0 * kSpan * static_cast<double>(b) / static_cast<double>(kGrid - 1UZ);
                         const CD     z  = CD(re, im);
-                        constellation.softDecisions(z, noisePower, maxLog, SoftAlgorithm::MaxLog);
-                        constellation.softDecisionsExhaustive(z, noisePower, exact, SoftAlgorithm::Exact);
+                        constellation.softDecisions(z, noisePower, maxLog, SoftAlgorithm::max_log);
+                        constellation.softDecisionsExhaustive(z, noisePower, exact, SoftAlgorithm::exact);
                         for (std::size_t k = 0UZ; k < constellation.bitsPerSymbol(); ++k) {
                             worst = std::max(worst, std::abs(maxLog[k] - exact[k]));
                             range = std::max(range, std::abs(exact[k]));
@@ -751,8 +751,8 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
                     for (std::size_t b = 0UZ; b < kGrid; ++b) {
                         const double im = -kSpan + 2.0 * kSpan * static_cast<double>(b) / static_cast<double>(kGrid - 1UZ);
                         const CD     z  = CD(re, im);
-                        constellation.softDecisions(z, noisePower, perAxis, SoftAlgorithm::MaxLog);
-                        constellation.softDecisionsExhaustive(z, noisePower, full, SoftAlgorithm::MaxLog);
+                        constellation.softDecisions(z, noisePower, perAxis, SoftAlgorithm::max_log);
+                        constellation.softDecisionsExhaustive(z, noisePower, full, SoftAlgorithm::max_log);
                         for (std::size_t k = 0UZ; k < constellation.bitsPerSymbol(); ++k) {
                             worst = std::max(worst, std::abs(perAxis[k] - full[k]));
                         }
@@ -795,7 +795,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
     };
 
     "the normalization is applied once, at construction"_test = [] {
-        for (const Normalization mode : {Normalization::Power, Normalization::Amplitude, Normalization::None}) {
+        for (const Normalization mode : {Normalization::power, Normalization::amplitude, Normalization::none}) {
             const C first  = C::qam(16UZ, mode);
             const C second = C::qam(16UZ, mode);
             for (std::size_t s = 0UZ; s < 16UZ; ++s) {
@@ -938,7 +938,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
 
             // QPSK, per axis, under every normalization: level 1 for a component above zero, the smallest
             // subnormal included; level 0 for a negative component, both zeros and NaN.
-            for (const Normalization mode : {Normalization::Power, Normalization::Amplitude, Normalization::None}) {
+            for (const Normalization mode : {Normalization::power, Normalization::amplitude, Normalization::none}) {
                 struct Row {
                     F             x;
                     std::uint32_t level;
@@ -999,7 +999,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
             const F                  tiny = std::numeric_limits<F>::denorm_min();
             const std::array<F, 5UZ> amplitudes{static_cast<F>(1e-20), static_cast<F>(1e-30), low, low / F{1024}, tiny};
 
-            const std::array<std::pair<Constellation<F>, const char*>, 4UZ> constellations{std::pair{Constellation<F>::qpsk(), "qpsk()"}, std::pair{Constellation<F>::qam(4UZ, Normalization::Power), "qam(4, Power)"}, std::pair{Constellation<F>::qam(4UZ, Normalization::Amplitude), "qam(4, Amplitude)"}, std::pair{Constellation<F>::qam(4UZ, Normalization::None), "qam(4, None)"}};
+            const std::array<std::pair<Constellation<F>, const char*>, 4UZ> constellations{std::pair{Constellation<F>::qpsk(), "qpsk()"}, std::pair{Constellation<F>::qam(4UZ, Normalization::power), "qam(4, Power)"}, std::pair{Constellation<F>::qam(4UZ, Normalization::amplitude), "qam(4, Amplitude)"}, std::pair{Constellation<F>::qam(4UZ, Normalization::none), "qam(4, None)"}};
             for (const auto& [qam, name] : constellations) {
                 // each point, scaled down, is still its own symbol, however small
                 std::vector<Z>            input;
@@ -1050,7 +1050,7 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
         using gr::digital::constellationOfFamily;
         const std::array<double, 4> custom{1.0, 0.0, -3.0, 0.0};
         const std::array<CD, 2>     customPoints{CD{1.0, 0.0}, CD{-3.0, 0.0}};
-        for (const Normalization mode : {Normalization::Power, Normalization::Amplitude, Normalization::None}) {
+        for (const Normalization mode : {Normalization::power, Normalization::amplitude, Normalization::none}) {
             const std::array<std::pair<ConstellationFamily, C>, 6> families{{
                 {ConstellationFamily::bpsk, C::bpsk(mode)},
                 {ConstellationFamily::qpsk, C::qpsk(mode)},
@@ -1067,8 +1067,8 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
                 }
             }
         }
-        expect(eq(constellationOfFamily<double>(ConstellationFamily::qam, 16UZ, 0.0, 0U, {}, Normalization::None).normalizationScale(), 1.0)) << "none leaves the points as the family defines them";
-        expect(throws([] { [[maybe_unused]] const C ignored = constellationOfFamily<double>(ConstellationFamily::custom, 0UZ, 0.0, 0U, {}, Normalization::Power); })) << "custom without points";
+        expect(eq(constellationOfFamily<double>(ConstellationFamily::qam, 16UZ, 0.0, 0U, {}, Normalization::none).normalizationScale(), 1.0)) << "none leaves the points as the family defines them";
+        expect(throws([] { [[maybe_unused]] const C ignored = constellationOfFamily<double>(ConstellationFamily::custom, 0UZ, 0.0, 0U, {}, Normalization::power); })) << "custom without points";
     };
 
     "the span form is the per-symbol form, and float is registered"_test = [] {

@@ -71,7 +71,7 @@ const boost::ut::suite<"ofdm settings at the initialization"> ofdmInitTests = []
                                                                                                          {"arity", gr::Size_t{16U}},
                                                                                                          {"phase_offset", 0.1f},
                                                                                                          {"label_xor", gr::Size_t{1U}},
-                                                                                                         {"normalization", std::string("Amplitude")},
+                                                                                                         {"normalization", std::string("amplitude")},
                                                                                                      });
         expect(failures.empty()) << failuresOf(failures);
         expectInitializes<ChannelEqualizer>({{"fft_len", gr::Size_t{128U}}, {"data_carriers", dataCarriers()}, {"sync_word", flatSymbol(128UZ)}, {"tracking", std::string("none")}}, "an equalizer of 128 bins");

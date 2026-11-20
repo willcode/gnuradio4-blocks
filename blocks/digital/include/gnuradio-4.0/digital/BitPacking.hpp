@@ -207,7 +207,7 @@ with its unfilled positions zero.
 
     struct Settings {
         Annotated<gr::Size_t, Unit<"bits">, Doc<"bits per output item">, Visible, Limits<Min<1U>, Max<8U>>> k             = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                                     bit_order     = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                                     bit_order     = gr::math::BitOrder::msb_first;
         Annotated<bool, Doc<"partial item flush">>                                                          flush_partial = true;
 
         GR_MAKE_REFLECTABLE(Settings, k, bit_order, flush_partial);
@@ -230,7 +230,7 @@ with its unfilled positions zero.
     void reset() { _tagRoute.restart(); }
 
     void configureConversion() {
-        gr::math::configureRepack(_repack, 1U, settings.k, gr::math::BitOrder::MsbFirst, settings.bit_order);
+        gr::math::configureRepack(_repack, 1U, settings.k, gr::math::BitOrder::msb_first, settings.bit_order);
         this->input_chunk_size  = _repack.inChunk;
         this->output_chunk_size = _repack.outChunk;
     }
@@ -282,7 +282,7 @@ here.
 
     struct Settings {
         Annotated<gr::Size_t, Unit<"bits">, Doc<"bits per input item">, Visible, Limits<Min<1U>, Max<8U>>> k             = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                                    bit_order     = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                                    bit_order     = gr::math::BitOrder::msb_first;
         Annotated<bool, Doc<"partial item flush">>                                                         flush_partial = true;
 
         GR_MAKE_REFLECTABLE(Settings, k, bit_order, flush_partial);
@@ -305,7 +305,7 @@ here.
     void reset() { _tagRoute.restart(); }
 
     void configureConversion() {
-        gr::math::configureRepack(_repack, settings.k, 1U, settings.bit_order, gr::math::BitOrder::MsbFirst);
+        gr::math::configureRepack(_repack, settings.k, 1U, settings.bit_order, gr::math::BitOrder::msb_first);
         this->input_chunk_size  = _repack.inChunk;
         this->output_chunk_size = _repack.outChunk;
     }
@@ -365,8 +365,8 @@ nothing can trail it.
     struct Settings {
         Annotated<gr::Size_t, Unit<"bits">, Doc<"bits per input item">, Visible, Limits<Min<1U>, Max<8U>>>  bits_in          = 1U;
         Annotated<gr::Size_t, Unit<"bits">, Doc<"bits per output item">, Visible, Limits<Min<1U>, Max<8U>>> bits_out         = 8U;
-        Annotated<gr::math::BitOrder, Doc<"input bit order">>                                               input_bit_order  = gr::math::BitOrder::MsbFirst;
-        Annotated<gr::math::BitOrder, Doc<"output bit order">>                                              output_bit_order = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"input bit order">>                                               input_bit_order  = gr::math::BitOrder::msb_first;
+        Annotated<gr::math::BitOrder, Doc<"output bit order">>                                              output_bit_order = gr::math::BitOrder::msb_first;
         Annotated<bool, Doc<"partial item flush">>                                                          flush_partial    = true;
 
         GR_MAKE_REFLECTABLE(Settings, bits_in, bits_out, input_bit_order, output_bit_order, flush_partial);
@@ -441,8 +441,8 @@ struct RecordRepackBits : Block<RecordRepackBits> {
     struct Settings {
         Annotated<gr::Size_t, Unit<"bits">, Doc<"bits per input item">, Visible, Limits<Min<1U>, Max<8U>>>  bits_in          = 1U;
         Annotated<gr::Size_t, Unit<"bits">, Doc<"bits per output item">, Visible, Limits<Min<1U>, Max<8U>>> bits_out         = 8U;
-        Annotated<gr::math::BitOrder, Doc<"input bit order">>                                               input_bit_order  = gr::math::BitOrder::MsbFirst;
-        Annotated<gr::math::BitOrder, Doc<"output bit order">>                                              output_bit_order = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"input bit order">>                                               input_bit_order  = gr::math::BitOrder::msb_first;
+        Annotated<gr::math::BitOrder, Doc<"output bit order">>                                              output_bit_order = gr::math::BitOrder::msb_first;
 
         GR_MAKE_REFLECTABLE(Settings, bits_in, bits_out, input_bit_order, output_bit_order);
     } settings;
@@ -482,9 +482,9 @@ struct RecordRepackBits : Block<RecordRepackBits> {
             }
             for (std::size_t bit = 0UZ; bit < totalBits; ++bit) {
                 const std::size_t inItem  = bit / widthIn;
-                const unsigned    inPos   = inOrder == gr::math::BitOrder::MsbFirst ? widthIn - 1U - static_cast<unsigned>(bit % widthIn) : static_cast<unsigned>(bit % widthIn);
+                const unsigned    inPos   = inOrder == gr::math::BitOrder::msb_first ? widthIn - 1U - static_cast<unsigned>(bit % widthIn) : static_cast<unsigned>(bit % widthIn);
                 const std::size_t outItem = bit / widthOut;
-                const unsigned    outPos  = outOrder == gr::math::BitOrder::MsbFirst ? widthOut - 1U - static_cast<unsigned>(bit % widthOut) : static_cast<unsigned>(bit % widthOut);
+                const unsigned    outPos  = outOrder == gr::math::BitOrder::msb_first ? widthOut - 1U - static_cast<unsigned>(bit % widthOut) : static_cast<unsigned>(bit % widthOut);
                 grouped.signal_values[outItem] |= static_cast<std::uint8_t>(((record.signal_values[inItem] >> inPos) & 1U) << outPos);
             }
 

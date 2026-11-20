@@ -83,7 +83,7 @@ const boost::ut::suite<"filter blocks initialize at each setting"> settingsInitT
         const auto dcBlocker = initFailures<DcBlocker<float>>({{"length", Size_t{16U}}, {"long_form", false}, {"reseed_interval", Size_t{1024U}}});
         expect(dcBlocker.empty()) << report(dcBlocker);
         // the defaults state no band, so the block is not ready until a whole design is given
-        const gr::property_map lowpass{{"profile", std::string("lowpass")}, {"sample_rate", 48000.f}, {"cutoff", 1000.0}, {"transition_width", 500.0}, {"gain", 2.0}, {"attenuation_db", 50.0}, {"window", std::string("Hann")}};
+        const gr::property_map lowpass{{"profile", std::string("lowpass")}, {"sample_rate", 48000.f}, {"cutoff", 1000.0}, {"transition_width", 500.0}, {"gain", 2.0}, {"attenuation_db", 50.0}, {"window", std::string("hann")}};
         const auto             designed = gr::testing::requiredInitFailures<DesignedFilter<float, float>>(lowpass, {{"decimation", Size_t{2U}}});
         expect(designed.empty()) << report(designed);
         expect(gr::testing::initRefused<DesignedFilter<float, float>>({{"profile", std::string("lowpass")}, {"sample_rate", 48000.f}})) << "a design key given at construction is designed at the initialization";
@@ -94,7 +94,7 @@ const boost::ut::suite<"filter blocks initialize at each setting"> settingsInitT
             {"poly_order", Size_t{2U}},
             {"deriv_order", Size_t{1U}},
             {"sample_rate", 100.f},
-            {"alignment", std::string("Causal")},
+            {"alignment", std::string("causal")},
         });
         expect(savitzkyGolay.empty()) << report(savitzkyGolay);
         const auto svd = initFailures<SvdDenoiser<float>>({
@@ -115,15 +115,15 @@ const boost::ut::suite<"filter blocks initialize at each setting"> settingsInitT
         const auto iir = initFailures<IirFilterDirectForm2<float>>({{"b", gr::Tensor<float>(shortLowpass.begin(), shortLowpass.end())}, {"a", gr::Tensor<float>{1.f, -0.5f}}});
         expect(iir.empty()) << report(iir);
         const auto basic = initFailures<BasicDecimatingFilter<float>>({
-            {"filter_type", std::string("FIR")},
-            {"filter_response", std::string("HIGHPASS")},
+            {"filter_type", std::string("fir")},
+            {"filter_response", std::string("highpass")},
             {"filter_order", Size_t{4U}},
             {"f_low", 0.05f},
             {"f_high", 0.3f},
             {"sample_rate", 2.f},
             {"decimate", Size_t{2U}},
-            {"iir_design_method", std::string("BESSEL")},
-            {"fir_design_method", std::string("Hamming")},
+            {"iir_design_method", std::string("bessel")},
+            {"fir_design_method", std::string("hamming")},
         });
         expect(basic.empty()) << report(basic);
         const auto decimator = initFailures<Decimator<float>>({{"decim", Size_t{4U}}});
@@ -153,9 +153,9 @@ const boost::ut::suite<"filter blocks initialize at each setting"> settingsInitT
             {"sample_rate", 1e6f},
             {"f_high_pass", 200.f},
             {"f_low_pass", 20000.f},
-            {"phase_unit", std::string("Degrees")},
+            {"phase_unit", std::string("degrees")},
             {"invert_phase", true},
-            {"derivative_method", std::string("SavitzkyGolay5")},
+            {"derivative_method", std::string("savitzky_golay5")},
             {"epsilon", 1e-9f},
         });
         expect(demodulator.empty()) << report(demodulator);

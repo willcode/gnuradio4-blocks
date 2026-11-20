@@ -37,7 +37,7 @@ enum class SchedulePosition : std::uint8_t { Before = 0, Inside, After, Unarmed 
 namespace detail {
 
 /// The direction of the schedule. `apply` puts the trajectory's shift on a clean signal. `correct` removes it.
-enum class DopplerDirection : std::uint8_t { Apply = 0, Correct };
+enum class DopplerDirection : std::uint8_t { apply = 0, correct };
 
 /// The limits of `anchor_ns`, the bound `gr::timing::ScheduleAnchor` holds.
 using AnchorNsLimits = Limits<Min<-gr::timing::ScheduleAnchor::kMaxAnchorNs>, Max<gr::timing::ScheduleAnchor::kMaxAnchorNs>>;
@@ -133,7 +133,7 @@ tags whose time is unreadable or past the anchor's bound. Each reads from any th
         Annotated<std::vector<std::int64_t>, Visible, Unit<"ns">, Doc<detail::kScheduleTimesDoc>> schedule_times_ns{};
         Annotated<std::vector<double>, Visible, Unit<"Hz">, Doc<"scheduled frequency offsets">>   schedule_offsets_hz{};
         Annotated<std::string, Doc<"frequency trajectory file">>                                  schedule_file{};
-        Annotated<detail::DopplerDirection, Visible, Doc<detail::kDirectionDoc>>                  direction            = detail::DopplerDirection::Apply;
+        Annotated<detail::DopplerDirection, Visible, Doc<detail::kDirectionDoc>>                  direction            = detail::DopplerDirection::apply;
         Annotated<float, Visible, Unit<"Hz">, Doc<detail::kSampleRateDoc>>                        sample_rate          = 1.f;
         Annotated<std::uint64_t, Doc<detail::kAnchorIndexDoc>>                                    anchor_index         = 0ULL;
         Annotated<std::int64_t, Unit<"ns">, Doc<detail::kAnchorNsDoc>, detail::AnchorNsLimits>    anchor_ns            = 0LL;
@@ -347,7 +347,7 @@ private:
 
     /// @p table in the sign of @p seat. 'correct' negates it once here, and the sample path is the same in both.
     [[nodiscard]] static std::shared_ptr<const gr::timing::FrequencySchedule> signedSchedule(const std::shared_ptr<const gr::timing::FrequencySchedule>& table, detail::DopplerDirection seat) {
-        if (!table || seat == detail::DopplerDirection::Apply) {
+        if (!table || seat == detail::DopplerDirection::apply) {
             return table;
         }
         std::vector<double> negated(table->offsets().begin(), table->offsets().end());

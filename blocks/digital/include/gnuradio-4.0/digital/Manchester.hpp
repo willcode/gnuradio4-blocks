@@ -48,9 +48,9 @@ item 2t. Being a rate changer it forwards only the framework's own tag vocabular
     PortOut<std::uint8_t> out;
 
     struct Settings {
-        Annotated<gr::digital::ManchesterConvention, Doc<"chip convention">, Visible>      convention    = gr::digital::ManchesterConvention::Unset;
+        Annotated<gr::digital::ManchesterConvention, Doc<"chip convention">, Visible>      convention    = gr::digital::ManchesterConvention::unset;
         Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order     = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order     = gr::math::BitOrder::msb_first;
 
         GR_MAKE_REFLECTABLE(Settings, convention, bits_per_item, bit_order);
     } settings;
@@ -60,7 +60,7 @@ item 2t. Being a rate changer it forwards only the framework's own tag vocabular
     gr::digital::ManchesterConfig _coder{};
 
     std::optional<gr::Refused> checkSettings(const Settings& s) const {
-        if (s.convention == gr::digital::ManchesterConvention::Unset) {
+        if (s.convention == gr::digital::ManchesterConvention::unset) {
             return gr::Refused(s.convention, "required");
         }
         return {};
@@ -117,9 +117,9 @@ the stream emits the trailing partial item, its pad positions flagged as violati
     PortOut<std::uint8_t, gr::Optional> violation;
 
     struct Settings {
-        Annotated<gr::digital::ManchesterConvention, Doc<"chip convention">, Visible>      convention    = gr::digital::ManchesterConvention::Unset;
+        Annotated<gr::digital::ManchesterConvention, Doc<"chip convention">, Visible>      convention    = gr::digital::ManchesterConvention::unset;
         Annotated<gr::Size_t, Unit<"bit">, Doc<"bits per item">, Limits<Min<1U>, Max<8U>>> bits_per_item = 8U;
-        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order     = gr::math::BitOrder::MsbFirst;
+        Annotated<gr::math::BitOrder, Doc<"bit order">>                                    bit_order     = gr::math::BitOrder::msb_first;
         Annotated<gr::Size_t, Doc<"pair start parity">, Limits<Max<1U>>>                   chip_phase    = 0U;
         Annotated<std::string, Doc<"alignment tag key (empty = off)">>                     align_tag_key = std::string(gr::tag::TRIGGER_NAME.key());
         Annotated<std::string, Doc<"alignment tag value (empty = any)">>                   align_tag_value{};
@@ -134,7 +134,7 @@ the stream emits the trailing partial item, its pad positions flagged as violati
     std::vector<std::uint8_t>     _spare{}; ///< flags for a chunk an unconnected violation port could not hold
 
     std::optional<gr::Refused> checkSettings(const Settings& s) const {
-        if (s.convention == gr::digital::ManchesterConvention::Unset) {
+        if (s.convention == gr::digital::ManchesterConvention::unset) {
             return gr::Refused(s.convention, "required");
         }
         return {};
@@ -238,7 +238,7 @@ the stream emits the trailing partial item, its pad positions flagged as violati
 
         const std::span<std::uint8_t> flags    = flagRoom(violationSpan, nItems);
         const unsigned                k        = static_cast<unsigned>(_coder.k);
-        const bool                    msb      = _coder.order == gr::math::BitOrder::MsbFirst;
+        const bool                    msb      = _coder.order == gr::math::BitOrder::msb_first;
         const auto                    position = [width, msb](unsigned index) noexcept { return msb ? width - 1U - index : index; };
 
         std::size_t  published = 0UZ;

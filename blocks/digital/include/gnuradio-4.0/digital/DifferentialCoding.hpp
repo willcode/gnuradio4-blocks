@@ -28,7 +28,7 @@ namespace detail {
 
 using Symbol = gr::Size_t;
 
-enum class Coding : std::uint8_t { Differential, Nrzi };
+enum class Coding : std::uint8_t { differential, nrzi };
 
 /**
  * @brief The configuration both halves of the code share, and the one word of state each carries.
@@ -41,7 +41,7 @@ struct CodingState {
     Symbol modulus = 2U;
     Symbol mask    = 1U;
     Symbol state   = 0U;
-    Coding coding  = Coding::Differential;
+    Coding coding  = Coding::differential;
     bool   binary  = true;
 };
 
@@ -81,7 +81,7 @@ A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every m
 
     struct Settings {
         Annotated<gr::Size_t, Unit<"symbols">, Doc<"alphabet size">> modulus       = 2U;
-        Annotated<detail::Coding, Doc<"line code">>                  coding        = detail::Coding::Differential;
+        Annotated<detail::Coding, Doc<"line code">>                  coding        = detail::Coding::differential;
         Annotated<gr::Size_t, Doc<"initial state">>                  initial_state = 0U;
 
         GR_MAKE_REFLECTABLE(Settings, modulus, coding, initial_state);
@@ -96,7 +96,7 @@ A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every m
         if (s.modulus < 2U || s.modulus > kAlphabet) {
             return gr::Refused(s.modulus, std::format("must be >= 2 and <= {}", kAlphabet));
         }
-        if (s.coding == detail::Coding::Nrzi && s.modulus != 2U) {
+        if (s.coding == detail::Coding::nrzi && s.modulus != 2U) {
             return gr::Refused(s.coding, "nrzi requires modulus 2");
         }
         if (s.initial_state >= s.modulus) {
@@ -113,7 +113,7 @@ A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every m
         const std::size_t nSamples = std::min(input.size(), output.size());
         detail::Symbol    state    = _coding.state;
 
-        if (_coding.coding == detail::Coding::Nrzi) {
+        if (_coding.coding == detail::Coding::nrzi) {
             for (std::size_t i = 0UZ; i < nSamples; ++i) {
                 state     = ~(static_cast<detail::Symbol>(input[i]) ^ state) & detail::Symbol{1};
                 output[i] = static_cast<T>(state);
@@ -170,7 +170,7 @@ A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every m
 
     struct Settings {
         Annotated<gr::Size_t, Unit<"symbols">, Doc<"alphabet size">> modulus       = 2U;
-        Annotated<detail::Coding, Doc<"line code">>                  coding        = detail::Coding::Differential;
+        Annotated<detail::Coding, Doc<"line code">>                  coding        = detail::Coding::differential;
         Annotated<gr::Size_t, Doc<"initial state">>                  initial_state = 0U;
 
         GR_MAKE_REFLECTABLE(Settings, modulus, coding, initial_state);
@@ -185,7 +185,7 @@ A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every m
         if (s.modulus < 2U || s.modulus > kAlphabet) {
             return gr::Refused(s.modulus, std::format("must be >= 2 and <= {}", kAlphabet));
         }
-        if (s.coding == detail::Coding::Nrzi && s.modulus != 2U) {
+        if (s.coding == detail::Coding::nrzi && s.modulus != 2U) {
             return gr::Refused(s.coding, "nrzi requires modulus 2");
         }
         if (s.initial_state >= s.modulus) {
@@ -204,7 +204,7 @@ A `modulus` of 2 serves BPSK, 4 QPSK and 8 8PSK; the coding is exact for every m
             return work::Status::OK;
         }
 
-        if (_coding.coding == detail::Coding::Nrzi) {
+        if (_coding.coding == detail::Coding::nrzi) {
             output[0UZ] = static_cast<T>(~(static_cast<detail::Symbol>(input[0UZ]) ^ _coding.state) & detail::Symbol{1});
             for (std::size_t i = 1UZ; i < nSamples; ++i) {
                 output[i] = static_cast<T>(~(static_cast<detail::Symbol>(input[i]) ^ static_cast<detail::Symbol>(input[i - 1UZ])) & detail::Symbol{1});

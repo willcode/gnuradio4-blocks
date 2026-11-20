@@ -25,7 +25,7 @@ using gr::math::mapRepackedOffset;
 using gr::math::repack;
 using gr::math::repackTail;
 
-constexpr BitOrder kOrders[] = {BitOrder::MsbFirst, BitOrder::LsbFirst};
+constexpr BitOrder kOrders[] = {BitOrder::msb_first, BitOrder::lsb_first};
 
 [[nodiscard]] std::size_t inChunkOf(const BitRepack& cfg) { return static_cast<std::size_t>(cfg.inChunk); }
 [[nodiscard]] std::size_t outChunkOf(const BitRepack& cfg) { return static_cast<std::size_t>(cfg.outChunk); }
@@ -44,7 +44,7 @@ constexpr BitOrder kOrders[] = {BitOrder::MsbFirst, BitOrder::LsbFirst};
     bits.reserve(items.size() * width);
     for (const std::uint8_t item : items) {
         for (unsigned step = 0U; step < width; ++step) {
-            const unsigned position = order == BitOrder::MsbFirst ? width - 1U - step : step;
+            const unsigned position = order == BitOrder::msb_first ? width - 1U - step : step;
             bits.push_back(static_cast<std::uint8_t>((item >> position) & 1U));
         }
     }
@@ -56,7 +56,7 @@ constexpr BitOrder kOrders[] = {BitOrder::MsbFirst, BitOrder::LsbFirst};
     std::vector<std::uint8_t> items(bits.size() / width, std::uint8_t{0});
     for (std::size_t b = 0UZ; b < items.size() * width; ++b) {
         const unsigned step     = static_cast<unsigned>(b % width);
-        const unsigned position = order == BitOrder::MsbFirst ? width - 1U - step : step;
+        const unsigned position = order == BitOrder::msb_first ? width - 1U - step : step;
         items[b / width]        = static_cast<std::uint8_t>(items[b / width] | (bits[b] << position));
     }
     return items;
@@ -178,14 +178,14 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         std::vector<std::uint8_t> reversed(all.size());
         std::ranges::transform(all, reversed.begin(), reverseByte);
         for (const BitOrder orderIn : kOrders) {
-            const BitOrder orderOut = orderIn == BitOrder::MsbFirst ? BitOrder::LsbFirst : BitOrder::MsbFirst;
+            const BitOrder orderOut = orderIn == BitOrder::msb_first ? BitOrder::lsb_first : BitOrder::msb_first;
             const auto     mirrored = throughKernel(configured(8U, 8U, orderIn, orderOut), all);
             expect(eq(firstDifference(mirrored, reversed), all.size())) << std::format("unequal orders ({} -> {}) must reverse every byte", magic_enum::enum_name(orderIn), magic_enum::enum_name(orderOut));
         }
 
         const std::array<std::uint8_t, 6> anchor{0x00U, 0x01U, 0x80U, 0xC5U, 0x3AU, 0xFFU};
         const std::array<std::uint8_t, 6> mirroredAnchor{0x00U, 0x80U, 0x01U, 0xA3U, 0x5CU, 0xFFU};
-        expect(eq(firstDifference(throughKernel(configured(8U, 8U, BitOrder::MsbFirst, BitOrder::LsbFirst), anchor), mirroredAnchor), mirroredAnchor.size()));
+        expect(eq(firstDifference(throughKernel(configured(8U, 8U, BitOrder::msb_first, BitOrder::lsb_first), anchor), mirroredAnchor), mirroredAnchor.size()));
     };
 
     // The two eight-bit shapes carry a 64-bit form, which has to be the same answer as the general loop.
@@ -197,14 +197,14 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         const auto bits = randomItems(8UZ * 512UZ, 1U, 0x243F6A8885A308D3ULL);
 
         for (const BitOrder order : kOrders) {
-            const BitRepack           unpack = configured(8U, 1U, order, BitOrder::MsbFirst);
+            const BitRepack           unpack = configured(8U, 1U, order, BitOrder::msb_first);
             std::vector<std::uint8_t> fastBits(bytes.size() * 8UZ, std::uint8_t{0xAA});
             std::vector<std::uint8_t> generalBits(fastBits.size(), std::uint8_t{0x55});
             repack(unpack, bytes, fastBits);
             gr::math::detail::repackGeneral(unpack, bytes, generalBits);
             expect(eq(firstDifference(fastBits, generalBits), generalBits.size())) << std::format("unpacking {} differs at bit {}", magic_enum::enum_name(order), firstDifference(fastBits, generalBits));
 
-            const BitRepack           pack = configured(1U, 8U, BitOrder::MsbFirst, order);
+            const BitRepack           pack = configured(1U, 8U, BitOrder::msb_first, order);
             std::vector<std::uint8_t> fastBytes(bits.size() / 8UZ, std::uint8_t{0xAA});
             std::vector<std::uint8_t> generalBytes(fastBytes.size(), std::uint8_t{0x55});
             repack(pack, bits, fastBytes);
@@ -227,19 +227,19 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         }
 
         const std::array<std::uint8_t, 8> stream{1U, 0U, 1U, 1U, 0U, 0U, 1U, 0U};
-        expect(eq(static_cast<unsigned>(throughKernel(configured(1U, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst), stream).at(0UZ)), 0xB2U)) << "1,0,1,1,0,0,1,0 packs msb_first to 0xB2";
-        expect(eq(static_cast<unsigned>(throughKernel(configured(1U, 8U, BitOrder::MsbFirst, BitOrder::LsbFirst), stream).at(0UZ)), 0x4DU)) << "and lsb_first to 0x4D, its reversal";
+        expect(eq(static_cast<unsigned>(throughKernel(configured(1U, 8U, BitOrder::msb_first, BitOrder::msb_first), stream).at(0UZ)), 0xB2U)) << "1,0,1,1,0,0,1,0 packs msb_first to 0xB2";
+        expect(eq(static_cast<unsigned>(throughKernel(configured(1U, 8U, BitOrder::msb_first, BitOrder::lsb_first), stream).at(0UZ)), 0x4DU)) << "and lsb_first to 0x4D, its reversal";
 
         const std::array<std::uint8_t, 2> source{0xF5U, 0x08U};
         const std::array<std::uint8_t, 4> nibblesMsb{0xFU, 0x5U, 0x0U, 0x8U};
         const std::array<std::uint8_t, 4> nibblesLsb{0x5U, 0xFU, 0x8U, 0x0U};
-        expect(eq(firstDifference(throughKernel(configured(8U, 4U, BitOrder::MsbFirst, BitOrder::MsbFirst), source), nibblesMsb), 4UZ)) << "0xF5 0x08 to msb_first nibbles";
-        expect(eq(firstDifference(throughKernel(configured(8U, 4U, BitOrder::LsbFirst, BitOrder::LsbFirst), source), nibblesLsb), 4UZ)) << "0xF5 0x08 to lsb_first nibbles";
+        expect(eq(firstDifference(throughKernel(configured(8U, 4U, BitOrder::msb_first, BitOrder::msb_first), source), nibblesMsb), 4UZ)) << "0xF5 0x08 to msb_first nibbles";
+        expect(eq(firstDifference(throughKernel(configured(8U, 4U, BitOrder::lsb_first, BitOrder::lsb_first), source), nibblesLsb), 4UZ)) << "0xF5 0x08 to lsb_first nibbles";
 
         const std::array<std::uint8_t, 16> bitsMsb{1U, 1U, 1U, 1U, 0U, 1U, 0U, 1U, 0U, 0U, 0U, 0U, 1U, 0U, 0U, 0U};
         const std::array<std::uint8_t, 16> bitsLsb{1U, 0U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U, 0U, 1U, 0U, 0U, 0U, 0U};
-        expect(eq(firstDifference(throughKernel(configured(8U, 1U, BitOrder::MsbFirst, BitOrder::MsbFirst), source), bitsMsb), 16UZ)) << "0xF5 0x08 to msb_first bits";
-        expect(eq(firstDifference(throughKernel(configured(8U, 1U, BitOrder::LsbFirst, BitOrder::LsbFirst), source), bitsLsb), 16UZ)) << "0xF5 0x08 to lsb_first bits";
+        expect(eq(firstDifference(throughKernel(configured(8U, 1U, BitOrder::msb_first, BitOrder::msb_first), source), bitsMsb), 16UZ)) << "0xF5 0x08 to msb_first bits";
+        expect(eq(firstDifference(throughKernel(configured(8U, 1U, BitOrder::lsb_first, BitOrder::lsb_first), source), bitsLsb), 16UZ)) << "0xF5 0x08 to lsb_first bits";
     };
 
     // Three bytes are exactly one period at eight to three, and the inverse recovers them.
@@ -248,13 +248,13 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         const std::array<std::uint8_t, 8> msbSymbols{6U, 1U, 2U, 3U, 5U, 2U, 3U, 7U};
         const std::array<std::uint8_t, 8> lsbSymbols{5U, 0U, 3U, 5U, 3U, 6U, 7U, 4U};
 
-        const auto msb = throughKernel(configured(8U, 3U, BitOrder::MsbFirst, BitOrder::MsbFirst), source);
-        const auto lsb = throughKernel(configured(8U, 3U, BitOrder::LsbFirst, BitOrder::LsbFirst), source);
+        const auto msb = throughKernel(configured(8U, 3U, BitOrder::msb_first, BitOrder::msb_first), source);
+        const auto lsb = throughKernel(configured(8U, 3U, BitOrder::lsb_first, BitOrder::lsb_first), source);
         expect(eq(firstDifference(msb, msbSymbols), 8UZ)) << "0xC5 0x3A 0x9F to msb_first octal 6 1 2 3 5 2 3 7";
         expect(eq(firstDifference(lsb, lsbSymbols), 8UZ)) << "0xC5 0x3A 0x9F to lsb_first octal 5 0 3 5 3 6 7 4";
 
-        expect(eq(firstDifference(throughKernel(configured(3U, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst), msb), source), 3UZ)) << "and back, msb_first";
-        expect(eq(firstDifference(throughKernel(configured(3U, 8U, BitOrder::LsbFirst, BitOrder::LsbFirst), lsb), source), 3UZ)) << "and back, lsb_first";
+        expect(eq(firstDifference(throughKernel(configured(3U, 8U, BitOrder::msb_first, BitOrder::msb_first), msb), source), 3UZ)) << "and back, msb_first";
+        expect(eq(firstDifference(throughKernel(configured(3U, 8U, BitOrder::lsb_first, BitOrder::lsb_first), lsb), source), 3UZ)) << "and back, lsb_first";
     };
 
     // Periods are independent, so how a stream is divided into calls cannot reach the result.
@@ -308,7 +308,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
             {6U, 4U, 2U, 3U, 12U}, {5U, 7U, 7U, 5U, 35U}, {8U, 7U, 7U, 8U, 56U}, {8U, 8U, 1U, 1U, 8U}, {1U, 1U, 1U, 1U, 1U}};
 
         for (const Row& row : kRows) {
-            const BitRepack cfg = configured(row.bitsIn, row.bitsOut, BitOrder::MsbFirst, BitOrder::MsbFirst);
+            const BitRepack cfg = configured(row.bitsIn, row.bitsOut, BitOrder::msb_first, BitOrder::msb_first);
             expect(eq(static_cast<unsigned>(cfg.inChunk), row.inChunk)) << std::format("({} -> {}) input chunk", row.bitsIn, row.bitsOut);
             expect(eq(static_cast<unsigned>(cfg.outChunk), row.outChunk)) << std::format("({} -> {}) output chunk", row.bitsIn, row.bitsOut);
             expect(eq(static_cast<unsigned>(cfg.period), row.period)) << std::format("({} -> {}) period", row.bitsIn, row.bitsOut);
@@ -317,7 +317,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         std::size_t worst = 0UZ;
         for (unsigned bitsIn = 1U; bitsIn <= 8U; ++bitsIn) {
             for (unsigned bitsOut = 1U; bitsOut <= 8U; ++bitsOut) {
-                worst = std::max(worst, static_cast<std::size_t>(configured(bitsIn, bitsOut, BitOrder::MsbFirst, BitOrder::MsbFirst).period));
+                worst = std::max(worst, static_cast<std::size_t>(configured(bitsIn, bitsOut, BitOrder::msb_first, BitOrder::msb_first).period));
             }
         }
         expect(eq(worst, gr::math::kMaxRepackPeriod)) << "the shift table is sized for the longest period in the space";
@@ -332,17 +332,17 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
 
     // A width outside the stated set is rejected, and rejects without half-applying.
     "validation rejects, and leaves the configuration intact"_test = [] {
-        BitRepack cfg = configured(3U, 5U, BitOrder::LsbFirst, BitOrder::MsbFirst);
+        BitRepack cfg = configured(3U, 5U, BitOrder::lsb_first, BitOrder::msb_first);
 
         for (const unsigned bad : {0U, 9U, 16U}) {
-            expect(throws<std::invalid_argument>([&] { configureRepack(cfg, bad, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst); })) << std::format("bitsIn = {}", bad);
-            expect(throws<std::invalid_argument>([&] { configureRepack(cfg, 8U, bad, BitOrder::MsbFirst, BitOrder::MsbFirst); })) << std::format("bitsOut = {}", bad);
+            expect(throws<std::invalid_argument>([&] { configureRepack(cfg, bad, 8U, BitOrder::msb_first, BitOrder::msb_first); })) << std::format("bitsIn = {}", bad);
+            expect(throws<std::invalid_argument>([&] { configureRepack(cfg, 8U, bad, BitOrder::msb_first, BitOrder::msb_first); })) << std::format("bitsOut = {}", bad);
         }
         expect(eq(static_cast<unsigned>(cfg.bitsIn), 3U)) << "a rejected width leaves the previous configuration standing";
         expect(eq(static_cast<unsigned>(cfg.bitsOut), 5U));
         expect(eq(static_cast<unsigned>(cfg.inChunk), 5U));
         expect(eq(static_cast<unsigned>(cfg.outChunk), 3U));
-        expect(that % (cfg.orderIn == BitOrder::LsbFirst));
+        expect(that % (cfg.orderIn == BitOrder::lsb_first));
     };
 
     // A stream value is masked to its field, so no stream value can change the answer or stop a graph.
@@ -356,7 +356,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
 
         for (const Case& shape : kCases) {
             for (const BitOrder orderIn : kOrders) {
-                const BitRepack cfg    = configured(shape.bitsIn, shape.bitsOut, orderIn, BitOrder::MsbFirst);
+                const BitRepack cfg    = configured(shape.bitsIn, shape.bitsOut, orderIn, BitOrder::msb_first);
                 const auto      masked = randomItems(kItems - (kItems % inChunkOf(cfg)), shape.bitsIn, 0x510E527FADE682D1ULL + shape.bitsIn);
 
                 const std::uint8_t        aboveField = static_cast<std::uint8_t>(~((1U << shape.bitsIn) - 1U));
@@ -365,14 +365,14 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
 
                 const auto fromMasked = throughKernel(cfg, masked);
                 const auto fromDirty  = throughKernel(cfg, dirty);
-                expect(eq(firstDifference(fromMasked, fromDirty), fromMasked.size())) << std::format("{} reads a bit above its field", describe(shape.bitsIn, shape.bitsOut, orderIn, BitOrder::MsbFirst));
+                expect(eq(firstDifference(fromMasked, fromDirty), fromMasked.size())) << std::format("{} reads a bit above its field", describe(shape.bitsIn, shape.bitsOut, orderIn, BitOrder::msb_first));
 
                 const unsigned limit = 1U << shape.bitsOut;
-                expect(std::ranges::all_of(fromDirty, [limit](std::uint8_t value) { return value < limit; })) << std::format("{} wrote above its output field", describe(shape.bitsIn, shape.bitsOut, orderIn, BitOrder::MsbFirst));
+                expect(std::ranges::all_of(fromDirty, [limit](std::uint8_t value) { return value < limit; })) << std::format("{} wrote above its output field", describe(shape.bitsIn, shape.bitsOut, orderIn, BitOrder::msb_first));
             }
         }
 
-        const BitRepack                 cfg = configured(3U, 8U, BitOrder::MsbFirst, BitOrder::MsbFirst);
+        const BitRepack                 cfg = configured(3U, 8U, BitOrder::msb_first, BitOrder::msb_first);
         const std::vector<std::uint8_t> ones(inChunkOf(cfg), std::uint8_t{0xFFU});
         const std::vector<std::uint8_t> threeBits(inChunkOf(cfg), std::uint8_t{0x07U});
         expect(eq(firstDifference(throughKernel(cfg, ones), throughKernel(cfg, threeBits)), outChunkOf(cfg))) << "all 0xFF and all 0x07 are the same three-bit stream";
@@ -382,7 +382,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
     "the trailing input, flushed and dropped"_test = [] {
         const std::array<std::uint8_t, 2> trailing{0xC5U, 0xBBU}; // 16 stranded bits, five whole symbols and one bit over
 
-        const BitRepack                   msb = configured(8U, 3U, BitOrder::MsbFirst, BitOrder::MsbFirst);
+        const BitRepack                   msb = configured(8U, 3U, BitOrder::msb_first, BitOrder::msb_first);
         const std::array<std::uint8_t, 6> expectedMsb{6U, 1U, 3U, 3U, 5U, 4U};
         std::vector<std::uint8_t>         padded(6UZ, std::uint8_t{0xAA});
         expect(eq(repackTail(msb, trailing, padded, true), 6UZ)) << "flushing emits the five whole symbols and one padded";
@@ -394,7 +394,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         expect(eq(firstDifference(std::span(dropped).first(5UZ), std::span(expectedMsb).first(5UZ)), 5UZ));
         expect(eq(static_cast<unsigned>(dropped[5UZ]), 0xAAU)) << "nothing past the returned count is written";
 
-        const BitRepack                   lsb = configured(8U, 3U, BitOrder::LsbFirst, BitOrder::LsbFirst);
+        const BitRepack                   lsb = configured(8U, 3U, BitOrder::lsb_first, BitOrder::lsb_first);
         const std::array<std::uint8_t, 6> expectedLsb{5U, 0U, 7U, 5U, 3U, 1U};
         std::vector<std::uint8_t>         lsbPadded(6UZ, std::uint8_t{0xAA});
         expect(eq(repackTail(lsb, trailing, lsbPadded, true), 6UZ));
@@ -402,8 +402,8 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
         expect(eq(lsbPadded[5UZ] & 0x06U, 0U)) << "lsb_first output pads the high positions";
 
         // the real bit of a padded item is the stream's own next bit, at the end the order names
-        expect(eq((padded[5UZ] >> 2U) & 1U, static_cast<unsigned>(toBits(trailing, 8U, BitOrder::MsbFirst)[15UZ])));
-        expect(eq(lsbPadded[5UZ] & 1U, static_cast<unsigned>(toBits(trailing, 8U, BitOrder::LsbFirst)[15UZ])));
+        expect(eq((padded[5UZ] >> 2U) & 1U, static_cast<unsigned>(toBits(trailing, 8U, BitOrder::msb_first)[15UZ])));
+        expect(eq(lsbPadded[5UZ] & 1U, static_cast<unsigned>(toBits(trailing, 8U, BitOrder::lsb_first)[15UZ])));
 
         // the longest trailing input each shape admits, the items it flushes, and the pad it leaves
         struct Row {
@@ -417,7 +417,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
             {7U, 5U, 4U, 5U, 2U}, {2U, 3U, 2U, 1U, 2U}, {6U, 4U, 1U, 1U, 2U}, {4U, 8U, 1U, 0U, 4U}};
 
         for (const Row& row : kRows) {
-            const BitRepack cfg = configured(row.bitsIn, row.bitsOut, BitOrder::MsbFirst, BitOrder::MsbFirst);
+            const BitRepack cfg = configured(row.bitsIn, row.bitsOut, BitOrder::msb_first, BitOrder::msb_first);
             expect(eq(static_cast<unsigned>(cfg.inChunk), row.trailing + 1U)) << std::format("({} -> {}) the longest trailing input is one item short of a period", row.bitsIn, row.bitsOut);
 
             const auto                source = randomItems(row.trailing, row.bitsIn, 0x9B05688C2B3E6C1FULL + row.bitsIn * 8U + row.bitsOut);
@@ -426,7 +426,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
 
             const unsigned padMask = (1U << row.padBits) - 1U;
             expect(eq(flushed[row.whole] & padMask, 0U)) << std::format("({} -> {}) the pad bits are zero", row.bitsIn, row.bitsOut);
-            expect(eq(firstDifference(std::span(flushed).first(row.whole), byDefinition(source, row.bitsIn, row.bitsOut, BitOrder::MsbFirst, BitOrder::MsbFirst)), std::size_t{row.whole})) //
+            expect(eq(firstDifference(std::span(flushed).first(row.whole), byDefinition(source, row.bitsIn, row.bitsOut, BitOrder::msb_first, BitOrder::msb_first)), std::size_t{row.whole})) //
                 << std::format("({} -> {}) the whole items match the definition", row.bitsIn, row.bitsOut);
 
             std::vector<std::uint8_t> truncated(row.whole + 1UZ, std::uint8_t{0xAA});
@@ -436,7 +436,7 @@ const boost::ut::suite<"bit packing"> bitPackingTests = [] {
 
         // where one input item is a whole period there is no trailing input, and the setting is inert
         for (const auto& [bitsIn, bitsOut] : {std::pair{8U, 1U}, std::pair{8U, 4U}, std::pair{8U, 8U}, std::pair{6U, 3U}}) {
-            const BitRepack cfg = configured(bitsIn, bitsOut, BitOrder::MsbFirst, BitOrder::MsbFirst);
+            const BitRepack cfg = configured(bitsIn, bitsOut, BitOrder::msb_first, BitOrder::msb_first);
             expect(eq(static_cast<unsigned>(cfg.inChunk), 1U)) << std::format("({} -> {}) one input item is a whole period", bitsIn, bitsOut);
             std::vector<std::uint8_t> out(4UZ, std::uint8_t{0xAA});
             expect(eq(repackTail(cfg, {}, out, true), 0UZ)) << "there is nothing to flush";

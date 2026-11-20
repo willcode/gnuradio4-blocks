@@ -41,7 +41,7 @@ struct SpectralSettings {
     std::size_t                 hop              = 512UZ;
     std::size_t                 nAverages        = 1UZ;
     bool                        maxHold          = false;
-    gr::algorithm::window::Type windowType       = gr::algorithm::window::Type::Hann;
+    gr::algorithm::window::Type windowType       = gr::algorithm::window::Type::hann;
     float                       windowShape      = 0.f;
     float                       sampleRate       = 1.f;
     double                      centerFrequency  = 0.;
@@ -538,7 +538,7 @@ settings it was computed with, the stream index of its first segment and its com
 
     struct Settings {
         Annotated<gr::Size_t, Visible, Doc<"FFT size">, Limits<Min<detail::kMinFftSize>, Max<detail::kMaxFftSize>>> fft_size            = 1024U;
-        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>>                      window              = gr::algorithm::window::Type::Hann;
+        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>>                      window              = gr::algorithm::window::Type::hann;
         Annotated<float, Visible, Doc<"window parameter (0 = default)">>                                            window_param        = 0.f;
         Annotated<double, Visible, Doc<"segment overlap">, Limits<Min<0.0>, Under<1.0>>>                            overlap             = 0.5;
         Annotated<gr::Size_t, Visible, Unit<"samples">, Doc<"hop (0 = from overlap)">>                              hop                 = 0U;
@@ -663,7 +663,7 @@ It passes no input tag on.
 
     struct Settings {
         Annotated<gr::Size_t, Visible, Doc<"FFT size">, Limits<Min<detail::kMinFftSize>, Max<detail::kMaxFftSize>>> fft_size            = 1024U;
-        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>>                      window              = gr::algorithm::window::Type::Hann;
+        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>>                      window              = gr::algorithm::window::Type::hann;
         Annotated<float, Visible, Doc<"window parameter (0 = default)">>                                            window_param        = 0.f;
         Annotated<double, Visible, Doc<"segment overlap">, Limits<Min<0.0>, Under<1.0>>>                            overlap             = 0.5;
         Annotated<gr::Size_t, Visible, Unit<"samples">, Doc<"hop (0 = from overlap)">>                              hop                 = 0U;

@@ -91,8 +91,8 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         // The audio low-pass shape (fs 240k, 17k cutoff, 2k transition, Hamming at the pinned law).
         {
             const int  n     = hammingLaw(240000.0, 2000.0);
-            auto       block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 240000.f}, {"cutoff", 17000.0}, {"transition_width", 2000.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
-            const auto want  = gr::filter::fir::design::designLowpass({.sampleRate = 240000.0, .cutoff = 17000.0, .transitionWidth = 2000.0, .window = Type::Hamming, .taps = n});
+            auto       block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", 240000.f}, {"cutoff", 17000.0}, {"transition_width", 2000.0}, {"window", std::string("hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
+            const auto want  = gr::filter::fir::design::designLowpass({.sampleRate = 240000.0, .cutoff = 17000.0, .transitionWidth = 2000.0, .window = Type::hamming, .taps = n});
             expect(eq(block._designed.size(), want.size()));
             expect(eq(worstDelta(std::span<const float>(block._designed), std::span<const float>(want)), 0.0)) << "same designer, same floats";
             expect(eq(static_cast<std::size_t>(block.status.designed_taps.value), want.size())) << "the observable states the length";
@@ -100,8 +100,8 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         // The sharp CW complex band (fs 96k, 575..825 Hz, 20 Hz transition — the receiver's largest filter).
         {
             const int  n     = hammingLaw(96000.0, 20.0);
-            auto       block = make<CF, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", 96000.f}, {"cutoff", 575.0}, {"high_cutoff", 825.0}, {"transition_width", 20.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
-            const auto want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = 96000.0, .cutoff = 575.0, .highCutoff = 825.0, .transitionWidth = 20.0, .window = Type::Hamming, .taps = n});
+            auto       block = make<CF, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", 96000.f}, {"cutoff", 575.0}, {"high_cutoff", 825.0}, {"transition_width", 20.0}, {"window", std::string("hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
+            const auto want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = 96000.0, .cutoff = 575.0, .highCutoff = 825.0, .transitionWidth = 20.0, .window = Type::hamming, .taps = n});
             expect(eq(block._designed.size(), want.size()));
             expect(eq(worstDelta(std::span<const CF>(block._designed), std::span<const CF>(want)), 0.0));
             expect(eq(static_cast<std::size_t>(n), want.size())) << "the CW length is the pinned 11563";
@@ -134,10 +134,10 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         expect(eq(worstDelta(std::span<const float>(derived._designed), std::span<const float>(kaiser)), 0.0)) << "Kaiser's beta follows attenuation_db";
 
         gr::property_map tukeySettings = lowpass;
-        tukeySettings.insert_or_assign(gr::property_map::key_type{"window"}, std::string("Tukey"));
+        tukeySettings.insert_or_assign(gr::property_map::key_type{"window"}, std::string("tukey"));
         auto       tukey     = make<float, float>(tukeySettings);
         FilterSpec tukeySpec = spec;
-        tukeySpec.window     = Type::Tukey;
+        tukeySpec.window     = Type::tukey;
         const auto tukeyWant = gr::filter::fir::design::designLowpass(tukeySpec);
         expect(fatal(eq(tukey._designed.size(), tukeyWant.size())));
         expect(eq(worstDelta(std::span<const float>(tukey._designed), std::span<const float>(tukeyWant)), 0.0)) << "Tukey takes its own default";
@@ -155,7 +155,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
 
     "behavioral: the low-pass passes and stops what its edges say"_test = [] {
         constexpr double fs    = 240000.0;
-        auto             block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 17000.0}, {"transition_width", 2000.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(hammingLaw(fs, 2000.0))}});
+        auto             block = make<float, float>({{"profile", std::string("lowpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 17000.0}, {"transition_width", 2000.0}, {"window", std::string("hamming")}, {"taps", static_cast<gr::Size_t>(hammingLaw(fs, 2000.0))}});
 
         const std::size_t  n = 65536UZ;
         std::vector<float> in(n);
@@ -180,7 +180,7 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
 
     "behavioral: the complex band-pass rejects the image and holds unity at center"_test = [] {
         constexpr double fs    = 96000.0;
-        auto             block = make<CF, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 300.0}, {"high_cutoff", 3000.0}, {"transition_width", 200.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(hammingLaw(fs, 200.0))}});
+        auto             block = make<CF, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 300.0}, {"high_cutoff", 3000.0}, {"transition_width", 200.0}, {"window", std::string("hamming")}, {"taps", static_cast<gr::Size_t>(hammingLaw(fs, 200.0))}});
 
         // The design's own contract: unity gain at band center.
         const double         fc = (300.0 + 3000.0) / 2.0 / fs;
@@ -217,8 +217,8 @@ const boost::ut::suite<"DesignedFilter"> designedFilterTests = [] {
         constexpr double fs    = 48000.0;
         constexpr double tone  = 19000.0;
         const int        n     = hammingLaw(fs, 100.0);
-        auto             block = make<float, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 18800.0}, {"high_cutoff", 19200.0}, {"transition_width", 100.0}, {"gain", 2.0}, {"window", std::string("Hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
-        const auto       want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = fs, .cutoff = 18800.0, .highCutoff = 19200.0, .transitionWidth = 100.0, .gain = 2.0, .window = Type::Hamming, .taps = n});
+        auto             block = make<float, CF>({{"profile", std::string("complex_bandpass")}, {"sample_rate", static_cast<float>(fs)}, {"cutoff", 18800.0}, {"high_cutoff", 19200.0}, {"transition_width", 100.0}, {"gain", 2.0}, {"window", std::string("hamming")}, {"taps", static_cast<gr::Size_t>(n)}});
+        const auto       want  = gr::filter::fir::design::designComplexBandpass({.sampleRate = fs, .cutoff = 18800.0, .highCutoff = 19200.0, .transitionWidth = 100.0, .gain = 2.0, .window = Type::hamming, .taps = n});
         expect(eq(block._designed.size(), want.size()));
         expect(eq(worstDelta(std::span<const CF>(block._designed), std::span<const CF>(want)), 0.0)) << "the taps are the library designer's for a real sample type too";
 

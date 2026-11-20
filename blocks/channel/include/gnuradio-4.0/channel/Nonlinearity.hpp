@@ -15,8 +15,8 @@
 namespace gr::blocks::channel {
 
 enum class NonlinearityModel : int {
-    Rapp,  ///< solid-state amplifier: soft envelope limiting, no AM/PM
-    Saleh, ///< traveling-wave tube: envelope compression with an amplitude-dependent phase shift
+    rapp,  ///< solid-state amplifier: soft envelope limiting, no AM/PM
+    saleh, ///< traveling-wave tube: envelope compression with an amplitude-dependent phase shift
 };
 
 GR_REGISTER_BLOCK(gr::blocks::channel::Nonlinearity, [T], [std::complex<float>])
@@ -55,7 +55,7 @@ drive off; a larger `smoothness` is a harder limit.
     PortOut<T> out;
 
     struct Settings {
-        Annotated<NonlinearityModel, Visible, Doc<"amplifier model">>                   model            = NonlinearityModel::Rapp;
+        Annotated<NonlinearityModel, Visible, Doc<"amplifier model">>                   model            = NonlinearityModel::rapp;
         Annotated<double, Visible, Unit<"dB">, Doc<"input backoff">>                    input_backoff_db = 0.0;
         Annotated<double, Visible, Doc<"Rapp saturation amplitude">, Limits<Over<0.0>>> saturation       = 1.0;
         Annotated<double, Visible, Doc<"Rapp knee sharpness">, Limits<Over<0.0>>>       smoothness       = 2.0;
@@ -79,7 +79,7 @@ drive off; a larger `smoothness` is a harder limit.
         if (driven == 0.) {
             return {0., 0.};
         }
-        if (settings.model == NonlinearityModel::Rapp) {
+        if (settings.model == NonlinearityModel::rapp) {
             const double ratio = std::pow(driven / settings.saturation, 2. * settings.smoothness);
             return {driven / std::pow(1. + ratio, 1. / (2. * settings.smoothness)), 0.};
         }

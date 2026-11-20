@@ -87,10 +87,10 @@ namespace gr::digital {
 
 /// @brief The chip pair each data bit becomes; the two conventions differ only there. A setting starts at `unset`
 /// and codes nothing until one is chosen: neither is a default.
-enum class ManchesterConvention : std::uint8_t { Unset, Ieee8023, GeThomas };
+enum class ManchesterConvention : std::uint8_t { unset, ieee802_3, ge_thomas };
 
 /// @brief The `k` of `chipPair(b) = (b XOR k, b XOR k XOR 1)`, and the only thing the two conventions disagree about.
-[[nodiscard]] constexpr std::uint8_t conventionXor(ManchesterConvention convention) noexcept { return static_cast<std::uint8_t>(convention == ManchesterConvention::Ieee8023 ? 1 : 0); }
+[[nodiscard]] constexpr std::uint8_t conventionXor(ManchesterConvention convention) noexcept { return static_cast<std::uint8_t>(convention == ManchesterConvention::ieee802_3 ? 1 : 0); }
 
 /**
  * @brief The conventions of the standards that state one, as interoperability constants.
@@ -108,18 +108,18 @@ namespace standard {
 /// `0xD5`, taken least-significant-bit first, encode to the item pairs `66 66` and `66 A6`. Their chip sequences carry the
 /// two properties the standard's waveform description states — the preamble is a square wave with exactly one transition
 /// per bit time, and the delimiter breaks it at exactly one place, the boundary between its final two ones.
-inline constexpr ManchesterConvention ethernet = ManchesterConvention::Ieee8023;
+inline constexpr ManchesterConvention ethernet = ManchesterConvention::ieee802_3;
 
 /// @brief MIL-STD-1553, "Manchester II bi-phase level". The standard states the mapping at bit level: a logic one is a
 /// bipolar coded signal `1/0`, a positive pulse followed by a negative pulse, and a logic zero is `0/1`. That is `k = 0`,
 /// and it is the strongest anchor available because it publishes the chip pair itself rather than a waveform. The same
 /// standard's command and data syncs are, in its own words, invalid Manchester waveforms, which is why a violation is
 /// reported and never absorbed.
-inline constexpr ManchesterConvention mil1553 = ManchesterConvention::GeThomas;
+inline constexpr ManchesterConvention mil1553 = ManchesterConvention::ge_thomas;
 
 /// @brief IEC 62386, digital addressable lighting. A logical one is low during the first half-bit and high during the
 /// second, so a rising mid-bit edge is a one, which is the same reading as `ethernet`.
-inline constexpr ManchesterConvention dali = ManchesterConvention::Ieee8023;
+inline constexpr ManchesterConvention dali = ManchesterConvention::ieee802_3;
 
 } // namespace standard
 
@@ -132,9 +132,9 @@ inline constexpr ManchesterConvention dali = ManchesterConvention::Ieee8023;
  * the totals a caller is about to report.
  */
 struct ManchesterConfig {
-    ManchesterConvention convention  = ManchesterConvention::Ieee8023;
+    ManchesterConvention convention  = ManchesterConvention::ieee802_3;
     std::uint8_t         bitsPerItem = 8U;
-    gr::math::BitOrder   order       = gr::math::BitOrder::MsbFirst;
+    gr::math::BitOrder   order       = gr::math::BitOrder::msb_first;
     std::uint8_t         chipPhase   = 0U; ///< the pairing grid `resetManchester()` restores, 0 or 1
 
     std::uint8_t                     k     = 1U; ///< the XOR constant of the convention
@@ -158,7 +158,7 @@ inline void resetManchester(ManchesterConfig& cfg) noexcept {
 namespace detail {
 
 /// @brief The bit position of the @p index-th bit of a @p width-bit item under @p order, which is the whole of what an order means.
-[[nodiscard]] constexpr unsigned streamPosition(unsigned index, unsigned width, gr::math::BitOrder order) noexcept { return order == gr::math::BitOrder::MsbFirst ? width - 1U - index : index; }
+[[nodiscard]] constexpr unsigned streamPosition(unsigned index, unsigned width, gr::math::BitOrder order) noexcept { return order == gr::math::BitOrder::msb_first ? width - 1U - index : index; }
 
 /// @brief The two output items @p item encodes to, the first in the high byte, packed in @p order and masked to @p width.
 [[nodiscard]] constexpr std::uint16_t chipPairItems(unsigned item, unsigned width, unsigned k, gr::math::BitOrder order) noexcept {
@@ -197,7 +197,7 @@ namespace detail {
  * is built once here and never resized.
  */
 inline void configureManchester(ManchesterConfig& cfg, ManchesterConvention convention, unsigned bitsPerItem, gr::math::BitOrder order, unsigned chipPhase = 0U) {
-    if (convention == ManchesterConvention::Unset) {
+    if (convention == ManchesterConvention::unset) {
         throw std::invalid_argument("gr::digital::configureManchester: convention is required");
     }
     if (bitsPerItem < 1U || bitsPerItem > 8U) {
@@ -275,7 +275,7 @@ inline void decodeAligned(const ManchesterConfig& cfg, std::span<const std::uint
     const unsigned width     = static_cast<unsigned>(cfg.bitsPerItem);
     const unsigned mask      = (1U << width) - 1U;
     const unsigned broadcast = cfg.k != 0U ? mask : 0U;
-    const bool     msbFirst  = cfg.order == gr::math::BitOrder::MsbFirst;
+    const bool     msbFirst  = cfg.order == gr::math::BitOrder::msb_first;
 
     for (std::size_t i = 0UZ; i < count; ++i) {
         const unsigned early = static_cast<unsigned>(in[2UZ * i]) & mask;

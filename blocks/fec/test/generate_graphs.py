@@ -1522,12 +1522,12 @@ def chunked(values, size):
 
 
 def block_kind(rows, cols, **more):
-    return {"kind": "Block", "rows": U32(rows), "cols": U32(cols), **more}
+    return {"kind": "block", "rows": U32(rows), "cols": U32(cols), **more}
 
 
 def conv_kind(branches, unit_delay, **more):
     return {
-        "kind": "Convolutional",
+        "kind": "convolutional",
         "branches": U32(branches),
         "unit_delay": U32(unit_delay),
         **more,
@@ -1535,7 +1535,7 @@ def conv_kind(branches, unit_delay, **more):
 
 
 def perm_kind(table):
-    return {"kind": "Permutation", "table": U32s(table)}
+    return {"kind": "permutation", "table": U32s(table)}
 
 
 def interleave_framed_graph():

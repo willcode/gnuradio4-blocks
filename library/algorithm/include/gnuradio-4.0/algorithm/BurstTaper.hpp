@@ -19,13 +19,13 @@
 namespace gr::algorithm {
 
 enum class TaperType {
-    None,
-    Linear,
-    RaisedCosine, // param = power exponent (default 1)
-    Tukey,        // param = roll-off ratio (default 0.5)
-    Gaussian,     // param = sigma (default 0.4)
-    Mushroom,     // zero-integral polynomial (C1)
-    MushroomSine, // zero-integral sinusoidal (C∞)
+    none,
+    linear,
+    raised_cosine, // param = power exponent (default 1)
+    tukey,         // param = roll-off ratio (default 0.5)
+    gaussian,      // param = sigma (default 0.4)
+    mushroom,      // zero-integral polynomial (C1)
+    mushroom_sine, // zero-integral sinusoidal (C∞)
 };
 
 /**
@@ -42,7 +42,7 @@ struct BurstTaper {
 
     using CoeffStorage = std::conditional_t<N == std::dynamic_extent, std::vector<T, Allocator>, std::array<T, N>>;
 
-    TaperType    _taperType    = TaperType::Linear;
+    TaperType    _taperType    = TaperType::linear;
     T            _rampTime     = T{0}; // [s]
     T            _sampleRate   = T{1}; // [Hz]
     T            _shapeParam   = T{0};
@@ -271,27 +271,27 @@ private:
     static T computeRise(TaperType type, T u, T param) {
         using std::numbers::pi_v;
         switch (type) {
-        case TaperType::None: return T{1};
-        case TaperType::Linear: return u;
-        case TaperType::RaisedCosine: {
+        case TaperType::none: return T{1};
+        case TaperType::linear: return u;
+        case TaperType::raised_cosine: {
             T base = (T{1} - std::cos(pi_v<T> * u)) / T{2};
             return (param > T{0} && param != T{1}) ? std::pow(base, param) : base;
         }
-        case TaperType::Tukey: {
+        case TaperType::tukey: {
             T alpha = (param > T{0}) ? param : T{0.5};
             return (u < alpha / T{2}) ? (T{1} - std::cos(T{2} * pi_v<T> * u / alpha)) / T{2} : T{1};
         }
-        case TaperType::Gaussian: {
+        case TaperType::gaussian: {
             T sigma  = (param > T{0}) ? param : T{2} / T{5};
             T raw    = std::exp(T{-0.5} * ((u - T{1}) / sigma) * ((u - T{1}) / sigma));
             T rawAt0 = std::exp(T{-0.5} / (sigma * sigma));
             return (raw - rawAt0) / (T{1} - rawAt0);
         }
-        case TaperType::Mushroom: {
+        case TaperType::mushroom: {
             T u2 = u * u;
             return u2 * (T{-12} + u * (T{28} - T{15} * u));
         }
-        case TaperType::MushroomSine: {
+        case TaperType::mushroom_sine: {
             T sinPu = std::sin(pi_v<T> * u);
             return (T{1} - std::cos(pi_v<T> * u)) / T{2} - (T{3} * pi_v<T> / T{8}) * sinPu * sinPu * sinPu;
         }

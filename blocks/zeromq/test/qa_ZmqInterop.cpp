@@ -523,7 +523,7 @@ const suite ZmqInteropTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         });
         auto& sink = fg.emplaceBlock<RecordingSink<gr::pmt::Value>>({{"n_samples_max", 1U}});
 
@@ -548,7 +548,7 @@ const suite ZmqInteropTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         });
 
         expect(fg.connect<"out", "in">(source, push).has_value());
@@ -570,7 +570,7 @@ const suite ZmqInteropTests = [] {
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"pass_tags", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         });
         auto& sink = fg.emplaceBlock<RecordingTaggedSink>({{"n_samples_max", 4U}});
 
@@ -605,7 +605,7 @@ const suite ZmqInteropTests = [] {
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"pass_tags", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         });
 
         expect(fg.connect<"out", "in">(source, push).has_value());

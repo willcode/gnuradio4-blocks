@@ -80,7 +80,7 @@ energy above `divergence_bound` resets the taps to the spike, counted in n_reset
 
     struct Settings {
         Annotated<gr::Size_t, Visible, Doc<"tap count">, Limits<Min<1U>, Max<127U>>>        num_taps           = 11U;
-        Annotated<gr::digital::AdaptiveAlgorithm, Visible, Doc<"adaptation algorithm">>     algorithm          = gr::digital::AdaptiveAlgorithm::Lms;
+        Annotated<gr::digital::AdaptiveAlgorithm, Visible, Doc<"adaptation algorithm">>     algorithm          = gr::digital::AdaptiveAlgorithm::lms;
         Annotated<EqualizerReference, Doc<"adaptation reference">>                          reference          = EqualizerReference::decision_directed;
         Annotated<double, Visible, Doc<"step size">, Limits<Over<0.0>, Under<1.0>>>         step_size          = 0.01;
         Annotated<gr::Size_t, Visible, Doc<"samples per symbol">, Limits<Min<1U>, Max<2U>>> samples_per_symbol = 1U;
@@ -92,7 +92,7 @@ energy above `divergence_bound` resets the taps to the spike, counted in n_reset
         Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                      phase_offset     = F{0};
         Annotated<gr::Size_t, Doc<"psk label offset">>                                      label_xor        = 0U;
         Annotated<std::vector<F>, Doc<"custom points">>                                     points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>                   normalization = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                   normalization = gr::digital::Normalization::power;
 
         GR_MAKE_REFLECTABLE(Settings, num_taps, algorithm, reference, step_size, samples_per_symbol, training_sequence, freeze, divergence_bound, constellation, arity, phase_offset, label_xor, points, normalization);
     } settings;
@@ -132,7 +132,7 @@ energy above `divergence_bound` resets the taps to the spike, counted in n_reset
         if (training.size() % 2UZ != 0UZ) {
             return gr::Refused(s.training_sequence, "must have an even length");
         }
-        if (s.reference == EqualizerReference::training && s.algorithm != gr::digital::AdaptiveAlgorithm::Cma && training.empty()) {
+        if (s.reference == EqualizerReference::training && s.algorithm != gr::digital::AdaptiveAlgorithm::cma && training.empty()) {
             return gr::Refused(s.training_sequence, "required");
         }
         const gr::digital::Constellation<F> decisions = constellationOf(s);
@@ -154,7 +154,7 @@ energy above `divergence_bound` resets the taps to the spike, counted in n_reset
         for (std::size_t i = 0UZ; i < _training.size(); ++i) {
             _training[i] = std::complex<F>(s.training_sequence.value[2UZ * i], s.training_sequence.value[2UZ * i + 1UZ]);
         }
-        _trained = s.reference == EqualizerReference::training && s.algorithm != gr::digital::AdaptiveAlgorithm::Cma;
+        _trained = s.reference == EqualizerReference::training && s.algorithm != gr::digital::AdaptiveAlgorithm::cma;
         _sps     = s.samples_per_symbol;
 
         this->input_chunk_size  = s.samples_per_symbol;

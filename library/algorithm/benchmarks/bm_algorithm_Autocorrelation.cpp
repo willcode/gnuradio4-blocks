@@ -59,8 +59,8 @@ void benchAutocorrelation() {
         const std::vector<Complex> input = noise(kSamples);
 
         for (const Geometry& geometry : kGeometries) {
-            for (const gr::analysis::AcfKind kind : {gr::analysis::AcfKind::Complex, gr::analysis::AcfKind::Envelope}) {
-                for (const gr::analysis::AcfNormalization normalization : {gr::analysis::AcfNormalization::Unbiased, gr::analysis::AcfNormalization::Biased}) {
+            for (const gr::analysis::AcfKind kind : {gr::analysis::AcfKind::complex, gr::analysis::AcfKind::envelope}) {
+                for (const gr::analysis::AcfNormalization normalization : {gr::analysis::AcfNormalization::unbiased, gr::analysis::AcfNormalization::biased}) {
                     for (const double overlap : kOverlaps) {
                         gr::analysis::AcfConfig config{};
                         config.windowLength  = geometry.windowLength;

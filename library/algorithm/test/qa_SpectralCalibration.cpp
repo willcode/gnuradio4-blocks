@@ -27,11 +27,11 @@ constexpr float kSampleRate = 48000.f;
 
 /// The windows the calibration is checked against, one per window family.
 constexpr std::array<std::pair<std::string_view, gr::algorithm::window::Type>, 5UZ> kWindows{{
-    {"Rectangular", gr::algorithm::window::Type::Rectangular},
-    {"Hann", gr::algorithm::window::Type::Hann},
-    {"Hamming", gr::algorithm::window::Type::Hamming},
-    {"Blackman", gr::algorithm::window::Type::Blackman},
-    {"BlackmanHarris", gr::algorithm::window::Type::BlackmanHarris},
+    {"Rectangular", gr::algorithm::window::Type::rectangular},
+    {"Hann", gr::algorithm::window::Type::hann},
+    {"Hamming", gr::algorithm::window::Type::hamming},
+    {"Blackman", gr::algorithm::window::Type::blackman},
+    {"BlackmanHarris", gr::algorithm::window::Type::blackman_harris},
 }};
 
 /// @brief The density of one windowed transform of `input`, computed with the kernel's scale and fold.
@@ -67,15 +67,15 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
     using namespace boost::ut;
 
     "a rectangle has one bin of noise bandwidth, and every other window has more"_test = [] {
-        const auto rect = gr::algorithm::window::create(gr::algorithm::window::Type::Rectangular, 1024UZ);
+        const auto rect = gr::algorithm::window::create(gr::algorithm::window::Type::rectangular, 1024UZ);
         expect(approx(enbwBins(std::span<const float>(rect)), 1.f, 1e-5f)) << "the rectangle's noise bandwidth is one bin";
 
         // the published figures: Hann 1.50, Hamming 1.36, Blackman 1.73, Blackman-Harris 2.00 bins
         const auto expected = std::vector<std::pair<gr::algorithm::window::Type, float>>{
-            {gr::algorithm::window::Type::Hann, 1.50f},
-            {gr::algorithm::window::Type::Hamming, 1.36f},
-            {gr::algorithm::window::Type::Blackman, 1.73f},
-            {gr::algorithm::window::Type::BlackmanHarris, 2.00f},
+            {gr::algorithm::window::Type::hann, 1.50f},
+            {gr::algorithm::window::Type::hamming, 1.36f},
+            {gr::algorithm::window::Type::blackman, 1.73f},
+            {gr::algorithm::window::Type::blackman_harris, 2.00f},
         };
         for (const auto& [type, figure] : expected) {
             const auto  window = gr::algorithm::window::create(type, 1024UZ);
@@ -133,7 +133,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
         // power against this value.
         constexpr float kPower = 1.f / 6.f;
 
-        const auto         window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n);
+        const auto         window = gr::algorithm::window::create(gr::algorithm::window::Type::hann, n);
         const auto         scale  = spectralScale(std::span<const float>(window), kSampleRate);
         std::vector<float> density(n, 0.f);
 
@@ -168,7 +168,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
 
     "a one-sided density integrates to the same total as the two-sided one"_test = [] {
         constexpr std::size_t n      = 1024UZ;
-        const auto            window = gr::algorithm::window::create(gr::algorithm::window::Type::Hann, n);
+        const auto            window = gr::algorithm::window::create(gr::algorithm::window::Type::hann, n);
         const auto            scale  = spectralScale(std::span<const float>(window), kSampleRate);
 
         // A real input as complex samples with zero quadrature. Its spectrum is conjugate-symmetric.
@@ -234,7 +234,7 @@ const boost::ut::suite<"SpectralCalibration"> calibrationTests = [] {
         expect(std::isnan(scale.density));
         expect(std::isnan(scale.enbwBins));
 
-        const auto rect   = gr::algorithm::window::create(gr::algorithm::window::Type::Rectangular, 16UZ);
+        const auto rect   = gr::algorithm::window::create(gr::algorithm::window::Type::rectangular, 16UZ);
         const auto noRate = spectralScale(std::span<const float>(rect), 0.f);
         expect(std::isnan(noRate.density)) << "a zero sample rate gives a NaN density";
     };

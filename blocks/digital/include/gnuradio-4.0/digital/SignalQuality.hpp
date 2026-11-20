@@ -100,7 +100,7 @@ change of `window` restarts the window.
         Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                               phase_offset  = F{0};
         Annotated<gr::Size_t, Doc<"psk label offset">>                                               label_xor     = 0U;
         Annotated<std::vector<F>, Doc<"custom points">>                                              points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>                            normalization = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                            normalization = gr::digital::Normalization::power;
         Annotated<gr::Size_t, Unit<"symbols">, Visible, Doc<"symbols per reading">, Limits<Min<1U>>> window        = 1000U;
         Annotated<EvmMode, Doc<"reference mode">>                                                    mode          = EvmMode::decision_directed;
 
@@ -362,7 +362,7 @@ and qam, `phase_offset` and `label_xor` by psk, and `points`, interleaved re, im
         Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                               phase_offset  = F{0};
         Annotated<gr::Size_t, Doc<"psk label offset">>                                               label_xor     = 0U;
         Annotated<std::vector<F>, Doc<"custom points">>                                              points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>                            normalization = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>                            normalization = gr::digital::Normalization::power;
 
         GR_MAKE_REFLECTABLE(Settings, method, window, ceiling_db, constellation, arity, phase_offset, label_xor, points, normalization);
     } settings;

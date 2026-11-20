@@ -221,7 +221,7 @@ int main() {
     std::vector<DelimiterExtractor<std::uint8_t>> stuffedBlocks;
     for (const std::size_t frameItems : kFrameLengths) {
         stuffedStreams.push_back(stuffedStream(frameItems));
-        stuffedBlocks.push_back(make<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("01111110")}, {"transparency", std::string("BitStuffing")}, {"max_payload_items", gr::Size_t{4096}}}));
+        stuffedBlocks.push_back(make<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"max_payload_items", gr::Size_t{4096}}}));
     }
     for (std::size_t which = 0UZ; which < stuffedBlocks.size(); ++which) {
         arms.push_back({std::format("bit_stuffing, 1 bit/item, d=8, frame={}", kFrameLengths[which]), [&, which] {
@@ -238,7 +238,7 @@ int main() {
     std::vector<DelimiterExtractor<std::uint8_t>> escapedBlocks;
     for (const std::size_t frameItems : kFrameLengths) {
         escapedStreams.push_back(escapedByteStream(frameItems));
-        escapedBlocks.push_back(make<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("ByteEscape")}, //
+        escapedBlocks.push_back(make<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("byte_escape")}, //
             {"escape_item", gr::Size_t{0xDB}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{4096}}}));
     }
     for (std::size_t which = 0UZ; which < escapedBlocks.size(); ++which) {

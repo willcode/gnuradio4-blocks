@@ -434,14 +434,14 @@ const boost::ut::suite<"SoapySink transmit bursts"> burstTests = [] {
 
     "the shutdown ramp-down still follows a transmission that ends without tx_eob"_test = [] {
         constexpr std::size_t kSamples = 2000UZ;
-        const auto            writes   = transmit("", kSamples, {}, {{"burst_taper_enabled", true}, {"burst_ramp_time", 0.001f}, {"burst_taper_type", std::string("Linear")}});
+        const auto            writes   = transmit("", kSamples, {}, {{"burst_taper_enabled", true}, {"burst_ramp_time", 0.001f}, {"burst_taper_type", std::string("linear")}});
         expect(gt(samplesTaken(writes), kSamples)) << "the ramp-down follows the stream's last sample";
         expect(std::ranges::none_of(writes, &Write::endsBurst)) << "no write ends a burst";
     };
 
     "no ramp-down follows a transmission that ended at tx_eob"_test = [] {
         constexpr std::size_t kSamples = 2000UZ;
-        const auto            writes   = transmit("", kSamples, {burstStart(0UZ), burstEnd(kSamples - 1UZ)}, {{"burst_taper_enabled", true}, {"burst_ramp_time", 0.001f}, {"burst_taper_type", std::string("Linear")}});
+        const auto            writes   = transmit("", kSamples, {burstStart(0UZ), burstEnd(kSamples - 1UZ)}, {{"burst_taper_enabled", true}, {"burst_ramp_time", 0.001f}, {"burst_taper_type", std::string("linear")}});
         expectBurstWrites("ended burst with taper", writes, kSamples, {kSamples - 1UZ}, {});
         expect(fatal(!writes.empty()));
         expect(writes.back().endsBurst()) << "the device's last write is the one that ended the burst";

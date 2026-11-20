@@ -108,7 +108,7 @@ counts `gr:sample_rate` tags that differ from the accepted `sample_rate`. The sc
         Annotated<std::vector<std::int64_t>, Visible, Unit<"ns">, Doc<detail::kScheduleTimesDoc>>           schedule_times_ns{};
         Annotated<std::vector<double>, Visible, Unit<"s">, Doc<"scheduled delays">>                         schedule_delays_s{};
         Annotated<std::string, Doc<"range trajectory file">>                                                schedule_file{};
-        Annotated<detail::DopplerDirection, Visible, Doc<detail::kDirectionDoc>>                            direction            = detail::DopplerDirection::Apply;
+        Annotated<detail::DopplerDirection, Visible, Doc<detail::kDirectionDoc>>                            direction            = detail::DopplerDirection::apply;
         Annotated<double, Unit<"s">, Doc<"delay bias (0 = derived)">>                                       bias_s               = 0.0;
         Annotated<float, Visible, Unit<"Hz">, Doc<detail::kSampleRateDoc>>                                  sample_rate          = 1.f;
         Annotated<std::uint64_t, Doc<detail::kAnchorIndexDoc>>                                              anchor_index         = 0ULL;
@@ -512,8 +512,8 @@ private:
             return staged;
         }
 
-        const double sign = direction == detail::DopplerDirection::Correct ? -1. : 1.;
-        if (direction == detail::DopplerDirection::Apply && bias < 0.) {
+        const double sign = direction == detail::DopplerDirection::correct ? -1. : 1.;
+        if (direction == detail::DopplerDirection::apply && bias < 0.) {
             return std::unexpected("bias_s: must be >= 0 in apply mode");
         }
         const double resolved = resolveBias(*table, direction, bias);
@@ -557,7 +557,7 @@ private:
         }
         // The default keeps the commanded delay causal. Apply is already non-negative and takes zero. Correct commands
         // `-delay + bias`, least where the delay is greatest. The schedule's maximum lifts that least value to zero.
-        return direction == detail::DopplerDirection::Correct ? schedule.maxValue() : 0.;
+        return direction == detail::DopplerDirection::correct ? schedule.maxValue() : 0.;
     }
 
     void reserve(std::size_t nSamples) {
@@ -588,7 +588,7 @@ private:
         if (_schedule) {
             _schedule->valuesFor(_clock, _position, delays);
             for (double& value : delays) {
-                value = (settings.direction.value == detail::DopplerDirection::Correct ? -value : value) + _bias;
+                value = (settings.direction.value == detail::DopplerDirection::correct ? -value : value) + _bias;
             }
         } else {
             std::ranges::fill(delays, _bias); // no table is a constant bias, which may be zero
@@ -694,7 +694,7 @@ private:
             return _anchor.armed() ? _bias : 0.;
         }
         const double raw = _schedule->delayAt(_clock.timeOf(index));
-        return (settings.direction.value == detail::DopplerDirection::Correct ? -raw : raw) + _bias;
+        return (settings.direction.value == detail::DopplerDirection::correct ? -raw : raw) + _bias;
     }
 
     [[nodiscard]] SchedulePosition positionAt(std::uint64_t index) const noexcept {

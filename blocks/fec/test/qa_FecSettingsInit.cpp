@@ -162,7 +162,7 @@ const boost::ut::suite<"fec settings at the initialization"> fecInitTests = [] {
         expectInitializes<ConvEncode>(named, "an encoder of a named code");
         expectInitializes<ConvEncode>(explicitCode, "an encoder of an explicit code");
 
-        const gr::property_map decoding{{"code", std::string("ccsds")}, {"invert_outputs", gr::Size_t{2U}}, {"termination", std::string("Open")}};
+        const gr::property_map decoding{{"code", std::string("ccsds")}, {"invert_outputs", gr::Size_t{2U}}, {"termination", std::string("open")}};
         expectInitializes<ViterbiDecode>(decoding, "a decoder of a named code, open");
         expectInitializes<ViterbiDecode>(explicitCode, "a decoder of an explicit code");
         expectInitializes<ViterbiDecodeSoft>(decoding, "a soft decoder of a named code, open");
@@ -197,21 +197,21 @@ const boost::ut::suite<"fec settings at the initialization"> fecInitTests = [] {
     };
 
     "the interleavers and the puncturers"_test = [] {
-        const gr::property_map         permutation{{"kind", std::string("Permutation")}, {"table", std::vector<gr::Size_t>{1U, 0U}}};
+        const gr::property_map         permutation{{"kind", std::string("permutation")}, {"table", std::vector<gr::Size_t>{1U, 0U}}};
         const std::vector<OffDefault>  interleaving{{"rows", gr::Size_t{2U}}, {"cols", gr::Size_t{8U}}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}, {"fill_value", gr::Size_t{7U}}};
         const std::vector<std::string> interleave = requiredInitFailures<Interleave<std::uint8_t>>(permutation, interleaving);
         expect(interleave.empty()) << failuresOf(interleave);
         const std::vector<std::string> deinterleave = requiredInitFailures<Deinterleave<std::uint8_t>>(permutation, interleaving);
         expect(deinterleave.empty()) << failuresOf(deinterleave);
-        expectInitializes<Interleave<std::uint8_t>>({{"kind", std::string("Block")}, {"rows", gr::Size_t{2U}}, {"cols", gr::Size_t{8U}}, {"window_offset", gr::Size_t{2U}}, {"window_length", gr::Size_t{8U}}}, "a windowed block interleaver");
-        expectInitializes<Interleave<std::uint8_t>>({{"kind", std::string("Convolutional")}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}, {"fill_value", gr::Size_t{7U}}}, "a convolutional interleaver");
-        expectInitializes<Interleave<std::uint8_t>>({{"kind", std::string("Permutation")}, {"table", std::vector<gr::Size_t>{1U, 0U, 3U, 2U}}}, "a permutation interleaver");
-        expectInitializes<Deinterleave<std::uint8_t>>({{"kind", std::string("Block")}, {"rows", gr::Size_t{2U}}, {"cols", gr::Size_t{8U}}, {"output_offset", gr::Size_t{2U}}, {"output_length", gr::Size_t{8U}}}, "a windowed block deinterleaver");
-        expectInitializes<Deinterleave<std::uint8_t>>({{"kind", std::string("Permutation")}, {"table", std::vector<gr::Size_t>{1U, 0U, 3U, 2U}}}, "a permutation deinterleaver");
-        expectInitializes<Deinterleave<std::uint8_t>>({{"kind", std::string("Convolutional")}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}}, "a convolutional deinterleaver");
+        expectInitializes<Interleave<std::uint8_t>>({{"kind", std::string("block")}, {"rows", gr::Size_t{2U}}, {"cols", gr::Size_t{8U}}, {"window_offset", gr::Size_t{2U}}, {"window_length", gr::Size_t{8U}}}, "a windowed block interleaver");
+        expectInitializes<Interleave<std::uint8_t>>({{"kind", std::string("convolutional")}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}, {"fill_value", gr::Size_t{7U}}}, "a convolutional interleaver");
+        expectInitializes<Interleave<std::uint8_t>>({{"kind", std::string("permutation")}, {"table", std::vector<gr::Size_t>{1U, 0U, 3U, 2U}}}, "a permutation interleaver");
+        expectInitializes<Deinterleave<std::uint8_t>>({{"kind", std::string("block")}, {"rows", gr::Size_t{2U}}, {"cols", gr::Size_t{8U}}, {"output_offset", gr::Size_t{2U}}, {"output_length", gr::Size_t{8U}}}, "a windowed block deinterleaver");
+        expectInitializes<Deinterleave<std::uint8_t>>({{"kind", std::string("permutation")}, {"table", std::vector<gr::Size_t>{1U, 0U, 3U, 2U}}}, "a permutation deinterleaver");
+        expectInitializes<Deinterleave<std::uint8_t>>({{"kind", std::string("convolutional")}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}}, "a convolutional deinterleaver");
         // a convolutional deinterleaver refuses an output window: the window addresses a frame
         for (const std::string_view key : {std::string_view("output_offset"), std::string_view("output_length")}) {
-            Deinterleave<std::uint8_t> windowed({{"kind", std::string("Convolutional")}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}, {std::pmr::string(key), gr::Size_t{1U}}});
+            Deinterleave<std::uint8_t> windowed({{"kind", std::string("convolutional")}, {"branches", gr::Size_t{4U}}, {"unit_delay", gr::Size_t{2U}}, {std::pmr::string(key), gr::Size_t{1U}}});
             const auto                 checked = windowed.check({});
             expect(fatal(!checked.has_value())) << std::format("a convolutional deinterleaver takes {}", key);
             expect(keysOf(checked.error()) == std::vector<std::string>{std::string(key)}) << reasonsOf(checked.error());

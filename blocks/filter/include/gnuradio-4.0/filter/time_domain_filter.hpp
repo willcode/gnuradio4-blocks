@@ -178,7 +178,7 @@ using IirFilterDirectForm2Transposed = iir_filter<T, IIRForm::DF_II_TRANSPOSED>;
 GR_REGISTER_BLOCK("gr::blocks::filter::BasicFilter", gr::blocks::filter::BasicFilter, ([T]), [ float, gr::UncertainValue<float> ])
 GR_REGISTER_BLOCK("gr::blocks::filter::BasicDecimatingFilter", gr::blocks::filter::BasicDecimatingFilter, ([T]), [ float, gr::UncertainValue<float> ])
 
-enum class FilterType { FIR, IIR };
+enum class FilterType { fir, iir };
 
 template<typename T, typename... Args>
 requires(std::floating_point<T> or std::is_arithmetic_v<meta::fundamental_base_value_type_t<T>>)
@@ -207,15 +207,15 @@ no single delay.
 
     // Public settings
     struct Settings {
-        Annotated<FilterType, Doc<"filter type">, Visible>           filter_type     = FilterType::IIR;
-        Annotated<gr::filter::Type, Doc<"filter response">, Visible> filter_response = gr::filter::Type::LOWPASS;
+        Annotated<FilterType, Doc<"filter type">, Visible>           filter_type     = FilterType::iir;
+        Annotated<gr::filter::Type, Doc<"filter response">, Visible> filter_response = gr::filter::Type::lowpass;
         Annotated<gr::Size_t, Doc<"filter order">>                   filter_order{3};
         Annotated<float, Unit<"Hz">, Doc<"low cutoff">, Visible>     f_low{0.1f};
         Annotated<float, Unit<"Hz">, Doc<"high cutoff">, Visible>    f_high{0.2f};
         Annotated<float, Unit<"Hz">, Doc<"sample rate">, Visible>    sample_rate{1.0f};
         Annotated<gr::Size_t, Doc<"decimation">, Limits<Min<1U>>>    decimate{1U};
-        Annotated<gr::filter::iir::Design, Doc<"IIR design method">> iir_design_method = gr::filter::iir::Design::BUTTERWORTH;
-        Annotated<algorithm::window::Type, Doc<"FIR design window">> fir_design_method = algorithm::window::Type::Kaiser;
+        Annotated<gr::filter::iir::Design, Doc<"IIR design method">> iir_design_method = gr::filter::iir::Design::butterworth;
+        Annotated<algorithm::window::Type, Doc<"FIR design window">> fir_design_method = algorithm::window::Type::kaiser;
 
         GR_MAKE_REFLECTABLE(Settings, filter_type, filter_response, filter_order, f_low, f_high, sample_rate, decimate, iir_design_method, fir_design_method);
     } settings;
@@ -230,7 +230,7 @@ no single delay.
 
     std::optional<gr::Refused> checkSettings(const Settings& s) const {
         const gr::filter::FilterParameters params{.order = s.filter_order.value, .fLow = static_cast<double>(s.f_low.value), .fHigh = static_cast<double>(s.f_high.value), .fs = static_cast<double>(s.sample_rate.value)};
-        if (s.filter_type.value == FilterType::FIR) {
+        if (s.filter_type.value == FilterType::fir) {
             std::ignore = gr::filter::fir::designFilter<ValueType>(s.filter_response.value, params, s.fir_design_method.value);
         } else {
             std::ignore = gr::filter::iir::designFilter<ValueType>(s.filter_response.value, params, s.iir_design_method.value);
@@ -263,11 +263,11 @@ no single delay.
         params.fHigh = static_cast<double>(settings.f_high);
         params.fs    = static_cast<double>(settings.sample_rate);
 
-        if (settings.filter_type == FilterType::FIR) { // design FIR filter
+        if (settings.filter_type == FilterType::fir) { // design FIR filter
             const FilterCoefficients<ValueType> coefficients = fir::designFilter<ValueType>(settings.filter_response, params, settings.fir_design_method);
             _twiceFirDelay                                   = detail::twiceTapDelay(std::span<const ValueType>(coefficients.b));
             _filter                                          = FilterImpl(coefficients);
-        } else if (settings.filter_type == FilterType::IIR) { // design IIR filter
+        } else if (settings.filter_type == FilterType::iir) { // design IIR filter
             _filter = FilterImpl(iir::designFilter<ValueType>(settings.filter_response, params, settings.iir_design_method));
         }
     }
@@ -283,7 +283,7 @@ no single delay.
 
     /// @brief The FIR design's delay in half input samples, or no value for an IIR design.
     [[nodiscard]] std::optional<std::uint64_t> twiceTagDelay() const noexcept {
-        if (settings.filter_type == FilterType::FIR) {
+        if (settings.filter_type == FilterType::fir) {
             return _twiceFirDelay;
         }
         return std::nullopt;

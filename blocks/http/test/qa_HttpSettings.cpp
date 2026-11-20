@@ -18,7 +18,7 @@ const boost::ut::suite<"http block settings"> httpSettingsTests = [] {
     "the http blocks initialize at each setting"_test = [] {
         using gr::testing::requiredInitFailures;
         const auto report   = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
-        auto       failures = requiredInitFailures<gr::blocks::http::HttpSource>({{"url", std::string("http://127.0.0.1:8080/echo")}}, {{"type", std::string("SUBSCRIBE")}, {"chunk_bytes", gr::Size_t{64U}}});
+        auto       failures = requiredInitFailures<gr::blocks::http::HttpSource>({{"url", std::string("http://127.0.0.1:8080/echo")}}, {{"type", std::string("subscribe")}, {"chunk_bytes", gr::Size_t{64U}}});
         expect(failures.empty()) << report(failures);
         failures = requiredInitFailures<gr::blocks::http::HttpSink>({{"url", std::string("http://127.0.0.1:8080/number")}}, {{"content_type", std::string("text/plain")}});
         expect(failures.empty()) << report(failures);

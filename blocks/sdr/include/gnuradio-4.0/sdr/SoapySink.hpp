@@ -105,7 +105,7 @@ taper is in use.
         Annotated<bool, Doc<"device state logging">>                                                      log_device_state      = true;
         Annotated<bool, Doc<"burst taper">>                                                               burst_taper_enabled   = false;
         Annotated<float, Unit<"s">, Doc<"burst ramp time">, Limits<Min<0.f>>>                             burst_ramp_time       = 0.001f;
-        Annotated<algorithm::TaperType, Doc<"burst taper type">>                                          burst_taper_type      = algorithm::TaperType::RaisedCosine;
+        Annotated<algorithm::TaperType, Doc<"burst taper type">>                                          burst_taper_type      = algorithm::TaperType::raised_cosine;
         Annotated<float, Doc<"taper shape parameter">>                                                    burst_shape_param     = 1.0f;
         Annotated<bool, Doc<"safety ramp-down">>                                                          burst_safety_rampdown = true;
 

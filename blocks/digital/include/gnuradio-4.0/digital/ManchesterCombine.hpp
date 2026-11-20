@@ -22,8 +22,8 @@ namespace detail {
 
 /// @brief What a soft chip stream carries, which decides how a bit is read out of a chip pair.
 enum class ManchesterInput : std::uint8_t {
-    Differential, ///< the output of a differential detector: one parity is a constant, the other is the bit
-    Chips         ///< chip decisions: a bit is half the difference of the two chips of a pair
+    differential, ///< the output of a differential detector: one parity is a constant, the other is the bit
+    chips         ///< chip decisions: a bit is half the difference of the two chips of a pair
 };
 
 /**
@@ -130,7 +130,7 @@ disagreement before the pairing moves.
     PortOut<float, Optional> confidence;
 
     struct Settings {
-        Annotated<detail::ManchesterInput, Doc<"input kind">, Visible>                          input             = detail::ManchesterInput::Differential;
+        Annotated<detail::ManchesterInput, Doc<"input kind">, Visible>                          input             = detail::ManchesterInput::differential;
         Annotated<gr::Size_t, Unit<"symbol">, Doc<"pairing averaging length">, Limits<Min<1U>>> averaging_symbols = 256U;
         Annotated<gr::Size_t, Unit<"symbol">, Doc<"pairing hold length">>                       hold_symbols      = 64U;
         Annotated<PairingPhase, Doc<"pairing grid">>                                            phase             = PairingPhase::estimate;
@@ -168,7 +168,7 @@ disagreement before the pairing moves.
 
         // every item of a pair is two apart from its neighbor in the next pair, so one parity holds for the chunk
         const unsigned firstParity  = static_cast<unsigned>(inSpan.streamIndex & 1ULL);
-        const bool     differential = settings.input.value == detail::ManchesterInput::Differential;
+        const bool     differential = settings.input.value == detail::ManchesterInput::differential;
 
         for (std::size_t m = 0UZ; m < nItems; ++m) {
             const float first  = inSpan[2UZ * m];

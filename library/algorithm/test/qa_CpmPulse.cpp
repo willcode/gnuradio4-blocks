@@ -28,13 +28,13 @@ using gr::digital::CpmPulseShape;
 
 constexpr double kTwoPi = 2. * std::numbers::pi_v<double>;
 
-constexpr std::array<CpmPulseShape, 3UZ> kShapes{CpmPulseShape::Rect, CpmPulseShape::RaisedCosine, CpmPulseShape::Gaussian};
+constexpr std::array<CpmPulseShape, 3UZ> kShapes{CpmPulseShape::rect, CpmPulseShape::raised_cosine, CpmPulseShape::gaussian};
 
 [[nodiscard]] constexpr std::string_view shapeName(CpmPulseShape shape) noexcept {
     switch (shape) {
-    case CpmPulseShape::Rect: return "rect";
-    case CpmPulseShape::RaisedCosine: return "raised_cosine";
-    case CpmPulseShape::Gaussian: return "gaussian";
+    case CpmPulseShape::rect: return "rect";
+    case CpmPulseShape::raised_cosine: return "raised_cosine";
+    case CpmPulseShape::gaussian: return "gaussian";
     }
     return "unknown";
 }
@@ -43,7 +43,7 @@ constexpr std::array<CpmPulseShape, 3UZ> kShapes{CpmPulseShape::Rect, CpmPulseSh
 [[nodiscard]] std::span<const double> btValuesFor(CpmPulseShape shape) noexcept {
     static constexpr std::array<double, 3UZ> gaussian{0.2, 0.3, 0.5};
     static constexpr std::array<double, 1UZ> single{0.3};
-    return shape == CpmPulseShape::Gaussian ? std::span<const double>(gaussian) : std::span<const double>(single);
+    return shape == CpmPulseShape::gaussian ? std::span<const double>(gaussian) : std::span<const double>(single);
 }
 
 /// Relative agreement with an absolute floor, so a reference tap of zero still compares. The widest Gaussians
@@ -211,7 +211,7 @@ const boost::ut::suite<"CpmPulse design"> cpmPulseDesignTests = [] {
         for (const std::size_t span : {1UZ, 2UZ, 3UZ, 4UZ, 5UZ, 8UZ}) {
             for (const std::size_t sps : {2UZ, 3UZ, 4UZ, 5UZ, 8UZ, 10UZ}) {
                 CpmPulse<double> kernel;
-                kernel.configure(CpmPulseShape::Rect, span, sps, 0.5, 0.3);
+                kernel.configure(CpmPulseShape::rect, span, sps, 0.5, 0.3);
 
                 const double want = 1. / (2. * static_cast<double>(span * sps));
                 for (const double tap : kernel.pulse()) {
@@ -346,43 +346,43 @@ const boost::ut::suite<"CpmPulse configuration"> cpmPulseConfigurationTests = []
     "configure refuses geometry outside the supported range"_test = [] {
         CpmPulse<double> kernel;
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 0UZ, 0.5, 0.3); })) << "zero samples per symbol";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 1UZ, 0.5, 0.3); })) << "one sample per symbol";
-        expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, 1UZ, 2UZ, 0.5, 0.3); })) << "two samples per symbol";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, 1UZ, 0UZ, 0.5, 0.3); })) << "zero samples per symbol";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, 1UZ, 1UZ, 0.5, 0.3); })) << "one sample per symbol";
+        expect(nothrow([&] { kernel.configure(CpmPulseShape::rect, 1UZ, 2UZ, 0.5, 0.3); })) << "two samples per symbol";
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 0UZ, 4UZ, 0.5, 0.3); })) << "zero symbol span";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, CpmPulse<double>::kMaxSymbolSpan + 1UZ, 4UZ, 0.5, 0.3); })) << "one symbol past the longest span";
-        expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, CpmPulse<double>::kMaxSymbolSpan, 4UZ, 0.5, 0.3); })) << "the longest supported span";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, 0UZ, 4UZ, 0.5, 0.3); })) << "zero symbol span";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, CpmPulse<double>::kMaxSymbolSpan + 1UZ, 4UZ, 0.5, 0.3); })) << "one symbol past the longest span";
+        expect(nothrow([&] { kernel.configure(CpmPulseShape::rect, CpmPulse<double>::kMaxSymbolSpan, 4UZ, 0.5, 0.3); })) << "the longest supported span";
     };
 
     "configure refuses modulation indices outside (0, 4]"_test = [] {
         CpmPulse<double> kernel;
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, 0., 0.3); })) << "modulation index zero";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, -1., 0.3); })) << "negative modulation index";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, 4.5, 0.3); })) << "modulation index past the ceiling";
-        expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, 2UZ, 4UZ, CpmPulse<double>::kMaxModulationIndex, 0.3); })) << "the largest accepted modulation index";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, 2UZ, 4UZ, 0., 0.3); })) << "modulation index zero";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, 2UZ, 4UZ, -1., 0.3); })) << "negative modulation index";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::rect, 2UZ, 4UZ, 4.5, 0.3); })) << "modulation index past the ceiling";
+        expect(nothrow([&] { kernel.configure(CpmPulseShape::rect, 2UZ, 4UZ, CpmPulse<double>::kMaxModulationIndex, 0.3); })) << "the largest accepted modulation index";
         expect(eq(kernel.modulationIndex(), CpmPulse<double>::kMaxModulationIndex));
     };
 
     "bt is validated where the design reads it"_test = [] {
         CpmPulse<double> kernel;
 
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Gaussian, 3UZ, 4UZ, 0.5, 0.); })) << "gaussian with a zero bandwidth-symbol-time product";
-        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::Gaussian, 3UZ, 4UZ, 0.5, -1.); })) << "gaussian with a negative bandwidth-symbol-time product";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::gaussian, 3UZ, 4UZ, 0.5, 0.); })) << "gaussian with a zero bandwidth-symbol-time product";
+        expect(throws<std::invalid_argument>([&] { kernel.configure(CpmPulseShape::gaussian, 3UZ, 4UZ, 0.5, -1.); })) << "gaussian with a negative bandwidth-symbol-time product";
 
         for (const double bt : {0., -1.}) {
-            expect(nothrow([&] { kernel.configure(CpmPulseShape::Rect, 3UZ, 4UZ, 0.5, bt); })) << std::format("rect with bt {}", bt);
-            expect(nothrow([&] { kernel.configure(CpmPulseShape::RaisedCosine, 3UZ, 4UZ, 0.5, bt); })) << std::format("raised cosine with bt {}", bt);
+            expect(nothrow([&] { kernel.configure(CpmPulseShape::rect, 3UZ, 4UZ, 0.5, bt); })) << std::format("rect with bt {}", bt);
+            expect(nothrow([&] { kernel.configure(CpmPulseShape::raised_cosine, 3UZ, 4UZ, 0.5, bt); })) << std::format("raised cosine with bt {}", bt);
         }
     };
 
     "cpmPulseShapeFrom maps the shape names"_test = [] {
         using gr::digital::cpmPulseShapeFrom;
 
-        expect(cpmPulseShapeFrom("rect") == CpmPulseShape::Rect);
-        expect(cpmPulseShapeFrom("raised_cosine") == CpmPulseShape::RaisedCosine);
-        expect(cpmPulseShapeFrom("gaussian") == CpmPulseShape::Gaussian);
+        expect(cpmPulseShapeFrom("rect") == CpmPulseShape::rect);
+        expect(cpmPulseShapeFrom("raised_cosine") == CpmPulseShape::raised_cosine);
+        expect(cpmPulseShapeFrom("gaussian") == CpmPulseShape::gaussian);
 
         for (const std::string_view name : {"", "Rect", "RECT", "gauss", "raised cosine", "raisedcosine", "gmsk"}) {
             expect(throws<std::invalid_argument>([name] { std::ignore = cpmPulseShapeFrom(name); })) << std::format("'{}' is not a pulse name", name);
@@ -399,9 +399,9 @@ const boost::ut::suite<"CpmPulse spectrum"> cpmPulseSpectrumTests = [] {
     // quoted alongside them belongs to bt 0.25 rather than bt 0.3. Truncating the Gaussian to three symbols
     // accounts for about 0.007 of the bt 0.3 figure, which converges to 0.915 by a span of four.
     "the 99% occupied bandwidth tightens with bt and against MSK"_test = [] {
-        const double gaussian03   = occupiedBandwidth(CpmPulseShape::Gaussian, 3UZ, 0.3);
-        const double gaussian05   = occupiedBandwidth(CpmPulseShape::Gaussian, 3UZ, 0.5);
-        const double minimumShift = occupiedBandwidth(CpmPulseShape::Rect, 1UZ, 0.3);
+        const double gaussian03   = occupiedBandwidth(CpmPulseShape::gaussian, 3UZ, 0.3);
+        const double gaussian05   = occupiedBandwidth(CpmPulseShape::gaussian, 3UZ, 0.5);
+        const double minimumShift = occupiedBandwidth(CpmPulseShape::rect, 1UZ, 0.3);
 
         std::println("CpmPulse 99% occupied bandwidth as a multiple of the bit rate: GMSK bt 0.3 {:.3f}, GMSK bt 0.5 {:.3f}, MSK {:.3f}", gaussian03, gaussian05, minimumShift);
 

@@ -88,7 +88,7 @@ An `f_max` of -1 disables the lowpass.
         // * IIR over FIR: reduced numerical complexity and minimizes group delay
         // * BESSEL: optimizes phase linearity in the pass-band and in turn frequency accuracy
         _n_period_estimate   = settings.n_periods * static_cast<gr::Size_t>(settings.f_min > 0.f ? settings.sample_rate / std::min(settings.f_min.value, settings.f_expected.value) : settings.sample_rate / settings.f_expected.value);
-        _singleFilterSection = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::LOWPASS, gr::filter::FilterParameters{.order = 2UZ, .fLow = static_cast<double>(settings.f_max), .fs = static_cast<double>(settings.sample_rate)}, gr::filter::iir::Design::BESSEL);
+        _singleFilterSection = gr::filter::iir::designFilter<T, 0UZ>(gr::filter::Type::lowpass, gr::filter::FilterParameters{.order = 2UZ, .fLow = static_cast<double>(settings.f_max), .fs = static_cast<double>(settings.sample_rate)}, gr::filter::iir::Design::bessel);
         _inputHistory        = HistoryBuffer<T>(std::bit_ceil(_singleFilterSection.b.size()));
         _outputHistory       = HistoryBuffer<T>(std::bit_ceil(std::max(_singleFilterSection.a.size(), std::size_t(_n_period_estimate))));
     }
@@ -262,7 +262,7 @@ This block estimates the frequency of a signal using the frequency-domain algori
             this->input_chunk_size = static_cast<gr::Size_t>(_minFFT);
         }
         _inData.resize(_minFFT, T(0));
-        _window = gr::algorithm::window::create<T>(gr::algorithm::window::Type::Hann, _minFFT);
+        _window = gr::algorithm::window::create<T>(gr::algorithm::window::Type::hann, _minFFT);
         _outData.resize(_minFFT, std::complex<T>(T(0)));
         _magnitudeSpectrum.resize(_minFFT / 2UZ, T(0));
     }
@@ -386,15 +386,15 @@ using FrequencyEstimatorFrequencyDomainDecimating = FrequencyEstimatorFrequencyD
 // IQDemodulator - Digital Vector Detector / Lock-In Amplifier
 // ============================================================================
 
-enum class PhaseUnit : int { Radians = 0, Degrees = 1 };
+enum class PhaseUnit : int { radians = 0, degrees = 1 };
 
 enum class DerivativeMethod : int {
-    SymmetricDifference = 0, /// [-1, 0, +1] kernel
-    SavitzkyGolay5      = 1, /// 5-point SG derivative
-    SavitzkyGolay7      = 2  /// 7-point SG derivative
+    symmetric_difference = 0, /// [-1, 0, +1] kernel
+    savitzky_golay5      = 1, /// 5-point SG derivative
+    savitzky_golay7      = 2  /// 7-point SG derivative
 };
 
-template<DerivativeMethod method = DerivativeMethod::SymmetricDifference, bool isConst = false>
+template<DerivativeMethod method = DerivativeMethod::symmetric_difference, bool isConst = false>
 struct Derivative {
     static constexpr DerivativeMethod kMethod  = method;
     static constexpr bool             kIsConst = isConst;
@@ -449,7 +449,7 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
 
     using TParent           = Block<IQDemodulator<T, Args...>, Args...>;
     using ArgumentsTypeList = typename TParent::ArgumentsTypeList;
-    using DerivativeControl = typename ArgumentsTypeList::template find_or_default<detail::is_derivative, Derivative<DerivativeMethod::SymmetricDifference, false>>;
+    using DerivativeControl = typename ArgumentsTypeList::template find_or_default<detail::is_derivative, Derivative<DerivativeMethod::symmetric_difference, false>>;
 
     PortIn<T>  ref;       // reference/DDS signal
     PortIn<T>  resp;      // response signal (e.g., cavity pickup)
@@ -462,7 +462,7 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
         Annotated<float, Doc<"sample rate">, Unit<"Hz">, Limits<Over<0.f>>>     sample_rate{62.5e6f};
         Annotated<float, Doc<"DC block cutoff">, Unit<"Hz">, Limits<Over<0.f>>> f_high_pass{100.f};
         Annotated<float, Doc<"averaging cutoff">, Unit<"Hz">>                   f_low_pass{10000.f};
-        Annotated<PhaseUnit, Doc<"output phase unit">>                          phase_unit{PhaseUnit::Radians};
+        Annotated<PhaseUnit, Doc<"output phase unit">>                          phase_unit{PhaseUnit::radians};
         Annotated<bool, Doc<"phase sign inversion">>                            invert_phase{false};
         Annotated<DerivativeMethod, Doc<"quadrature generation method">>        derivative_method{DerivativeControl::kMethod};
         Annotated<T, Doc<"division threshold">>                                 epsilon{T(1e-12)};
@@ -519,19 +519,19 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
         // configure derivative kernel (stored time-reversed for direct inner_product)
         // gain factor = lim_{ω→0} |H(ω)|/sin(ω), used for frequency estimation
         switch (settings.derivative_method.value) {
-        case DerivativeMethod::SymmetricDifference:
+        case DerivativeMethod::symmetric_difference:
             // H(ω) = 2j·sin(ω), |H(ω)| = 2·sin(ω)
             _derivative_kernel      = {T(1), T(0), T(-1)};
             _derivative_delay       = 1UZ;
             _derivative_gain_factor = T(2);
             break;
-        case DerivativeMethod::SavitzkyGolay5:
+        case DerivativeMethod::savitzky_golay5:
             // H(ω) = j·(0.4·sin(2ω) + 0.2·sin(ω)), |H(ω)| ≈ sin(ω)·(0.8·cos(ω) + 0.2) ≈ sin(ω) at DC
             _derivative_kernel      = {T(0.2), T(0.1), T(0), T(-0.1), T(-0.2)};
             _derivative_delay       = 2UZ;
             _derivative_gain_factor = T(1);
             break;
-        case DerivativeMethod::SavitzkyGolay7:
+        case DerivativeMethod::savitzky_golay7:
             // H(ω) = j·(6·sin(3ω) + 4·sin(2ω) + 2·sin(ω))/28, |H(ω)| ≈ sin(ω) at DC
             _derivative_kernel      = {T(3) / T(28), T(2) / T(28), T(1) / T(28), T(0), T(-1) / T(28), T(-2) / T(28), T(-3) / T(28)};
             _derivative_delay       = 3UZ;
@@ -629,9 +629,9 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
                 auto computeGainFactor = [this](T omega) -> T {
                     const T c = std::cos(omega);
                     switch (settings.derivative_method.value) {
-                    case DerivativeMethod::SymmetricDifference: return T(2);                               // |H(ω)| = 2·sin(ω)
-                    case DerivativeMethod::SavitzkyGolay5: return T(0.8) * c + T(0.2);                     // |H(ω)| = sin(ω)·(0.8c + 0.2)
-                    case DerivativeMethod::SavitzkyGolay7: return (T(6) * c * c + T(2) * c - T(1)) / T(7); // |H(ω)| = sin(ω)·(6c²+2c-1)/7
+                    case DerivativeMethod::symmetric_difference: return T(2);                               // |H(ω)| = 2·sin(ω)
+                    case DerivativeMethod::savitzky_golay5: return T(0.8) * c + T(0.2);                     // |H(ω)| = sin(ω)·(0.8c + 0.2)
+                    case DerivativeMethod::savitzky_golay7: return (T(6) * c * c + T(2) * c - T(1)) / T(7); // |H(ω)| = sin(ω)·(6c²+2c-1)/7
                     default: return _derivative_gain_factor;
                     }
                 };
@@ -673,7 +673,7 @@ Typical application: RF cavity field measurement at 0.1–5 MHz carriers, 62.5 M
             }
 
             // convert to degrees if requested
-            if (settings.phase_unit == PhaseUnit::Degrees) {
+            if (settings.phase_unit == PhaseUnit::degrees) {
                 ph *= T(180) / std::numbers::pi_v<T>;
             }
 

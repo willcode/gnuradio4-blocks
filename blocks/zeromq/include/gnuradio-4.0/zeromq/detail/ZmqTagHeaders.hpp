@@ -45,7 +45,7 @@ inline T read_native(const std::uint8_t*& ptr, const std::uint8_t* end) {
     return value;
 }
 
-inline std::vector<std::uint8_t> serialize_tag_header(std::uint64_t offset, const std::vector<ZmqTagHeaderRecord>& tags, PmtWireFormat format = PmtWireFormat::GR4_YAML_V1) {
+inline std::vector<std::uint8_t> serialize_tag_header(std::uint64_t offset, const std::vector<ZmqTagHeaderRecord>& tags, PmtWireFormat format = PmtWireFormat::gr4_yaml_v1) {
     std::vector<std::uint8_t> out;
     append_native(out, kTagHeaderMagic);
     append_native(out, kTagHeaderVersion);
@@ -66,7 +66,7 @@ inline std::vector<std::uint8_t> serialize_tag_header(std::uint64_t offset, cons
     return out;
 }
 
-inline std::size_t parse_tag_header(const std::uint8_t* data, std::size_t size, std::uint64_t& offset_out, std::vector<ZmqTagHeaderRecord>& tags_out, PmtWireFormat format = PmtWireFormat::GR4_YAML_V1) {
+inline std::size_t parse_tag_header(const std::uint8_t* data, std::size_t size, std::uint64_t& offset_out, std::vector<ZmqTagHeaderRecord>& tags_out, PmtWireFormat format = PmtWireFormat::gr4_yaml_v1) {
     if (size < sizeof(std::uint16_t) + sizeof(std::uint8_t) + sizeof(std::uint64_t) + sizeof(std::uint64_t)) {
         throw DecodeError("incoming zmq msg too small to hold gr tag header!");
     }

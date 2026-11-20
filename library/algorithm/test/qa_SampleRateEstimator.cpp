@@ -265,7 +265,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "None mode passes through unchanged"_test = [] {
         DriftCompensator<float> comp;
-        comp.mode = gr::algorithm::DriftCorrection::None;
+        comp.mode = gr::algorithm::DriftCorrection::none;
         std::array<float, 10> buf{1.f, 2.f, 3.f, 4.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
 
         comp.fractionalAccumulator = 5.0; // would normally trigger correction
@@ -275,7 +275,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "Cubic mode insert uses smooth interpolation"_test = [] {
         DriftCompensator<float> comp;
-        comp.mode                  = gr::algorithm::DriftCorrection::Cubic;
+        comp.mode                  = gr::algorithm::DriftCorrection::cubic;
         comp.fractionalAccumulator = 0.99;
         // ramp: 0, 10, 20, 30 — cubic should produce a smooth value near 25 at the splice
         std::array<float, 10> buf{0.f, 10.f, 20.f, 30.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
@@ -288,7 +288,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "Cubic mode drop blends smoothly"_test = [] {
         DriftCompensator<float> comp;
-        comp.mode                  = gr::algorithm::DriftCorrection::Cubic;
+        comp.mode                  = gr::algorithm::DriftCorrection::cubic;
         comp.fractionalAccumulator = -0.99;
         std::array<float, 10> buf{0.f, 10.f, 20.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
         auto                  n = comp.compensateSource(std::span(buf), 3U, 48000.0 * 0.99, 48000.0, 1U);
@@ -299,7 +299,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "AdaptiveResampling mode produces correct output count"_test = [] {
         DriftCompensator<float> comp;
-        comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
 
         // 100 ppm fast: 1000 input frames should produce ~999 output frames
         std::vector<float> buf(2000, 0.f);
@@ -314,7 +314,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "AdaptiveResampling preserves ramp shape"_test = [] {
         DriftCompensator<float> comp;
-        comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
 
         constexpr std::size_t N = 100U;
         std::vector<float>    buf(N + 10U, 0.f);
@@ -334,7 +334,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "AdaptiveResampling sink mode"_test = [] {
         DriftCompensator<float> comp;
-        comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
 
         constexpr std::size_t N = 100U;
         std::vector<float>    input(N, 0.f);
@@ -357,8 +357,8 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
                 DriftCompensator<float> source;
                 DriftCompensator<float> sink;
-                source.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
-                sink.mode   = gr::algorithm::DriftCorrection::AdaptiveResampling;
+                source.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
+                sink.mode   = gr::algorithm::DriftCorrection::adaptive_resampling;
                 std::vector<float> in(n, 1.f);
                 std::vector<float> buf(n + 8U), adjusted(n + 8U);
                 std::size_t        totalSource = 0U;
@@ -384,7 +384,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
         auto resample = [&](std::size_t callSize) {
             DriftCompensator<double> comp;
-            comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+            comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
             std::vector<double> out;
             std::vector<double> buf(callSize + 8U);
             for (std::size_t first = 0U; first < total; first += callSize) {
@@ -418,7 +418,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
 
     "AdaptiveResampling ramp has one slope across call boundaries"_test = [] {
         DriftCompensator<double> comp;
-        comp.mode                   = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode                   = gr::algorithm::DriftCorrection::adaptive_resampling;
         constexpr std::size_t n     = 480U;
         constexpr double      ratio = 1.003;
         std::vector<double>   out;
@@ -448,11 +448,11 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
             return buf;
         };
         DriftCompensator<float> fresh;
-        fresh.mode           = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        fresh.mode           = gr::algorithm::DriftCorrection::adaptive_resampling;
         const auto reference = run(fresh);
 
         DriftCompensator<float> used;
-        used.mode   = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        used.mode   = gr::algorithm::DriftCorrection::adaptive_resampling;
         std::ignore = run(used);
         std::ignore = run(used);
         expect(neq(used.resamplerPhase, 0.0)) << "two calls leave a phase to carry";
@@ -473,7 +473,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
         }
         auto resample = [&](const std::vector<double>& data, std::size_t channels, std::size_t callFrames) {
             DriftCompensator<double> comp;
-            comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+            comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
             std::vector<double> out;
             std::vector<double> buf((callFrames + 8U) * channels);
             for (std::size_t first = 0U; first < total; first += callFrames) {
@@ -504,7 +504,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
     "AdaptiveResampling follows a ratio change between calls"_test = [] {
         constexpr std::size_t    n = 480U;
         DriftCompensator<double> comp;
-        comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
         std::vector<double>   out;
         std::vector<double>   buf(n + 8U);
         constexpr std::size_t nCalls = 20U;
@@ -552,7 +552,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
     "AdaptiveResampling with a span of exactly the input drops the frames still due"_test = [] {
         constexpr std::size_t    n = 100U;
         DriftCompensator<double> comp;
-        comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
         std::vector<double> buf(n); // no room for the n/0.99 frames the grid asks for
         for (std::size_t c = 0U; c < 3U; ++c) {
             for (std::size_t i = 0U; i < n; ++i) {
@@ -570,7 +570,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
     "AdaptiveResampling reports the position of its next output frame"_test = [] {
         constexpr std::size_t    n = 50U;
         DriftCompensator<double> comp;
-        comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+        comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
         expect(eq(comp.nextOutputPhase(), DriftCompensator<double>::kStartPhase)) << "before the first call";
 
         std::vector<double> buf(n + 8U);
@@ -597,7 +597,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
         }
         auto resample = [&](std::size_t callFrames) {
             DriftCompensator<std::int16_t> comp;
-            comp.mode = gr::algorithm::DriftCorrection::AdaptiveResampling;
+            comp.mode = gr::algorithm::DriftCorrection::adaptive_resampling;
             std::vector<std::int16_t> out;
             std::vector<std::int16_t> buf(callFrames + 8U);
             for (std::size_t first = 0U; first < total; first += callFrames) {
@@ -622,7 +622,7 @@ const boost::ut::suite<"Drift Compensator"> driftCompensatorTests = [] {
     };
 
     "all modes produce valid output for stereo"_test = [] {
-        for (auto mode : {gr::algorithm::DriftCorrection::Linear, gr::algorithm::DriftCorrection::Cubic, gr::algorithm::DriftCorrection::AdaptiveResampling}) {
+        for (auto mode : {gr::algorithm::DriftCorrection::linear, gr::algorithm::DriftCorrection::cubic, gr::algorithm::DriftCorrection::adaptive_resampling}) {
             DriftCompensator<float> comp;
             comp.mode = mode;
 

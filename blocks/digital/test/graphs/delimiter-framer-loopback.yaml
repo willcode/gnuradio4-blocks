@@ -54,10 +54,10 @@ blocks:
     parameters:
       name: hdlc_framer
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 8192
       payload_pack_bits: !!uint32 8
-      payload_bit_order: LsbFirst
+      payload_bit_order: lsb_first
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: hdlc_framed
@@ -95,10 +95,10 @@ blocks:
     parameters:
       name: hdlc_extractor
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 8192
       payload_pack_bits: !!uint32 8
-      payload_bit_order: LsbFirst
+      payload_bit_order: lsb_first
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: hdlc_received
@@ -181,7 +181,7 @@ blocks:
       name: slip_framer
       end_delimiter: "11000000"
       bits_per_item: !!uint32 8
-      transparency: ByteEscape
+      transparency: byte_escape
       escape_item: !!uint32 219
       escape_map: !!uint32 [220, 192, 221, 219]
       max_payload_items: !!uint32 1024
@@ -223,7 +223,7 @@ blocks:
       name: slip_extractor
       end_delimiter: "11000000"
       bits_per_item: !!uint32 8
-      transparency: ByteEscape
+      transparency: byte_escape
       escape_item: !!uint32 219
       escape_map: !!uint32 [220, 192, 221, 219]
       max_payload_items: !!uint32 1024
@@ -309,7 +309,7 @@ blocks:
       name: ppp_framer
       end_delimiter: "01111110"
       bits_per_item: !!uint32 8
-      transparency: ByteEscape
+      transparency: byte_escape
       escape_item: !!uint32 125
       escape_map: !!uint32 [
         32, 0, 33, 1, 34, 2, 35, 3, 36, 4, 37, 5, 38, 6, 39, 7, 40, 8, 41, 9, 42, 10, 43, 11, 44, 12, 45, 13, 46,
@@ -355,7 +355,7 @@ blocks:
       name: ppp_extractor
       end_delimiter: "01111110"
       bits_per_item: !!uint32 8
-      transparency: ByteEscape
+      transparency: byte_escape
       escape_item: !!uint32 125
       escape_map: !!uint32 [
         32, 0, 33, 1, 34, 2, 35, 3, 36, 4, 37, 5, 38, 6, 39, 7, 40, 8, 41, 9, 42, 10, 43, 11, 44, 12, 45, 13, 46,
@@ -445,7 +445,7 @@ blocks:
       name: nmea_framer
       end_delimiter: "0000110100001010"
       start_delimiter: "00100100"
-      frame_open: Start
+      frame_open: start
       bits_per_item: !!uint32 8
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -486,7 +486,7 @@ blocks:
       name: nmea_extractor
       end_delimiter: "0000110100001010"
       start_delimiter: "00100100"
-      frame_open: Start
+      frame_open: start
       bits_per_item: !!uint32 8
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>

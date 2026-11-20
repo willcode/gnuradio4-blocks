@@ -38,7 +38,7 @@ blocks:
     parameters:
       name: iq_source
       sample_rate: !!float32 2000000.0
-      signal_type: Sin
+      signal_type: sin
       tone_frequency: !!float32 100000.0
       amplitude: !!float32 1.0
       chunk_size: !!uint32 8192

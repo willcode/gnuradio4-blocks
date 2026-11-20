@@ -86,12 +86,12 @@ inline constexpr std::size_t kDesignGrid = 1UZ << 15;
 
 /// @brief The window a design is shaped by: a type and the single shape parameter that type reads.
 struct WindowSpec {
-    gr::algorithm::window::Type type  = gr::algorithm::window::Type::Kaiser;
+    gr::algorithm::window::Type type  = gr::algorithm::window::Type::kaiser;
     double                      param = std::numeric_limits<double>::quiet_NaN(); /// NaN selects the window's own default
 };
 
 /// @brief A Kaiser window shaped for @p attenDb; Kaiser is the only window whose attenuation is a parameter.
-[[nodiscard]] inline WindowSpec kaiserFor(double attenDb) { return {gr::algorithm::window::Type::Kaiser, kaiserBeta(attenDb)}; }
+[[nodiscard]] inline WindowSpec kaiserFor(double attenDb) { return {gr::algorithm::window::Type::kaiser, kaiserBeta(attenDb)}; }
 
 /**
  * @brief The measured figures of a window without a shape parameter.
@@ -120,18 +120,18 @@ struct WindowFigures {
 [[nodiscard]] inline WindowFigures windowFigures(gr::algorithm::window::Type type) {
     using enum gr::algorithm::window::Type;
     switch (type) {
-    case None:
-    case Rectangular: return {0.920, 20.96};
-    case Bartlett: return {3.762, 26.26};
-    case Welch: return {1.866, 31.38};
-    case Hann: return {3.127, 43.94};
-    case Hamming: return {3.319, 53.40};
-    case Parzen: return {7.860, 56.64};
-    case Blackman: return {5.593, 75.29};
-    case FlatTop: return {9.150, 95.70};
-    case BlackmanHarris: return {7.838, 109.29};
-    case Nuttall: return {7.757, 111.96};
-    case BlackmanNuttall: return {7.819, 114.90};
+    case none:
+    case rectangular: return {0.920, 20.96};
+    case bartlett: return {3.762, 26.26};
+    case welch: return {1.866, 31.38};
+    case hann: return {3.127, 43.94};
+    case hamming: return {3.319, 53.40};
+    case parzen: return {7.860, 56.64};
+    case blackman: return {5.593, 75.29};
+    case flat_top: return {9.150, 95.70};
+    case blackman_harris: return {7.838, 109.29};
+    case nuttall: return {7.757, 111.96};
+    case blackman_nuttall: return {7.819, 114.90};
     default: break;
     }
     throw std::invalid_argument("FilterDesign: Kaiser, Tukey, Gaussian and Exponential have a shape-dependent transition constant — state the tap count, or use kaiserLength for Kaiser");
@@ -1057,14 +1057,14 @@ struct FilterSpec {
     double                      transitionWidth = 0.0;                                      /// [Hz], applied to every edge
     double                      gain            = 1.0;                                      /// the value of the design's own normalization reference
     double                      attenuationDb   = 60.0;                                     /// Kaiser only: what the window is shaped for
-    gr::algorithm::window::Type window          = gr::algorithm::window::Type::Kaiser;      //
+    gr::algorithm::window::Type window          = gr::algorithm::window::Type::kaiser;      //
     double                      windowParam     = std::numeric_limits<double>::quiet_NaN(); /// NaN: Kaiser takes beta from attenuationDb, others their own default
     std::size_t                 taps            = 0UZ;                                      /// 0: estimated from transitionWidth
 };
 
 /// @brief The window @p spec asks for, Kaiser's beta following from the attenuation where none is stated.
 [[nodiscard]] inline WindowSpec windowOf(const FilterSpec& spec) {
-    if (spec.window == gr::algorithm::window::Type::Kaiser && std::isnan(spec.windowParam)) {
+    if (spec.window == gr::algorithm::window::Type::kaiser && std::isnan(spec.windowParam)) {
         return kaiserFor(spec.attenuationDb);
     }
     return {spec.window, spec.windowParam};
@@ -1076,7 +1076,7 @@ struct FilterSpec {
         return oddLength(spec.taps, floorTaps);
     }
     const double width = spec.transitionWidth / spec.sampleRate;
-    if (spec.window == gr::algorithm::window::Type::Kaiser) {
+    if (spec.window == gr::algorithm::window::Type::kaiser) {
         return oddLength(kaiserLength(spec.attenuationDb, width), floorTaps);
     }
     return oddLength(windowLength(spec.window, width), floorTaps);

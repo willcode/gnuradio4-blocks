@@ -29,12 +29,12 @@ const boost::ut::suite<"measurement blocks initialize at each setting"> settings
         const auto failures = initFailures<Autocorrelation<CF>>({
             {"window_length", Size_t{2048U}},
             {"max_lag", Size_t{512U}},
-            {"kind", std::string("Complex")},
-            {"normalization", std::string("Biased")},
+            {"kind", std::string("complex")},
+            {"normalization", std::string("biased")},
             {"n_averages", Size_t{4U}},
             {"overlap", 0.25},
             {"remove_mean", false},
-            {"window", std::string("Hann")},
+            {"window", std::string("hann")},
             {"false_alarm_rate", 1e-2},
             {"emit_phase", true},
             {"sample_rate", 48000.f},
@@ -75,7 +75,7 @@ const boost::ut::suite<"measurement blocks initialize at each setting"> settings
     "spectral estimates"_test = [&] {
         const auto welch = initFailures<WelchPsd<CF>>({
             {"fft_size", Size_t{512U}},
-            {"window", std::string("Kaiser")},
+            {"window", std::string("kaiser")},
             {"window_param", 6.f},
             {"overlap", 0.25},
             {"hop", Size_t{128U}},
@@ -89,7 +89,7 @@ const boost::ut::suite<"measurement blocks initialize at each setting"> settings
         expect(welch.empty()) << report(welch);
         const auto spectrogram = initFailures<Spectrogram<CF>>({
             {"fft_size", Size_t{512U}},
-            {"window", std::string("Kaiser")},
+            {"window", std::string("kaiser")},
             {"window_param", 6.f},
             {"overlap", 0.25},
             {"hop", Size_t{128U}},

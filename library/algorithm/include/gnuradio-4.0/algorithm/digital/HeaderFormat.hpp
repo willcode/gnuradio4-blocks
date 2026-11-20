@@ -219,14 +219,14 @@ private:
 /// @brief What a length field's number counts. Required, with no default: the three give different answers for the
 /// same wire bits and a silent choice is a silent interoperability assumption, so a setting starts at `unset`, which
 /// counts nothing.
-enum class CountCovers : std::uint8_t { Unset, Payload, PayloadAndCheck, WholeFrame };
+enum class CountCovers : std::uint8_t { unset, payload, payload_and_check, whole_frame };
 
 /// @brief Whether a length field's bytes run most or least significant first. The bits inside a byte are MSB first
 /// either way, which is the whole of the difference.
-enum class HeaderByteOrder : std::uint8_t { Big, Little };
+enum class HeaderByteOrder : std::uint8_t { big, little };
 
 /// @brief Which end of a Golay header's twelve information bits the flags occupy.
-enum class FlagsPosition : std::uint8_t { High, Low };
+enum class FlagsPosition : std::uint8_t { high, low };
 
 /**
  * @brief The count arithmetic, stated once and shared by every layout that carries a length field.
@@ -250,7 +250,7 @@ enum class FlagsPosition : std::uint8_t { High, Low };
  * default correct without stating a number twice.
  */
 struct LengthCount {
-    CountCovers covers           = CountCovers::PayloadAndCheck;
+    CountCovers covers           = CountCovers::payload_and_check;
     std::size_t unitItems        = 8UZ; ///< `u`, items per counted unit, in `[1, 64]`
     std::size_t checkItems       = 0UZ; ///< `c`, trailing check items the field does not count; only under `payload`
     std::size_t framePrefixItems = 0UZ; ///< `p`, frame items ahead of the payload the field does count; zero means `headerItems()`
@@ -258,16 +258,16 @@ struct LengthCount {
 
 /// @brief Refuse a count whose parameters do not describe the convention they are given with, naming the setting.
 inline void validateLengthCount(const LengthCount& count) {
-    if (count.covers == CountCovers::Unset) {
+    if (count.covers == CountCovers::unset) {
         throw std::invalid_argument("gr::digital::LengthCount: count_covers is required");
     }
     if (count.unitItems < 1UZ || count.unitItems > 64UZ) {
         throw std::invalid_argument("gr::digital::LengthCount: count_unit_items must be in [1, 64], got " + std::to_string(count.unitItems));
     }
-    if (count.checkItems != 0UZ && count.covers != CountCovers::Payload) {
+    if (count.checkItems != 0UZ && count.covers != CountCovers::payload) {
         throw std::invalid_argument("gr::digital::LengthCount: check_items is only meaningful when the field counts the payload alone, got " + std::to_string(count.checkItems));
     }
-    if (count.framePrefixItems != 0UZ && count.covers != CountCovers::WholeFrame) {
+    if (count.framePrefixItems != 0UZ && count.covers != CountCovers::whole_frame) {
         throw std::invalid_argument("gr::digital::LengthCount: frame_prefix_items is only meaningful when the field counts the whole frame, got " + std::to_string(count.framePrefixItems));
     }
 }
@@ -290,10 +290,10 @@ inline void validateLengthCount(const LengthCount& count) {
 
     std::size_t items = unit * value;
     switch (count.covers) {
-    case CountCovers::Unset: return std::nullopt;
-    case CountCovers::Payload: items += check; break;
-    case CountCovers::PayloadAndCheck: break;
-    case CountCovers::WholeFrame:
+    case CountCovers::unset: return std::nullopt;
+    case CountCovers::payload: items += check; break;
+    case CountCovers::payload_and_check: break;
+    case CountCovers::whole_frame:
         if (items <= prefix) {
             return std::nullopt;
         }
@@ -317,15 +317,15 @@ inline void validateLengthCount(const LengthCount& count) {
 
     std::size_t counted = payloadItems;
     switch (count.covers) {
-    case CountCovers::Unset: return std::nullopt;
-    case CountCovers::Payload:
+    case CountCovers::unset: return std::nullopt;
+    case CountCovers::payload:
         if (payloadItems < check) {
             return std::nullopt;
         }
         counted = payloadItems - check;
         break;
-    case CountCovers::PayloadAndCheck: break;
-    case CountCovers::WholeFrame:
+    case CountCovers::payload_and_check: break;
+    case CountCovers::whole_frame:
         if (payloadItems > std::numeric_limits<std::size_t>::max() - prefix) {
             return std::nullopt;
         }
@@ -366,7 +366,7 @@ public:
         if (lengthBits < 1UZ || lengthBits > kMaxLengthBits) {
             throw std::invalid_argument("gr::digital::LengthPlainHeader: length_bits must be in [1, 32], got " + std::to_string(lengthBits));
         }
-        if (order == HeaderByteOrder::Little && lengthBits % 8UZ != 0UZ) {
+        if (order == HeaderByteOrder::little && lengthBits % 8UZ != 0UZ) {
             throw std::invalid_argument("gr::digital::LengthPlainHeader: a little-endian byte order needs a whole number of bytes, got length_bits " + std::to_string(lengthBits));
         }
         validateLengthCount(count);
@@ -403,7 +403,7 @@ public:
 private:
     template<HeaderItem T>
     [[nodiscard]] std::uint32_t readField(std::span<const T> header) const noexcept {
-        if (order_ == HeaderByteOrder::Big) {
+        if (order_ == HeaderByteOrder::big) {
             return readHeaderField(header, 0UZ, lengthBits_);
         }
         std::uint32_t value = 0U;
@@ -415,7 +415,7 @@ private:
 
     template<HeaderItem T>
     void writeField(std::span<T> out, std::uint32_t value) const noexcept {
-        if (order_ == HeaderByteOrder::Big) {
+        if (order_ == HeaderByteOrder::big) {
             writeHeaderField(out, 0UZ, lengthBits_, value);
             return;
         }
@@ -481,8 +481,8 @@ public:
         }
 
         const std::uint32_t info   = static_cast<std::uint32_t>(decoded.info);
-        const std::uint32_t length = flags_ == FlagsPosition::High ? (info & maxValue_) : (info >> static_cast<std::uint32_t>(flagBits_));
-        const std::uint32_t flags  = flags_ == FlagsPosition::High ? (info >> static_cast<std::uint32_t>(lengthBits_)) : (info & maxFlags_);
+        const std::uint32_t length = flags_ == FlagsPosition::high ? (info & maxValue_) : (info >> static_cast<std::uint32_t>(flagBits_));
+        const std::uint32_t flags  = flags_ == FlagsPosition::high ? (info >> static_cast<std::uint32_t>(lengthBits_)) : (info & maxFlags_);
 
         const std::optional<std::size_t> items = payloadItemsFromCount(count_, length, headerItems());
         if (!items.has_value()) {
@@ -515,7 +515,7 @@ public:
             flags = static_cast<std::uint32_t>(*carried);
         }
 
-        const std::uint32_t info = flags_ == FlagsPosition::High ? ((flags << static_cast<std::uint32_t>(lengthBits_)) | *value) : ((*value << static_cast<std::uint32_t>(flagBits_)) | flags);
+        const std::uint32_t info = flags_ == FlagsPosition::high ? ((flags << static_cast<std::uint32_t>(lengthBits_)) | *value) : ((*value << static_cast<std::uint32_t>(flagBits_)) | flags);
         writeHeaderField(out, 0UZ, kCodewordItems, gr::fec::golay24Encode(static_cast<std::uint16_t>(info)));
         return true;
     }

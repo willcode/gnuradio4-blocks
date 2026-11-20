@@ -359,11 +359,11 @@ struct ScramblerProfile {
 
 /// @brief The named profiles, in the order `profileByName` lists them when it does not find one.
 inline constexpr std::array<ScramblerProfile, 5> kProfiles{{
-    {"ccsds131", ProfileFamily::Additive, standard::ccsds131, seedFromBitString("11111111", 8U), 8U, gr::math::BitOrder::MsbFirst, ""},                 //
-    {"ccsds131_17", ProfileFamily::Additive, standard::ccsds131_17, seedFromBitString("00011100011100011", 17U), 8U, gr::math::BitOrder::MsbFirst, ""}, //
-    {"pn9", ProfileFamily::Additive, standard::pn9, seedFromBitString("111111111", 9U), 8U, gr::math::BitOrder::LsbFirst, ""},                          //
-    {"si4463", ProfileFamily::Additive, standard::si4463, seedFromBitString("111100001", 9U), 8U, gr::math::BitOrder::LsbFirst, ""},                    //
-    {"g3ruh", ProfileFamily::Multiplicative, standard::g3ruh, 0ULL, 8U, gr::math::BitOrder::MsbFirst, ""}                                               //
+    {"ccsds131", ProfileFamily::Additive, standard::ccsds131, seedFromBitString("11111111", 8U), 8U, gr::math::BitOrder::msb_first, ""},                 //
+    {"ccsds131_17", ProfileFamily::Additive, standard::ccsds131_17, seedFromBitString("00011100011100011", 17U), 8U, gr::math::BitOrder::msb_first, ""}, //
+    {"pn9", ProfileFamily::Additive, standard::pn9, seedFromBitString("111111111", 9U), 8U, gr::math::BitOrder::lsb_first, ""},                          //
+    {"si4463", ProfileFamily::Additive, standard::si4463, seedFromBitString("111100001", 9U), 8U, gr::math::BitOrder::lsb_first, ""},                    //
+    {"g3ruh", ProfileFamily::Multiplicative, standard::g3ruh, 0ULL, 8U, gr::math::BitOrder::msb_first, ""}                                               //
 }};
 
 /// @brief The profile named @p name, or `std::invalid_argument` listing every name there is.
@@ -399,7 +399,7 @@ struct ScramblerConfig {
     std::uint64_t      seed        = 0ULL;
     ScramblerMode      mode        = ScramblerMode::Additive;
     std::uint8_t       bitsPerItem = 8U;
-    gr::math::BitOrder order       = gr::math::BitOrder::MsbFirst;
+    gr::math::BitOrder order       = gr::math::BitOrder::msb_first;
 
     std::uint8_t                 degree      = 0U;   ///< the largest delay, and the register width
     std::uint8_t                 minDelay    = 0U;   ///< the smallest delay
@@ -760,7 +760,7 @@ inline constexpr std::array<std::uint8_t, 256> kReversedByte = [] {
 /// Its own inverse, so the same call turns a field back into an item.
 [[nodiscard]] inline std::uint8_t streamField(std::uint8_t item, unsigned width, gr::math::BitOrder order) noexcept {
     const unsigned field = static_cast<unsigned>(item) & ((1U << width) - 1U);
-    return order == gr::math::BitOrder::MsbFirst ? static_cast<std::uint8_t>(field) : kReversedByte[static_cast<std::size_t>(field) << (8U - width)];
+    return order == gr::math::BitOrder::msb_first ? static_cast<std::uint8_t>(field) : kReversedByte[static_cast<std::size_t>(field) << (8U - width)];
 }
 
 /// @brief The next @p count feedback bits, oldest at position `count-1`, read from @p reg alone.
@@ -985,7 +985,7 @@ inline void scrambleMonitored(ScramblerConfig& cfg, std::span<const std::uint8_t
     for (std::size_t i = 0UZ; i < count; ++i) {
         unsigned item = 0U;
         for (unsigned bit = 0U; bit < width; ++bit) {
-            const unsigned position = order == gr::math::BitOrder::MsbFirst ? width - 1U - bit : bit;
+            const unsigned position = order == gr::math::BitOrder::msb_first ? width - 1U - bit : bit;
             const unsigned feedback = static_cast<unsigned>(std::popcount(reg & taps)) & 1U;
             const unsigned source   = (static_cast<unsigned>(in[i]) >> position) & 1U;
             const unsigned force    = modulus != 0U && counter == modulus - 1U ? 1U : 0U;
@@ -1024,7 +1024,7 @@ inline void scrambleReference(ScramblerConfig& cfg, std::span<const std::uint8_t
     for (std::size_t i = 0UZ; i < count; ++i) {
         unsigned item = 0U;
         for (unsigned bit = 0U; bit < width; ++bit) {
-            const unsigned position = cfg.order == gr::math::BitOrder::MsbFirst ? width - 1U - bit : bit;
+            const unsigned position = cfg.order == gr::math::BitOrder::msb_first ? width - 1U - bit : bit;
             const unsigned feedback = static_cast<unsigned>(std::popcount(reg & taps)) & 1U;
             const unsigned source   = (static_cast<unsigned>(in[i]) >> position) & 1U;
             const unsigned result   = source ^ feedback;

@@ -153,7 +153,7 @@ struct ConvolutionalCode {
  * future that would resolve them, so a caller that needs them reliable extracts `K-1` steps past
  * its payload and discards them.
  */
-enum class ConvTermination : std::uint8_t { Terminated, Open };
+enum class ConvTermination : std::uint8_t { terminated, open };
 
 /// Information bits a frame of @p codedBits coded bits carries under @p termination, or zero when
 /// that length is not a frame. Terminated: a nonzero multiple of n holding the K-1 tail steps plus
@@ -163,7 +163,7 @@ enum class ConvTermination : std::uint8_t { Terminated, Open };
         return 0UZ;
     }
     const std::size_t steps = codedBits / code.polynomialCount;
-    if (termination == ConvTermination::Open) {
+    if (termination == ConvTermination::open) {
         return steps;
     }
     return steps < code.constraintLength ? 0UZ : steps - (code.constraintLength - 1UZ);
@@ -172,7 +172,7 @@ enum class ConvTermination : std::uint8_t { Terminated, Open };
 /// Information bits a terminated frame of @p codedBits coded bits carries, or zero when that
 /// length is not a frame: it must be a nonzero multiple of n and hold at least the K-1 tail steps
 /// plus one information step.
-[[nodiscard]] inline constexpr std::size_t convolutionalInfoBits(const ConvolutionalCode& code, std::size_t codedBits) noexcept { return convolutionalInfoBits(code, codedBits, ConvTermination::Terminated); }
+[[nodiscard]] inline constexpr std::size_t convolutionalInfoBits(const ConvolutionalCode& code, std::size_t codedBits) noexcept { return convolutionalInfoBits(code, codedBits, ConvTermination::terminated); }
 
 /// Encode @p info as one terminated frame into @p out, one bit per item with the low bit
 /// significant, and answer the coded bits written.
@@ -237,11 +237,11 @@ public:
     /// `initialState` naming a state the code does not have, leaves the decoder unconfigured and
     /// every decode then answers a zero result. `initialState` is meaningful under `open` only:
     /// a terminated frame's initial state is the zero state by construction.
-    bool configure(const ConvolutionalCode& code, ConvTermination termination = ConvTermination::Terminated, std::optional<std::uint32_t> initialState = std::nullopt) {
+    bool configure(const ConvolutionalCode& code, ConvTermination termination = ConvTermination::terminated, std::optional<std::uint32_t> initialState = std::nullopt) {
         _code         = {};
         _states       = 0UZ;
         _half         = 0UZ;
-        _termination  = ConvTermination::Terminated;
+        _termination  = ConvTermination::terminated;
         _initialState = std::nullopt;
         _traceback.clear(); // sized by the state count, so it cannot outlive a code change
         _words.clear();
@@ -256,7 +256,7 @@ public:
         _states       = code.states();
         _half         = _states >> 1U;
         _termination  = termination;
-        _initialState = termination == ConvTermination::Open ? initialState : std::nullopt;
+        _initialState = termination == ConvTermination::open ? initialState : std::nullopt;
 
         _outputs.assign(2UZ * _states, 0U);
         for (std::size_t state = 0UZ; state < _states; ++state) {
@@ -371,7 +371,7 @@ private:
     [[nodiscard]] float runTrellis(std::size_t steps, FStepCosts&& stepCosts) {
         std::array<float, (1UZ << kConvMaxPolynomials)> cost{};
 
-        if (_termination == ConvTermination::Terminated) {
+        if (_termination == ConvTermination::terminated) {
             std::fill(_metric.begin(), _metric.end(), kUnreachable);
             _metric[0UZ] = 0.0F; // the frame starts in the zero state, which is what termination buys
         } else if (_initialState.has_value()) {
@@ -406,7 +406,7 @@ private:
 
     /// Where the traceback starts: the zero state when terminated, the best-metric state when open.
     [[nodiscard]] std::size_t winningState() const noexcept {
-        if (_termination == ConvTermination::Terminated) {
+        if (_termination == ConvTermination::terminated) {
             return 0UZ;
         }
         return static_cast<std::size_t>(std::min_element(_metric.begin(), _metric.end()) - _metric.begin());
@@ -435,7 +435,7 @@ private:
     ConvolutionalCode            _code{};
     std::size_t                  _states       = 0UZ;
     std::size_t                  _half         = 0UZ; ///< the bit a state's two predecessors differ in
-    ConvTermination              _termination  = ConvTermination::Terminated;
+    ConvTermination              _termination  = ConvTermination::terminated;
     std::optional<std::uint32_t> _initialState = std::nullopt; ///< Open only: where the stream's path is known to stand
 
     std::vector<std::uint32_t> _outputs;   ///< branch outputs, indexed by state and input

@@ -403,7 +403,7 @@ const boost::ut::suite<"constellation blocks"> constellationBlockTests = [] {
 
     "power normalization is the default and amplitude is available"_test = [] {
         ConstellationEncoder<float> power     = make<ConstellationEncoder<float>>({{"constellation", std::string("qam")}, {"arity", 16U}});
-        ConstellationEncoder<float> amplitude = make<ConstellationEncoder<float>>({{"constellation", std::string("qam")}, {"arity", 16U}, {"normalization", std::string("Amplitude")}});
+        ConstellationEncoder<float> amplitude = make<ConstellationEncoder<float>>({{"constellation", std::string("qam")}, {"arity", 16U}, {"normalization", std::string("amplitude")}});
 
         std::vector<std::uint8_t> symbols(16UZ);
         std::iota(symbols.begin(), symbols.end(), std::uint8_t{0});
@@ -435,7 +435,7 @@ const boost::ut::suite<"constellation blocks"> constellationBlockTests = [] {
 
             SymbolMap                         transmitMap = make<SymbolMap>({{"map", tableOf(toRotation)}});
             DifferentialEncoder<std::uint8_t> diffEncoder = make<DifferentialEncoder<std::uint8_t>>({{"modulus", arity}});
-            ConstellationEncoder<float>       encoder     = make<ConstellationEncoder<float>>({{"constellation", std::string("custom")}, {"points", rotation}, {"normalization", std::string("None")}});
+            ConstellationEncoder<float>       encoder     = make<ConstellationEncoder<float>>({{"constellation", std::string("custom")}, {"points", rotation}, {"normalization", std::string("none")}});
 
             const std::vector<std::uint8_t> mapped    = drive<std::uint8_t>(transmitMap, std::span<const std::uint8_t>(data));
             const std::vector<std::uint8_t> encoded   = drive<std::uint8_t>(diffEncoder, std::span<const std::uint8_t>(mapped));
@@ -447,7 +447,7 @@ const boost::ut::suite<"constellation blocks"> constellationBlockTests = [] {
                 std::vector<CF> received(modulated.size());
                 std::ranges::transform(modulated, received.begin(), [spin](const CF& sample) { return sample * spin; });
 
-                ConstellationDecoder<float>       decoder     = make<ConstellationDecoder<float>>({{"constellation", std::string("custom")}, {"points", rotation}, {"normalization", std::string("None")}});
+                ConstellationDecoder<float>       decoder     = make<ConstellationDecoder<float>>({{"constellation", std::string("custom")}, {"points", rotation}, {"normalization", std::string("none")}});
                 DifferentialDecoder<std::uint8_t> diffDecoder = make<DifferentialDecoder<std::uint8_t>>({{"modulus", arity}});
                 SymbolMap                         receiveMap  = make<SymbolMap>({{"map", tableOf(toGray)}});
 

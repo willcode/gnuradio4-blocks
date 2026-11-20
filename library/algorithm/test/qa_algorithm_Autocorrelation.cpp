@@ -112,11 +112,11 @@ template<typename T>
         std::complex<double> value{};
         if constexpr (std::is_same_v<T, float>) {
             const double sample = static_cast<double>(window[k]);
-            value               = config.kind == AcfKind::Envelope ? std::complex<double>(sample * sample, 0.) : std::complex<double>(sample, 0.);
+            value               = config.kind == AcfKind::envelope ? std::complex<double>(sample * sample, 0.) : std::complex<double>(sample, 0.);
         } else {
             const double re = static_cast<double>(window[k].real());
             const double im = static_cast<double>(window[k].imag());
-            value           = config.kind == AcfKind::Envelope ? std::complex<double>(re * re + im * im, 0.) : std::complex<double>(re, im);
+            value           = config.kind == AcfKind::envelope ? std::complex<double>(re * re + im * im, 0.) : std::complex<double>(re, im);
         }
         u[k] = value;
         mean += value;
@@ -147,7 +147,7 @@ template<typename T>
     }
     for (std::size_t lag = 0UZ; lag <= lags; ++lag) {
         double ratio = magnitudes[0UZ] > 0. ? magnitudes[lag] / magnitudes[0UZ] : 0.;
-        if (config.normalization == AcfNormalization::Unbiased) {
+        if (config.normalization == AcfNormalization::unbiased) {
             ratio = taperAcf[lag] > 0. ? ratio * taperAcf[0UZ] / taperAcf[lag] : 0.;
         }
         ratios[lag] = ratio;
@@ -198,7 +198,7 @@ template<typename T>
         for (std::size_t m = 1UZ; m < windows && m * hop < n - lag; ++m) {
             squares += 2. * static_cast<double>(windows - m) * static_cast<double>(n - lag - m * hop);
         }
-        const auto divisor = static_cast<double>(windows * (normalization == AcfNormalization::Biased ? n : n - lag));
+        const auto divisor = static_cast<double>(windows * (normalization == AcfNormalization::biased ? n : n - lag));
         scatter[lag]       = std::sqrt(squares) / divisor;
     }
     return scatter;
@@ -315,8 +315,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         for (const auto& [n, lags] : kGeometries) {
             const std::vector<Complex> complexInput = complexNoise(n, 0x9E37ULL + n);
             const std::vector<float>   realInput    = realNoise(n, 0xC0FFEEULL + n);
-            for (const AcfKind kind : {AcfKind::Complex, AcfKind::Envelope}) {
-                for (const AcfNormalization normalization : {AcfNormalization::Unbiased, AcfNormalization::Biased}) {
+            for (const AcfKind kind : {AcfKind::complex, AcfKind::envelope}) {
+                for (const AcfNormalization normalization : {AcfNormalization::unbiased, AcfNormalization::biased}) {
                     const AcfConfig config = baseConfig(n, lags, kind, normalization);
 
                     gr::analysis::Autocorrelation<Complex> complexKernel;
@@ -355,8 +355,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::size_t                realizations = 400UZ;
         constexpr std::array<std::size_t, 5> kLags{1UZ, 64UZ, 128UZ, 256UZ, 384UZ};
 
-        for (const AcfNormalization normalization : {AcfNormalization::Biased, AcfNormalization::Unbiased}) {
-            const AcfConfig                        config = baseConfig(n, lags, AcfKind::Complex, normalization);
+        for (const AcfNormalization normalization : {AcfNormalization::biased, AcfNormalization::unbiased}) {
+            const AcfConfig                        config = baseConfig(n, lags, AcfKind::complex, normalization);
             gr::analysis::Autocorrelation<Complex> kernel;
             kernel.prepare(config);
 
@@ -373,7 +373,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             for (std::size_t k = 0UZ; k < kLags.size(); ++k) {
                 const std::size_t lag      = kLags[k];
                 const double      measured = std::sqrt(sumSquares[k] / static_cast<double>(realizations));
-                const double      expected = normalization == AcfNormalization::Biased ? std::sqrt(static_cast<double>(n - lag)) / static_cast<double>(n) : 1. / std::sqrt(static_cast<double>(n - lag));
+                const double      expected = normalization == AcfNormalization::biased ? std::sqrt(static_cast<double>(n - lag)) / static_cast<double>(n) : 1. / std::sqrt(static_cast<double>(n - lag));
                 std::println("scatter: {} lag {:>4}: rms {:.5f} against {:.5f} ({:+.1f}%)", gr::analysis::acfNormalizationName(normalization), lag, measured, expected, 100. * (measured / expected - 1.));
                 expect(std::abs(kernel.lagScatter()[lag] / expected - 1.) < 1e-9) << std::format("{} lag {}: the modeled scatter {:.7f} is the closed form", gr::analysis::acfNormalizationName(normalization), lag, kernel.lagScatter()[lag]);
                 expect(std::abs(measured / expected - 1.) < 0.10) << std::format("{} lag {}: {:.5f} against {:.5f}", gr::analysis::acfNormalizationName(normalization), lag, measured, expected);
@@ -387,11 +387,11 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::size_t windows = 2000UZ;
         constexpr double      pFa     = 1e-3;
 
-        const AcfConfig                        config = baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased);
+        const AcfConfig                        config = baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased);
         gr::analysis::Autocorrelation<Complex> kernel;
         kernel.prepare(config);
 
-        const std::vector<double> closed  = rectangularScatter(n, lags, n, 1UZ, AcfNormalization::Unbiased);
+        const std::vector<double> closed  = rectangularScatter(n, lags, n, 1UZ, AcfNormalization::unbiased);
         const double              derived = acfRecordThreshold(std::span<const double>(closed).subspan(1UZ), pFa, false);
         const double              naive   = acfThreshold(n, lags, pFa); // every lag at the scatter 1/sqrt(N)
         expect(derived < acfThreshold(n - lags, lags, pFa)) << "the threshold lies below that of every lag at the scatter of lag L";
@@ -424,7 +424,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             const auto scale = static_cast<float>(std::sqrt(1. + depth * std::cos(kTwoPi * static_cast<double>(k) / static_cast<double>(period))));
             modulated[k] *= scale;
         }
-        AcfConfig                              envelopeConfig = baseConfig(positiveN, positiveLags, AcfKind::Envelope, AcfNormalization::Unbiased);
+        AcfConfig                              envelopeConfig = baseConfig(positiveN, positiveLags, AcfKind::envelope, AcfNormalization::unbiased);
         gr::analysis::Autocorrelation<Complex> envelopeKernel;
         envelopeKernel.prepare(envelopeConfig);
         const std::vector<Record> found = drive(envelopeKernel, std::span<const Complex>(modulated));
@@ -444,13 +444,13 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
     "the two normalizations differ by exactly the lag window"_test = [] {
         constexpr std::size_t n    = 1024UZ;
         constexpr std::size_t lags = 256UZ;
-        for (const auto windowType : {gr::algorithm::window::Type::Rectangular, gr::algorithm::window::Type::Hann}) {
+        for (const auto windowType : {gr::algorithm::window::Type::rectangular, gr::algorithm::window::Type::hann}) {
             const std::vector<Complex> input = complexNoise(n, 0xBEEFULL);
 
-            AcfConfig unbiasedConfig   = baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased);
+            AcfConfig unbiasedConfig   = baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased);
             unbiasedConfig.window      = windowType;
             AcfConfig biasedConfig     = unbiasedConfig;
-            biasedConfig.normalization = AcfNormalization::Biased;
+            biasedConfig.normalization = AcfNormalization::biased;
 
             gr::analysis::Autocorrelation<Complex> unbiasedKernel;
             unbiasedKernel.prepare(unbiasedConfig);
@@ -484,7 +484,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::array<std::size_t, 3> kAverages{1UZ, 4UZ, 16UZ};
 
         for (const std::size_t averages : kAverages) {
-            AcfConfig disjoint   = baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased);
+            AcfConfig disjoint   = baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased);
             disjoint.nAverages   = averages;
             AcfConfig overlapped = disjoint;
             overlapped.overlap   = 0.5;
@@ -536,7 +536,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             sample += Complex{1.f, 0.f}; // a DC offset equal to the rms
         }
 
-        AcfConfig kept  = baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased);
+        AcfConfig kept  = baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased);
         kept.removeMean = false;
         gr::analysis::Autocorrelation<Complex> keptKernel;
         keptKernel.prepare(kept);
@@ -566,7 +566,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             const double phase = kTwoPi * rng.uniform01<double>();
             constant[k]        = Complex{static_cast<float>(std::cos(phase)), static_cast<float>(std::sin(phase))};
         }
-        AcfConfig                              envelope = baseConfig(n, lags, AcfKind::Envelope, AcfNormalization::Unbiased);
+        AcfConfig                              envelope = baseConfig(n, lags, AcfKind::envelope, AcfNormalization::unbiased);
         gr::analysis::Autocorrelation<Complex> envelopeKernel;
         envelopeKernel.prepare(envelope);
         const std::vector<Record> none = drive(envelopeKernel, std::span<const Complex>(constant));
@@ -579,7 +579,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
     "the window counters add up, and the remainder stays with the caller"_test = [] {
         constexpr std::size_t n      = 256UZ;
         constexpr std::size_t lags   = 64UZ;
-        AcfConfig             config = baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased);
+        AcfConfig             config = baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased);
         config.overlap               = 0.5;
         config.nAverages             = 4UZ;
 
@@ -618,8 +618,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::size_t      averages = 4UZ;
         const std::vector<Complex> input    = complexNoise(4096UZ, 0x5CA7ULL);
         for (const double overlap : {0., 0.5, 0.75}) {
-            for (const AcfNormalization normalization : {AcfNormalization::Unbiased, AcfNormalization::Biased}) {
-                AcfConfig config = baseConfig(n, lags, AcfKind::Complex, normalization);
+            for (const AcfNormalization normalization : {AcfNormalization::unbiased, AcfNormalization::biased}) {
+                AcfConfig config = baseConfig(n, lags, AcfKind::complex, normalization);
                 config.overlap   = overlap;
                 config.nAverages = averages;
                 gr::analysis::Autocorrelation<Complex> kernel;
@@ -631,12 +631,12 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
                     expect(std::abs(kernel.lagScatter()[lag] / closed[lag] - 1.) < 1e-9) << std::format("overlap {} {} lag {}: {:.8f} against {:.8f}", overlap, gr::analysis::acfNormalizationName(normalization), lag, kernel.lagScatter()[lag], closed[lag]);
                 }
                 const auto   noisiest = static_cast<std::size_t>(std::distance(closed.begin(), std::ranges::max_element(closed)));
-                const double divisor  = static_cast<double>(normalization == AcfNormalization::Biased ? n : n - noisiest);
+                const double divisor  = static_cast<double>(normalization == AcfNormalization::biased ? n : n - noisiest);
                 const double pairs    = std::pow(static_cast<double>(n - noisiest) / (divisor * closed[noisiest]), 2.);
                 expect(eq(records[0UZ].scatterLag, noisiest)) << std::format("overlap {} {}: the scatter holds for the noisiest lag", overlap, gr::analysis::acfNormalizationName(normalization));
                 expect(std::abs(records[0UZ].scatter / closed[noisiest] - 1.) < 1e-9);
                 expect(std::abs(records[0UZ].nPairs / pairs - 1.) < 1e-9) << std::format("{:.3f} effective products against {:.3f}", records[0UZ].nPairs, pairs);
-                expect(eq(noisiest, normalization == AcfNormalization::Biased ? 1UZ : lags)) << "the biased scatter is largest at lag 1, the unbiased at lag L";
+                expect(eq(noisiest, normalization == AcfNormalization::biased ? 1UZ : lags)) << "the biased scatter is largest at lag 1, the unbiased at lag L";
             }
         }
     };
@@ -648,10 +648,10 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::size_t records  = 800UZ;
         constexpr double      pFa      = 0.25;
         std::uint64_t         seed     = 0xFA1A0000ULL;
-        for (const auto taper : {gr::algorithm::window::Type::Rectangular, gr::algorithm::window::Type::Hann}) {
+        for (const auto taper : {gr::algorithm::window::Type::rectangular, gr::algorithm::window::Type::hann}) {
             for (const double overlap : {0., 0.5}) {
-                for (const AcfNormalization normalization : {AcfNormalization::Unbiased, AcfNormalization::Biased}) {
-                    AcfConfig config      = baseConfig(n, lags, AcfKind::Complex, normalization);
+                for (const AcfNormalization normalization : {AcfNormalization::unbiased, AcfNormalization::biased}) {
+                    AcfConfig config      = baseConfig(n, lags, AcfKind::complex, normalization);
                     config.window         = taper;
                     config.overlap        = overlap;
                     config.nAverages      = averages;
@@ -709,8 +709,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::size_t records  = 100UZ;
         constexpr double      pFa      = 0.1;
         std::uint64_t         seed     = 0x0FF5E700ULL;
-        for (const auto& [taper, overlap, normalization] : {std::tuple{gr::algorithm::window::Type::Rectangular, 0., AcfNormalization::Unbiased}, std::tuple{gr::algorithm::window::Type::Hann, 0.5, AcfNormalization::Biased}}) {
-            AcfConfig config      = baseConfig(n, lags, AcfKind::Complex, normalization);
+        for (const auto& [taper, overlap, normalization] : {std::tuple{gr::algorithm::window::Type::rectangular, 0., AcfNormalization::unbiased}, std::tuple{gr::algorithm::window::Type::hann, 0.5, AcfNormalization::biased}}) {
+            AcfConfig config      = baseConfig(n, lags, AcfKind::complex, normalization);
             config.window         = taper;
             config.overlap        = overlap;
             config.nAverages      = averages;
@@ -718,7 +718,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             gr::analysis::Autocorrelation<Complex> kernel;
             kernel.prepare(config);
             const std::span<const double> taperAcf = kernel.taperAutocorrelation();
-            const bool                    biased   = normalization == AcfNormalization::Biased;
+            const bool                    biased   = normalization == AcfNormalization::biased;
             // the size of the offset mean removal alone gives lag `tau`
             const auto offset = [&taperAcf, biased](std::size_t lag) { return (biased ? taperAcf[lag] / taperAcf[0UZ] : 1.) / static_cast<double>(n - 1UZ); };
 
@@ -774,8 +774,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         constexpr std::size_t      n     = 1024UZ;
         constexpr std::size_t      lags  = 16UZ;
         const std::vector<Complex> noise = complexNoise(4UZ * n, 0xE5E5ULL);
-        for (const AcfKind kind : {AcfKind::Envelope, AcfKind::Complex}) {
-            AcfConfig config  = baseConfig(n, lags, kind, AcfNormalization::Unbiased);
+        for (const AcfKind kind : {AcfKind::envelope, AcfKind::complex}) {
+            AcfConfig config  = baseConfig(n, lags, kind, AcfNormalization::unbiased);
             config.removeMean = false;
             config.nAverages  = 4UZ;
             gr::analysis::Autocorrelation<Complex> kernel;
@@ -789,7 +789,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             }
             const double mean = sum / static_cast<double>(lags);
             std::println("mean kept: {} kind: lags 1..{} average {:.4f}; threshold {}, margin {} dB", gr::analysis::acfKindName(kind), lags, mean, record.threshold, record.peakThresholdDb);
-            if (kind == AcfKind::Envelope) {
+            if (kind == AcfKind::envelope) {
                 expect(std::abs(mean - 0.5) < 0.1) << std::format("the envelope lags average {:.4f}, near one half", mean);
                 expect(std::isinf(record.threshold) && record.threshold > 0.) << "the envelope kind publishes no finite threshold";
                 expect(std::isinf(record.peakThresholdDb) && record.peakThresholdDb > 0.) << "and no finite margin";
@@ -825,10 +825,10 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         // about 1 of 10000 seeds per arm.
         const double  bound = pFa + 4. * std::sqrt(pFa * (1. - pFa) / static_cast<double>(records));
         std::uint64_t seed  = 0xDB0000ULL;
-        for (const auto taper : {gr::algorithm::window::Type::Rectangular, gr::algorithm::window::Type::Hann}) {
-            for (const AcfNormalization normalization : {AcfNormalization::Unbiased, AcfNormalization::Biased}) {
+        for (const auto taper : {gr::algorithm::window::Type::rectangular, gr::algorithm::window::Type::hann}) {
+            for (const AcfNormalization normalization : {AcfNormalization::unbiased, AcfNormalization::biased}) {
                 for (const std::size_t lags : {n / 16UZ, n / 4UZ, n / 2UZ, n - 1UZ}) {
-                    AcfConfig config      = baseConfig(n, lags, AcfKind::Complex, normalization);
+                    AcfConfig config      = baseConfig(n, lags, AcfKind::complex, normalization);
                     config.window         = taper;
                     config.falseAlarmRate = pFa;
                     gr::analysis::Autocorrelation<Complex> kernel;
@@ -857,10 +857,10 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
         // direct sums over the record's windows.
         constexpr std::size_t    n     = 1024UZ;
         constexpr std::size_t    lags  = n - 1UZ;
-        const std::vector<float> taper = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Hann, n);
+        const std::vector<float> taper = gr::algorithm::window::create<float>(gr::algorithm::window::Type::hann, n);
         for (const auto& [averages, overlap] : {std::pair{1UZ, 0.}, std::pair{4UZ, 0.5}}) {
-            AcfConfig config = baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased);
-            config.window    = gr::algorithm::window::Type::Hann;
+            AcfConfig config = baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased);
+            config.window    = gr::algorithm::window::Type::hann;
             config.overlap   = overlap;
             config.nAverages = averages;
             gr::analysis::Autocorrelation<Complex> kernel;
@@ -916,7 +916,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
 
     "a record published after nAverages falls below the windows pending counts apart from full records"_test = [] {
         constexpr std::size_t n      = 64UZ;
-        AcfConfig             config = baseConfig(n, 8UZ, AcfKind::Complex, AcfNormalization::Unbiased);
+        AcfConfig             config = baseConfig(n, 8UZ, AcfKind::complex, AcfNormalization::unbiased);
         config.nAverages             = 16UZ;
         gr::analysis::Autocorrelation<Complex> kernel;
         kernel.prepare(config);
@@ -950,7 +950,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             std::uint64_t partial;
         };
         for (const auto& [averages, full, longer, partial] : {FlushArm{4UZ, 0ULL, 1ULL, 0ULL}, FlushArm{10UZ, 1ULL, 0ULL, 0ULL}, FlushArm{16UZ, 0ULL, 0ULL, 1ULL}}) {
-            AcfConfig config = baseConfig(n, 8UZ, AcfKind::Complex, AcfNormalization::Unbiased);
+            AcfConfig config = baseConfig(n, 8UZ, AcfKind::complex, AcfNormalization::unbiased);
             config.nAverages = 16UZ;
             gr::analysis::Autocorrelation<Complex> kernel;
             kernel.prepare(config);
@@ -976,7 +976,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
             std::vector<Complex> input = complexNoise(3UZ * n, 0x0BADULL);
             input[n + 5UZ]             = Complex{bad, 0.f};
             gr::analysis::Autocorrelation<Complex> kernel;
-            kernel.prepare(baseConfig(n, lags, AcfKind::Complex, AcfNormalization::Unbiased));
+            kernel.prepare(baseConfig(n, lags, AcfKind::complex, AcfNormalization::unbiased));
             const std::vector<Record> records = drive(kernel, std::span<const Complex>(input), false);
             expect(eq(kernel.nWindows, std::uint64_t{3ULL}));
             expect(eq(kernel.nNonFinite, std::uint64_t{1ULL})) << std::format("{}: the window holding it is counted non-finite", bad);
@@ -990,7 +990,7 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
 
     "prepare and the setters refuse invalid settings"_test = [] {
         gr::analysis::Autocorrelation<Complex> kernel;
-        AcfConfig                              config = baseConfig(1024UZ, 256UZ, AcfKind::Complex, AcfNormalization::Unbiased);
+        AcfConfig                              config = baseConfig(1024UZ, 256UZ, AcfKind::complex, AcfNormalization::unbiased);
 
         AcfConfig tooShort    = config;
         tooShort.windowLength = 8UZ;
@@ -1017,8 +1017,8 @@ const suite<"autocorrelation kernel"> _acfKernel = [] {
 
     "the segmenter refuses a taper the window cannot build"_test = [] {
         gr::analysis::WindowedSegmenter<float> segmenter;
-        expect(throws<gr::exception>([&] { segmenter.prepare(1UZ, 0UZ, 0., gr::algorithm::window::Type::Kaiser); })) << "a one-sample Kaiser window";
-        expect(nothrow([&] { segmenter.prepare(16UZ, 4UZ, 0., gr::algorithm::window::Type::Kaiser); }));
+        expect(throws<gr::exception>([&] { segmenter.prepare(1UZ, 0UZ, 0., gr::algorithm::window::Type::kaiser); })) << "a one-sample Kaiser window";
+        expect(nothrow([&] { segmenter.prepare(16UZ, 4UZ, 0., gr::algorithm::window::Type::kaiser); }));
         expect(eq(segmenter.taper.size(), 16UZ));
     };
 };

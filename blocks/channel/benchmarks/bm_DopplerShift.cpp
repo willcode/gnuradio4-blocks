@@ -54,7 +54,7 @@ template<typename TBlock>
         times[k]       = static_cast<std::int64_t>(std::llround(t * 1e9));
         offsets[k]     = -10'000. * std::tanh((t - 300.) / 60.);
     }
-    return {{"sample_rate", kSampleRate}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}, {"direction", std::string("Apply")}};
+    return {{"sample_rate", kSampleRate}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}, {"direction", std::string("apply")}};
 }
 
 } // namespace

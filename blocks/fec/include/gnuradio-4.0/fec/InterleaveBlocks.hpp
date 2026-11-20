@@ -69,7 +69,7 @@ struct InterleaverOrigin {
 
 //! The family settings one kernel is built from; the readout window is Interleave's alone.
 struct InterleaverSettings {
-    gr::fec::InterleaverKind kind         = gr::fec::InterleaverKind::Unset;
+    gr::fec::InterleaverKind kind         = gr::fec::InterleaverKind::unset;
     gr::Size_t               rows         = 0U;
     gr::Size_t               cols         = 0U;
     gr::Size_t               windowOffset = 0U;
@@ -85,13 +85,13 @@ struct InterleaverSettings {
 template<typename T>
 [[nodiscard]] inline gr::fec::Interleaver<T> interleaverKernel(const InterleaverSettings& settings) {
     const T fill = static_cast<T>(settings.fillValue);
-    if (settings.kind == gr::fec::InterleaverKind::Block) {
+    if (settings.kind == gr::fec::InterleaverKind::block) {
         const std::size_t frame  = std::size_t{settings.rows} * settings.cols;
         const std::size_t length = settings.windowLength == 0U ? frame : settings.windowLength;
         return gr::fec::Interleaver<T>::block(settings.rows, settings.cols, settings.windowOffset, length, fill);
     }
     if constexpr (std::same_as<T, std::uint8_t>) {
-        if (settings.kind == gr::fec::InterleaverKind::Convolutional) {
+        if (settings.kind == gr::fec::InterleaverKind::convolutional) {
             return gr::fec::Interleaver<T>::convolutional(settings.branches, settings.unitDelay, fill);
         }
     }
@@ -103,7 +103,7 @@ template<typename T>
 template<typename T, typename TSettings>
 [[nodiscard]] std::optional<gr::Refused> checkInterleaver(const TSettings& s) {
     switch (s.kind.value) {
-    case gr::fec::InterleaverKind::Block:
+    case gr::fec::InterleaverKind::block:
         if (s.rows.value == 0U) {
             return gr::Refused(s.rows, "required");
         }
@@ -111,7 +111,7 @@ template<typename T, typename TSettings>
             return gr::Refused(s.cols, "required");
         }
         return {};
-    case gr::fec::InterleaverKind::Convolutional:
+    case gr::fec::InterleaverKind::convolutional:
         if (!std::same_as<T, std::uint8_t>) {
             return gr::Refused(s.kind, "convolutional requires byte items");
         }
@@ -122,12 +122,12 @@ template<typename T, typename TSettings>
             return gr::Refused(s.unit_delay, "required");
         }
         return {};
-    case gr::fec::InterleaverKind::Permutation:
+    case gr::fec::InterleaverKind::permutation:
         if (s.table.value.empty()) {
             return gr::Refused(s.table, "required");
         }
         return {};
-    case gr::fec::InterleaverKind::Unset: break;
+    case gr::fec::InterleaverKind::unset: break;
     }
     return gr::Refused(s.kind, "required");
 }
@@ -226,7 +226,7 @@ convolutional, branch b of the `branches` delay lines holds b * unit_delay cells
     PortOut<DataSet<T>, Async> out;
 
     struct Settings {
-        Annotated<gr::fec::InterleaverKind, Doc<"interleaver family">, Visible>   kind          = gr::fec::InterleaverKind::Unset;
+        Annotated<gr::fec::InterleaverKind, Doc<"interleaver family">, Visible>   kind          = gr::fec::InterleaverKind::unset;
         Annotated<gr::Size_t, Doc<"block rows">, Visible>                         rows          = 0U;
         Annotated<gr::Size_t, Doc<"block columns">, Visible>                      cols          = 0U;
         Annotated<gr::Size_t, Doc<"readout window offset">>                       window_offset = 0U;
@@ -287,7 +287,7 @@ convolutional, branch b of the `branches` delay lines holds b * unit_delay cells
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const bool        stream   = interleaver->kind() == gr::fec::InterleaverKind::Convolutional;
+        const bool        stream   = interleaver->kind() == gr::fec::InterleaverKind::convolutional;
         const std::size_t inFrame  = interleaver->frameSize();
         const std::size_t outFrame = interleaver->interleavedSize();
 
@@ -364,7 +364,7 @@ inverted once at configure.
     PortOut<DataSet<T>, Async> out;
 
     struct Settings {
-        Annotated<gr::fec::InterleaverKind, Doc<"interleaver family">, Visible>   kind          = gr::fec::InterleaverKind::Unset;
+        Annotated<gr::fec::InterleaverKind, Doc<"interleaver family">, Visible>   kind          = gr::fec::InterleaverKind::unset;
         Annotated<gr::Size_t, Doc<"block rows">, Visible>                         rows          = 0U;
         Annotated<gr::Size_t, Doc<"block columns">, Visible>                      cols          = 0U;
         Annotated<gr::Size_t, Doc<"output offset">>                               output_offset = 0U;
@@ -396,7 +396,7 @@ inverted once at configure.
             return refused;
         }
         const gr::fec::Interleaver<T> kernel = kernelOf(s);
-        if (s.kind == gr::fec::InterleaverKind::Convolutional) { // stream-shaped: there is no frame for an output window to address
+        if (s.kind == gr::fec::InterleaverKind::convolutional) { // stream-shaped: there is no frame for an output window to address
             if (s.output_offset != 0U) {
                 return gr::Refused(s.output_offset, "must be 0 when kind is convolutional");
             }
@@ -416,7 +416,7 @@ inverted once at configure.
 
     void applySettings(const Settings& s) {
         interleaver.emplace(kernelOf(s));
-        const bool framed = interleaver->kind() != gr::fec::InterleaverKind::Convolutional; // the window is read by the framed kinds alone
+        const bool framed = interleaver->kind() != gr::fec::InterleaverKind::convolutional; // the window is read by the framed kinds alone
         _outOffset        = framed ? std::size_t{s.output_offset} : 0UZ;
         _outLength        = framed && s.output_length != 0U ? std::size_t{s.output_length} : interleaver->frameSize() - _outOffset;
         _origins.reset();
@@ -436,7 +436,7 @@ inverted once at configure.
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const bool        stream   = interleaver->kind() == gr::fec::InterleaverKind::Convolutional;
+        const bool        stream   = interleaver->kind() == gr::fec::InterleaverKind::convolutional;
         const std::size_t inFrame  = interleaver->interleavedSize();
         const std::size_t outFrame = interleaver->frameSize();
 

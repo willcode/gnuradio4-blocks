@@ -25,21 +25,21 @@ namespace gr::blocks::basic {
 using namespace gr;
 
 namespace function_generator {
-enum class SignalType : int { Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse, UniformNoise, TriangularNoise, GaussianNoise, Sin, Cos, FastSin, FastCos };
+enum class SignalType : int { constant, linear_ramp, parabolic_ramp, cubic_spline, impulse_response, uniform_noise, triangular_noise, gaussian_noise, sin, cos, fast_sin, fast_cos };
 enum class ParameterType : int { signal_type, start_value, final_value, duration, round_off_time, impulse_time0, impulse_time1, tone_frequency, phase };
 
 using enum SignalType;
 using enum ParameterType;
 constexpr auto SignalTypeList = magic_enum::enum_values<SignalType>();
 
-constexpr bool isToneType(SignalType type) noexcept { return type == Sin || type == Cos || type == FastSin || type == FastCos; }
+constexpr bool isToneType(SignalType type) noexcept { return type == sin || type == cos || type == fast_sin || type == fast_cos; }
 
 constexpr gr::signal::ToneType toToneType(SignalType type) noexcept {
     switch (type) {
-    case Sin: return gr::signal::ToneType::Sin;
-    case Cos: return gr::signal::ToneType::Cos;
-    case FastSin: return gr::signal::ToneType::FastSin;
-    case FastCos: return gr::signal::ToneType::FastCos;
+    case sin: return gr::signal::ToneType::Sin;
+    case cos: return gr::signal::ToneType::Cos;
+    case fast_sin: return gr::signal::ToneType::FastSin;
+    case fast_cos: return gr::signal::ToneType::FastCos;
     default: std::unreachable();
     }
 }
@@ -63,42 +63,42 @@ requires std::is_same_v<EnumType, SignalType> || std::is_same_v<EnumType, Parame
 // each create*PropertyMap returns one segment: the settings a FunctionGenerator puts in force when its `segment` names it
 template<typename T>
 [[nodiscard]] property_map createConstPropertyMap(T startValue) {
-    return {createPropertyMapEntry(signal_type, Const), createPropertyMapEntry(start_value, startValue)};
+    return {createPropertyMapEntry(signal_type, constant), createPropertyMapEntry(start_value, startValue)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createLinearRampPropertyMap(T startValue, T finalValue, T durationValue) {
-    return {createPropertyMapEntry(signal_type, LinearRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
+    return {createPropertyMapEntry(signal_type, linear_ramp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createParabolicRampPropertyMap(T startValue, T finalValue, T durationValue, T roundOffTime) {
-    return {createPropertyMapEntry(signal_type, ParabolicRamp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime)};
+    return {createPropertyMapEntry(signal_type, parabolic_ramp), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue), createPropertyMapEntry(round_off_time, roundOffTime)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createCubicSplinePropertyMap(T startValue, T finalValue, T durationValue) {
-    return {createPropertyMapEntry(signal_type, CubicSpline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
+    return {createPropertyMapEntry(signal_type, cubic_spline), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(duration, durationValue)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createImpulseResponsePropertyMap(T startValue, T finalValue, T time0, T time1) {
-    return {createPropertyMapEntry(signal_type, ImpulseResponse), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
+    return {createPropertyMapEntry(signal_type, impulse_response), createPropertyMapEntry(start_value, startValue), createPropertyMapEntry(final_value, finalValue), createPropertyMapEntry(impulse_time0, time0), createPropertyMapEntry(impulse_time1, time1)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createUniformNoisePropertyMap(T amplitude) {
-    return {createPropertyMapEntry(signal_type, UniformNoise), createPropertyMapEntry(start_value, amplitude)};
+    return {createPropertyMapEntry(signal_type, uniform_noise), createPropertyMapEntry(start_value, amplitude)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createTriangularNoisePropertyMap(T amplitude) {
-    return {createPropertyMapEntry(signal_type, TriangularNoise), createPropertyMapEntry(start_value, amplitude)};
+    return {createPropertyMapEntry(signal_type, triangular_noise), createPropertyMapEntry(start_value, amplitude)};
 }
 
 template<typename T>
 [[nodiscard]] property_map createGaussianNoisePropertyMap(T amplitude) {
-    return {createPropertyMapEntry(signal_type, GaussianNoise), createPropertyMapEntry(start_value, amplitude)};
+    return {createPropertyMapEntry(signal_type, gaussian_noise), createPropertyMapEntry(start_value, amplitude)};
 }
 
 template<typename T>
@@ -108,22 +108,22 @@ template<typename T>
 
 template<typename T>
 [[nodiscard]] property_map createSinPropertyMap(T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
-    return createTonePropertyMap(Sin, freq, amplitude, phase, offset, durationValue);
+    return createTonePropertyMap(sin, freq, amplitude, phase, offset, durationValue);
 }
 
 template<typename T>
 [[nodiscard]] property_map createCosPropertyMap(T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
-    return createTonePropertyMap(Cos, freq, amplitude, phase, offset, durationValue);
+    return createTonePropertyMap(cos, freq, amplitude, phase, offset, durationValue);
 }
 
 template<typename T>
 [[nodiscard]] property_map createFastSinPropertyMap(T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
-    return createTonePropertyMap(FastSin, freq, amplitude, phase, offset, durationValue);
+    return createTonePropertyMap(fast_sin, freq, amplitude, phase, offset, durationValue);
 }
 
 template<typename T>
 [[nodiscard]] property_map createFastCosPropertyMap(T freq, T amplitude, T phase = T(0), T offset = T(0), T durationValue = T(0)) {
-    return createTonePropertyMap(FastCos, freq, amplitude, phase, offset, durationValue);
+    return createTonePropertyMap(fast_cos, freq, amplitude, phase, offset, durationValue);
 }
 
 /**
@@ -226,9 +226,9 @@ template<typename T>
 struct FunctionGenerator : Block<FunctionGenerator<T>>, BlockingSync<FunctionGenerator<T>> {
     using Description = Doc<R""(@brief generates function waveforms and their combinations, one named segment after another.
 
-Supported functions: Constant, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse,
-                     UniformNoise, TriangularNoise, GaussianNoise,
-                     Sin, Cos, FastSin, FastCos.
+Supported functions: constant, linear_ramp, parabolic_ramp, cubic_spline, impulse_response,
+                     uniform_noise, triangular_noise, gaussian_noise,
+                     sin, cos, fast_sin, fast_cos.
 
 Segments: `segments` maps a segment's name to the signal settings it holds (signal_type, the values, the duration).
 Setting `segment` to a name runs that segment's values and restarts the waveform; a signal setting the same call
@@ -242,8 +242,8 @@ Operating modes:
   clk_in connected: generates one sample per clock input sample
   clk_in disconnected: free-running mode synchronised to wall-clock time
 
-`chunk_size` is the samples per update in free-running mode. `round_off_time` serves ParabolicRamp; `impulse_time0`
-and `impulse_time1` serve ImpulseResponse.
+`chunk_size` is the samples per update in free-running mode. `round_off_time` serves parabolic_ramp; `impulse_time0`
+and `impulse_time1` serve impulse_response.
 `tone_frequency` is the tone's own frequency, apart from the stream's gr:frequency.
 )"">;
 
@@ -259,7 +259,7 @@ and `impulse_time1` serve ImpulseResponse.
         // a command, not a state: the apply hook restarts the waveform and assigns false, so each true restarts again
         Annotated<bool, Doc<"segment restart">> trigger = false;
 
-        Annotated<function_generator::SignalType, Visible, Doc<"signal type">>   signal_type    = function_generator::Const;
+        Annotated<function_generator::SignalType, Visible, Doc<"signal type">>   signal_type    = function_generator::constant;
         Annotated<float>                                                         start_value    = 0.f;
         Annotated<float>                                                         final_value    = 0.f;
         Annotated<float, Unit<"s">, Doc<"duration">>                             duration       = 0.f;
@@ -283,7 +283,7 @@ and `impulse_time1` serve ImpulseResponse.
 
     // the values the waveform runs: the host's signal settings, overlaid by the values of the segment in force
     struct Signal {
-        function_generator::SignalType signal_type    = function_generator::Const;
+        function_generator::SignalType signal_type    = function_generator::constant;
         float                          start_value    = 0.f;
         float                          final_value    = 0.f;
         float                          duration       = 0.f;
@@ -407,7 +407,7 @@ and `impulse_time1` serve ImpulseResponse.
         _sampleCounter++;
         using enum function_generator::SignalType;
 
-        if (_signal.signal_type == UniformNoise || _signal.signal_type == TriangularNoise || _signal.signal_type == GaussianNoise) {
+        if (_signal.signal_type == uniform_noise || _signal.signal_type == triangular_noise || _signal.signal_type == gaussian_noise) {
             _currentTime += _timeTick;
             if constexpr (gr::signal::detail::is_complex_v<T>) {
                 using F           = typename T::value_type;
@@ -446,17 +446,17 @@ and `impulse_time1` serve ImpulseResponse.
 
         double value{};
         switch (_signal.signal_type) {
-        case Const: value = sv; break;
-        case LinearRamp: value = _currentTime > dur ? fv : sv + (fv - sv) * (_currentTime / dur); break;
-        case ParabolicRamp: value = calculateParabolicRamp(); break;
-        case CubicSpline: {
+        case constant: value = sv; break;
+        case linear_ramp: value = _currentTime > dur ? fv : sv + (fv - sv) * (_currentTime / dur); break;
+        case parabolic_ramp: value = calculateParabolicRamp(); break;
+        case cubic_spline: {
             const double t  = _currentTime / dur;
             const double t2 = 3. * t * t;
             const double t3 = 2. * t * t * t;
             value           = _currentTime > dur ? fv : (t3 - t2 + 1.) * sv + (-t3 + t2) * fv;
             break;
         }
-        case ImpulseResponse: {
+        case impulse_response: {
             const double it0 = static_cast<double>(_signal.impulse_time0);
             const double it1 = static_cast<double>(_signal.impulse_time1);
             value            = (_currentTime < it0 || _currentTime > it0 + it1) ? sv : fv;
@@ -584,8 +584,8 @@ private:
 
     void configureGeneratorsFromSettings() noexcept {
         using enum function_generator::SignalType;
-        if (_signal.signal_type == UniformNoise || _signal.signal_type == TriangularNoise || _signal.signal_type == GaussianNoise) {
-            const auto noiseType = static_cast<gr::signal::NoiseType>(static_cast<int>(_signal.signal_type) - static_cast<int>(UniformNoise));
+        if (_signal.signal_type == uniform_noise || _signal.signal_type == triangular_noise || _signal.signal_type == gaussian_noise) {
+            const auto noiseType = static_cast<gr::signal::NoiseType>(static_cast<int>(_signal.signal_type) - static_cast<int>(uniform_noise));
             _noise.configure(noiseType, static_cast<double>(_signal.start_value), 0., _signal.seed); // start_value = noise amplitude
         } else if (function_generator::isToneType(_signal.signal_type)) {
             // for tone types: final_value = amplitude, start_value = offset (reused from ramp semantics)

@@ -223,7 +223,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
         const auto stuffed = [](std::string_view delimiter, unsigned k) {
             DelimiterConfig cfg;
             cfg.endDelimiter    = std::string(delimiter);
-            cfg.transparency    = Transparency::BitStuffing;
+            cfg.transparency    = Transparency::bit_stuffing;
             cfg.stuffAfterOnes  = k;
             cfg.abortOnes       = k + 2U;
             cfg.maxPayloadItems = 256UZ;
@@ -242,7 +242,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
                 cfg.endDelimiter.push_back(((delimiterValue >> bit) & 1U) != 0U ? '1' : '0');
             }
             cfg.bitsPerItem     = 8U;
-            cfg.transparency    = Transparency::ByteEscape;
+            cfg.transparency    = Transparency::byte_escape;
             cfg.escapeItem      = 0xDBU;
             cfg.escapeMap       = {{0xDCU, 0xC0U}, {0xDDU, 0xDBU}};
             cfg.maxPayloadItems = 256UZ;
@@ -329,7 +329,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             const std::string flag = flagFor(k);
             DelimiterConfig   cfg;
             cfg.endDelimiter    = flag;
-            cfg.transparency    = Transparency::BitStuffing;
+            cfg.transparency    = Transparency::bit_stuffing;
             cfg.stuffAfterOnes  = k;
             cfg.abortOnes       = 0U; // an all-ones payload is legal data here rather than an abort
             cfg.maxPayloadItems = 4096UZ;
@@ -414,7 +414,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
         DelimiterConfig cfg = gr::digital::hdlc();
         cfg.maxPayloadItems = 1024UZ;
         cfg.packBits        = 8U;
-        cfg.packOrder       = gr::math::BitOrder::LsbFirst;
+        cfg.packOrder       = gr::math::BitOrder::lsb_first;
         gr::digital::framerConfigure(cfg);
 
         gr::digital::DelimiterEncoder encoder;
@@ -447,7 +447,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
         // disagree about: the machine clears the count as the opening delimiter opens the frame, so the encoder does
         DelimiterConfig cfg;
         cfg.endDelimiter    = "0111111";
-        cfg.transparency    = Transparency::BitStuffing;
+        cfg.transparency    = Transparency::bit_stuffing;
         cfg.stuffAfterOnes  = 5U;
         cfg.abortOnes       = 0U; // the delimiter's own run would otherwise abandon the frame carrying it
         cfg.maxPayloadItems = 4096UZ;
@@ -499,7 +499,7 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             DelimiterConfig cfg;
             cfg.endDelimiter    = "11000000"; // 0xC0
             cfg.bitsPerItem     = 8U;
-            cfg.transparency    = Transparency::ByteEscape;
+            cfg.transparency    = Transparency::byte_escape;
             cfg.escapeItem      = introducer;
             cfg.escapeMap       = std::move(pairs);
             cfg.maxPayloadItems = 256UZ;
@@ -516,9 +516,9 @@ const boost::ut::suite<"delimiter scanner"> delimiterTests = [] {
             DelimiterConfig cfg;
             cfg.endDelimiter    = "11000000"; // 0xC0
             cfg.startDelimiter  = "00100100"; // '$'
-            cfg.frameOpen       = FrameOpen::Start;
+            cfg.frameOpen       = FrameOpen::start;
             cfg.bitsPerItem     = 8U;
-            cfg.transparency    = Transparency::ByteEscape;
+            cfg.transparency    = Transparency::byte_escape;
             cfg.escapeItem      = 0xDBU;
             cfg.escapeMap       = std::move(pairs);
             cfg.maxPayloadItems = 256UZ;

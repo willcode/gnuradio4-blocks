@@ -134,7 +134,7 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
         const std::vector<std::int64_t> times{0LL, 1'000'000'000LL};
         const std::vector<double>       offsets{kStart, kEnd};
 
-        auto       block = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}, {"direction", std::string("Apply")}});
+        auto       block = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", times}, {"schedule_offsets_hz", offsets}, {"direction", std::string("apply")}});
         const auto input = ones(nSamples);
         const auto out   = runChunked(*block, std::span<const C>(input), nSamples);
 
@@ -186,8 +186,8 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
             input[k] = C(bits.next() != 0U ? 1.f : -1.f, bits.next() != 0U ? 1.f : -1.f) * 0.70710678f;
         }
 
-        auto applied   = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("Apply")}});
-        auto corrected = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("Correct")}});
+        auto applied   = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("apply")}});
+        auto corrected = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("correct")}});
 
         const auto shifted  = runChunked(*applied, std::span<const C>(input), 8192UZ);
         const auto restored = runChunked(*corrected, std::span<const C>(shifted), 8192UZ);
@@ -439,9 +439,9 @@ const boost::ut::suite<"doppler shift"> dopplerShiftTests = [] {
             std::vector<C>            symbols(kChunk);
             std::vector<C>            scratch(kChunk);
 
-            auto applied = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("Apply")}});
+            auto applied = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("apply")}});
             auto noise   = configured<AwgnChannel<C>>({{"noise_power", kNoise}, {"seed", std::uint64_t{20260902}}});
-            auto removed = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("Correct")}});
+            auto removed = configured<DopplerShift<C>>({{"sample_rate", static_cast<float>(fs)}, {"schedule_times_ns", pass.times}, {"schedule_offsets_hz", pass.offsets}, {"direction", std::string("correct")}});
 
             std::uint64_t errors = 0ULL;
             for (std::size_t at = 0UZ; at < kSymbols; at += kChunk) {
@@ -484,7 +484,7 @@ const boost::ut::suite<"DopplerShift settings at the initialization"> dopplerIni
 
     "DopplerShift initializes at its defaults and with each setting off its default"_test = [] {
         const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::channel::DopplerShift<std::complex<float>>>({
-            {"direction", std::string("Correct")},
+            {"direction", std::string("correct")},
             {"sample_rate", 1e6f},
             {"anchor_index", std::uint64_t{10U}},
             {"anchor_ns", std::int64_t{5}},

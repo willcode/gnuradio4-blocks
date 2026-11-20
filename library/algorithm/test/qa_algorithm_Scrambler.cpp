@@ -50,7 +50,7 @@ using gr::math::BitRepack;
 using gr::math::configureRepack;
 using gr::math::repack;
 
-constexpr BitOrder kOrders[] = {BitOrder::MsbFirst, BitOrder::LsbFirst};
+constexpr BitOrder kOrders[] = {BitOrder::msb_first, BitOrder::lsb_first};
 
 constexpr ScramblerMode kModes[] = {ScramblerMode::Additive, ScramblerMode::MultiplicativeScramble, ScramblerMode::MultiplicativeDescramble};
 
@@ -79,7 +79,7 @@ constexpr std::string_view kMultiplicative[] = {"18,23", "5,23", "14,17", "4,7",
     return cfg;
 }
 
-[[nodiscard]] ScramblerConfig additive(std::string_view taps, std::string_view seed, unsigned width = 8U, BitOrder order = BitOrder::MsbFirst) { return configured(taps, seedFromBitString(seed, degreeOf(tapsFromDelayList(taps))), ScramblerMode::Additive, width, order); }
+[[nodiscard]] ScramblerConfig additive(std::string_view taps, std::string_view seed, unsigned width = 8U, BitOrder order = BitOrder::msb_first) { return configured(taps, seedFromBitString(seed, degreeOf(tapsFromDelayList(taps))), ScramblerMode::Additive, width, order); }
 
 [[nodiscard]] std::uint64_t maskOf(std::uint8_t degree) { return degree == 64U ? ~std::uint64_t{0} : ((std::uint64_t{1} << degree) - std::uint64_t{1}); }
 
@@ -297,7 +297,7 @@ struct Replay {
 /// The input that holds a multiplicative scrambler's output at all zeros: a descrambler of the same shape run over
 /// zeros produces exactly it, whatever the seed. `[in]` carries the same configuration the scrambler will use.
 [[nodiscard]] std::vector<std::uint8_t> lockUpInput(std::string_view taps, std::uint64_t seed, bool invert, std::uint32_t modulus, std::size_t count) {
-    ScramblerConfig cfg = configured(taps, seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+    ScramblerConfig cfg = configured(taps, seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
     configureMonitor(cfg, invert, modulus, modulus == 0U ? "" : "1,2");
     const std::vector<std::uint8_t> zeros(count, std::uint8_t{0});
     return through(cfg, zeros);
@@ -471,7 +471,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
                     ++cases;
                     const bool ok = firstDifference(twice, source) == source.size();
                     failures += ok ? 0UZ : 1UZ;
-                    expect(ok) << std::format("{} at {} bits, {} differs at item {}", entry.name, width, order == BitOrder::MsbFirst ? "msb_first" : "lsb_first", firstDifference(twice, source));
+                    expect(ok) << std::format("{} at {} bits, {} differs at item {}", entry.name, width, order == BitOrder::msb_first ? "msb_first" : "lsb_first", firstDifference(twice, source));
                 }
             }
         }
@@ -514,14 +514,14 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         for (const std::string_view taps : kMultiplicative) {
             const std::uint8_t degree  = degreeOf(tapsFromDelayList(taps));
             const auto         source  = randomItems(4000UZ, 1U, 0x452821E638D01377ULL);
-            ScramblerConfig    tx      = configured(taps, 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+            ScramblerConfig    tx      = configured(taps, 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
             const auto         channel = through(tx, source);
 
             std::size_t lateFailures = 0UZ;
             std::size_t worst        = 0UZ;
             for (std::size_t trial = 0UZ; trial < 50UZ; ++trial) {
                 const std::uint64_t wrong = engine() & maskOf(degree);
-                ScramblerConfig     rx    = configured(taps, wrong, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig     rx    = configured(taps, wrong, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
                 const auto          out   = through(rx, channel);
 
                 std::size_t firstCorrect = 0UZ;
@@ -543,11 +543,11 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         for (const std::string_view taps : kMultiplicative) {
             const std::uint8_t degree  = degreeOf(tapsFromDelayList(taps));
             const auto         source  = randomItems(4000UZ, 1U, 0xBE5466CF34E90C6CULL);
-            ScramblerConfig    tx      = configured(taps, std::uint64_t{0x2B7E151628AED2A6} & maskOf(degree), ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+            ScramblerConfig    tx      = configured(taps, std::uint64_t{0x2B7E151628AED2A6} & maskOf(degree), ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
             const auto         channel = through(tx, source);
 
             for (const std::size_t join : {1UZ, 7UZ, 137UZ, 1999UZ}) {
-                ScramblerConfig rx  = configured(taps, std::uint64_t{0xABF7158809CF4F3C} & maskOf(degree), ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig rx  = configured(taps, std::uint64_t{0xABF7158809CF4F3C} & maskOf(degree), ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
                 const auto      out = through(rx, std::span<const std::uint8_t>{channel}.subspan(join));
 
                 std::size_t offside = 0UZ;
@@ -569,7 +569,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             const std::uint8_t degree = degreeOf(mask);
             const std::size_t  wanted = 1UZ + static_cast<std::size_t>(tapCountOf(mask));
 
-            ScramblerConfig tx      = configured(taps, 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+            ScramblerConfig tx      = configured(taps, 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
             const auto      channel = through(tx, source);
 
             std::size_t offside = 0UZ;
@@ -578,7 +578,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
                 const std::size_t         position  = static_cast<std::size_t>(degree) + 8UZ + engine() % (corrupted.size() - 2UZ * static_cast<std::size_t>(degree) - 16UZ);
                 corrupted[position] ^= std::uint8_t{1};
 
-                ScramblerConfig rx  = configured(taps, 0ULL, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig rx  = configured(taps, 0ULL, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
                 const auto      out = through(rx, corrupted);
                 offside += (out.size() - agreementCount(out, source)) == wanted ? 0UZ : 1UZ;
             }
@@ -681,7 +681,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             for (const unsigned width : {1U, 8U}) {
                 for (const ScramblerMode mode : kModes) {
                     const auto      source = randomItems(5000UZ, width, 0xDA1D8CB0DB0C0EA6ULL + cases);
-                    ScramblerConfig cfg    = configured(taps, std::uint64_t{0x5AA5F00F} & maskOf(degree), mode, width, BitOrder::MsbFirst);
+                    ScramblerConfig cfg    = configured(taps, std::uint64_t{0x5AA5F00F} & maskOf(degree), mode, width, BitOrder::msb_first);
                     const auto      whole  = inChunks(cfg, source, source.size(), kEpoch);
 
                     for (const std::size_t chunk : {1UZ, 3UZ, 17UZ, 4096UZ}) {
@@ -725,14 +725,14 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
                 repack(up, scrambled, packed);
 
                 ++cases;
-                expect(eq(firstDifference(packed, wanted), kBytes)) << std::format("scrambling {} bits at a time under {} differs from scrambling whole bytes", width, order == BitOrder::MsbFirst ? "msb_first" : "lsb_first");
+                expect(eq(firstDifference(packed, wanted), kBytes)) << std::format("scrambling {} bits at a time under {} differs from scrambling whole bytes", width, order == BitOrder::msb_first ? "msb_first" : "lsb_first");
             }
         }
         expect(eq(cases, 10UZ));
 
         // and the negative half: the two orders are not interchangeable
-        ScramblerConfig   msb   = additive("1,3,5,8", "11111111", 8U, BitOrder::MsbFirst);
-        ScramblerConfig   lsb   = additive("1,3,5,8", "11111111", 8U, BitOrder::LsbFirst);
+        ScramblerConfig   msb   = additive("1,3,5,8", "11111111", 8U, BitOrder::msb_first);
+        ScramblerConfig   lsb   = additive("1,3,5,8", "11111111", 8U, BitOrder::lsb_first);
         const std::size_t agree = agreementCount(through(msb, source), through(lsb, source));
         expect(that % (agree * 4UZ < kBytes)) << std::format("the two orders agreed on {} of {} bytes, which should be only the bit-palindromes", agree, kBytes);
     };
@@ -754,11 +754,11 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         const ScramblerConfig before = cfg;
         const TapMask         ccsds  = tapsFromDelayList("1,3,5,8");
 
-        expect(throws<std::invalid_argument>([&cfg] { configureScrambler(cfg, 0ULL, 0ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst); })) << "an empty tap set";
+        expect(throws<std::invalid_argument>([&cfg] { configureScrambler(cfg, 0ULL, 0ULL, ScramblerMode::Additive, 8U, BitOrder::msb_first); })) << "an empty tap set";
         for (const unsigned bad : {0U, 9U, 16U}) {
-            expect(throws<std::invalid_argument>([&cfg, bad] { configureScrambler(cfg, ccsds, 0xFFULL, ScramblerMode::Additive, bad, BitOrder::MsbFirst); })) << std::format("bitsPerItem = {}", bad);
+            expect(throws<std::invalid_argument>([&cfg, bad] { configureScrambler(cfg, ccsds, 0xFFULL, ScramblerMode::Additive, bad, BitOrder::msb_first); })) << std::format("bitsPerItem = {}", bad);
         }
-        expect(throws<std::invalid_argument>([&cfg] { configureScrambler(cfg, ccsds, 0x100ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst); })) << "a seed carrying bits above the degree";
+        expect(throws<std::invalid_argument>([&cfg] { configureScrambler(cfg, ccsds, 0x100ULL, ScramblerMode::Additive, 8U, BitOrder::msb_first); })) << "a seed carrying bits above the degree";
 
         expect(eq(cfg.taps, before.taps)) << "a rejected setting leaves the previous configuration standing";
         expect(eq(cfg.seed, before.seed));
@@ -780,7 +780,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         for (const ScramblerMode mode : kModes) {
             expect(nothrow([mode] {
                 ScramblerConfig zero{};
-                configureScrambler(zero, ccsds, 0ULL, mode, 8U, BitOrder::MsbFirst);
+                configureScrambler(zero, ccsds, 0ULL, mode, 8U, BitOrder::msb_first);
             }));
         }
     };
@@ -894,7 +894,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         for (const Derived& row : kDerived) {
             const TapMask   mask = tapsFromDelayList(row.taps);
             ScramblerConfig cfg{};
-            configureScrambler(cfg, mask, 0x1ULL, ScramblerMode::Additive, 8U, BitOrder::MsbFirst);
+            configureScrambler(cfg, mask, 0x1ULL, ScramblerMode::Additive, 8U, BitOrder::msb_first);
 
             expect(eq(static_cast<unsigned>(degreeOf(mask)), row.degree)) << row.taps;
             expect(eq(static_cast<unsigned>(minDelayOf(mask)), row.minDelay)) << row.taps;
@@ -906,7 +906,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
             // a multiplicative configuration holds nothing but its register
             ScramblerConfig self{};
-            configureScrambler(self, mask, 0x1ULL, ScramblerMode::MultiplicativeScramble, 8U, BitOrder::MsbFirst);
+            configureScrambler(self, mask, 0x1ULL, ScramblerMode::MultiplicativeScramble, 8U, BitOrder::msb_first);
             expect(eq(self.table.size(), 0UZ)) << std::format("{}: only the additive mode has a sequence to tabulate", row.taps);
         }
 
@@ -937,7 +937,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         // a zero seed is a dead generator, which is why an additive block refuses one
         for (const Entry& entry : kAdditive) {
             const std::uint8_t degree = degreeOf(tapsFromDelayList(entry.taps));
-            ScramblerConfig    dead   = configured(entry.taps, 0ULL, ScramblerMode::Additive, 1U, BitOrder::MsbFirst);
+            ScramblerConfig    dead   = configured(entry.taps, 0ULL, ScramblerMode::Additive, 1U, BitOrder::msb_first);
             const auto         bits   = sequenceItems(dead, 64UZ);
             expect(std::ranges::all_of(bits, [](std::uint8_t bit) { return bit == 0U; })) << std::format("{} at degree {} generates nothing from an all-zero seed", entry.name, degree);
         }
@@ -953,11 +953,11 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             const std::uint8_t                 degree = degreeOf(tapsFromDelayList(taps));
             const std::array<std::uint64_t, 2> seeds{std::uint64_t{0}, std::uint64_t{0x71574E69A458FEA3} & maskOf(degree)};
             for (const std::uint64_t seed : seeds) {
-                ScramblerConfig                 shape = configured(taps, seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig                 shape = configured(taps, seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
                 const std::vector<std::uint8_t> zeros(20000UZ, std::uint8_t{0});
                 const auto                      crafted = through(shape, zeros);
 
-                ScramblerConfig tx  = configured(taps, seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig tx  = configured(taps, seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
                 const auto      out = through(tx, crafted);
                 expect(std::ranges::all_of(out, [](std::uint8_t bit) { return bit == 0U; })) << std::format("taps {}: a crafted input holds the output at a constant, and no run-length monitor is offered", taps);
             }
@@ -975,10 +975,10 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         };
         // pn9's three choices are confirmed together by one string: taps, seed and bit order each have an alternative
         // here, and each alternative produces its own bytes and not the vendor's.
-        constexpr Variant kPn9[] = {{"{4,9} lsb_first, the profile", "4,9", BitOrder::LsbFirst, "FF E1 1D 9A ED 85 33 24"}, //
-            {"{4,9} msb_first", "4,9", BitOrder::MsbFirst, "FF 87 B8 59 B7 A1 CC 24"},                                      //
-            {"{5,9} lsb_first, the reciprocal reading", "5,9", BitOrder::LsbFirst, "FF C1 FB E8 4C 90 72 8B"},              //
-            {"{5,9} msb_first", "5,9", BitOrder::MsbFirst, "FF 83 DF 17 32 09 4E D1"}};
+        constexpr Variant kPn9[] = {{"{4,9} lsb_first, the profile", "4,9", BitOrder::lsb_first, "FF E1 1D 9A ED 85 33 24"}, //
+            {"{4,9} msb_first", "4,9", BitOrder::msb_first, "FF 87 B8 59 B7 A1 CC 24"},                                      //
+            {"{5,9} lsb_first, the reciprocal reading", "5,9", BitOrder::lsb_first, "FF C1 FB E8 4C 90 72 8B"},              //
+            {"{5,9} msb_first", "5,9", BitOrder::msb_first, "FF 83 DF 17 32 09 4E D1"}};
 
         std::vector<std::string> openings;
         for (const Variant& variant : kPn9) {
@@ -990,12 +990,12 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         std::ranges::sort(openings);
         expect(eq(std::ranges::unique(openings).size(), 0UZ)) << "the four readings are four different sequences, so the check value pins all three choices at once";
 
-        ScramblerConfig pn9 = additive("4,9", "111111111", 8U, BitOrder::LsbFirst);
+        ScramblerConfig pn9 = additive("4,9", "111111111", 8U, BitOrder::lsb_first);
         expect(eq(hexOf(sequenceItems(pn9, 16UZ)), std::string{"FF E1 1D 9A ED 85 33 24 EA 7A D2 39 70 97 57 0A"})) << "the sixteen bytes the CC11xx and SX12xx data sheets describe";
 
         // si4463: pn9's recursion at the phase the chip's register model emits — all effective stages seeded ones,
         // the Galois form of the documented tap mask, output at bit 0
-        ScramblerConfig si4463 = additive("4,9", "111100001", 8U, BitOrder::LsbFirst);
+        ScramblerConfig si4463 = additive("4,9", "111100001", 8U, BitOrder::lsb_first);
         expect(eq(hexOf(sequenceItems(si4463, 8UZ)), std::string{"0F EF D0 6C 2F 9C 21 51"})) << "pn9's sequence advanced five steps, not pn9's own phase";
 
         // g3ruh: nothing offline separates the two readings, so both are recorded and a swapped one is visible
@@ -1062,7 +1062,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         std::size_t checked   = 0UZ;
         std::size_t shifted   = 0UZ;
         for (std::uint64_t seed = 1ULL; seed <= kPeriod; ++seed) {
-            ScramblerConfig cfg  = configured("4,9", seed, ScramblerMode::Additive, 1U, BitOrder::MsbFirst);
+            ScramblerConfig cfg  = configured("4,9", seed, ScramblerMode::Additive, 1U, BitOrder::msb_first);
             const auto      bits = sequenceItems(cfg, kPeriod);
 
             bool found = false;
@@ -1115,7 +1115,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             ScramblerConfig tx{};
             configureScrambler(tx, g3ruh.taps, g3ruh.seed, ScramblerMode::MultiplicativeScramble, 1U, g3ruh.order);
 
-            ScramblerConfig rx = configured("12,17", seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+            ScramblerConfig rx = configured("12,17", seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
             const auto      y  = through(tx, source);
             const auto      x  = through(rx, y);
 
@@ -1137,7 +1137,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         ScramblerConfig walked    = ScramblerConfig{};
         applyProfile(walked, "pn9", ScramblerMode::Additive);
         ScramblerConfig supplied = ScramblerConfig{};
-        configureExplicit(supplied, packed, kPeriod, 8U, BitOrder::LsbFirst, true);
+        configureExplicit(supplied, packed, kPeriod, 8U, BitOrder::lsb_first, true);
 
         const auto source = randomItems(kPeriod * 10UZ / 8UZ, 8U, 0x452821E638D01377ULL);
         expect(eq(firstDifference(through(walked, source), through(supplied, source)), source.size())) << "the two mask sources agree bit for bit over ten periods";
@@ -1146,7 +1146,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         // (b) the counted refusal, as a number
         constexpr std::size_t kOverrun = 37UZ;
         ScramblerConfig       once     = ScramblerConfig{};
-        configureExplicit(once, packed, kPeriod, 1U, BitOrder::MsbFirst, false);
+        configureExplicit(once, packed, kPeriod, 1U, BitOrder::msb_first, false);
         const std::vector<std::uint8_t> ones(kPeriod + kOverrun, std::uint8_t{1});
         const auto                      covered = through(once, ones);
         expect(eq(once.nUnscrambledItems, kOverrun)) << "every item the sequence could not reach is counted";
@@ -1160,7 +1160,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         // repeating instead covers the whole epoch and counts nothing
         ScramblerConfig tiled = ScramblerConfig{};
-        configureExplicit(tiled, packed, kPeriod, 1U, BitOrder::MsbFirst, true);
+        configureExplicit(tiled, packed, kPeriod, 1U, BitOrder::msb_first, true);
         const auto whole = through(tiled, ones);
         expect(eq(tiled.nUnscrambledItems, 0UZ)) << "the tiling source leaves nothing uncovered";
         expect(that % (firstDifference(whole, covered) == kPeriod)) << "and the two sources part exactly where the sequence ran out";
@@ -1173,24 +1173,24 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto ignored = sequenceFromHex("   "); })) << "an empty sequence";
         expect(throws<std::invalid_argument>([&packed] {
             ScramblerConfig cfg{};
-            configureExplicit(cfg, packed, 0UZ, 8U, BitOrder::MsbFirst, true);
+            configureExplicit(cfg, packed, 0UZ, 8U, BitOrder::msb_first, true);
         })) << "a zero-length mask";
         expect(throws<std::invalid_argument>([&packed] {
             ScramblerConfig cfg{};
-            configureExplicit(cfg, packed, (1UZ << 20) + 1UZ, 8U, BitOrder::MsbFirst, true);
+            configureExplicit(cfg, packed, (1UZ << 20) + 1UZ, 8U, BitOrder::msb_first, true);
         })) << "a mask above 2^20 bits";
         expect(throws<std::invalid_argument>([&packed] {
             ScramblerConfig cfg{};
-            configureExplicit(cfg, packed, 9U * 1024UZ, 8U, BitOrder::MsbFirst, true);
+            configureExplicit(cfg, packed, 9U * 1024UZ, 8U, BitOrder::msb_first, true);
         })) << "more bits claimed than supplied";
         expect(throws<std::invalid_argument>([&packed] {
             ScramblerConfig cfg{};
-            configureExplicit(cfg, packed, 511UZ, 9U, BitOrder::MsbFirst, true);
+            configureExplicit(cfg, packed, 511UZ, 9U, BitOrder::msb_first, true);
         })) << "an item width outside [1, 8]";
 
         // configuring a tap set afterwards puts the mask source back, so nothing of the explicit configuration leaks
         ScramblerConfig reused = supplied;
-        configureScrambler(reused, tapsFromDelayList("4,9"), seedFromBitString("111111111", 9U), ScramblerMode::Additive, 8U, BitOrder::LsbFirst);
+        configureScrambler(reused, tapsFromDelayList("4,9"), seedFromBitString("111111111", 9U), ScramblerMode::Additive, 8U, BitOrder::lsb_first);
         expect(that % (reused.source == SequenceSource::Lfsr && reused.nUnscrambledItems == 0UZ)) << "a reconfiguration is whole";
     };
 
@@ -1208,8 +1208,8 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
                 const std::uint64_t seed   = (0x243F6A8885A308D3ULL * (trial + 1UZ)) & maskOf(kDegree);
                 const auto          source = randomItems(kBits, 1U, 0xB5026F5AA96619E9ULL + trial);
 
-                ScramblerConfig tx = configured("3,20", seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
-                ScramblerConfig rx = configured("3,20", seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig tx = configured("3,20", seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
+                ScramblerConfig rx = configured("3,20", seed, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
                 configureMonitor(tx, true, modulus, "1,2");
                 configureMonitor(rx, true, modulus, "1,2");
 
@@ -1230,8 +1230,8 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         // the counter itself, compared at every item rather than at the end of the run
         for (const std::uint32_t modulus : {8U, 32U}) {
             const auto      source = randomItems(4000UZ, 1U, 0x2545F4914F6CDD1DULL + modulus);
-            ScramblerConfig tx     = configured("3,20", 0x5A5A5ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
-            ScramblerConfig rx     = configured("3,20", 0x0F0F0ULL, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+            ScramblerConfig tx     = configured("3,20", 0x5A5A5ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
+            ScramblerConfig rx     = configured("3,20", 0x0F0F0ULL, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
             configureMonitor(tx, true, modulus, "1,2");
             configureMonitor(rx, true, modulus, "1,2");
 
@@ -1254,7 +1254,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         for (const std::uint32_t modulus : {8U, 32U}) {
             const auto      source = randomItems(kBits, 1U, 0x8AED2A6ABF715880ULL + modulus);
-            ScramblerConfig tx     = configured("3,20", 0x13579ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+            ScramblerConfig tx     = configured("3,20", 0x13579ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
             configureMonitor(tx, true, modulus, "1,2");
             const auto y = through(tx, source);
 
@@ -1289,12 +1289,12 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
             for (const std::uint64_t seed : {std::uint64_t{0}, std::uint64_t{0x13579}, std::uint64_t{0xFFFFF}}) {
                 const auto crafted = lockUpInput("3,20", seed, true, 0U, kBits);
 
-                ScramblerConfig plain = configured("3,20", seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig plain = configured("3,20", seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
                 configureMonitor(plain, true, 0U, "");
                 const auto held = through(plain, crafted);
                 expect(eq(leadingRun(held), kBits)) << std::format("seed {:#x}: the plain scrambler's output is constant for the whole run", seed);
 
-                ScramblerConfig forced = configured("3,20", seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+                ScramblerConfig forced = configured("3,20", seed, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
                 configureMonitor(forced, true, modulus, "1,2");
                 const auto broken = through(forced, crafted);
                 expect(that % (leadingRun(broken) < kBits)) << std::format("N = {}, seed {:#x}: the forced scrambler's is not", modulus, seed);
@@ -1312,13 +1312,13 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         const auto crafted = lockUpInput("3,20", 0x13579ULL, true, kAfter, kBits);
 
-        ScramblerConfig tx = configured("3,20", 0x13579ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+        ScramblerConfig tx = configured("3,20", 0x13579ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
         configureMonitor(tx, true, kAfter, "1,2");
         const auto held = through(tx, crafted);
         expect(eq(leadingRun(held), kBits)) << "an input constructed against the rule holds the output at a constant for the whole run";
         expect(that % (tx.nForcedTransitions > 0UZ)) << "and the forcing fired throughout, which is what makes it a counterexample rather than a disabled rule";
 
-        ScramblerConfig rx = configured("3,20", 0x13579ULL, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::MsbFirst);
+        ScramblerConfig rx = configured("3,20", 0x13579ULL, ScramblerMode::MultiplicativeDescramble, 1U, BitOrder::msb_first);
         configureMonitor(rx, true, kAfter, "1,2");
         expect(eq(firstDifference(through(rx, held), crafted), crafted.size())) << "and it descrambles exactly, from item zero";
     };
@@ -1329,7 +1329,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
 
         ScramblerConfig cfg = ScramblerConfig{};
         applyProfile(cfg, "pn9", ScramblerMode::Additive);
-        expect(that % (cfg.taps == tapsFromDelayList("4,9") && cfg.seed == 511ULL && cfg.bitsPerItem == 8U && cfg.order == BitOrder::LsbFirst)) << "a profile fills the four settings the generator is built from";
+        expect(that % (cfg.taps == tapsFromDelayList("4,9") && cfg.seed == 511ULL && cfg.bitsPerItem == 8U && cfg.order == BitOrder::lsb_first)) << "a profile fills the four settings the generator is built from";
         expect(that % (cfg.forceAfter == 0U && !cfg.invertOutput && cfg.sequenceRepeat)) << "and names no other setting";
 
         expect(throws<std::invalid_argument>([] {
@@ -1352,7 +1352,7 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         expect(throws<std::invalid_argument>([] { [[maybe_unused]] const auto& ignored = profileByName(""); })) << "and so does the empty one, which is how a caller selects nothing";
 
         // the forced-transition group's own refusals
-        ScramblerConfig pair = configured("3,20", 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::MsbFirst);
+        ScramblerConfig pair = configured("3,20", 0ULL, ScramblerMode::MultiplicativeScramble, 1U, BitOrder::msb_first);
         expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 1U, "1,2"); })) << "N below 2";
         expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 4097U, "1,2"); })) << "N above 4096";
         expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 0U, "1,2"); })) << "delays describing a disabled mechanism";
@@ -1360,13 +1360,13 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
         expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 32U, "1,2,3"); })) << "three delays where two are needed";
         expect(throws<std::invalid_argument>([&pair] { configureMonitor(pair, false, 32U, "1,65"); })) << "a monitored delay above 64";
 
-        ScramblerConfig additiveCfg = configured("4,9", 511ULL, ScramblerMode::Additive, 8U, BitOrder::LsbFirst);
+        ScramblerConfig additiveCfg = configured("4,9", 511ULL, ScramblerMode::Additive, 8U, BitOrder::lsb_first);
         expect(throws<std::invalid_argument>([&additiveCfg] { configureMonitor(additiveCfg, false, 32U, "1,2"); })) << "the rule belongs to the family that has feedback for it to act on";
         expect(throws<std::invalid_argument>([&additiveCfg] { configureMonitor(additiveCfg, true, 0U, ""); })) << "and so does the inversion";
 
         // with the group off, the multiplicative pair is bit for bit what it was before the rule existed
         const auto      source = randomItems(8192UZ, 8U, 0xA54FF53A5F1D36F1ULL);
-        ScramblerConfig plain  = configured("18,23", 0x7FFFFFULL, ScramblerMode::MultiplicativeScramble, 8U, BitOrder::MsbFirst);
+        ScramblerConfig plain  = configured("18,23", 0x7FFFFFULL, ScramblerMode::MultiplicativeScramble, 8U, BitOrder::msb_first);
         const auto      before = through(plain, source);
         resetScrambler(plain);
         configureMonitor(plain, false, 0U, "");

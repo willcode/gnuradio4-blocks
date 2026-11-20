@@ -17,25 +17,25 @@
 namespace gr::algorithm::savitzky_golay {
 
 enum class Alignment : std::uint8_t {
-    Centred, // symmetric window, linear-phase, group delay D=(W-1)/2
-    Causal   // past-only window, zero-latency, non-linear phase
+    centered, // symmetric window, linear-phase, group delay D=(W-1)/2
+    causal    // past-only window, zero-latency, non-linear phase
 };
 
 enum class BoundaryPolicy : std::uint8_t {
-    Default,       // pre-fill history with config.defaultValue
-    ZeroOrderHold, // fill history with first sample (lazy)
-    Reflect,       // batch: reflect at boundaries; streaming: same as ZeroOrderHold
-    Replicate      // batch: replicate edges; streaming: same as ZeroOrderHold
+    default_value,   // pre-fill history with config.defaultValue
+    zero_order_hold, // fill history with first sample (lazy)
+    reflect,         // batch: reflect at boundaries; streaming: same as zero_order_hold
+    replicate        // batch: replicate edges; streaming: same as zero_order_hold
 };
 
 template<typename T>
 struct Config {
     static_assert(std::floating_point<T>, "Config requires a floating-point type");
-    std::size_t    derivOrder     = 0UZ;                     /// derivative order (0 = smoothing)
-    T              delta          = T{1};                    /// sample spacing (1/sample_rate)
-    Alignment      alignment      = Alignment::Centred;      /// Centred or Causal
-    BoundaryPolicy boundaryPolicy = BoundaryPolicy::Default; /// initialization / boundary handling
-    T              defaultValue   = T{0};                    /// fill value for BoundaryPolicy::Default
+    std::size_t    derivOrder     = 0UZ;                           /// derivative order (0 = smoothing)
+    T              delta          = T{1};                          /// sample spacing (1/sample_rate)
+    Alignment      alignment      = Alignment::centered;           /// centred or causal
+    BoundaryPolicy boundaryPolicy = BoundaryPolicy::default_value; /// initialization / boundary handling
+    T              defaultValue   = T{0};                          /// fill value for BoundaryPolicy::default_value
 };
 
 namespace detail {
@@ -79,8 +79,8 @@ namespace detail {
 template<typename T>
 [[nodiscard]] constexpr std::size_t boundaryIndex(std::ptrdiff_t i, std::size_t N, const Config<T>& config) noexcept {
     switch (config.boundaryPolicy) {
-    case BoundaryPolicy::Reflect: return reflectIndex(i, N);
-    case BoundaryPolicy::Replicate: return replicateIndex(i, N);
+    case BoundaryPolicy::reflect: return reflectIndex(i, N);
+    case BoundaryPolicy::replicate: return replicateIndex(i, N);
     default: return replicateIndex(i, N);
     }
 }
@@ -102,7 +102,7 @@ template<std::floating_point T>
     const std::size_t d = derivOrder;
 
     // build Vandermonde matrix A[i,j] = t_i^j
-    const auto D = (config.alignment == Alignment::Centred) ? static_cast<std::ptrdiff_t>((W - 1UZ) / 2UZ) : static_cast<std::ptrdiff_t>(W - 1UZ);
+    const auto D = (config.alignment == Alignment::centered) ? static_cast<std::ptrdiff_t>((W - 1UZ) / 2UZ) : static_cast<std::ptrdiff_t>(W - 1UZ);
 
     Tensor<T> A({W, p + 1UZ});
     for (std::size_t i = 0UZ; i < W; ++i) {
@@ -161,7 +161,7 @@ void apply(std::span<const T> in, std::span<T> out, std::span<const T> coeffs, c
         return;
     }
 
-    const auto D = (config.alignment == Alignment::Centred) ? static_cast<std::ptrdiff_t>((W - 1UZ) / 2UZ) : static_cast<std::ptrdiff_t>(W - 1UZ);
+    const auto D = (config.alignment == Alignment::centered) ? static_cast<std::ptrdiff_t>((W - 1UZ) / 2UZ) : static_cast<std::ptrdiff_t>(W - 1UZ);
 
     for (std::size_t n = 0UZ; n < N; ++n) {
         out[n] = std::transform_reduce(coeffs.begin(), coeffs.end(), std::views::iota(0UZ, W).begin(), T{0}, std::plus<>{}, [&](T c, std::size_t k) {
@@ -183,7 +183,7 @@ void applyZeroPhase(std::span<const T> in, std::span<T> out, std::span<const T> 
 
     std::vector<T> temp(N), temp2(N);
     Config<T>      centredConfig = config;
-    centredConfig.alignment      = Alignment::Centred;
+    centredConfig.alignment      = Alignment::centered;
 
     apply(in, std::span<T>(temp), coeffs, centredConfig);
     std::ranges::reverse(temp);
@@ -208,7 +208,7 @@ private:
     gr::HistoryBuffer<T> _history;
     bool                 _initialized{false};
 
-    [[nodiscard]] bool needsLazyInit() const noexcept { return _config.boundaryPolicy != BoundaryPolicy::Default; }
+    [[nodiscard]] bool needsLazyInit() const noexcept { return _config.boundaryPolicy != BoundaryPolicy::default_value; }
 
     void fillHistory(T value) {
         for (std::size_t i = 0UZ; i < _windowSize; ++i) {
@@ -218,7 +218,7 @@ private:
 
 public:
     explicit SavitzkyGolayFilter(std::size_t windowSize = 11UZ, std::size_t polyOrder = 4UZ, const Config<T>& config = {}) : _windowSize(std::max(windowSize, 1UZ)), _polyOrder(std::min(polyOrder, _windowSize - 1UZ)), _config(config), _coeffs(computeCoefficients<T>(_windowSize, _polyOrder, _config)), _history(_windowSize), _initialized(!needsLazyInit()) {
-        if (_config.boundaryPolicy == BoundaryPolicy::Default) {
+        if (_config.boundaryPolicy == BoundaryPolicy::default_value) {
             fillHistory(_config.defaultValue);
         }
     }
@@ -235,7 +235,7 @@ public:
     void reset() {
         _history.reset();
         _initialized = !needsLazyInit();
-        if (_config.boundaryPolicy == BoundaryPolicy::Default) {
+        if (_config.boundaryPolicy == BoundaryPolicy::default_value) {
             fillHistory(_config.defaultValue);
         }
     }
@@ -248,7 +248,7 @@ public:
     [[nodiscard]] BoundaryPolicy     boundaryPolicy() const noexcept { return _config.boundaryPolicy; }
     [[nodiscard]] const Config<T>&   config() const noexcept { return _config; }
     [[nodiscard]] std::span<const T> coefficients() const noexcept { return _coeffs; }
-    [[nodiscard]] std::size_t        delay() const noexcept { return (_config.alignment == Alignment::Centred) ? (_windowSize - 1UZ) / 2UZ : 0UZ; }
+    [[nodiscard]] std::size_t        delay() const noexcept { return (_config.alignment == Alignment::centered) ? (_windowSize - 1UZ) / 2UZ : 0UZ; }
 
     void setParameters(std::size_t windowSize, std::size_t polyOrder, const Config<T>& config = {}) {
         _windowSize = std::max(windowSize, 1UZ);

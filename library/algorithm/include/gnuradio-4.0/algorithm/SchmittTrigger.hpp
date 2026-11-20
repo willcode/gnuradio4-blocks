@@ -67,7 +67,7 @@ struct SchmittTrigger {
     constexpr explicit SchmittTrigger(value_t threshold = 1, value_t offset = 0) noexcept(Method != InterpolationMethod::POLYNOMIAL_INTERPOLATION) : _threshold(threshold), _offset(offset), _upperThreshold(_offset + _threshold), _lowerThreshold(_offset - _threshold) {
         if constexpr (Method == InterpolationMethod::POLYNOMIAL_INTERPOLATION) {
             namespace sg      = gr::algorithm::savitzky_golay;
-            const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
+            const auto config = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::centered, .boundaryPolicy = sg::BoundaryPolicy::reflect};
             _sgCoeffs         = sg::computeCoefficients<sg_compute_t>(interpolationWindow, std::min(_sgPolyOrder, interpolationWindow - 1UZ), config);
         }
         for (std::size_t i = 0; i < _historyBuffer.capacity(); ++i) { // prime the history buffer
@@ -371,7 +371,7 @@ struct SchmittTrigger {
         }
 
         // b) Apply SG smoothing using pre-cached coefficients
-        const auto sgConfig = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::Centred, .boundaryPolicy = sg::BoundaryPolicy::Reflect};
+        const auto sgConfig = sg::Config<sg_compute_t>{.derivOrder = 0UZ, .delta = sg_compute_t{1}, .alignment = sg::Alignment::centered, .boundaryPolicy = sg::BoundaryPolicy::reflect};
 
         sg::apply(std::span<const sg_compute_t>(rawData.data(), nSamples), std::span<sg_compute_t>(smoothedData.data(), nSamples), std::span<const sg_compute_t>(_sgCoeffs), sgConfig);
 

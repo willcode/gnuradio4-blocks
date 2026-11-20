@@ -216,8 +216,8 @@ const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
             {"n_samples_max", gr::Size_t{10U}},
             {"sample_rate", 2.f},
             {"string_vector_setting", std::vector<std::string>{"a", "b"}},
-            {"test_enum_setting", std::string("TEST_STATE2")},
-            {"annotated_test_enum_setting", std::string("TEST_STATE3")},
+            {"test_enum_setting", std::string("test_state2")},
+            {"annotated_test_enum_setting", std::string("test_state3")},
         });
         expect(recorder.empty()) << std::format("{}", recorder);
         const std::vector<std::string> source = initFailures<TagSource<float>>({

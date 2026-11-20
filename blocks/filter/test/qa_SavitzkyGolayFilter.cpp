@@ -47,7 +47,7 @@ const boost::ut::suite<"SavitzkyGolayFilter block"> sgFilterBlockTests = [] {
         SavitzkyGolayFilter<float> filter;
         filter.start();
 
-        // With BoundaryPolicy::Default, history is pre-filled with zeros
+        // With BoundaryPolicy::default_value, history is pre-filled with zeros
         // Process a few samples and verify we get finite output
         std::vector<float> outputs;
         for (int i = 0; i < 20; ++i) {
@@ -105,7 +105,7 @@ const boost::ut::suite<"SavitzkyGolayFilter block"> sgFilterBlockTests = [] {
 
     "a settings change"_test = [] {
         SavitzkyGolayFilter<float> filter;
-        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"window_size", 21U}, {"poly_order", static_cast<gr::Size_t>(4)}, {"alignment", std::string("Causal")}}).empty());
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"window_size", 21U}, {"poly_order", static_cast<gr::Size_t>(4)}, {"alignment", std::string("causal")}}).empty());
 
         expect(eq(filter.settings.window_size.value, static_cast<gr::Size_t>(21)));
         expect(eq(filter.settings.poly_order.value, static_cast<gr::Size_t>(4)));
@@ -224,10 +224,10 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter block"> sgDataSetBlockTests =
 
     "a settings change"_test = [] {
         SavitzkyGolayDataSetFilter<float> filter;
-        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"window_size", 15U}, {"boundary_policy", std::string("Replicate")}}).empty());
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"window_size", 15U}, {"boundary_policy", std::string("replicate")}}).empty());
 
         expect(eq(filter.settings.window_size.value, static_cast<gr::Size_t>(15)));
-        expect(filter.settings.boundary_policy.value == gr::algorithm::savitzky_golay::BoundaryPolicy::Replicate);
+        expect(filter.settings.boundary_policy.value == gr::algorithm::savitzky_golay::BoundaryPolicy::replicate);
     };
 };
 
@@ -277,7 +277,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
     "alignment modes"_test = [] {
         "Centred alignment"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            expect(filter.set({{"window_size", 11U}, {"alignment", "Centred"}}).has_value());
+            expect(filter.set({{"window_size", 11U}, {"alignment", "centered"}}).has_value());
             filter.start();
 
             std::vector<double> outputs;
@@ -289,7 +289,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
 
         "Causal alignment"_test = [] {
             SavitzkyGolayFilter<double> filter;
-            expect(filter.set({{"window_size", 11U}, {"alignment", "Causal"}}).has_value());
+            expect(filter.set({{"window_size", 11U}, {"alignment", "causal"}}).has_value());
             filter.start();
 
             std::vector<double> outputs;
@@ -302,7 +302,7 @@ const boost::ut::suite<"SavitzkyGolayFilter edge cases"> sgFilterEdgeCaseTests =
         "an unknown alignment is refused"_test = [] {
             SavitzkyGolayFilter<double> filter;
             expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(filter), {{"alignment", std::string("Invalid")}}).empty());
-            expect(filter.settings.alignment.value == gr::algorithm::savitzky_golay::Alignment::Centred);
+            expect(filter.settings.alignment.value == gr::algorithm::savitzky_golay::Alignment::centered);
         };
     };
 
@@ -426,7 +426,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
 
         "Reflect policy"_test = [&] {
             SavitzkyGolayDataSetFilter<double> filter;
-            expect(filter.set({{"window_size", 7U}, {"boundary_policy", "Reflect"}}).has_value());
+            expect(filter.set({{"window_size", 7U}, {"boundary_policy", "reflect"}}).has_value());
             filter.start();
 
             auto output = filter.processOne(makeInput());
@@ -435,7 +435,7 @@ const boost::ut::suite<"SavitzkyGolayDataSetFilter edge cases"> sgDataSetEdgeCas
 
         "Replicate policy"_test = [&] {
             SavitzkyGolayDataSetFilter<double> filter;
-            expect(filter.set({{"window_size", 7U}, {"boundary_policy", "Replicate"}}).has_value());
+            expect(filter.set({{"window_size", 7U}, {"boundary_policy", "replicate"}}).has_value());
             filter.start();
 
             auto output = filter.processOne(makeInput());
@@ -671,7 +671,7 @@ const boost::ut::suite<"SavitzkyGolayFilter tag placement"> sgTagPlacementTests 
             source._tags.emplace_back(kSamples - 1UZ, gr::property_map{{gr::property_map::key_type{gr::tag::TRIGGER_META_INFO.key()}, std::string("last")}, {gr::property_map::key_type{gr::tag::TX_EOB.key()}, true}});
             gr::property_map settings{{"window_size", c.window}, {"poly_order", gr::Size_t{2}}};
             if (c.causal) {
-                settings.insert_or_assign(gr::property_map::key_type{"alignment"}, std::string("Causal"));
+                settings.insert_or_assign(gr::property_map::key_type{"alignment"}, std::string("causal"));
             }
             auto& block = graph.emplaceBlock<SavitzkyGolayFilter<float>>(std::move(settings));
             auto  sinks = gr::blocks::filter::testing::connectEndSinks<float>(graph, block);

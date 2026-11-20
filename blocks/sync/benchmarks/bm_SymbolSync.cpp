@@ -73,15 +73,15 @@ int main() {
     const std::vector<CF> input = makeShapedQpsk();
     std::vector<CF>       output(kSamplesPerCall);
 
-    SymbolSync<CF> mm2          = make(2.0, "MuellerMuller", 0.0, "mmse8");
-    SymbolSync<CF> mm4          = make(4.0, "MuellerMuller", 0.0, "mmse8");
-    SymbolSync<CF> mm8          = make(8.0, "MuellerMuller", 0.0, "mmse8");
-    SymbolSync<CF> gardner2     = make(2.0, "Gardner", 1.06739, "mmse8");
-    SymbolSync<CF> gardner4     = make(4.0, "Gardner", 1.06739, "mmse8");
-    SymbolSync<CF> gardner8     = make(8.0, "Gardner", 1.06739, "mmse8");
-    SymbolSync<CF> slope4       = make(4.0, "SignalTimesSlopeMl", 1.0, "mmse8");
-    SymbolSync<CF> mmPoly4      = make(4.0, "MuellerMuller", 0.0, "polyphase");
-    SymbolSync<CF> gardnerPoly4 = make(4.0, "Gardner", 1.06739, "polyphase");
+    SymbolSync<CF> mm2          = make(2.0, "mueller_muller", 0.0, "mmse8");
+    SymbolSync<CF> mm4          = make(4.0, "mueller_muller", 0.0, "mmse8");
+    SymbolSync<CF> mm8          = make(8.0, "mueller_muller", 0.0, "mmse8");
+    SymbolSync<CF> gardner2     = make(2.0, "gardner", 1.06739, "mmse8");
+    SymbolSync<CF> gardner4     = make(4.0, "gardner", 1.06739, "mmse8");
+    SymbolSync<CF> gardner8     = make(8.0, "gardner", 1.06739, "mmse8");
+    SymbolSync<CF> slope4       = make(4.0, "signal_times_slope_ml", 1.0, "mmse8");
+    SymbolSync<CF> mmPoly4      = make(4.0, "mueller_muller", 0.0, "polyphase");
+    SymbolSync<CF> gardnerPoly4 = make(4.0, "gardner", 1.06739, "polyphase");
 
     std::array<gr::blocks::testing::bench::Arm, 9UZ> arms{{
         {"M&M, mmse8, sps 2", [&] { return drive(mm2, input, std::span<CF>(output)); }},

@@ -68,7 +68,7 @@ found, each as 'name [id]'; `dropped_samples` counts captured samples lost to a 
 #else
             0.1f;
 #endif
-        gr::Annotated<algorithm::DriftCorrection, gr::Doc<"drift correction">> drift_correction = algorithm::DriftCorrection::Linear;
+        gr::Annotated<algorithm::DriftCorrection, gr::Doc<"drift correction">> drift_correction = algorithm::DriftCorrection::linear;
 
         GR_MAKE_REFLECTABLE(Settings, sample_rate, num_channels, io_buffer_size, device, backend, emit_timing_tags, emit_meta_info, tag_interval, trigger_name, ppm_estimator_cutoff, drift_correction);
     } settings;
@@ -268,7 +268,7 @@ private:
     void publishSamples(auto& writer, std::size_t nFrameAligned, std::size_t channelCount) {
         // The resampler may return more frames than it gets: the estimate is clamped to +-10 %, so a chunk grows by
         // at most 1/0.9 (a ninth), and one eighth plus a few frames is room for it. The other modes add one frame.
-        const bool        resampling      = _driftCompensator.mode == algorithm::DriftCorrection::AdaptiveResampling;
+        const bool        resampling      = _driftCompensator.mode == algorithm::DriftCorrection::adaptive_resampling;
         const auto        headroomOf      = [&](std::size_t nSamples) { return resampling ? (nSamples / channelCount / 8UZ + 4UZ) * channelCount : channelCount; };
         const std::size_t available       = writer.available();
         const std::size_t availableFrames = available / channelCount;
@@ -312,7 +312,7 @@ private:
             const double clampedRate   = std::clamp(estimatedRate, nomRate * 0.9, nomRate * 1.1);
             if (clampedRate > 0.0) {
                 // the resampled chunk starts at the carried position, not at its first input frame
-                if (_driftCompensator.mode == algorithm::DriftCorrection::AdaptiveResampling) {
+                if (_driftCompensator.mode == algorithm::DriftCorrection::adaptive_resampling) {
                     tCaptureNs += static_cast<std::int64_t>(std::llround(_driftCompensator.nextOutputPhase() * 1e9 / nomRate));
                 }
                 nProduced = _driftCompensator.compensateSource(std::span<T>(outSpan.data(), outSpan.size()), nProduced, clampedRate, nomRate, channelCount);
@@ -542,7 +542,7 @@ found, each as 'name [id]'; `dropped_samples` counts the samples the full stagin
 #else
             0.1f;
 #endif
-        gr::Annotated<algorithm::DriftCorrection, gr::Doc<"drift correction">> drift_correction = algorithm::DriftCorrection::Linear;
+        gr::Annotated<algorithm::DriftCorrection, gr::Doc<"drift correction">> drift_correction = algorithm::DriftCorrection::linear;
         gr::Annotated<bool, gr::Doc<"diagnostic logging">>                     debug_console    = false;
 
         GR_MAKE_REFLECTABLE(Settings, sample_rate, num_channels, io_buffer_size, device, backend, ppm_estimator_cutoff, drift_correction, debug_console);
@@ -581,7 +581,7 @@ found, each as 'name [id]'; `dropped_samples` counts the samples the full stagin
         std::size_t                stagingCapacity{1U};
         float                      ioBufferSeconds{5.f};
         float                      ppmEstimatorCutoff{0.1f};
-        algorithm::DriftCorrection driftCorrection{algorithm::DriftCorrection::Linear};
+        algorithm::DriftCorrection driftCorrection{algorithm::DriftCorrection::linear};
         bool                       debugConsole{false};
     };
 

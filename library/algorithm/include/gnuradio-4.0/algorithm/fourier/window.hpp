@@ -37,10 +37,10 @@ namespace gr::algorithm::window {
  * Kaiser (beta), Tukey (alpha), Gaussian (sigma) and Exponential (decay in dB) read the single scalar
  * `param` of create(); every other window ignores it. See create() for the per-window defaults and ranges.
  */
-// HannExp names the Hann window and holds its ordinal, so that a setting stored under that name still resolves and the enumerators after it keep their values.
-enum class Type : int { None, Rectangular, Hamming, Hann, HannExp [[deprecated("HannExp is the Hann window")]], Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser, Bartlett, Welch, Parzen, Tukey, Gaussian };
+// hann_exp names the Hann window and holds its ordinal, so that the enumerators after it keep their values.
+enum class Type : int { none, rectangular, hamming, hann, hann_exp [[deprecated("hann_exp is the Hann window")]], blackman, nuttall, blackman_harris, blackman_nuttall, flat_top, exponential, kaiser, bartlett, welch, parzen, tukey, gaussian };
 using enum Type;
-inline static constexpr gr::meta::fixed_string TypeNames = "[None, Rectangular, Hamming, Hann, HannExp, Blackman, Nuttall, BlackmanHarris, BlackmanNuttall, FlatTop, Exponential, Kaiser, Bartlett, Welch, Parzen, Tukey, Gaussian]";
+inline static constexpr gr::meta::fixed_string TypeNames = "[none, rectangular, hamming, hann, hann_exp, blackman, nuttall, blackman_harris, blackman_nuttall, flat_top, exponential, kaiser, bartlett, welch, parzen, tukey, gaussian]";
 
 /**
  * @brief Modified Bessel function of the first kind, order zero, by its series.
@@ -74,10 +74,10 @@ template<typename T>
 requires std::is_floating_point_v<T>
 [[nodiscard]] constexpr T defaultParameter(Type windowFunction) noexcept {
     switch (windowFunction) {
-    case Type::Kaiser: return static_cast<T>(1.6);
-    case Type::Tukey: return static_cast<T>(0.5);
-    case Type::Gaussian: return static_cast<T>(0.4);
-    case Type::Exponential: return static_cast<T>(60);
+    case Type::kaiser: return static_cast<T>(1.6);
+    case Type::tukey: return static_cast<T>(0.5);
+    case Type::gaussian: return static_cast<T>(0.4);
+    case Type::exponential: return static_cast<T>(60);
     default: return static_cast<T>(0);
     }
 }
@@ -86,22 +86,22 @@ template<typename T>
 requires std::is_floating_point_v<T>
 void validateParameter(Type windowFunction, T param) {
     switch (windowFunction) {
-    case Type::Kaiser:
+    case Type::kaiser:
         if (param < static_cast<T>(0)) {
             throw std::invalid_argument(std::format("Kaiser beta must be non-negative, is {}", param));
         }
         return;
-    case Type::Tukey:
+    case Type::tukey:
         if (param < static_cast<T>(0) || param > static_cast<T>(1)) {
             throw std::invalid_argument(std::format("Tukey alpha must be within [0, 1], is {}", param));
         }
         return;
-    case Type::Gaussian:
+    case Type::gaussian:
         if (param <= static_cast<T>(0) || param > static_cast<T>(0.5)) {
             throw std::invalid_argument(std::format("Gaussian sigma must be within (0, 0.5], is {}", param));
         }
         return;
-    case Type::Exponential:
+    case Type::exponential:
         if (param < static_cast<T>(0)) {
             throw std::invalid_argument(std::format("Exponential decay [dB] must be non-negative, is {}", param));
         }
@@ -156,19 +156,19 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
     detail::validateParameter<T>(windowFunction, p);
 
     // every cosine-sum window scales by 1/(n - 1); Kaiser rejects n <= 1 below
-    if (n == 1 && windowFunction != Type::Kaiser) {
+    if (n == 1 && windowFunction != Type::kaiser) {
         container[0] = static_cast<T>(1);
         return;
     }
 
     using enum Type;
     switch (windowFunction) {
-    case None:
-    case Rectangular: {
+    case none:
+    case rectangular: {
         std::ranges::fill(container, 1);
         return;
     }
-    case Hamming: {
+    case hamming: {
         // formula: w(n) = 0.53836 - 0.46164 * cos((2 * pi * n) / (N - 1))
         // equiripple-optimal coefficients; the textbook 0.54/0.46 rounding raises the peak sidelobe by ~0.5 dB
         const T a = pi2 / static_cast<T>(n - 1);
@@ -179,18 +179,18 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
-    case HannExp:
+    case hann_exp:
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
-    case Hann: {
+    case hann: {
         // formula: w(n) = 0.5 - 0.5 * cos((2 * pi * n) / (N - 1))
         // reference: von Hann, J. (1901). Über den Durchgang einer elektrischen Welle längs der Erdoberfläche. Elektrische Nachrichtentechnik, 17, 421-424.
         const T a = pi2 / static_cast<T>(n - 1);
         detail::fillSymmetric<T>(container, n, [a](const std::size_t i) { return static_cast<T>(.5) - static_cast<T>(.5) * std::cos(a * static_cast<T>(i)); });
         return;
     }
-    case Blackman: {
+    case blackman: {
         // formula: w(n) = 0.42 - 0.5 * cos((2 * pi * n) / (N - 1)) + 0.08 * cos((4 * pi * n) / (N - 1))
         // reference: Blackman, R. B., & Tukey, J. W. (1958). The measurement of power spectra from the point of view of communications engineering. Dover Publications.
         const T a = pi2 / static_cast<T>(n - 1);
@@ -200,7 +200,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case Nuttall: {
+    case nuttall: {
         // Formula: w(n) = a0 - a1 * cos((2 * pi * n) / (N - 1)) + a2 * cos((4 * pi * n) / (N - 1)) - a3 * cos((6 * pi * n) / (N - 1))
         // Reference: Nuttall, A. (1981). Some Windows with Very Good Sidelobe Behavior. IEEE Transactions on Acoustics, Speech, and Signal Processing, 29(1), 84-91.
         const T a = pi2 / static_cast<T>(n - 1);
@@ -211,7 +211,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case BlackmanHarris: {
+    case blackman_harris: {
         // formula: w(n) = a0 - a1 * cos((2 * pi * n) / (N - 1)) + a2 * cos((4 * pi * n) / (N - 1)) - a3 * cos((6 * pi * n) / (N - 1))
         // reference: Harris, F. J. (1978). On the use of windows for harmonic analysis with the discrete Fourier transform. Proceedings of the IEEE, 66(1), 51-83.
         const T a = pi2 / static_cast<T>(n - 1);
@@ -222,7 +222,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case BlackmanNuttall: {
+    case blackman_nuttall: {
         // formula: w(n) = 0.3635819 - 0.4891775 * cos(2*pi*n/(N-1)) + 0.1365995 * cos(4*pi*n/(N-1)) - 0.0106411 * cos(6*pi*n/(N-1))
         // reference: Generalized from Nuttall, A. (1981) and Harris, F. J. (1978).
         const T a = pi2 / static_cast<T>(n - 1);
@@ -232,7 +232,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case FlatTop: {
+    case flat_top: {
         // formula: w(n) = (a0 - a1 * cos((2 * pi * n) / (N - 1)) + a2 * cos((4 * pi * n) / (N - 1)) - a3 * cos((6 * pi * n) / (N - 1)) + a4 * cos((8 * pi * n) / (N - 1))) / sum(a)
         // a4 = 0.028 makes the coefficients sum to zero at the boundary: peak sidelobe
         // -76.6 dB against -68.9 dB for the a4 = 0.032 variant, at the same scalloping loss
@@ -245,7 +245,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case Exponential: {
+    case exponential: {
         // formula: w(n) = exp(-|n - (N-1)/2| / tau), tau = (N-1)/2 * (8.69/param) -- symmetric Poisson window decaying by `param` dB at the edges
         // reference: Harris, F. J. (1978). On the use of windows for harmonic analysis with the discrete Fourier transform. Proceedings of the IEEE, 66(1), 51-83.
         // its transform has no main-lobe null within tens of bins, which suits spectral apodization but leaves FIR design without a transition-width bound
@@ -254,7 +254,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         detail::fillSymmetric<T>(container, n, [center, tau](const std::size_t i) { return std::exp(-std::abs(static_cast<T>(i) - center) / tau); });
         return;
     }
-    case Kaiser: {
+    case kaiser: {
         // formula: w(n) = I0(beta * sqrt(1 - ((2*n/(N-1)) - 1)^2)) / I0(beta)
         // reference: J. F. Kaiser and R. W. Schafer. On the use of the i0-sinh window for spectrum analysis. IEEE Transactions on Acoustics, Speech, and Signal Processing, 28(1):105–107, 1980.
         if (n <= 1) {
@@ -269,13 +269,13 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case Bartlett: {
+    case bartlett: {
         // formula: w(n) = 1 - |n - M| / M, M = (N - 1)/2 -- triangular with both ends exactly zero
         const T m = static_cast<T>(n - 1) / static_cast<T>(2);
         detail::fillSymmetric<T>(container, n, [m](const std::size_t i) { return static_cast<T>(1) - std::abs(static_cast<T>(i) - m) / m; });
         return;
     }
-    case Welch: {
+    case welch: {
         // formula: w(n) = 1 - ((n - M) / M)^2, M = (N - 1)/2 -- parabolic
         const T m = static_cast<T>(n - 1) / static_cast<T>(2);
         detail::fillSymmetric<T>(container, n, [m](const std::size_t i) {
@@ -284,7 +284,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case Parzen: {
+    case parzen: {
         // formula: r = |n - M| / (N/2), M = (N - 1)/2; w = 1 - 6 r^2 (1 - r) for r <= 1/2, else 2 (1 - r)^3
         // the N/2 denominator leaves the ends at 2/N^3 rather than at zero
         const T m    = static_cast<T>(n - 1) / static_cast<T>(2);
@@ -296,7 +296,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         });
         return;
     }
-    case Tukey: {
+    case tukey: {
         // formula: x = n/(N - 1); w = 0.5 (1 - cos(2 pi x / alpha)) for x < alpha/2, 1 in between, mirrored at the far end
         // alpha == 0 is Rectangular and alpha == 1 is Hann, both exactly
         if (p <= static_cast<T>(0)) {
@@ -308,7 +308,7 @@ void create(ContainerType& container, Type windowFunction, const T param = std::
         detail::fillSymmetric<T>(container, n, [taper, a](const std::size_t i) { return static_cast<T>(i) < taper ? static_cast<T>(0.5) * (static_cast<T>(1) - std::cos(a * static_cast<T>(i))) : static_cast<T>(1); });
         return;
     }
-    case Gaussian: {
+    case gaussian: {
         // formula: w(n) = exp(-0.5 ((n - M) / (sigma M))^2), M = (N - 1)/2
         // sigma is a fraction of the half-length rather than a count of samples: the shape -- and with it the sidelobe
         // level and the ENBW -- is then independent of N. Translation from a samples-based setting: sigma = std/M.

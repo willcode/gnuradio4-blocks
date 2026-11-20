@@ -87,7 +87,7 @@ template<typename T>
 concept TimingSample = gr::math::RealOrComplexSample<T>;
 
 /// @brief Which detector, chosen once at construction and never per symbol.
-enum class TimingDetector { MuellerMuller, ModifiedMuellerMuller, ZeroCrossing, Gardner, EarlyLate, SignalTimesSlopeMl, SignumTimesSlopeMl };
+enum class TimingDetector { mueller_muller, modified_mueller_muller, zero_crossing, gardner, early_late, signal_times_slope_ml, signum_times_slope_ml };
 
 /**
  * @brief What a scheduler needs to know about a detector, and nothing about how the error is computed.
@@ -107,13 +107,13 @@ struct TimingDetectorTraits {
 
 [[nodiscard]] inline constexpr TimingDetectorTraits traitsOf(TimingDetector detector) noexcept {
     switch (detector) {
-    case TimingDetector::MuellerMuller: return {1, 2, true, false, false};
-    case TimingDetector::ModifiedMuellerMuller: return {1, 3, true, false, false};
-    case TimingDetector::ZeroCrossing: return {2, 2, true, false, false};
-    case TimingDetector::Gardner: return {2, 2, false, false, false};
-    case TimingDetector::EarlyLate: return {2, 1, false, false, true};
-    case TimingDetector::SignalTimesSlopeMl: return {1, 1, false, true, false};
-    case TimingDetector::SignumTimesSlopeMl: return {1, 1, false, true, false};
+    case TimingDetector::mueller_muller: return {1, 2, true, false, false};
+    case TimingDetector::modified_mueller_muller: return {1, 3, true, false, false};
+    case TimingDetector::zero_crossing: return {2, 2, true, false, false};
+    case TimingDetector::gardner: return {2, 2, false, false, false};
+    case TimingDetector::early_late: return {2, 1, false, false, true};
+    case TimingDetector::signal_times_slope_ml: return {1, 1, false, true, false};
+    case TimingDetector::signum_times_slope_ml: return {1, 1, false, true, false};
     }
     return {};
 }

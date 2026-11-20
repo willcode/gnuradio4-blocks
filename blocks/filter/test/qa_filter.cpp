@@ -246,7 +246,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             auto filterType = TTestParameter::filter_type;
 
             BasicFilter<T> filter;
-            expect(filter.set({{"filter_type", std::string(gr::meta::enumName(filterType).value_or(""))}, {"filter_response", "LOWPASS"}, {"filter_order", static_cast<gr::Size_t>(filterOrder)}, {"f_low", f_low}, {"sample_rate", sampleRate}, {"iir_design_method", "CHEBYSHEV1"}, {"fir_design_method", "Hamming"}}).has_value());
+            expect(filter.set({{"filter_type", std::string(gr::meta::enumName(filterType).value_or(""))}, {"filter_response", "lowpass"}, {"filter_order", static_cast<gr::Size_t>(filterOrder)}, {"f_low", f_low}, {"sample_rate", sampleRate}, {"iir_design_method", "chebyshev1"}, {"fir_design_method", "hamming"}}).has_value());
             filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
             "verify in-band signal passes through"_test = [&filter] {
@@ -285,17 +285,17 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
                 expect(le(maxOutput, static_cast<ValueType>(.2f))) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.settings.filter_type, maxOutput);
             };
         } |
-        std::tuple<FilterTestParam<float, FilterType::FIR>,          //
-            FilterTestParam<double, FilterType::FIR>,                //
-            FilterTestParam<UncertainValue<float>, FilterType::FIR>, //
-            FilterTestParam<float, FilterType::IIR>,                 //
-            FilterTestParam<double, FilterType::IIR>,                //
-            FilterTestParam<UncertainValue<float>, FilterType::IIR>>{};
+        std::tuple<FilterTestParam<float, FilterType::fir>,          //
+            FilterTestParam<double, FilterType::fir>,                //
+            FilterTestParam<UncertainValue<float>, FilterType::fir>, //
+            FilterTestParam<float, FilterType::iir>,                 //
+            FilterTestParam<double, FilterType::iir>,                //
+            FilterTestParam<UncertainValue<float>, FilterType::iir>>{};
 
     "UncertainValue<double> header type smoke test"_test = [] {
         static_assert(BlockLike<BasicFilter<UncertainValue<double>>>);
         BasicFilter<UncertainValue<double>> filter;
-        expect(filter.settings.filter_type == FilterType::IIR);
+        expect(filter.settings.filter_type == FilterType::iir);
     };
 
     "BasicDecimatingFilter - Low-pass Filter Test"_test = [](const FilterType& filterType) {
@@ -303,7 +303,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
 
         // Instantiate the BasicDecimatingFilter with the desired decimation rate
         BasicDecimatingFilter<T> filter;
-        expect(filter.set({{"filter_type", std::string(gr::meta::enumName(filterType).value_or(""))}, {"filter_response", "LOWPASS"}, {"filter_order", static_cast<gr::Size_t>(filterOrder)}, {"f_low", f_low}, {"sample_rate", sampleRate}, {"iir_design_method", "CHEBYSHEV1"}, {"fir_design_method", "Hamming"}, {"decimate", static_cast<gr::Size_t>(decimationRate)}}).has_value());
+        expect(filter.set({{"filter_type", std::string(gr::meta::enumName(filterType).value_or(""))}, {"filter_response", "lowpass"}, {"filter_order", static_cast<gr::Size_t>(filterOrder)}, {"f_low", f_low}, {"sample_rate", sampleRate}, {"iir_design_method", "chebyshev1"}, {"fir_design_method", "hamming"}, {"decimate", static_cast<gr::Size_t>(decimationRate)}}).has_value());
         filter.designFilter(); // triggers filter re-computation and setting of internal enums
 
         expect(eq(filter.input_chunk_size, decimationRate)) << "decimationRate type mismatch";
@@ -349,7 +349,7 @@ const boost::ut::suite<"Basic[Decimating]Filter"> BasicFilterTests = [] {
             double maxOutput = std::abs(*std::ranges::max_element(outputSignal, maxOp));
             expect(le(maxOutput, T{0.2})) << std::format("{} filter should attenuate out-of-band frequencies: max output {}", filter.settings.filter_type, maxOutput);
         };
-    } | std::vector<FilterType>({FilterType::FIR, FilterType::IIR});
+    } | std::vector<FilterType>({FilterType::fir, FilterType::iir});
 
     "Decimator - Low-pass Filter Test"_test = [] {
         using namespace gr::blocks::testing;
@@ -447,11 +447,11 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         params.fLow                    = 100.0;
         params.fHigh                   = 200.0;
         params.fs                      = 1000.0;
-        const std::vector<float> taps  = gr::filter::fir::designFilter<float>(gr::filter::Type::LOWPASS, params, gr::algorithm::window::Type::Hamming).b;
+        const std::vector<float> taps  = gr::filter::fir::designFilter<float>(gr::filter::Type::lowpass, params, gr::algorithm::window::Type::hamming).b;
         const std::uint64_t      twice = gr::blocks::filter::detail::twiceTapDelay(std::span<const float>(taps));
         expect(gt(twice, 4ULL)) << "the design delays the last two inputs past the last output";
 
-        const gr::property_map design{{"filter_type", std::string("FIR")}, {"filter_response", std::string("LOWPASS")}, {"filter_order", gr::Size_t{4}}, {"f_low", 100.0f}, {"f_high", 200.0f}, {"sample_rate", 1000.0f}, {"fir_design_method", std::string("Hamming")}};
+        const gr::property_map design{{"filter_type", std::string("fir")}, {"filter_response", std::string("lowpass")}, {"filter_order", gr::Size_t{4}}, {"f_low", 100.0f}, {"f_high", 200.0f}, {"sample_rate", 1000.0f}, {"fir_design_method", std::string("hamming")}};
         // at M = 5 a stream of 1003 ends in a partial chunk of 3 inputs, which holds both end tags and makes no output
         for (const gr::Size_t decimation : {gr::Size_t{1}, gr::Size_t{5}}) {
             for (const gr::Size_t samples : {kSamples, gr::Size_t{kSamples + 3U}}) {
@@ -480,7 +480,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
     };
 
     "BasicFilter in IIR mode leaves a tag on its own input"_test = [] {
-        const TaggedRun got = runTagged<BasicFilter<float>>({{"filter_type", std::string("IIR")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}}, kSamples, kMid);
+        const TaggedRun got = runTagged<BasicFilter<float>>({{"filter_type", std::string("iir")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}}, kSamples, kMid);
         expect(got.ran);
         expect(eq(got.samples, std::size_t{kSamples}));
         expect(that % (got.offsetsOf(gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{kMid})) << "the framework places the tag";
@@ -500,14 +500,14 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         filter_test::expectAtStreamEnd(fir, 250UZ, {"gr:trigger_name", kNonDefaultKey}, "fir_filter");
         expect(eq(fir.sampleOffsetsOf("gr:trigger_meta_info").size(), 1UZ)) << "fir_filter: a tag inside the stream reaches a sample";
 
-        const auto iir = filter_test::runChained<FirFilter<float>, BasicFilter<float>>(upstream, {{"filter_type", std::string("IIR")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}}, 1000U, tags);
+        const auto iir = filter_test::runChained<FirFilter<float>, BasicFilter<float>>(upstream, {{"filter_type", std::string("iir")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}}, 1000U, tags);
         filter_test::expectAtStreamEnd(iir, 250UZ, {"gr:trigger_name", kNonDefaultKey}, "BasicFilter, IIR");
     };
 
     "BasicDecimatingFilter in IIR mode publishes the tags of its partial last chunk at the end-of-stream index"_test = [] {
         // At M = 5 a stream of 1003 ends in a partial chunk of 3 inputs, which holds both end tags. No call forwards
         // them. They leave through the framework's forwarder, one past the 200 outputs.
-        gr::property_map settings{{"filter_type", std::string("IIR")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}};
+        gr::property_map settings{{"filter_type", std::string("iir")}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}};
         settings.insert_or_assign(gr::property_map::key_type{"decimate"}, gr::Size_t{5});
         const TaggedRun got = runTagged<BasicDecimatingFilter<float>>(settings, kSamples + 3U, kMid);
         expect(got.ran);
@@ -569,7 +569,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         // mode and starts on a tag, which the framework places on output 100. The held trigger leaves there too.
         namespace test = gr::blocks::testing::span;
         BasicFilter<float> block;
-        expect(block.set({{"filter_type", "FIR"}, {"filter_response", "LOWPASS"}, {"filter_order", 4U}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}, {"fir_design_method", "Hamming"}}).has_value());
+        expect(block.set({{"filter_type", "fir"}, {"filter_response", "lowpass"}, {"filter_order", 4U}, {"f_low", 100.0f}, {"sample_rate", 1000.0f}, {"fir_design_method", "hamming"}}).has_value());
         block.start();
         expect(gt(block.twiceTagDelay().value_or(0ULL), 0ULL)) << "the FIR design delays its tags";
 
@@ -580,7 +580,7 @@ const boost::ut::suite<"tag placement"> TagPlacementTests = [] {
         const std::vector<gr::Tag> secondTags{{100UZ, gr::property_map{{gr::property_map::key_type{"gr:trigger_meta_info"}, std::string("next")}}}};
         for (const auto& [at, tags] : {std::pair{0UZ, std::span<const gr::Tag>(firstTags)}, std::pair{100UZ, std::span<const gr::Tag>(secondTags)}}) {
             if (at > 0UZ) {
-                expect(block.set({{"filter_type", "IIR"}}).has_value());
+                expect(block.set({{"filter_type", "iir"}}).has_value());
                 block.designFilter();
             }
             test::InputSpan<float>  inSpan(std::span<const float>(input), at, tags);

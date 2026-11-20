@@ -15,20 +15,20 @@ namespace gr::digital {
 
 /// The adaptation rules an AdaptiveFir carries.
 enum class AdaptiveAlgorithm {
-    Lms,  ///< least mean squares against a reference symbol
-    Nlms, ///< the same, with the step normalized by the energy in the tap window
-    Cma   ///< constant modulus, blind: the reference is the constellation's own modulus statistic
+    lms,  ///< least mean squares against a reference symbol
+    nlms, ///< the same, with the step normalized by the energy in the tap window
+    cma   ///< constant modulus, blind: the reference is the constellation's own modulus statistic
 };
 
 [[nodiscard]] inline AdaptiveAlgorithm adaptiveAlgorithmFrom(std::string_view name) {
     if (name == "lms") {
-        return AdaptiveAlgorithm::Lms;
+        return AdaptiveAlgorithm::lms;
     }
     if (name == "nlms") {
-        return AdaptiveAlgorithm::Nlms;
+        return AdaptiveAlgorithm::nlms;
     }
     if (name == "cma") {
-        return AdaptiveAlgorithm::Cma;
+        return AdaptiveAlgorithm::cma;
     }
     throw std::invalid_argument(std::format("gr::digital::AdaptiveFir: unknown algorithm '{}'; lms, nlms or cma", name));
 }
@@ -68,7 +68,7 @@ struct AdaptiveFir {
     std::vector<Complex> _history{Complex{}, Complex{}}; ///< 2*nTaps entries, each sample written to two slots
     std::size_t          _nTaps           = 1UZ;
     std::size_t          _position        = 0UZ; ///< slot holding the newest sample; walks backwards
-    AdaptiveAlgorithm    _algorithm       = AdaptiveAlgorithm::Lms;
+    AdaptiveAlgorithm    _algorithm       = AdaptiveAlgorithm::lms;
     double               _stepSize        = 0.01;
     double               _referenceRatio  = 1.;
     double               _divergenceBound = 100.;
@@ -160,7 +160,7 @@ struct AdaptiveFir {
         double errorIm = 0.;
         double step    = _stepSize;
 
-        if (_algorithm == AdaptiveAlgorithm::Cma) {
+        if (_algorithm == AdaptiveAlgorithm::cma) {
             const double yr    = static_cast<double>(y.real());
             const double yi    = static_cast<double>(y.imag());
             const double slack = _referenceRatio - (yr * yr + yi * yi);
@@ -169,7 +169,7 @@ struct AdaptiveFir {
         } else {
             errorRe = static_cast<double>(reference.real()) - static_cast<double>(y.real());
             errorIm = static_cast<double>(reference.imag()) - static_cast<double>(y.imag());
-            if (_algorithm == AdaptiveAlgorithm::Nlms) {
+            if (_algorithm == AdaptiveAlgorithm::nlms) {
                 double energy = 0.;
                 for (std::size_t i = 0UZ; i < _nTaps; ++i) {
                     const double xr = static_cast<double>(_history[_position + i].real());

@@ -120,18 +120,18 @@ struct LengthRow {
     gr::Size_t               unitItems;
     gr::Size_t               checkItems;
     gr::Size_t               prefixItems;
-    const char*              byteOrder = "Big";
-    const char*              flagsAt   = "High";
+    const char*              byteOrder = "big";
+    const char*              flagsAt   = "high";
 };
 
 [[nodiscard]] gr::digital::LengthCount countOf(const LengthRow& row) { return gr::digital::LengthCount{row.coversValue, static_cast<std::size_t>(row.unitItems), static_cast<std::size_t>(row.checkItems), static_cast<std::size_t>(row.prefixItems)}; }
 
 [[nodiscard]] gr::digital::HeaderFormat formatOf(const LengthRow& row) {
     if (std::string_view(row.name) == "length_plain") {
-        const auto order = std::string_view(row.byteOrder) == "Little" ? gr::digital::HeaderByteOrder::Little : gr::digital::HeaderByteOrder::Big;
+        const auto order = std::string_view(row.byteOrder) == "little" ? gr::digital::HeaderByteOrder::little : gr::digital::HeaderByteOrder::big;
         return gr::digital::HeaderFormat{gr::digital::LengthPlainHeader{row.lengthBits, order, countOf(row)}};
     }
-    const auto flags = std::string_view(row.flagsAt) == "Low" ? gr::digital::FlagsPosition::Low : gr::digital::FlagsPosition::High;
+    const auto flags = std::string_view(row.flagsAt) == "low" ? gr::digital::FlagsPosition::low : gr::digital::FlagsPosition::high;
     return gr::digital::HeaderFormat{gr::digital::LengthGolay24Header{row.lengthBits, flags, countOf(row)}};
 }
 
@@ -452,9 +452,9 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
         // one 34-byte payload region whose last two bytes are a CRC-16, behind a 16-bit length field: the three
         // conventions write 32, 34 and 36 and every one of them has to extract the same 272 items
         constexpr std::size_t kPayloadItems = 272UZ;
-        const LengthRow       kRows[]{{"length_plain", "Payload", gr::digital::CountCovers::Payload, 16UZ, 8U, 16U, 0U}, //
-                  {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 8U, 0U, 0U},  //
-                  {"length_plain", "WholeFrame", gr::digital::CountCovers::WholeFrame, 16UZ, 8U, 0U, 16U}};
+        const LengthRow       kRows[]{{"length_plain", "payload", gr::digital::CountCovers::payload, 16UZ, 8U, 16U, 0U}, //
+                  {"length_plain", "payload_and_check", gr::digital::CountCovers::payload_and_check, 16UZ, 8U, 0U, 0U},  //
+                  {"length_plain", "whole_frame", gr::digital::CountCovers::whole_frame, 16UZ, 8U, 0U, 16U}};
         const std::uint32_t   kWritten[]{32U, 34U, 36U};
 
         for (std::size_t which = 0UZ; which < std::size(kRows); ++which) {
@@ -486,12 +486,12 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
     };
 
     "both realizations round trip random lengths under every convention"_test = [] {
-        const LengthRow kRows[]{{"length_plain", "Payload", gr::digital::CountCovers::Payload, 16UZ, 8U, 16U, 0U},          //
-            {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 8U, 0U, 0U},           //
-            {"length_plain", "WholeFrame", gr::digital::CountCovers::WholeFrame, 16UZ, 8U, 0U, 0U},                       //
-            {"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 1U, 0U, 0U, "Little"}, //
-            {"length_golay24", "Payload", gr::digital::CountCovers::Payload, 8UZ, 8U, 16U, 0U, "Big", "High"},              //
-            {"length_golay24", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 8UZ, 8U, 0U, 0U, "Big", "Low"}};
+        const LengthRow kRows[]{{"length_plain", "payload", gr::digital::CountCovers::payload, 16UZ, 8U, 16U, 0U},          //
+            {"length_plain", "payload_and_check", gr::digital::CountCovers::payload_and_check, 16UZ, 8U, 0U, 0U},           //
+            {"length_plain", "whole_frame", gr::digital::CountCovers::whole_frame, 16UZ, 8U, 0U, 0U},                       //
+            {"length_plain", "payload_and_check", gr::digital::CountCovers::payload_and_check, 16UZ, 1U, 0U, 0U, "little"}, //
+            {"length_golay24", "payload", gr::digital::CountCovers::payload, 8UZ, 8U, 16U, 0U, "big", "high"},              //
+            {"length_golay24", "payload_and_check", gr::digital::CountCovers::payload_and_check, 8UZ, 8U, 0U, 0U, "big", "low"}};
 
         for (const LengthRow& row : kRows) {
             const gr::digital::HeaderFormat        format = formatOf(row);
@@ -527,7 +527,7 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
     };
 
     "the Golay header corrects three errors and counts them, and refuses a fourth"_test = [] {
-        const LengthRow                 row{"length_golay24", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 8UZ, 8U, 0U, 0U, "Big", "High"};
+        const LengthRow                 row{"length_golay24", "payload_and_check", gr::digital::CountCovers::payload_and_check, 8UZ, 8U, 0U, 0U, "big", "high"};
         const gr::digital::HeaderFormat format = formatOf(row);
 
         for (std::size_t errors = 0UZ; errors <= 3UZ; ++errors) {
@@ -565,7 +565,7 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
     };
 
     "an over-long claim is refused and the genuine packet behind it survives"_test = [] {
-        const LengthRow                 row{"length_plain", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 16UZ, 8U, 0U, 0U};
+        const LengthRow                 row{"length_plain", "payload_and_check", gr::digital::CountCovers::payload_and_check, 16UZ, 8U, 0U, 0U};
         const gr::digital::HeaderFormat format = formatOf(row);
 
         Rng                       rng{};
@@ -597,8 +597,8 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
     };
 
     "the new formats do not change with the feed granularity"_test = [] {
-        const LengthRow kRows[]{{"length_plain", "Payload", gr::digital::CountCovers::Payload, 16UZ, 8U, 16U, 0U}, //
-            {"length_golay24", "PayloadAndCheck", gr::digital::CountCovers::PayloadAndCheck, 8UZ, 8U, 0U, 0U, "Big", "High"}};
+        const LengthRow kRows[]{{"length_plain", "payload", gr::digital::CountCovers::payload, 16UZ, 8U, 16U, 0U}, //
+            {"length_golay24", "payload_and_check", gr::digital::CountCovers::payload_and_check, 8UZ, 8U, 0U, 0U, "big", "high"}};
 
         for (const LengthRow& row : kRows) {
             const gr::digital::HeaderFormat        format = formatOf(row);
@@ -633,25 +633,25 @@ const boost::ut::suite<"length headers"> lengthHeaderTests = [] {
 
         const gr::property_map crc{{"max_payload_items", 256U}};
         refuses(gr::property_map{{"max_payload_items", 256U}, {"length_bits", 16U}}, "length_bits", "a width belongs to the length formats");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"count_covers", std::string("Payload")}}, "count_covers", "and so does what the field counts");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"count_covers", std::string("payload")}}, "count_covers", "and so does what the field counts");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"count_unit_items", 1U}}, "count_unit_items", "and the unit");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"check_items", 16U}}, "check_items", "and the check field");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"frame_prefix_items", 16U}}, "frame_prefix_items", "and the prefix");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"byte_order", std::string("Little")}}, "byte_order", "byte_order belongs to length_plain alone");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"flags_position", std::string("Low")}}, "flags_position", "and flags_position to length_golay24 alone");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"byte_order", std::string("little")}}, "byte_order", "byte_order belongs to length_plain alone");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"flags_position", std::string("low")}}, "flags_position", "and flags_position to length_golay24 alone");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"fixed_payload_items", 64U}}, "fixed_payload_items", "and a fixed length to fixed_length alone");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 12U}, {"count_covers", std::string("PayloadAndCheck")}, {"byte_order", std::string("Little")}}, "byte_order", "byte_order under length_golay24");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 12U}, {"count_covers", std::string("payload_and_check")}, {"byte_order", std::string("little")}}, "byte_order", "byte_order under length_golay24");
 
-        const gr::property_map plain{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"count_covers", std::string("PayloadAndCheck")}};
+        const gr::property_map plain{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"count_covers", std::string("payload_and_check")}};
         refuses(plain, "length_bits", "length_bits is required by the length formats and has no default");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}}, "count_covers", "and count_covers has none either");
         refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("everything")}}, "count_covers", "an unrecognized convention names the setting");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 33U}, {"count_covers", std::string("PayloadAndCheck")}}, "length_bits", "a field wider than the framer's header buffer");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 12U}, {"count_covers", std::string("PayloadAndCheck")}, {"byte_order", std::string("Little")}}, "byte_order", "a byte order over a field that is not whole bytes");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("PayloadAndCheck")}}, "length_bits", "a Golay header carries twelve information bits");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"count_unit_items", 65U}}, "must be >= 1 and <= 64", "a counted unit above 64 items");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("PayloadAndCheck")}, {"check_items", 2U}}, "check_items", "a check field under a convention that counts it");
-        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("Payload")}, {"frame_prefix_items", 16U}}, "frame_prefix_items", "and a frame prefix under one that does not");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 33U}, {"count_covers", std::string("payload_and_check")}}, "length_bits", "a field wider than the framer's header buffer");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 12U}, {"count_covers", std::string("payload_and_check")}, {"byte_order", std::string("little")}}, "byte_order", "a byte order over a field that is not whole bytes");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("payload_and_check")}}, "length_bits", "a Golay header carries twelve information bits");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("payload_and_check")}, {"count_unit_items", 65U}}, "must be >= 1 and <= 64", "a counted unit above 64 items");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("payload_and_check")}, {"check_items", 2U}}, "check_items", "a check field under a convention that counts it");
+        refuses(gr::property_map{{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("payload")}, {"frame_prefix_items", 16U}}, "frame_prefix_items", "and a frame prefix under one that does not");
 
         expect(nothrow([&crc] { std::ignore = make<PacketFramer<std::uint8_t>>(crc); })) << "and a settings vector naming no layout-specific setting leaves the realizations in use alone";
     };

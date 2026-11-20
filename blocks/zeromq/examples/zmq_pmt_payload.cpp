@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
         auto& push   = graph.emplaceBlock<gr::blocks::zeromq::ZmqPushSink<gr::pmt::Value>>({
             {"endpoint", endpoint},
             {"timeout", 100},
-            {"pmt_wire_format", "GR3"},
+            {"pmt_wire_format", "gr3"},
             {"bind", true},
         });
         if (auto conn = graph.connect<"out", "in">(source, push); !conn) {
@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
         auto& pull = graph.emplaceBlock<gr::blocks::zeromq::ZmqPullSource<gr::pmt::Value>>({
             {"endpoint", endpoint},
             {"timeout", 100},
-            {"pmt_wire_format", "GR3"},
+            {"pmt_wire_format", "gr3"},
             {"bind", false},
         });
         auto& sink = graph.emplaceBlock<PmtPrintingSink>();

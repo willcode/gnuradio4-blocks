@@ -142,12 +142,12 @@ port, for the complex kind only, and the phase record's signal name ends in _pha
     struct Settings {
         Annotated<gr::Size_t, Unit<"samples">, Visible, Doc<"window length">, Limits<Min<16U>, Max<1048576U>>, StoppedOnly> window_length    = 4096U;
         Annotated<gr::Size_t, Unit<"samples">, Visible, Doc<"maximum lag">, Limits<Min<1U>>, StoppedOnly>                   max_lag          = 1024U;
-        Annotated<gr::analysis::AcfKind, Visible, Doc<"estimator kind">, StoppedOnly>                                       kind             = gr::analysis::AcfKind::Envelope;
-        Annotated<gr::analysis::AcfNormalization, Visible, Doc<"lag normalization">, StoppedOnly>                           normalization    = gr::analysis::AcfNormalization::Unbiased;
+        Annotated<gr::analysis::AcfKind, Visible, Doc<"estimator kind">, StoppedOnly>                                       kind             = gr::analysis::AcfKind::envelope;
+        Annotated<gr::analysis::AcfNormalization, Visible, Doc<"lag normalization">, StoppedOnly>                           normalization    = gr::analysis::AcfNormalization::unbiased;
         Annotated<gr::Size_t, Visible, Doc<"windows per record">, Limits<Min<1U>>>                                          n_averages       = 16U;
         Annotated<double, Visible, Doc<"window overlap">, StoppedOnly, Limits<Min<0.0>, Under<1.0>>>                        overlap          = 0.5;
         Annotated<bool, Visible, Doc<"mean removal">, StoppedOnly>                                                          remove_mean      = true;
-        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>, StoppedOnly>                 window           = gr::algorithm::window::Type::Rectangular;
+        Annotated<gr::algorithm::window::Type, Visible, Doc<gr::algorithm::window::TypeNames>, StoppedOnly>                 window           = gr::algorithm::window::Type::rectangular;
         Annotated<double, Visible, Doc<"false alarm rate">, Limits<Over<0.0>, Under<1.0>>>                                  false_alarm_rate = 1e-3;
         Annotated<bool, Visible, Doc<"phase output">>                                                                       emit_phase       = false;
         Annotated<float, Visible, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>                                        sample_rate      = 1.f;
@@ -289,7 +289,7 @@ port, for the complex kind only, and the phase record's signal name ends in _pha
     }
 
 private:
-    [[nodiscard]] bool wantsPhase(const auto& phaseSpan) const noexcept { return settings.emit_phase.value && _kernel.config().kind == gr::analysis::AcfKind::Complex && phaseSpan.isConnected; }
+    [[nodiscard]] bool wantsPhase(const auto& phaseSpan) const noexcept { return settings.emit_phase.value && _kernel.config().kind == gr::analysis::AcfKind::complex && phaseSpan.isConnected; }
 
     [[nodiscard]] bool hasRoom(const auto& outSpan, const auto& phaseSpan, const detail::AcfProgress& progress) const noexcept { return progress.made < outSpan.size() && (!wantsPhase(phaseSpan) || progress.madePhase < phaseSpan.size()); }
 

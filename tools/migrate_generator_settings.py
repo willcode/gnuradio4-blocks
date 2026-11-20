@@ -61,6 +61,16 @@
    every block carries, read-only for this one. A saved graph that names `stride`
    on the correlator becomes one that names `code_stride`.
 
+5. The enumerators a setting takes are spelled in lower case with underscores, as
+   the standard library spells its own, and a host sends that spelling exactly:
+   `bit_order: MsbFirst` becomes `bit_order: msb_first`, `window: BlackmanHarris`
+   becomes `window: blackman_harris`. A value is respelled where its key is a
+   setting an enumeration types, under any block; a value the table does not
+   list stays as it is. Two enumerators were renamed, not respelled, since their
+   spelling is a C++ keyword: the signal type `Const` is `constant`, and the
+   Savitzky-Golay and SVD filters' boundary policy `Default` is `default_value`.
+   The window `HannExp` becomes `hann`, the window it named.
+
 Usage:
     python3 tools/migrate_generator_settings.py graph.grc              # report only
     python3 tools/migrate_generator_settings.py --in-place graph.grc   # rewrite
@@ -79,6 +89,173 @@ KEY_RENAMES = {
     "gr::blocks::basic::SignalGenerator": ("frequency", "tone_frequency"),
     "gr::blocks::basic::FunctionGenerator": ("frequency", "tone_frequency"),
     "gr::blocks::digital::AccessCodeCorrelator": ("stride", "code_stride"),
+}
+
+# each setting whose enumeration was respelled, with its enumerators' old and new names
+ENUMERATOR_RENAMES = {
+    "algorithm": {"Lms": "lms", "Nlms": "nlms", "Cma": "cma"},
+    "alignment": {"Centred": "centered", "Causal": "causal"},
+    "annotated_test_enum_setting": {
+        "TEST_STATE1": "test_state1",
+        "TEST_STATE2": "test_state2",
+        "TEST_STATE3": "test_state3",
+    },
+    "bit_order": {"MsbFirst": "msb_first", "LsbFirst": "lsb_first"},
+    "boundary_policy": {
+        "Default": "default_value",
+        "ZeroOrderHold": "zero_order_hold",
+        "Reflect": "reflect",
+        "Replicate": "replicate",
+    },
+    "burst_taper_type": {
+        "None": "none",
+        "Linear": "linear",
+        "RaisedCosine": "raised_cosine",
+        "Tukey": "tukey",
+        "Gaussian": "gaussian",
+        "Mushroom": "mushroom",
+        "MushroomSine": "mushroom_sine",
+    },
+    "byte_order": {"Big": "big", "Little": "little"},
+    "coding": {"Differential": "differential", "Nrzi": "nrzi"},
+    "convention": {"Ieee8023": "ieee802_3", "GeThomas": "ge_thomas"},
+    "count_covers": {
+        "Payload": "payload",
+        "PayloadAndCheck": "payload_and_check",
+        "WholeFrame": "whole_frame",
+    },
+    "crc_byte_order": {"Big": "big", "Little": "little"},
+    "derivative_method": {
+        "SymmetricDifference": "symmetric_difference",
+        "SavitzkyGolay5": "savitzky_golay5",
+        "SavitzkyGolay7": "savitzky_golay7",
+    },
+    "detector": {
+        "MuellerMuller": "mueller_muller",
+        "ModifiedMuellerMuller": "modified_mueller_muller",
+        "ZeroCrossing": "zero_crossing",
+        "Gardner": "gardner",
+        "EarlyLate": "early_late",
+        "SignalTimesSlopeMl": "signal_times_slope_ml",
+        "SignumTimesSlopeMl": "signum_times_slope_ml",
+    },
+    "direction": {"Apply": "apply", "Correct": "correct"},
+    "drift_correction": {
+        "None": "none",
+        "Linear": "linear",
+        "Cubic": "cubic",
+        "AdaptiveResampling": "adaptive_resampling",
+    },
+    "filter_response": {
+        "LOWPASS": "lowpass",
+        "HIGHPASS": "highpass",
+        "BANDPASS": "bandpass",
+        "BANDSTOP": "bandstop",
+    },
+    "filter_type": {"FIR": "fir", "IIR": "iir"},
+    "fir_design_method": {
+        "None": "none",
+        "Rectangular": "rectangular",
+        "Hamming": "hamming",
+        "Hann": "hann",
+        "HannExp": "hann",
+        "Blackman": "blackman",
+        "Nuttall": "nuttall",
+        "BlackmanHarris": "blackman_harris",
+        "BlackmanNuttall": "blackman_nuttall",
+        "FlatTop": "flat_top",
+        "Exponential": "exponential",
+        "Kaiser": "kaiser",
+        "Bartlett": "bartlett",
+        "Welch": "welch",
+        "Parzen": "parzen",
+        "Tukey": "tukey",
+        "Gaussian": "gaussian",
+    },
+    "flags_position": {"High": "high", "Low": "low"},
+    "frame_open": {
+        "Delimiter": "delimiter",
+        "Start": "start",
+        "Immediate": "immediate",
+    },
+    "iir_design_method": {
+        "BUTTERWORTH": "butterworth",
+        "BESSEL": "bessel",
+        "CHEBYSHEV1": "chebyshev1",
+        "CHEBYSHEV2": "chebyshev2",
+    },
+    "input": {"Differential": "differential", "Chips": "chips"},
+    "input_bit_order": {"MsbFirst": "msb_first", "LsbFirst": "lsb_first"},
+    "kind": {
+        "Complex": "complex",
+        "Envelope": "envelope",
+        "Block": "block",
+        "Convolutional": "convolutional",
+        "Permutation": "permutation",
+    },
+    "model": {"Rapp": "rapp", "Saleh": "saleh"},
+    "normalization": {
+        "Biased": "biased",
+        "Unbiased": "unbiased",
+        "Power": "power",
+        "Amplitude": "amplitude",
+        "None": "none",
+    },
+    "output_bit_order": {"MsbFirst": "msb_first", "LsbFirst": "lsb_first"},
+    "payload_bit_order": {"MsbFirst": "msb_first", "LsbFirst": "lsb_first"},
+    "phase_unit": {"Radians": "radians", "Degrees": "degrees"},
+    "pmt_wire_format": {"GR3": "gr3", "GR4_YAML_V1": "gr4_yaml_v1"},
+    "pulse": {"Rect": "rect", "RaisedCosine": "raised_cosine", "Gaussian": "gaussian"},
+    "replacement": {"Interpolate": "interpolate", "Hold": "hold", "Zero": "zero"},
+    "signal_type": {
+        "Const": "constant",
+        "LinearRamp": "linear_ramp",
+        "ParabolicRamp": "parabolic_ramp",
+        "CubicSpline": "cubic_spline",
+        "ImpulseResponse": "impulse_response",
+        "UniformNoise": "uniform_noise",
+        "TriangularNoise": "triangular_noise",
+        "GaussianNoise": "gaussian_noise",
+        "Sin": "sin",
+        "Cos": "cos",
+        "FastSin": "fast_sin",
+        "FastCos": "fast_cos",
+        "Square": "square",
+        "Saw": "saw",
+        "Triangle": "triangle",
+    },
+    "soft_algorithm": {"MaxLog": "max_log", "Exact": "exact"},
+    "termination": {"Terminated": "terminated", "Open": "open"},
+    "test_enum_setting": {
+        "TEST_STATE1": "test_state1",
+        "TEST_STATE2": "test_state2",
+        "TEST_STATE3": "test_state3",
+    },
+    "transparency": {
+        "None": "none",
+        "BitStuffing": "bit_stuffing",
+        "ByteEscape": "byte_escape",
+    },
+    "type": {"GET": "get", "SUBSCRIBE": "subscribe"},
+    "window": {
+        "None": "none",
+        "Rectangular": "rectangular",
+        "Hamming": "hamming",
+        "Hann": "hann",
+        "HannExp": "hann",
+        "Blackman": "blackman",
+        "Nuttall": "nuttall",
+        "BlackmanHarris": "blackman_harris",
+        "BlackmanNuttall": "blackman_nuttall",
+        "FlatTop": "flat_top",
+        "Exponential": "exponential",
+        "Kaiser": "kaiser",
+        "Bartlett": "bartlett",
+        "Welch": "welch",
+        "Parzen": "parzen",
+        "Tukey": "tukey",
+        "Gaussian": "gaussian",
+    },
 }
 
 ALIAS_FAMILIES = (
@@ -432,6 +609,43 @@ def migrate_contexts(text):
     return "\n".join(lines) + trailing, changes, notes
 
 
+def migrate_enumerators(text):
+    """Return the text with each enumerator ENUMERATOR_RENAMES lists respelled, and the changes made."""
+    lines = text.splitlines(keepends=True)
+    changes = []
+    for number, line in enumerate(lines, start=1):
+        match = _KEY_LINE.match(line.rstrip("\r\n"))
+        if not match or match.group("value") is None:
+            continue
+        renames = ENUMERATOR_RENAMES.get(match.group("key").strip())
+        value = match.group("value")
+        quote = (
+            value[0]
+            if value[:1] in ("'", '"') and value[-1:] == value[:1] and len(value) > 1
+            else ""
+        )
+        bare = value[1:-1] if quote else value
+        if renames is None or bare not in renames:
+            continue
+        ending = line[len(line.rstrip("\r\n")) :]
+        lines[number - 1] = "{}{}{}: {}{}{}{}".format(
+            match.group("indent"),
+            match.group("dash") or "",
+            match.group("key"),
+            quote,
+            renames[bare],
+            quote,
+            ending,
+        )
+        changes.append(
+            (
+                number,
+                "{} {} -> {}".format(match.group("key").strip(), bare, renames[bare]),
+            )
+        )
+    return "".join(lines), changes
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Migrate a saved flow graph across the generator setting and alias renames and the generator's segments."
@@ -449,6 +663,8 @@ def main(argv=None):
     migrated, changes = migrate(original)
     migrated, context_changes, notes = migrate_contexts(migrated)
     changes += context_changes
+    migrated, enumerator_changes = migrate_enumerators(migrated)
+    changes += enumerator_changes
 
     for number, description in changes:
         print("{}:{}: {}".format(arguments.graph, number, description))
@@ -657,6 +873,22 @@ class MigrateTest(unittest.TestCase):
         self.assertEqual(
             migrate_id("gr::blocks::sdr::SoapySink<complex<float32>, 1UZ>"),
             "gr::blocks::sdr::SoapySink<complex<float32>>",
+        )
+
+    def test_enumerators_are_respelled(self):
+        migrated, changes = migrate_enumerators(GENERATOR_AFTER)
+        self.assertIn("          signal_type: constant\n", migrated)
+        self.assertIn("          signal_type: linear_ramp\n", migrated)
+        self.assertEqual(len(changes), 2)
+        self.assertEqual(migrate_enumerators(migrated), (migrated, []))
+        self.assertEqual(
+            migrate_enumerators("      window: 'BlackmanHarris'\n")[0],
+            "      window: 'blackman_harris'\n",
+        )
+        self.assertEqual(
+            migrate_enumerators("      name: Hann\n")[0],
+            "      name: Hann\n",
+            "another key's value stays",
         )
 
     def test_unchanged_ids_report_nothing(self):

@@ -50,10 +50,10 @@
 namespace gr::digital {
 
 /// @brief How a protocol keeps its delimiter out of the payload.
-enum class Transparency : std::uint8_t { None, BitStuffing, ByteEscape };
+enum class Transparency : std::uint8_t { none, bit_stuffing, byte_escape };
 
 /// @brief What opens a frame: the closing delimiter itself, a separate opening delimiter, or nothing at all.
-enum class FrameOpen : std::uint8_t { Delimiter, Start, Immediate };
+enum class FrameOpen : std::uint8_t { delimiter, start, immediate };
 
 /// @brief Which port a closed region belongs on, and under which refusal.
 enum class FrameOutcome : std::uint8_t { Emitted, Overrun, Undersize, Unaligned };
@@ -70,8 +70,8 @@ enum class ScanEvent : std::uint8_t {
 /// @brief The name a block exposes for @p mode.
 [[nodiscard]] constexpr std::string_view transparencyName(Transparency mode) noexcept {
     switch (mode) {
-    case Transparency::BitStuffing: return std::string_view{"bit_stuffing"};
-    case Transparency::ByteEscape: return std::string_view{"byte_escape"};
+    case Transparency::bit_stuffing: return std::string_view{"bit_stuffing"};
+    case Transparency::byte_escape: return std::string_view{"byte_escape"};
     default: break;
     }
     return std::string_view{"none"};
@@ -79,14 +79,14 @@ enum class ScanEvent : std::uint8_t {
 
 /// @brief The mode @p name selects; throws `std::invalid_argument`, quoting @p name, for anything but the three names.
 [[nodiscard]] inline Transparency transparencyFromName(std::string_view name) {
-    if (name == transparencyName(Transparency::None)) {
-        return Transparency::None;
+    if (name == transparencyName(Transparency::none)) {
+        return Transparency::none;
     }
-    if (name == transparencyName(Transparency::BitStuffing)) {
-        return Transparency::BitStuffing;
+    if (name == transparencyName(Transparency::bit_stuffing)) {
+        return Transparency::bit_stuffing;
     }
-    if (name == transparencyName(Transparency::ByteEscape)) {
-        return Transparency::ByteEscape;
+    if (name == transparencyName(Transparency::byte_escape)) {
+        return Transparency::byte_escape;
     }
     throw std::invalid_argument(std::format("gr::digital::transparencyFromName: transparency must be 'none', 'bit_stuffing' or 'byte_escape', got '{}'", name));
 }
@@ -94,8 +94,8 @@ enum class ScanEvent : std::uint8_t {
 /// @brief The name a block exposes for @p opening.
 [[nodiscard]] constexpr std::string_view frameOpenName(FrameOpen opening) noexcept {
     switch (opening) {
-    case FrameOpen::Start: return std::string_view{"start"};
-    case FrameOpen::Immediate: return std::string_view{"immediate"};
+    case FrameOpen::start: return std::string_view{"start"};
+    case FrameOpen::immediate: return std::string_view{"immediate"};
     default: break;
     }
     return std::string_view{"delimiter"};
@@ -103,14 +103,14 @@ enum class ScanEvent : std::uint8_t {
 
 /// @brief The opening rule @p name selects; throws `std::invalid_argument`, quoting @p name, for anything but the three names.
 [[nodiscard]] inline FrameOpen frameOpenFromName(std::string_view name) {
-    if (name == frameOpenName(FrameOpen::Delimiter)) {
-        return FrameOpen::Delimiter;
+    if (name == frameOpenName(FrameOpen::delimiter)) {
+        return FrameOpen::delimiter;
     }
-    if (name == frameOpenName(FrameOpen::Start)) {
-        return FrameOpen::Start;
+    if (name == frameOpenName(FrameOpen::start)) {
+        return FrameOpen::start;
     }
-    if (name == frameOpenName(FrameOpen::Immediate)) {
-        return FrameOpen::Immediate;
+    if (name == frameOpenName(FrameOpen::immediate)) {
+        return FrameOpen::immediate;
     }
     throw std::invalid_argument(std::format("gr::digital::frameOpenFromName: frame_open must be 'delimiter', 'start' or 'immediate', got '{}'", name));
 }
@@ -156,7 +156,7 @@ template<std::floating_point T>
 /// @brief The low @p width bits of @p value, in place under `msb_first` and reversed under `lsb_first`.
 [[nodiscard]] inline constexpr std::uint8_t orderedLowBits(unsigned value, unsigned width, gr::math::BitOrder order) noexcept {
     const unsigned low = value & ((1U << width) - 1U);
-    if (order == gr::math::BitOrder::MsbFirst) {
+    if (order == gr::math::BitOrder::msb_first) {
         return static_cast<std::uint8_t>(low);
     }
     unsigned reversed = 0U;
@@ -201,10 +201,10 @@ template<std::floating_point T>
 struct DelimiterConfig {
     std::string                                        endDelimiter{};   ///< the closing delimiter, `'0'`/`'1'` characters, MSB first in wire order
     std::string                                        startDelimiter{}; ///< the opening delimiter, required and non-empty iff `frameOpen == Start`
-    FrameOpen                                          frameOpen      = FrameOpen::Delimiter;
+    FrameOpen                                          frameOpen      = FrameOpen::delimiter;
     unsigned                                           bitsPerItem    = 1U;                            ///< bits each input item carries, `[1, 8]`
-    gr::math::BitOrder                                 bitOrder       = gr::math::BitOrder::MsbFirst; ///< order of an item's bits on the wire, meaningful only above one bit per item
-    Transparency                                       transparency   = Transparency::None;
+    gr::math::BitOrder                                 bitOrder       = gr::math::BitOrder::msb_first; ///< order of an item's bits on the wire, meaningful only above one bit per item
+    Transparency                                       transparency   = Transparency::none;
     unsigned                                           stuffAfterOnes = 5U;                             ///< bit stuffing: a `0` arriving at exactly this consecutive-ones count is removed
     unsigned                                           abortOnes      = 7U;                             ///< bit stuffing: this many consecutive `1`s abandons the frame; exceeds `stuffAfterOnes` and the delimiters' longest run of ones; `0` disables
     std::uint8_t                                       escapeItem     = 0U;                             ///< byte escaping: the introducer's item value
@@ -212,7 +212,7 @@ struct DelimiterConfig {
     std::size_t                                        maxPayloadItems = 0UZ;                           ///< the largest payload a frame may carry, in decoded items; `0` is unset
     std::size_t                                        minPayloadItems = 1UZ;                           ///< a closed region shorter than this is refused as undersize
     unsigned                                           packBits        = 0U;                            ///< `0` emits decoded items unchanged; `1..8` repacks the decoded bits into items of that width
-    gr::math::BitOrder                                 packOrder       = gr::math::BitOrder::MsbFirst; ///< the order the pack stage assembles bits in
+    gr::math::BitOrder                                 packOrder       = gr::math::BitOrder::msb_first; ///< the order the pack stage assembles bits in
 
     std::uint64_t                 endBits       = 0ULL;  ///< the closing delimiter's bits, right-aligned
     std::uint64_t                 startBits     = 0ULL;  ///< the opening delimiter's bits, right-aligned
@@ -271,16 +271,16 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
     if (cfg.abortOnes != 0U && cfg.abortOnes <= cfg.stuffAfterOnes) {
         throw std::invalid_argument(std::format("gr::digital::configureDelimiter: abortOnes {} must exceed stuffAfterOnes {}, or an abort would fire before a stuff and make the code unusable", cfg.abortOnes, cfg.stuffAfterOnes));
     }
-    if (cfg.frameOpen == FrameOpen::Start && startText.empty()) {
+    if (cfg.frameOpen == FrameOpen::start && startText.empty()) {
         throw std::invalid_argument("gr::digital::configureDelimiter: frameOpen 'start' needs a startDelimiter");
     }
-    if (cfg.frameOpen != FrameOpen::Start && !startText.empty()) {
+    if (cfg.frameOpen != FrameOpen::start && !startText.empty()) {
         throw std::invalid_argument(std::format("gr::digital::configureDelimiter: frameOpen '{}' consults no startDelimiter, so setting one is a settings error rather than a harmless extra", frameOpenName(cfg.frameOpen)));
     }
-    if (cfg.transparency == Transparency::BitStuffing && width != 1U) {
+    if (cfg.transparency == Transparency::bit_stuffing && width != 1U) {
         throw std::invalid_argument(std::format("gr::digital::configureDelimiter: bit stuffing is a bit-level code and needs bitsPerItem 1, got {}", width));
     }
-    if (cfg.transparency == Transparency::ByteEscape && width != 8U) {
+    if (cfg.transparency == Transparency::byte_escape && width != 8U) {
         throw std::invalid_argument(std::format("gr::digital::configureDelimiter: byte escaping needs a byte, so bitsPerItem must be 8, got {}", width));
     }
 
@@ -337,14 +337,14 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
     // The abort counter runs over the delimiter's own ones, the frame the delimiter closes still being open, so an
     // abort run no longer than the delimiter's fires inside every closing delimiter and abandons every frame. The
     // bound is therefore the delimiters' longest run of ones and not stuffAfterOnes alone.
-    if (cfg.transparency == Transparency::BitStuffing && cfg.abortOnes != 0U) {
+    if (cfg.transparency == Transparency::bit_stuffing && cfg.abortOnes != 0U) {
         const unsigned delimiterOnes = std::max(longestOneRun(startText), longestOneRun(endText));
         if (cfg.abortOnes <= delimiterOnes) {
             throw std::invalid_argument(std::format("gr::digital::configureDelimiter: abortOnes {} does not exceed the run of {} consecutive ones the delimiters carry, so the abort would fire inside the delimiter that closes a frame and abandon every frame", cfg.abortOnes, delimiterOnes));
         }
     }
 
-    if (!endText.empty() && cfg.transparency == Transparency::BitStuffing) {
+    if (!endText.empty() && cfg.transparency == Transparency::bit_stuffing) {
         const unsigned longest = longestOneRun(endText);
         if (longest <= cfg.stuffAfterOnes) {
             throw std::invalid_argument(std::format("gr::digital::configureDelimiter: coded data may carry runs of up to {} consecutive ones and \"{}\" carries at most {}, so a conforming encoder can produce this delimiter inside a payload", cfg.stuffAfterOnes, endText, longest));
@@ -368,7 +368,7 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
             }
         }
     }
-    if (!endText.empty() && cfg.transparency == Transparency::ByteEscape) {
+    if (!endText.empty() && cfg.transparency == Transparency::byte_escape) {
         for (const std::uint8_t value : detail::delimiterItemValues(endText, width)) {
             if (value == cfg.escapeItem) {
                 throw std::invalid_argument(std::format("gr::digital::configureDelimiter: the delimiter carries the escape introducer {}, which the decoder removes, so the delimiter is not invariant under the decoder", value));
@@ -385,7 +385,7 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
     cfg.startBits      = startWord;
     cfg.startMask      = startMask;
     cfg.startItems     = startText.size() / width;
-    cfg.distinctStart  = cfg.frameOpen == FrameOpen::Start;
+    cfg.distinctStart  = cfg.frameOpen == FrameOpen::start;
     cfg.escapeTable    = escapeTable;
     cfg.escapeMapped   = escapeMapped;
     cfg.escapeOriginal = escapeOriginal;
@@ -393,7 +393,7 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
         cfg.itemTable[value] = detail::orderedLowBits(value, width, cfg.bitOrder);
     }
     if (cfg.packBits != 0U) {
-        gr::math::configureRepack(cfg.pack, 1U, cfg.packBits, gr::math::BitOrder::MsbFirst, cfg.packOrder);
+        gr::math::configureRepack(cfg.pack, 1U, cfg.packBits, gr::math::BitOrder::msb_first, cfg.packOrder);
     }
 }
 
@@ -409,7 +409,7 @@ inline void configureDelimiter(DelimiterConfig& cfg) {
  * @return the warning, or an empty string when there is nothing to warn about.
  */
 [[nodiscard]] inline std::string unforgeabilityWarning(const DelimiterConfig& cfg) {
-    if (cfg.transparency != Transparency::ByteEscape || cfg.endDelimiter.empty()) {
+    if (cfg.transparency != Transparency::byte_escape || cfg.endDelimiter.empty()) {
         return {};
     }
     for (const std::uint8_t value : detail::delimiterItemValues(cfg.endDelimiter, cfg.bitsPerItem)) {
@@ -440,7 +440,7 @@ inline void framerConfigure(DelimiterConfig& cfg) {
     DelimiterConfig staged = cfg;
     configureDelimiter(staged);
 
-    if (staged.transparency == Transparency::ByteEscape) {
+    if (staged.transparency == Transparency::byte_escape) {
         const auto require = [&staged](std::uint8_t value, std::string_view which) {
             if (!staged.escapeOriginal[value]) {
                 throw std::invalid_argument(std::format("gr::digital::framerConfigure: {} is {}, which the escape map does not list as an original value, so an encoder would emit it unescaped and a payload could forge the delimiter", which, value));
@@ -449,7 +449,7 @@ inline void framerConfigure(DelimiterConfig& cfg) {
         for (const std::uint8_t value : detail::delimiterEmitValues(staged.endDelimiter, staged.bitsPerItem, staged.bitOrder)) {
             require(value, "an item of the end delimiter");
         }
-        if (staged.frameOpen == FrameOpen::Start) {
+        if (staged.frameOpen == FrameOpen::start) {
             for (const std::uint8_t value : detail::delimiterEmitValues(staged.startDelimiter, staged.bitsPerItem, staged.bitOrder)) {
                 require(value, "an item of the start delimiter");
             }
@@ -476,12 +476,12 @@ struct EncodeResult {
  */
 [[nodiscard]] inline std::size_t framedItemsBound(const DelimiterConfig& cfg, std::size_t payloadItems) noexcept {
     std::size_t coded = payloadItems;
-    if (cfg.transparency == Transparency::BitStuffing) {
+    if (cfg.transparency == Transparency::bit_stuffing) {
         coded += payloadItems / cfg.stuffAfterOnes;
-    } else if (cfg.transparency == Transparency::ByteEscape) {
+    } else if (cfg.transparency == Transparency::byte_escape) {
         coded += payloadItems;
     }
-    const std::size_t opening = cfg.frameOpen == FrameOpen::Start ? cfg.startItems : (cfg.frameOpen == FrameOpen::Delimiter ? cfg.endItems : 0UZ);
+    const std::size_t opening = cfg.frameOpen == FrameOpen::start ? cfg.startItems : (cfg.frameOpen == FrameOpen::delimiter ? cfg.endItems : 0UZ);
     return coded + opening + cfg.endItems;
 }
 
@@ -529,12 +529,12 @@ struct DelimiterEncoder {
         }
 
         _closing      = detail::delimiterEmitValues(config.endDelimiter, config.bitsPerItem, config.bitOrder);
-        _opening      = config.frameOpen == FrameOpen::Start ? detail::delimiterEmitValues(config.startDelimiter, config.bitsPerItem, config.bitOrder) : (config.frameOpen == FrameOpen::Delimiter ? _closing : std::vector<std::uint8_t>{});
+        _opening      = config.frameOpen == FrameOpen::start ? detail::delimiterEmitValues(config.startDelimiter, config.bitsPerItem, config.bitOrder) : (config.frameOpen == FrameOpen::delimiter ? _closing : std::vector<std::uint8_t>{});
         _endBitLength = config.endItems * config.bitsPerItem;
 
         _payload.clear();
         if (config.packBits != 0U) {
-            gr::math::configureRepack(_unpack, config.packBits, 1U, config.packOrder, gr::math::BitOrder::MsbFirst);
+            gr::math::configureRepack(_unpack, config.packBits, 1U, config.packOrder, gr::math::BitOrder::msb_first);
             _payload.reserve(config.maxPayloadItems);
         }
     }
@@ -563,7 +563,7 @@ struct DelimiterEncoder {
         // under `none` the receiver's own register runs here, seeded by the opening delimiter exactly as the receiver seeds it
         std::uint64_t match   = 0ULL;
         std::size_t   shifted = 0UZ;
-        if (config.transparency == Transparency::None) {
+        if (config.transparency == Transparency::none) {
             for (const std::uint8_t item : _opening) {
                 advance(match, shifted, item);
             }
@@ -572,7 +572,7 @@ struct DelimiterEncoder {
         unsigned ones = 0U;
         for (const std::uint8_t item : payload) {
             switch (config.transparency) {
-            case Transparency::BitStuffing:
+            case Transparency::bit_stuffing:
                 out.push_back(item);
                 if (detail::sliceBit(item)) {
                     ++ones;
@@ -585,7 +585,7 @@ struct DelimiterEncoder {
                     ones = 0U;
                 }
                 break;
-            case Transparency::ByteEscape:
+            case Transparency::byte_escape:
                 if (config.escapeOriginal[item]) {
                     out.push_back(config.escapeItem);
                     out.push_back(_escapeReverse[item]);
@@ -790,7 +790,7 @@ struct DelimiterScanner {
             return step;
         }
 
-        if (_state == State::Idle && config.frameOpen == FrameOpen::Immediate) {
+        if (_state == State::Idle && config.frameOpen == FrameOpen::immediate) {
             openAt(at); // there is no opening delimiter, so the machine opens at the first item and again after every close
         }
         const bool open = _state == State::Open;
@@ -815,7 +815,7 @@ struct DelimiterScanner {
             return step;
         }
 
-        const bool startMatch = config.frameOpen == FrameOpen::Delimiter ? endMatch : (config.distinctStart && _shifted >= _startBitLength && _startRegister == config.startBits);
+        const bool startMatch = config.frameOpen == FrameOpen::delimiter ? endMatch : (config.distinctStart && _shifted >= _startBitLength && _startRegister == config.startBits);
         if (startMatch) {
             if (open) { // a mid-frame start abandons rather than being read as data, which would cost every frame after a lost end delimiter
                 abandon();
@@ -833,7 +833,7 @@ struct DelimiterScanner {
         ++_rawInFrame;
         T    value   = item;
         bool removed = false;
-        if (config.transparency == Transparency::BitStuffing) {
+        if (config.transparency == Transparency::bit_stuffing) {
             if (bits != 0ULL) {
                 ++_ones;
                 if (config.abortOnes != 0U && _ones == config.abortOnes) {
@@ -849,7 +849,7 @@ struct DelimiterScanner {
                 _ones   = 0U;
             }
         } else if constexpr (std::same_as<T, std::uint8_t>) {
-            if (config.transparency == Transparency::ByteEscape) {
+            if (config.transparency == Transparency::byte_escape) {
                 if (_escaped) {
                     _escaped = false;
                     if (!config.escapeMapped[item]) {
@@ -962,7 +962,7 @@ private:
             step.event = ScanEvent::Record;
         }
 
-        if (config.frameOpen == FrameOpen::Delimiter) {
+        if (config.frameOpen == FrameOpen::delimiter) {
             openAt(at + 1UZ); // the delimiter that closed this frame opens the next one
             return;
         }
@@ -1002,9 +1002,9 @@ private:
 [[nodiscard]] inline DelimiterConfig hdlc() {
     DelimiterConfig cfg;
     cfg.endDelimiter   = "01111110";
-    cfg.frameOpen      = FrameOpen::Delimiter;
+    cfg.frameOpen      = FrameOpen::delimiter;
     cfg.bitsPerItem    = 1U;
-    cfg.transparency   = Transparency::BitStuffing;
+    cfg.transparency   = Transparency::bit_stuffing;
     cfg.stuffAfterOnes = 5U;
     cfg.abortOnes      = 7U;
     configureDelimiter(cfg);
@@ -1020,9 +1020,9 @@ private:
 [[nodiscard]] inline DelimiterConfig slip() {
     DelimiterConfig cfg;
     cfg.endDelimiter = "11000000"; // 0xC0
-    cfg.frameOpen    = FrameOpen::Delimiter;
+    cfg.frameOpen    = FrameOpen::delimiter;
     cfg.bitsPerItem  = 8U;
-    cfg.transparency = Transparency::ByteEscape;
+    cfg.transparency = Transparency::byte_escape;
     cfg.escapeItem   = 0xDBU;
     cfg.escapeMap    = {{0xDCU, 0xC0U}, {0xDDU, 0xDBU}};
     configureDelimiter(cfg);
@@ -1041,9 +1041,9 @@ private:
 
     DelimiterConfig cfg;
     cfg.endDelimiter = "01111110"; // 0x7E
-    cfg.frameOpen    = FrameOpen::Delimiter;
+    cfg.frameOpen    = FrameOpen::delimiter;
     cfg.bitsPerItem  = 8U;
-    cfg.transparency = Transparency::ByteEscape;
+    cfg.transparency = Transparency::byte_escape;
     cfg.escapeItem   = 0x7DU;
     cfg.escapeMap    = escapeMapFromXor(0x20U, std::span<const std::uint8_t>(originals));
     configureDelimiter(cfg);
@@ -1053,7 +1053,7 @@ private:
 /**
  * @brief NMEA 0183 sentences: `$` opens, `CR LF` closes, and nothing is escaped.
  *
- * The example of `Transparency::None`, which is correct here because the payload alphabet is printable ASCII and is
+ * The example of `Transparency::none`, which is correct here because the payload alphabet is printable ASCII and is
  * wrong wherever it is not: an eight-bit delimiter over unconstrained binary data is forged once every 256 bit
  * positions, which at 9600 bit/s is 37.5 times a second.
  */
@@ -1061,9 +1061,9 @@ private:
     DelimiterConfig cfg;
     cfg.endDelimiter   = "0000110100001010"; // CR LF
     cfg.startDelimiter = "00100100";         // $
-    cfg.frameOpen      = FrameOpen::Start;
+    cfg.frameOpen      = FrameOpen::start;
     cfg.bitsPerItem    = 8U;
-    cfg.transparency   = Transparency::None;
+    cfg.transparency   = Transparency::none;
     configureDelimiter(cfg);
     return cfg;
 }

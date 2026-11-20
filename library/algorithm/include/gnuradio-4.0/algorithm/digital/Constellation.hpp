@@ -79,13 +79,13 @@
 namespace gr::digital {
 
 /// @brief Which reference scale the stored points carry. `power` is the default; see the file comment.
-enum class Normalization { Power, Amplitude, None };
+enum class Normalization { power, amplitude, none };
 
 /// @brief Which decision the geometry admits, resolved once at construction and never per symbol.
 enum class DecisionStrategy { Psk, SquareQam, Nearest };
 
 /// @brief `max_log` needs no transcendental and is exact for BPSK and QPSK; `exact` is the true LLR.
-enum class SoftAlgorithm { MaxLog, Exact };
+enum class SoftAlgorithm { max_log, exact };
 
 [[nodiscard]] inline constexpr std::uint32_t grayEncode(std::uint32_t index) noexcept { return index ^ (index >> 1U); }
 
@@ -107,11 +107,11 @@ public:
     static constexpr std::size_t kMaxAxisBits   = 4UZ;
     static constexpr std::size_t kMaxAxisLevels = 16UZ;
 
-    [[nodiscard]] static Constellation bpsk(Normalization mode = Normalization::Power) { return psk(2UZ, F{0}, 1U, mode); }
-    [[nodiscard]] static Constellation qpsk(Normalization mode = Normalization::Power) { return psk(4UZ, static_cast<F>(std::numbers::pi / 4.0), 3U, mode); }
-    [[nodiscard]] static Constellation psk8(Normalization mode = Normalization::Power) { return psk(8UZ, F{0}, 0U, mode); }
+    [[nodiscard]] static Constellation bpsk(Normalization mode = Normalization::power) { return psk(2UZ, F{0}, 1U, mode); }
+    [[nodiscard]] static Constellation qpsk(Normalization mode = Normalization::power) { return psk(4UZ, static_cast<F>(std::numbers::pi / 4.0), 3U, mode); }
+    [[nodiscard]] static Constellation psk8(Normalization mode = Normalization::power) { return psk(8UZ, F{0}, 0U, mode); }
 
-    [[nodiscard]] static Constellation psk(std::size_t arity, F phaseOffset = F{0}, std::uint8_t labelXor = 0U, Normalization mode = Normalization::Power) {
+    [[nodiscard]] static Constellation psk(std::size_t arity, F phaseOffset = F{0}, std::uint8_t labelXor = 0U, Normalization mode = Normalization::power) {
         requirePowerOfTwo(arity, "psk");
         std::vector<std::complex<F>> raw(arity);
         for (std::uint32_t g = 0U; g < arity; ++g) {
@@ -120,7 +120,7 @@ public:
         return Constellation(std::move(raw), mode, phaseOffset, true);
     }
 
-    [[nodiscard]] static Constellation qam(std::size_t arity, Normalization mode = Normalization::Power) {
+    [[nodiscard]] static Constellation qam(std::size_t arity, Normalization mode = Normalization::power) {
         requirePowerOfTwo(arity, "qam");
         const std::size_t bits = bitCount(arity);
         if (bits % 2UZ != 0UZ) {
@@ -138,7 +138,7 @@ public:
         return Constellation(std::move(raw), mode, F{0}, false);
     }
 
-    [[nodiscard]] static Constellation custom(std::span<const std::complex<F>> pointsInSymbolOrder, Normalization mode = Normalization::Power) {
+    [[nodiscard]] static Constellation custom(std::span<const std::complex<F>> pointsInSymbolOrder, Normalization mode = Normalization::power) {
         requirePowerOfTwo(pointsInSymbolOrder.size(), "custom");
         return Constellation(std::vector<std::complex<F>>(pointsInSymbolOrder.begin(), pointsInSymbolOrder.end()), mode, F{0}, false);
     }
@@ -224,12 +224,12 @@ public:
     }
 
     /// @brief `bitsPerSymbol()` log-likelihood ratios, MSB first, by the cheapest route the geometry allows.
-    void softDecisions(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
+    void softDecisions(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::max_log) const {
         checkSoftArguments(noisePower, out.size());
         softDecisionsUnchecked(z, noisePower, out, algorithm);
     }
 
-    void softDecisions(std::span<const std::complex<F>> in, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
+    void softDecisions(std::span<const std::complex<F>> in, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::max_log) const {
         checkSoftArguments(noisePower, bits_);
         if (out.size() < in.size() * bits_) {
             throw std::invalid_argument("gr::digital::Constellation::softDecisions: output span holds fewer than bitsPerSymbol() values per symbol");
@@ -244,7 +244,7 @@ public:
      *
      * Also the only route for `exact`, whose sums do not shorten the way the max-log minima do.
      */
-    void softDecisionsExhaustive(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
+    void softDecisionsExhaustive(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::max_log) const {
         checkSoftArguments(noisePower, out.size());
         exhaustive(z, noisePower, out, algorithm);
     }
@@ -267,7 +267,7 @@ private:
         }
         const double meanMagnitude = sumMagnitude / static_cast<double>(arity_);
         const double rmsMagnitude  = std::sqrt(sumPower / static_cast<double>(arity_));
-        const double multiplier    = mode == Normalization::Power ? 1.0 / rmsMagnitude : (mode == Normalization::Amplitude ? 1.0 / meanMagnitude : 1.0);
+        const double multiplier    = mode == Normalization::power ? 1.0 / rmsMagnitude : (mode == Normalization::amplitude ? 1.0 / meanMagnitude : 1.0);
         if (!(multiplier > 0.0) || !std::isfinite(multiplier)) {
             throw std::invalid_argument("gr::digital::Constellation: the point set has no positive scale to normalize by");
         }
@@ -565,7 +565,7 @@ private:
     }
 
     void softDecisionsUnchecked(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm) const {
-        if (algorithm == SoftAlgorithm::MaxLog && strategy_ == DecisionStrategy::SquareQam) {
+        if (algorithm == SoftAlgorithm::max_log && strategy_ == DecisionStrategy::SquareQam) {
             const std::size_t axisBits = std::min(axisBits_, kMaxAxisBits);
             axisSoftDecisions(z.imag(), noisePower, out.subspan(0UZ, axisBits));
             axisSoftDecisions(z.real(), noisePower, out.subspan(axisBits, axisBits));
@@ -622,7 +622,7 @@ private:
             smallest                         = std::min(smallest, distance[s]);
         }
 
-        if (algorithm == SoftAlgorithm::MaxLog) {
+        if (algorithm == SoftAlgorithm::max_log) {
             for (std::size_t k = 0UZ; k < bits_; ++k) {
                 F zero = std::numeric_limits<F>::infinity();
                 F one  = std::numeric_limits<F>::infinity();

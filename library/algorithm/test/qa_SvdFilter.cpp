@@ -95,7 +95,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
 
     "streaming denoiser BoundaryPolicy"_test = [] {
         "Default policy pre-fills with defaultValue"_test = [] {
-            constexpr Config<double> config{.maxRank = 2UZ, .boundaryPolicy = BoundaryPolicy::Default, .defaultValue = 0.0};
+            constexpr Config<double> config{.maxRank = 2UZ, .boundaryPolicy = BoundaryPolicy::default_value, .defaultValue = 0.0};
             SvdDenoiser<double>      denoiser(32UZ, 16UZ, config);
 
             // Process a sinusoid - the filter should produce valid output from first sample
@@ -109,7 +109,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
         };
 
         "ZeroOrderHold policy fills lazily"_test = [] {
-            constexpr Config<double> config{.maxRank = 2UZ, .boundaryPolicy = BoundaryPolicy::ZeroOrderHold};
+            constexpr Config<double> config{.maxRank = 2UZ, .boundaryPolicy = BoundaryPolicy::zero_order_hold};
             SvdDenoiser<double>      denoiser(32UZ, 16UZ, config);
 
             // Process a sinusoid - first sample fills buffer, then denoising starts
@@ -123,7 +123,7 @@ const boost::ut::suite<"SVD filter algorithm"> svdFilterTests = [] {
         };
 
         "reset clears state"_test = [] {
-            constexpr Config<double> config{.maxRank = 2UZ, .boundaryPolicy = BoundaryPolicy::Default};
+            constexpr Config<double> config{.maxRank = 2UZ, .boundaryPolicy = BoundaryPolicy::default_value};
             SvdDenoiser<double>      denoiser(32UZ, 16UZ, config);
 
             // Process some samples
@@ -529,7 +529,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t    svdWindowSize = 40UZ;
@@ -581,7 +581,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t    svdWindowSize = 112UZ;
@@ -633,7 +633,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t    svdWindowSize = 104UZ;
@@ -683,7 +683,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t    svdWindowSize = 128UZ;
@@ -792,7 +792,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t    svdWindowSize = 88UZ;
@@ -849,7 +849,7 @@ const boost::ut::suite<"SVD denoising comparison"> visualDemoTests = [] {
         }
 
         constexpr FilterParameters firParams{.order = 2UZ, .fLow = fc, .attenuationDb = 40.0, .fs = 1.0};
-        const auto                 firCoeffs = fir::designFilter<double>(Type::LOWPASS, firParams);
+        const auto                 firCoeffs = fir::designFilter<double>(Type::lowpass, firParams);
         const std::size_t          lpDelay   = (firCoeffs.b.size() - 1UZ) / 2UZ;
 
         constexpr std::size_t    svdWindowSize = 91UZ;

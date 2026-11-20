@@ -835,7 +835,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
 
         // A change that keeps the hop keeps the grid and the gap.
         block._core.skipping = 700UZ;
-        std::ignore          = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"window", std::string("Hamming")}});
+        std::ignore          = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"window", std::string("hamming")}});
         expect(eq(block._core.skipping, 700UZ)) << "a window change keeps the gap";
         expect(eq(block._core.gridStart, std::uint64_t{4096ULL}));
     };
@@ -851,11 +851,11 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
             }
             return block;
         };
-        const auto stated  = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}, {"window_param", kBeta}});
-        const auto omitted = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}});
+        const auto stated  = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("kaiser")}, {"window_param", kBeta}});
+        const auto omitted = build({{"fft_size", gr::Size_t{kFft}}, {"sample_rate", kSampleRate}, {"window", std::string("kaiser")}});
 
-        const auto direct  = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft, kBeta);
-        const auto library = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Kaiser, kFft);
+        const auto direct  = gr::algorithm::window::create<float>(gr::algorithm::window::Type::kaiser, kFft, kBeta);
+        const auto library = gr::algorithm::window::create<float>(gr::algorithm::window::Type::kaiser, kFft);
 
         expect(eq(stated->_core.window.size(), direct.size()));
         for (std::size_t k = 0UZ; k < std::min(stated->_core.window.size(), direct.size()); ++k) {
@@ -872,7 +872,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         }
 
         // The parameter changes the noise bandwidth, and the record states both the window and the parameter.
-        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}, {"window_param", kBeta}};
+        const gr::property_map settings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("kaiser")}, {"window_param", kBeta}};
         const auto             records = collect<WelchPsd<CF>, CF>(settings, tone(kFft * 8UZ, 32., kFft), 4096UZ);
         expect(!records.empty());
         if (records.empty()) {
@@ -880,7 +880,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         }
         expect(approx(metaNumber(records.front(), "window_param"), static_cast<double>(kBeta), 1e-5)) << "the record states its beta";
 
-        const gr::property_map defaulted{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("Kaiser")}};
+        const gr::property_map defaulted{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{2U}}, {"sample_rate", kSampleRate}, {"window", std::string("kaiser")}};
         const auto             plain = collect<WelchPsd<CF>, CF>(defaulted, tone(kFft * 8UZ, 32., kFft), 4096UZ);
         expect(!plain.empty());
         if (plain.empty()) {
@@ -904,10 +904,10 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
                 throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
             }
         };
-        expect(throws([&] { refused({{"window", std::string("Gaussian")}, {"window_param", 0.9f}}); })) << "a Gaussian sigma is a fraction of the half-length";
-        expect(throws([&] { refused({{"window", std::string("Tukey")}, {"window_param", 2.0f}}); })) << "a Tukey alpha is a fraction";
-        expect(throws([&] { refused({{"window", std::string("Kaiser")}, {"window_param", -1.0f}}); })) << "a Kaiser beta is not negative";
-        expect(nothrow([&] { refused({{"window", std::string("Hann")}, {"window_param", 3.0f}}); })) << "a window without a parameter ignores one, as the library does";
+        expect(throws([&] { refused({{"window", std::string("gaussian")}, {"window_param", 0.9f}}); })) << "a Gaussian sigma is a fraction of the half-length";
+        expect(throws([&] { refused({{"window", std::string("tukey")}, {"window_param", 2.0f}}); })) << "a Tukey alpha is a fraction";
+        expect(throws([&] { refused({{"window", std::string("kaiser")}, {"window_param", -1.0f}}); })) << "a Kaiser beta is not negative";
+        expect(nothrow([&] { refused({{"window", std::string("hann")}, {"window_param", 3.0f}}); })) << "a window without a parameter ignores one, as the library does";
     };
 
     "the largest transform length is accepted, and one above it is refused"_test = [] {
@@ -1113,7 +1113,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         block._core.recordStartAt = 4096ULL;
         block._core.segments      = 3UZ;
 
-        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n_averages", gr::Size_t{4U}}, {"window", std::string("Hamming")}});
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n_averages", gr::Size_t{4U}}, {"window", std::string("hamming")}});
 
         expect(eq(block._core.streamAt, std::uint64_t{4096ULL})) << "the stream position is kept";
         expect(eq(block._core.pending.size(), 100UZ)) << "and no buffered sample is dropped";
@@ -1267,7 +1267,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         constexpr double kCenterBin = 32.;
         constexpr double kMargin    = 0.06; // bins, above the measured bias at offsets 0.3 and 0.5
 
-        for (const std::string& windowName : {std::string("Hann"), std::string("Blackman")}) {
+        for (const std::string& windowName : {std::string("hann"), std::string("blackman")}) {
             for (const double offset : {0.0, 0.3, 0.5}) {
                 const gr::property_map psdSettings{{"fft_size", gr::Size_t{kFft}}, {"n_averages", gr::Size_t{4U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}, {"window", windowName}};
                 const auto             psd = collect<WelchPsd<CF>, CF>(psdSettings, tone(kFft * 16UZ, kCenterBin + offset, kFft), 4096UZ);
@@ -1701,7 +1701,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
             {"n_averages 0", {{"n_averages", gr::Size_t{0U}}}, retune},
             {"sample_rate 0, then restored", {{"sample_rate", 0.f}}, {{"sample_rate", kSampleRate}}},
             {"fft_size 100, then restored", {{"fft_size", gr::Size_t{100U}}}, {{"fft_size", gr::Size_t{kFft}}}},
-            {"window Gaussian2, then restored", {{"window", std::string("Gaussian2")}}, {{"window", std::string("Hann")}}},
+            {"window Gaussian2, then restored", {{"window", std::string("Gaussian2")}}, {{"window", std::string("hann")}}},
             {"n_averages 0, then restored", {{"n_averages", gr::Size_t{0U}}}, {{"n_averages", gr::Size_t{2U}}}},
         };
         for (const auto& [arm, refusal, later] : welchArms) {
@@ -1713,7 +1713,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
         const std::vector<Arm> rowArms{
             {"Spectrogram sample_rate 0", {{"sample_rate", 0.f}}, retune},
             {"Spectrogram window Gaussian2", {{"window", std::string("Gaussian2")}}, retune},
-            {"Spectrogram window Gaussian2, then restored", {{"window", std::string("Gaussian2")}}, {{"window", std::string("Hann")}}},
+            {"Spectrogram window Gaussian2, then restored", {{"window", std::string("Gaussian2")}}, {{"window", std::string("hann")}}},
         };
         for (const auto& [arm, refusal, later] : rowArms) {
             same(run.template operator()<Spectrogram<CF>>(rows, refusal, later), run.template operator()<Spectrogram<CF>>(rows, {}, later), arm);
@@ -1732,7 +1732,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
             expect(!applyLive(block, refusal).empty()) << name << ": the first batch is refused";
             bool moved = true;
             try {
-                applyLive(block, {{"sample_rate", kSampleRate}, {"window", std::string("Hamming")}});
+                applyLive(block, {{"sample_rate", kSampleRate}, {"window", std::string("hamming")}});
             } catch (const gr::exception&) {
                 moved = false;
             }
@@ -1742,7 +1742,7 @@ const boost::ut::suite<"SpectralEstimate"> spectralTests = [] {
 
             const double      rate   = metaNumber(records.front(), "sample_rate");
             const std::string window = metaString(records.front(), "window");
-            expect(eq(rate, static_cast<double>(moved ? kSampleRate : 1000.f)) && eq(window, std::string(moved ? "Hamming" : "Hann"))) << name << ": the record states the rate and window the block accepted";
+            expect(eq(rate, static_cast<double>(moved ? kSampleRate : 1000.f)) && eq(window, std::string(moved ? "hamming" : "hann"))) << name << ": the record states the rate and window the block accepted";
             settings.insert_or_assign(std::pmr::string("sample_rate"), gr::pmt::Value(static_cast<float>(rate)));
             settings.insert_or_assign(std::pmr::string("window"), gr::pmt::Value(window));
             settings.insert_or_assign(std::pmr::string("center_frequency"), gr::pmt::Value(1e6));

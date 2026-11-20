@@ -43,7 +43,7 @@ template<typename TSettings>
         if (s.length_bits.value != 0U) {
             return gr::Refused(s.length_bits, kLengthOnly);
         }
-        if (s.count_covers.value != gr::digital::CountCovers::Unset) {
+        if (s.count_covers.value != gr::digital::CountCovers::unset) {
             return gr::Refused(s.count_covers, kLengthOnly);
         }
         if (s.count_unit_items.value != 8U) {
@@ -56,10 +56,10 @@ template<typename TSettings>
             return gr::Refused(s.frame_prefix_items, kLengthOnly);
         }
     }
-    if (format != HeaderLayout::length_plain && s.byte_order.value != gr::digital::HeaderByteOrder::Big) {
+    if (format != HeaderLayout::length_plain && s.byte_order.value != gr::digital::HeaderByteOrder::big) {
         return gr::Refused(s.byte_order, "must keep its default unless header_format is length_plain");
     }
-    if (format != HeaderLayout::length_golay24 && s.flags_position.value != gr::digital::FlagsPosition::High) {
+    if (format != HeaderLayout::length_golay24 && s.flags_position.value != gr::digital::FlagsPosition::high) {
         return gr::Refused(s.flags_position, "must keep its default unless header_format is length_golay24");
     }
     if (format != HeaderLayout::fixed_length && s.fixed_payload_items.value != 0U) {
@@ -85,16 +85,16 @@ template<typename TSettings>
     if (format == HeaderLayout::length_golay24 && s.length_bits.value > 12U) {
         return gr::Refused(s.length_bits, "must be <= 12 when header_format is length_golay24");
     }
-    if (format == HeaderLayout::length_plain && s.byte_order.value == gr::digital::HeaderByteOrder::Little && s.length_bits.value % 8U != 0U) {
+    if (format == HeaderLayout::length_plain && s.byte_order.value == gr::digital::HeaderByteOrder::little && s.length_bits.value % 8U != 0U) {
         return gr::Refused(s.byte_order, "little requires a length_bits multiple of 8");
     }
-    if (s.count_covers.value == gr::digital::CountCovers::Unset) {
+    if (s.count_covers.value == gr::digital::CountCovers::unset) {
         return gr::Refused(s.count_covers, "required");
     }
-    if (s.count_covers.value != gr::digital::CountCovers::Payload && s.check_items.value != 0U) {
+    if (s.count_covers.value != gr::digital::CountCovers::payload && s.check_items.value != 0U) {
         return gr::Refused(s.check_items, "must be 0 unless count_covers is payload");
     }
-    if (s.count_covers.value != gr::digital::CountCovers::WholeFrame && s.frame_prefix_items.value != 0U) {
+    if (s.count_covers.value != gr::digital::CountCovers::whole_frame && s.frame_prefix_items.value != 0U) {
         return gr::Refused(s.frame_prefix_items, "must be 0 unless count_covers is whole_frame");
     }
     return {};

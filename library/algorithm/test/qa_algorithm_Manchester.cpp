@@ -32,11 +32,11 @@ using gr::math::BitRepack;
 using gr::math::configureRepack;
 using gr::math::repack;
 
-constexpr BitOrder kOrders[] = {BitOrder::MsbFirst, BitOrder::LsbFirst};
+constexpr BitOrder kOrders[] = {BitOrder::msb_first, BitOrder::lsb_first};
 
-constexpr ManchesterConvention kConventions[] = {ManchesterConvention::Ieee8023, ManchesterConvention::GeThomas};
+constexpr ManchesterConvention kConventions[] = {ManchesterConvention::ieee802_3, ManchesterConvention::ge_thomas};
 
-[[nodiscard]] ManchesterConfig configured(ManchesterConvention convention, unsigned width = 8U, BitOrder order = BitOrder::MsbFirst, unsigned phase = 0U) {
+[[nodiscard]] ManchesterConfig configured(ManchesterConvention convention, unsigned width = 8U, BitOrder order = BitOrder::msb_first, unsigned phase = 0U) {
     ManchesterConfig cfg{};
     configureManchester(cfg, convention, width, order, phase);
     return cfg;
@@ -77,7 +77,7 @@ struct Decoded {
     stream.reserve(items.size() * static_cast<std::size_t>(width));
     for (const std::uint8_t item : items) {
         for (unsigned i = 0U; i < width; ++i) {
-            const unsigned position = order == BitOrder::MsbFirst ? width - 1U - i : i;
+            const unsigned position = order == BitOrder::msb_first ? width - 1U - i : i;
             stream.push_back(static_cast<std::uint8_t>((static_cast<unsigned>(item) >> position) & 1U));
         }
     }
@@ -152,15 +152,15 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         };
         constexpr Row kTable[] = {{0x00U, "AA AA", "55 55"}, {0xFFU, "55 55", "AA AA"}, {0x0FU, "AA 55", "55 AA"}, {0x55U, "99 99", "66 66"}, {0xAAU, "66 66", "99 99"}, {0xA5U, "66 99", "99 66"}, {0x47U, "9A 95", "65 6A"}};
 
-        const ManchesterConfig ieee = configured(ManchesterConvention::Ieee8023);
+        const ManchesterConfig ieee = configured(ManchesterConvention::ieee802_3);
         for (const Row& row : kTable) {
             expect(eq(hexOf(encoded(ieee, std::span{&row.item, 1UZ})), std::string{row.ieee})) << std::format("{:02X} under ieee802_3", row.item);
         }
-        expect(eq(static_cast<unsigned>(conventionXor(ManchesterConvention::Ieee8023)), 1U)) << "the standard's complement-then-true bit cell is k = 1";
+        expect(eq(static_cast<unsigned>(conventionXor(ManchesterConvention::ieee802_3)), 1U)) << "the standard's complement-then-true bit cell is k = 1";
         expect(eq(static_cast<unsigned>(ieee.k), 1U));
 
         // the preamble octet and the delimiter are transmitted least-significant-bit first
-        const ManchesterConfig lsb      = configured(ManchesterConvention::Ieee8023, 8U, BitOrder::LsbFirst);
+        const ManchesterConfig lsb      = configured(ManchesterConvention::ieee802_3, 8U, BitOrder::lsb_first);
         const std::uint8_t     preamble = 0x55U;
         const std::uint8_t     sfd      = 0xD5U;
         expect(eq(hexOf(encoded(lsb, std::span{&preamble, 1UZ})), std::string{"66 66"})) << "the preamble octet 0x55";
@@ -174,7 +174,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
 
         // property one: the preamble is a square wave with exactly one transition per bit time, so the
         // mid-bit transitions are all of them and no bit boundary carries one
-        const auto  preambleChips = streamOf(encoded(lsb, std::span{&preamble, 1UZ}), 8U, BitOrder::LsbFirst);
+        const auto  preambleChips = streamOf(encoded(lsb, std::span{&preamble, 1UZ}), 8U, BitOrder::lsb_first);
         std::size_t transitions   = 0UZ;
         for (std::size_t i = 1UZ; i < preambleChips.size(); ++i) {
             transitions += preambleChips[i] != preambleChips[i - 1UZ] ? 1UZ : 0UZ;
@@ -186,7 +186,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
 
         // property two: the delimiter breaks that square wave at exactly one place, the boundary
         // between its final two ones, because that is the only place two adjacent bits are equal
-        const auto               sfdChips = streamOf(encoded(lsb, std::span{&sfd, 1UZ}), 8U, BitOrder::LsbFirst);
+        const auto               sfdChips = streamOf(encoded(lsb, std::span{&sfd, 1UZ}), 8U, BitOrder::lsb_first);
         std::vector<std::size_t> broken;
         for (std::size_t j = 0UZ; j + 1UZ < 8UZ; ++j) {
             if (sfdChips[2UZ * j + 1UZ] != sfdChips[2UZ * j + 2UZ]) {
@@ -200,11 +200,11 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
     // The other convention, anchored to the one standard that publishes the chip pair itself rather
     //    than a waveform, and the identity that makes the whole table checkable in one line.
     "ge_thomas reproduces MIL-STD-1553's own statement, and the columns are complements"_test = [] {
-        const ManchesterConfig thomas = configured(ManchesterConvention::GeThomas);
-        expect(eq(static_cast<unsigned>(conventionXor(ManchesterConvention::GeThomas)), 0U)) << "a logic one as 1/0 and a logic zero as 0/1 is k = 0";
+        const ManchesterConfig thomas = configured(ManchesterConvention::ge_thomas);
+        expect(eq(static_cast<unsigned>(conventionXor(ManchesterConvention::ge_thomas)), 0U)) << "a logic one as 1/0 and a logic zero as 0/1 is k = 0";
 
         // the standard's sentence, reproduced from the chip map at one bit per item
-        const ManchesterConfig bitwise = configured(ManchesterConvention::GeThomas, 1U);
+        const ManchesterConfig bitwise = configured(ManchesterConvention::ge_thomas, 1U);
         const std::uint8_t     one     = 1U;
         const std::uint8_t     zero    = 0U;
         expect(eq(hexOf(encoded(bitwise, std::span{&one, 1UZ})), std::string{"01 00"})) << "a logic one is a positive pulse followed by a negative one";
@@ -220,7 +220,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         }
 
         // the cheapest possible check that the whole table is right, over its whole domain
-        const ManchesterConfig ieee     = configured(ManchesterConvention::Ieee8023);
+        const ManchesterConfig ieee     = configured(ManchesterConvention::ieee802_3);
         std::size_t            agreeing = 0UZ;
         for (unsigned value = 0U; value < 256U; ++value) {
             const std::uint8_t item = static_cast<std::uint8_t>(value);
@@ -230,9 +230,9 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         }
         expect(eq(agreeing, 256UZ)) << "every ge_thomas entry is the bitwise complement of its ieee802_3 neighbor";
 
-        expect(that % (gr::digital::standard::ethernet == ManchesterConvention::Ieee8023)) << "IEEE 802.3 and IEC 62386 are on one side";
-        expect(that % (gr::digital::standard::dali == ManchesterConvention::Ieee8023));
-        expect(that % (gr::digital::standard::mil1553 == ManchesterConvention::GeThomas)) << "and MIL-STD-1553 is on the other, which is the whole point of the setting";
+        expect(that % (gr::digital::standard::ethernet == ManchesterConvention::ieee802_3)) << "IEEE 802.3 and IEC 62386 are on one side";
+        expect(that % (gr::digital::standard::dali == ManchesterConvention::ieee802_3));
+        expect(that % (gr::digital::standard::mil1553 == ManchesterConvention::ge_thomas)) << "and MIL-STD-1553 is on the other, which is the whole point of the setting";
     };
 
     // The trap, both halves. A test that only asserted a difference would pass on a decoder that
@@ -245,17 +245,17 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         };
         constexpr Row kRows[] = {{0x47U, "9A 95", 0xB8U}, {0x00U, "AA AA", 0xFFU}, {0xAAU, "66 66", 0x55U}, {0xA5U, "66 99", 0x5AU}};
 
-        const ManchesterConfig ieee = configured(ManchesterConvention::Ieee8023);
+        const ManchesterConfig ieee = configured(ManchesterConvention::ieee802_3);
         for (const Row& row : kRows) {
             const auto chips = encoded(ieee, std::span{&row.item, 1UZ});
             expect(eq(hexOf(chips), std::string{row.chips})) << std::format("{:02X}", row.item);
 
-            ManchesterConfig right  = configured(ManchesterConvention::Ieee8023);
+            ManchesterConfig right  = configured(ManchesterConvention::ieee802_3);
             const Decoded    honest = decoded(right, chips);
             expect(eq(static_cast<unsigned>(honest.items.front()), static_cast<unsigned>(row.item))) << "the right convention returns the data";
             expect(eq(static_cast<unsigned>(honest.flags.front()), 0U));
 
-            ManchesterConfig wrong  = configured(ManchesterConvention::GeThomas);
+            ManchesterConfig wrong  = configured(ManchesterConvention::ge_thomas);
             const Decoded    silent = decoded(wrong, chips);
             expect(that % (silent.items.front() != row.item)) << std::format("{:02X}: the wrong convention must not return the data", row.item);
             expect(eq(static_cast<unsigned>(silent.items.front()), static_cast<unsigned>(row.wrong))) << "and what it returns is the exact complement";
@@ -266,7 +266,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         // the same thing over a stream, so that the silence is not an artifact of one byte
         const auto       source = randomItems(4096UZ, 8U, 0x243F6A8885A308D3ULL);
         const auto       chips  = encoded(ieee, source);
-        ManchesterConfig wrong  = configured(ManchesterConvention::GeThomas);
+        ManchesterConfig wrong  = configured(ManchesterConvention::ge_thomas);
         const Decoded    silent = decoded(wrong, chips);
         std::size_t      exact  = 0UZ;
         for (std::size_t i = 0UZ; i < source.size(); ++i) {
@@ -303,7 +303,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         for (const ManchesterConvention convention : kConventions) {
             const ManchesterConfig cfg    = configured(convention, 1U);
             const auto             source = randomItems(4096UZ, 1U, 0x852835481D8E5A15ULL);
-            const auto             chips  = streamOf(encoded(cfg, source), 1U, BitOrder::MsbFirst);
+            const auto             chips  = streamOf(encoded(cfg, source), 1U, BitOrder::msb_first);
             const std::string      name{magic_enum::enum_name(convention)};
 
             expect(eq(chips.size(), 8192UZ)) << "the chip rate is exactly twice the bit rate";
@@ -350,14 +350,14 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
             const unsigned         k     = static_cast<unsigned>(conventionXor(convention));
             const ManchesterConfig cfg   = configured(convention, 1U);
             const auto             data  = randomItems(64UZ, 1U, 0xA4093822299F31D0ULL);
-            auto                   chips = streamOf(encoded(cfg, data), 1U, BitOrder::MsbFirst);
+            auto                   chips = streamOf(encoded(cfg, data), 1U, BitOrder::msb_first);
 
             // the MIL-STD-1553 command sync's shape: three bit times wide, one polarity for the first
             // half of it and the other for the second, which is three chip pairs of which two are invalid
             const std::size_t                     at = chips.size();
             constexpr std::array<std::uint8_t, 6> kSync{1U, 1U, 1U, 0U, 0U, 0U};
             chips.insert(chips.end(), kSync.begin(), kSync.end());
-            const auto tail = streamOf(encoded(cfg, data), 1U, BitOrder::MsbFirst);
+            const auto tail = streamOf(encoded(cfg, data), 1U, BitOrder::msb_first);
             chips.insert(chips.end(), tail.begin(), tail.end());
 
             ManchesterConfig sink   = configured(convention, 1U);
@@ -468,14 +468,14 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         };
         constexpr Row kRows[] = {{0x47U, "5C", "E4", 4UZ}, {0x00U, "7F", "80", 1UZ}, {0xAAU, "AA", "FF", 8UZ}};
 
-        const ManchesterConfig ieee = configured(ManchesterConvention::Ieee8023);
+        const ManchesterConfig ieee = configured(ManchesterConvention::ieee802_3);
         for (const Row& row : kRows) {
             const auto       chips  = encoded(ieee, std::span{&row.item, 1UZ});
-            ManchesterConfig offset = configured(ManchesterConvention::Ieee8023, 8U, BitOrder::MsbFirst, 1U);
+            ManchesterConfig offset = configured(ManchesterConvention::ieee802_3, 8U, BitOrder::msb_first, 1U);
             const Decoded    result = decoded(offset, chips);
             expect(eq(hexOf(result.items), std::string{row.bits})) << std::format("{:02X} decoded one chip out of phase", row.item);
             expect(eq(hexOf(result.flags), std::string{row.flags}));
-            expect(eq(countOnes(streamOf(result.flags, 8U, BitOrder::MsbFirst)), row.count)) << std::format("{:02X}: flagged of 8", row.item);
+            expect(eq(countOnes(streamOf(result.flags, 8U, BitOrder::msb_first)), row.count)) << std::format("{:02X}: flagged of 8", row.item);
         }
 
         // the general rule, independent of the convention: a misaligned decoder always emits NOT b[j]
@@ -485,7 +485,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
             const auto             data  = randomItems(4096UZ, 1U, 0xB3EE1411636FBC2BULL);
             const auto             chips = encoded(cfg, data);
 
-            ManchesterConfig offset = configured(convention, 1U, BitOrder::MsbFirst, 1U);
+            ManchesterConfig offset = configured(convention, 1U, BitOrder::msb_first, 1U);
             const Decoded    result = decoded(offset, chips);
 
             std::size_t wrongBit  = 0UZ;
@@ -506,12 +506,12 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         // output is the wrong-convention output in all but the first item
         const std::vector<std::uint8_t> constant(64UZ, std::uint8_t{0x00});
         const auto                      chips  = encoded(ieee, constant);
-        ManchesterConfig                offset = configured(ManchesterConvention::Ieee8023, 8U, BitOrder::MsbFirst, 1U);
+        ManchesterConfig                offset = configured(ManchesterConvention::ieee802_3, 8U, BitOrder::msb_first, 1U);
         const Decoded                   quiet  = decoded(offset, chips);
-        expect(eq(countOnes(streamOf(quiet.flags, 8U, BitOrder::MsbFirst)), 1UZ)) << "one flag in the whole stream, and it is the orphan";
+        expect(eq(countOnes(streamOf(quiet.flags, 8U, BitOrder::msb_first)), 1UZ)) << "one flag in the whole stream, and it is the orphan";
         expect(eq(static_cast<unsigned>(quiet.flags.front()), 0x80U)) << "at the very first position";
 
-        ManchesterConfig wrong      = configured(ManchesterConvention::GeThomas);
+        ManchesterConfig wrong      = configured(ManchesterConvention::ge_thomas);
         const Decoded    complement = decoded(wrong, chips);
         expect(eq(firstDifference(std::span<const std::uint8_t>{quiet.items}.subspan(1UZ), std::span<const std::uint8_t>{complement.items}.subspan(1UZ)), quiet.items.size() - 1UZ)) << "the two faults are indistinguishable after the first item, which is why the convention has no default";
         expect(that % (quiet.items.front() != complement.items.front())) << "and distinguishable only in that one item";
@@ -520,36 +520,36 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
     // The alignment contract. Off by one here is the whole failure, so the item index is asserted.
     "the pairing grid, what a change costs, and what does not move it"_test = [] {
         // (a) a chip_phase = 1 run begins with exactly one flagged orphan and spends nothing else
-        const ManchesterConfig cfg   = configured(ManchesterConvention::Ieee8023, 1U);
+        const ManchesterConfig cfg   = configured(ManchesterConvention::ieee802_3, 1U);
         const auto             data  = randomItems(2048UZ, 1U, 0x8A5EDAFDA9C4C61EULL);
         const auto             chips = encoded(cfg, data);
 
-        ManchesterConfig offset = configured(ManchesterConvention::Ieee8023, 1U, BitOrder::MsbFirst, 1U);
+        ManchesterConfig offset = configured(ManchesterConvention::ieee802_3, 1U, BitOrder::msb_first, 1U);
         const Decoded    late   = decoded(offset, chips);
         expect(eq(static_cast<unsigned>(late.flags.front()), 1U)) << "the first output item is flagged";
         expect(eq(offset.nOrphanItems, 1ULL)) << "exactly one item is fabricated";
         expect(eq(offset.nDroppedChips, 0ULL)) << "and no chip is lost";
         expect(that % offset.hasCarry) << "steady phase 1 costs one chip of state and nothing else";
 
-        ManchesterConfig aligned = configured(ManchesterConvention::Ieee8023, 1U);
+        ManchesterConfig aligned = configured(ManchesterConvention::ieee802_3, 1U);
         const Decoded    shifted = decoded(aligned, std::span<const std::uint8_t>{chips}.subspan(1UZ));
         expect(eq(firstDifference(std::span<const std::uint8_t>{late.items}.subspan(1UZ), shifted.items), shifted.items.size())) << "from item 1 a phase-1 decode is a phase-0 decode of the same chips shifted by one chip";
         expect(eq(firstDifference(std::span<const std::uint8_t>{late.flags}.subspan(1UZ), shifted.flags), shifted.flags.size()));
 
         // (b) the parity a chip index requests, and the consequence at an even width
-        ManchesterConfig grid = configured(ManchesterConvention::Ieee8023, 1U);
+        ManchesterConfig grid = configured(ManchesterConvention::ieee802_3, 1U);
         expect(eq(realignManchester(grid, 8ULL), 0UZ)) << "an even chip index is the natural grid";
         expect(eq(static_cast<unsigned>(grid.gridParity), 0U));
         expect(eq(realignManchester(grid, 9ULL), 0UZ));
         expect(eq(static_cast<unsigned>(grid.gridParity), 1U)) << "an odd chip index moves it";
         for (const std::uint64_t item : {0ULL, 1ULL, 7ULL, 8ULL, 1000ULL}) {
-            ManchesterConfig wide = configured(ManchesterConvention::Ieee8023, 8U);
+            ManchesterConfig wide = configured(ManchesterConvention::ieee802_3, 8U);
             expect(eq(realignManchester(wide, item * 8ULL), 0UZ));
             expect(eq(static_cast<unsigned>(wide.gridParity), 0U)) << std::format("at bits_per_item = 8 an item offset of {} can only ever request parity 0", item);
         }
 
         // (e) the grid-change budget: every call publishes one item per two input items, in every row
-        ManchesterConfig                budget = configured(ManchesterConvention::Ieee8023, 1U);
+        ManchesterConfig                budget = configured(ManchesterConvention::ieee802_3, 1U);
         const std::vector<std::uint8_t> chunk{1U, 0U};
         std::vector<std::uint8_t>       out(1UZ, 0U);
         std::vector<std::uint8_t>       flags(1UZ, 0U);
@@ -581,7 +581,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         expect(eq(budget.nDroppedChips, 1ULL));
 
         // (f) a long deliberate violation run moves nothing
-        ManchesterConfig                still = configured(ManchesterConvention::GeThomas, 1U);
+        ManchesterConfig                still = configured(ManchesterConvention::ge_thomas, 1U);
         const std::vector<std::uint8_t> flat(4096UZ, std::uint8_t{1});
         const Decoded                   all = decoded(still, flat);
         expect(eq(countOnes(all.flags), all.flags.size())) << "every pair of a constant chip run is a violation";
@@ -620,8 +620,8 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         expect(eq(identical, 4UZ)) << "4 of 4: unpacking, coding one bit at a time and repacking is coding whole items";
 
         // and the negative half: the two orders are not interchangeable
-        const ManchesterConfig msb   = configured(ManchesterConvention::Ieee8023, 8U, BitOrder::MsbFirst);
-        const ManchesterConfig lsb   = configured(ManchesterConvention::Ieee8023, 8U, BitOrder::LsbFirst);
+        const ManchesterConfig msb   = configured(ManchesterConvention::ieee802_3, 8U, BitOrder::msb_first);
+        const ManchesterConfig lsb   = configured(ManchesterConvention::ieee802_3, 8U, BitOrder::lsb_first);
         std::size_t            agree = 0UZ;
         for (unsigned value = 0U; value < 256U; ++value) {
             const std::uint8_t item = static_cast<std::uint8_t>(value);
@@ -762,40 +762,40 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
 
     // What configureManchester() refuses, and the guarantee that a refusal cannot half-apply.
     "validation rejects, and the previous configuration stands"_test = [] {
-        ManchesterConfig cfg = configured(ManchesterConvention::GeThomas, 5U, BitOrder::LsbFirst, 1U);
+        ManchesterConfig cfg = configured(ManchesterConvention::ge_thomas, 5U, BitOrder::lsb_first, 1U);
 
         for (const unsigned bad : {0U, 9U, 255U}) {
-            expect(throws<std::invalid_argument>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::Ieee8023, bad, BitOrder::MsbFirst); })) << std::format("bitsPerItem = {}", bad);
+            expect(throws<std::invalid_argument>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::ieee802_3, bad, BitOrder::msb_first); })) << std::format("bitsPerItem = {}", bad);
         }
         for (const unsigned bad : {2U, 100U}) {
-            expect(throws<std::invalid_argument>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::Ieee8023, 8U, BitOrder::MsbFirst, bad); })) << std::format("chipPhase = {}", bad);
+            expect(throws<std::invalid_argument>([&cfg, bad] { configureManchester(cfg, ManchesterConvention::ieee802_3, 8U, BitOrder::msb_first, bad); })) << std::format("chipPhase = {}", bad);
         }
 
-        expect(that % (cfg.convention == ManchesterConvention::GeThomas)) << "a rejected setting leaves the previous configuration standing";
+        expect(that % (cfg.convention == ManchesterConvention::ge_thomas)) << "a rejected setting leaves the previous configuration standing";
         expect(eq(static_cast<unsigned>(cfg.bitsPerItem), 5U));
-        expect(that % (cfg.order == BitOrder::LsbFirst));
+        expect(that % (cfg.order == BitOrder::lsb_first));
         expect(eq(static_cast<unsigned>(cfg.chipPhase), 1U));
         expect(eq(static_cast<unsigned>(cfg.k), 0U));
         const std::uint8_t item = 0x1FU;
         expect(eq(hexOf(encoded(cfg, std::span{&item, 1UZ})), std::string{"15 0A"})) << "and it still codes";
 
-        expect(throws<std::invalid_argument>([&cfg] { configureManchester(cfg, ManchesterConvention::Unset, 8U, BitOrder::MsbFirst); })) << "a convention left unset";
-        expect(that % (cfg.convention == ManchesterConvention::GeThomas)) << "and the previous configuration stands";
+        expect(throws<std::invalid_argument>([&cfg] { configureManchester(cfg, ManchesterConvention::unset, 8U, BitOrder::msb_first); })) << "a convention left unset";
+        expect(that % (cfg.convention == ManchesterConvention::ge_thomas)) << "and the previous configuration stands";
 
-        expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::Ieee8023, 1U, BitOrder::MsbFirst, 1U); })) << "the edges of both ranges are accepted";
-        expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::GeThomas, 8U, BitOrder::LsbFirst, 0U); }));
+        expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::ieee802_3, 1U, BitOrder::msb_first, 1U); })) << "the edges of both ranges are accepted";
+        expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::ge_thomas, 8U, BitOrder::lsb_first, 0U); }));
     };
 
     // The state a caller has to account for, which is bounded by construction rather than by a threshold.
     "the configuration's shape, and what it carries between calls"_test = [] {
-        const ManchesterConfig cfg = configured(ManchesterConvention::Ieee8023);
+        const ManchesterConfig cfg = configured(ManchesterConvention::ieee802_3);
         expect(eq(cfg.table.size(), 256UZ)) << "the chip table covers every item value at every width";
         expect(eq(sizeof(cfg.table), 512UZ)) << "512 bytes, fixed by the item type and never resized";
         expect(eq(static_cast<unsigned>(cfg.gridParity), 0U));
         expect(that % !cfg.hasCarry) << "the encoder's direction carries nothing at all";
 
         // resetManchester() puts the grid back where the phase says and leaves the totals alone
-        ManchesterConfig                live = configured(ManchesterConvention::Ieee8023, 1U, BitOrder::MsbFirst, 1U);
+        ManchesterConfig                live = configured(ManchesterConvention::ieee802_3, 1U, BitOrder::msb_first, 1U);
         const std::vector<std::uint8_t> chips(64UZ, std::uint8_t{1});
         [[maybe_unused]] const Decoded  ignored = decoded(live, chips);
         expect(that % live.hasCarry);
@@ -808,7 +808,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         // the two directions of the rate change, which are properties of the code and not of a setting
         const auto source = randomItems(1000UZ, 8U, 0xF12C7F995D0EB1D9ULL);
         expect(eq(encoded(cfg, source).size(), 2000UZ)) << "one input item to two output items";
-        ManchesterConfig sink   = configured(ManchesterConvention::Ieee8023);
+        ManchesterConfig sink   = configured(ManchesterConvention::ieee802_3);
         const Decoded    result = decoded(sink, encoded(cfg, source));
         expect(eq(result.items.size(), 1000UZ)) << "and two input items to one output item";
         expect(eq(result.flags.size(), 1000UZ)) << "and one violation item beside it";

@@ -47,7 +47,7 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
         Annotated<double, Limits<Min<0.0>, Max<1.0>>>  alpha              = 1e-3;
         Annotated<gr::Size_t, Limits<Min<1U>>>         blank_samples      = 7U;
         Annotated<gr::Size_t>                          lookback_samples   = 2U;
-        Annotated<detail::Replacement, Visible>        replacement        = detail::Replacement::Interpolate;
+        Annotated<detail::Replacement, Visible>        replacement        = detail::Replacement::interpolate;
         Annotated<bool>                                retrigger          = false;
         Annotated<gr::Size_t>                          max_window_samples = 0U;
         Annotated<bool>                                emit_tags          = false;
@@ -77,7 +77,7 @@ struct NoiseBlanker : Block<NoiseBlanker<T>, NoTagPropagation> {
     std::size_t                                         _blank        = 7UZ;
     std::size_t                                         _maxWindow    = 28UZ;
     std::size_t                                         _maxSetting   = 0UZ;
-    detail::Replacement                                 _rule         = detail::Replacement::Interpolate;
+    detail::Replacement                                 _rule         = detail::Replacement::interpolate;
     bool                                                _enabled      = false;
     bool                                                _retrigger    = false;
     bool                                                _emitTags     = false;
@@ -437,7 +437,7 @@ private:
         ++_runPosition;
         if (ahead > _delay) {
             _held = _runPosition;
-            return _rule == detail::Replacement::Zero ? T{} : _anchor;
+            return _rule == detail::Replacement::zero ? T{} : _anchor;
         }
 
         const std::uint32_t position = _runPosition - _held;
@@ -451,8 +451,8 @@ private:
         }
 
         switch (_rule) {
-        case detail::Replacement::Zero: return T{};
-        case detail::Replacement::Hold: return _anchor;
+        case detail::Replacement::zero: return T{};
+        case detail::Replacement::hold: return _anchor;
         default: break;
         }
         const T      after  = _line[slot(ahead)];
@@ -718,7 +718,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
     using namespace boost::ut;
 
     "a clean signal comes out delayed and otherwise untouched"_test = [] {
-        for (const char* rule : {"Interpolate", "Hold", "zero"}) {
+        for (const char* rule : {"interpolate", "hold", "zero"}) {
             NoiseBlanker<CF>       block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string(rule)}});
             const std::vector<CF>  x     = tone(40000UZ, 0.5);
             const test::Result<CF> got   = test::run(block, std::span<const CF>(x), 997UZ);
@@ -928,7 +928,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
             // The reference is held exact. A 5 % duty of impulses would otherwise raise it and cost detection. That
             // effect belongs to the scene and not to the statistic under test here.
-            NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 1e8 / static_cast<double>(kRate)}, {"replacement", std::string("Zero")}});
+            NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"averaging_time", 1e8 / static_cast<double>(kRate)}, {"replacement", std::string("zero")}});
             block._warmup          = 0UZ;
             presetTracker(block, 1.0);
             const test::Result<CF> got = test::run(block, std::span<const CF>(x), 4096UZ);
@@ -969,7 +969,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             double      bound;
         };
         // Each rule has a bound with margin for the generator, and interpolation beats zeroing by 40 dB.
-        constexpr Arm       kArms[]{{"Interpolate", -80.0}, {"Hold", -55.0}, {"Zero", -33.0}};
+        constexpr Arm       kArms[]{{"interpolate", -80.0}, {"hold", -55.0}, {"zero", -33.0}};
         std::vector<double> residual;
 
         for (const auto& [rule, bound] : kArms) {
@@ -1017,7 +1017,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         std::vector<CF>       x   = tone(2000UZ, 1.0);
         x[kAt] += CF(200.f, 0.f);
 
-        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("zero")}, {"emit_tags", true}});
         block._warmup          = 0UZ;
         presetTracker(block, 1.0);
 
@@ -1051,7 +1051,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         }
         x[1500UZ] += CF(200.f, 0.f); // one more, well after the burst
 
-        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("zero")}, {"emit_tags", true}});
         block._warmup          = 0UZ;
         presetTracker(block, 1.0);
 
@@ -1065,7 +1065,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         expect(eq(made, kLength)) << "the block never stops producing";
         expect(eq(highest, 28U)) << "a retriggering window stops extending at exactly max_window_samples, 4 * blank_samples";
 
-        NoiseBlanker<CF> again = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        NoiseBlanker<CF> again = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"retrigger", true}, {"replacement", std::string("zero")}, {"emit_tags", true}});
         again._warmup          = 0UZ;
         presetTracker(again, 1.0);
         const test::Result<CF> got = test::run(again, std::span<const CF>(x), 97UZ);
@@ -1111,7 +1111,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             x[at] += CF(60.f, 20.f);
         }
 
-        for (const char* rule : {"Interpolate", "Hold", "zero"}) {
+        for (const char* rule : {"interpolate", "hold", "zero"}) {
             NoiseBlanker<CF>       reference = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string(rule)}});
             const test::Result<CF> want      = test::run(reference, std::span<const CF>(x), 4096UZ);
 
@@ -1252,7 +1252,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
                 impulses.push_back(at);
             }
 
-            NoiseBlanker<CF>       block    = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}});
+            NoiseBlanker<CF>       block    = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("zero")}});
             const test::Result<CF> got      = test::run(block, std::span<const CF>(x), 4096UZ);
             const auto             replaced = [&got](std::size_t from, std::size_t to) {
                 const auto zero = std::ranges::count(std::span<const CF>(got.samples).subspan(from + 9UZ, to - from), CF{});
@@ -1273,7 +1273,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
     "a run longer than the delay line holds, then interpolates, and its marker states its whole length"_test = [] {
         constexpr std::size_t kAt   = 500UZ;
         const std::vector<CF> clean = tone(2000UZ, 1.0);
-        for (const char* rule : {"Interpolate", "Hold", "zero"}) {
+        for (const char* rule : {"interpolate", "hold", "zero"}) {
             // A burst of b samples at +46 dB with retrigger off: windows of 7 follow one another while the burst lasts.
             for (const auto& [burst, run] : {std::pair{1UZ, 9UZ}, std::pair{12UZ, 16UZ}, std::pair{20UZ, 23UZ}, std::pair{40UZ, 44UZ}}) {
                 std::vector<CF> x = clean;
@@ -1310,7 +1310,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
             impulses.push_back(at);
         }
 
-        NoiseBlanker<CF>       block  = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}});
+        NoiseBlanker<CF>       block  = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("zero")}});
         const test::Result<CF> got    = test::run(block, std::span<const CF>(x), 4096UZ);
         std::size_t            caught = 0UZ;
         for (const std::size_t at : impulses) {
@@ -1324,7 +1324,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
 
     "a batch the block refuses changes nothing it computes"_test = [] {
         const std::vector<CF> x     = noise(30000UZ, 0x9b05688c2b3e6c1fULL);
-        NoiseBlanker<CF>      block = make<CF>({{"sample_rate", kRate}, {"replacement", std::string("Zero")}});
+        NoiseBlanker<CF>      block = make<CF>({{"sample_rate", kRate}, {"replacement", std::string("zero")}});
         std::ignore                 = test::run(block, std::span<const CF>(x).first(5000UZ), 4096UZ);
 
         expect(!apply(block, {{"enabled", true}, {"replacement", std::string("taper")}}).empty()) << "an unknown rule refuses the whole batch";
@@ -1474,9 +1474,9 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         expect(eq(zeros, std::ptrdiff_t{3})) << "and after the line's first fill, the three replaced samples that left before the change are the only zeros";
 
         // From nine to seven: the line drops inputs 201 and 202 from inside the run, and the run's end stays in it.
-        NoiseBlanker<CF>       reference = blanker("Interpolate");
+        NoiseBlanker<CF>       reference = blanker("interpolate");
         const test::Result<CF> whole     = test::run(reference, std::span<const CF>(x), kFirst);
-        NoiseBlanker<CF>       cut       = blanker("Interpolate");
+        NoiseBlanker<CF>       cut       = blanker("interpolate");
         std::ignore                      = test::run(cut, std::span<const CF>(x).first(kFirst), kFirst);
         expect(apply(cut, {{"lookback_samples", 0U}}).empty());
         const test::Result<CF> rest = test::run(cut, std::span<const CF>(x).subspan(kFirst), 64UZ);
@@ -1498,7 +1498,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         const auto                 tagged = [](const char* key) { return gr::property_map{{gr::property_map::key_type{key}, gr::pmt::Value(std::string("x"))}}; };
         const std::vector<gr::Tag> marks{{40UZ, tagged(gr::tag::TRIGGER_NAME.key())}, {94UZ, tagged(gr::tag::SIGNAL_NAME.key())}};
 
-        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("zero")}, {"emit_tags", true}});
         block._warmup          = 0UZ;
         presetTracker(block, 1.0);
         const test::Result<CF> got = test::run(block, std::span<const CF>(x), 37UZ, std::span<const gr::Tag>(marks));
@@ -1535,7 +1535,7 @@ const boost::ut::suite<"NoiseBlanker"> noiseBlankerTests = [] {
         x[kAt] += CF(200.f, 0.f);
         const auto tagged = [](const char* key) { return gr::property_map{{gr::property_map::key_type{key}, gr::pmt::Value(std::string("x"))}}; };
 
-        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("Zero")}, {"emit_tags", true}});
+        NoiseBlanker<CF> block = make<CF>({{"enabled", true}, {"sample_rate", kRate}, {"replacement", std::string("zero")}, {"emit_tags", true}});
         block._warmup          = 0UZ;
         presetTracker(block, 1.0);
         const std::vector<gr::Tag> marks{{kAt + 2UZ, tagged(gr::tag::TRIGGER_NAME.key())}, {kAt + 8UZ, tagged(gr::tag::SIGNAL_NAME.key())}};
@@ -1748,7 +1748,7 @@ const boost::ut::suite<"NoiseBlanker settings at the initialization"> noiseBlank
             {"alpha", 0.01},
             {"blank_samples", gr::Size_t{5U}},
             {"lookback_samples", gr::Size_t{3U}},
-            {"replacement", std::string("Hold")},
+            {"replacement", std::string("hold")},
             {"retrigger", true},
             {"max_window_samples", gr::Size_t{40U}},
             {"emit_tags", true},

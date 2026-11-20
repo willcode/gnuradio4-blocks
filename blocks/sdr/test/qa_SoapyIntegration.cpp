@@ -250,7 +250,7 @@ std::vector<CF32> expectedTransmission(const std::vector<CF32>& values, std::siz
 
     gr::algorithm::BurstTaper<float> taper;
     if (rampTime.has_value()) {
-        std::ignore = taper.configure(gr::algorithm::TaperType::Linear, *rampTime, sampleRate, 1.0f);
+        std::ignore = taper.configure(gr::algorithm::TaperType::linear, *rampTime, sampleRate, 1.0f);
         std::ignore = taper.setTarget(true);
     }
     std::vector<CF32> sent(n);
@@ -867,7 +867,7 @@ const boost::ut::suite<"SoapySink write path"> writePathTests = [] {
     // end short of the sink's chunks.
     static const std::string kDevice = "buffer_size=131072,max_write_samples=3001";
 
-    const property_map taperOn{{"burst_taper_enabled", true}, {"burst_ramp_time", kRampTime}, {"burst_taper_type", std::string("Linear")}};
+    const property_map taperOn{{"burst_taper_enabled", true}, {"burst_ramp_time", kRampTime}, {"burst_taper_type", std::string("linear")}};
 
     "every sample reaches the device once and in order, each part saturated to full scale"_test = [] {
         const auto values   = placeMarkedPattern(997UZ);
@@ -924,7 +924,7 @@ const boost::ut::suite<"SoapySink write path"> writePathTests = [] {
 
     // A setting given at construction does not follow tags. The sink starts with its default ramp time.
     "a ramp time cut to zero while the sink runs leaves the ramp-down the run started with"_test = [] {
-        const property_map settings{{"sample_rate", kRate}, {"burst_taper_enabled", true}, {"burst_taper_type", std::string("Linear")}};
+        const property_map settings{{"sample_rate", kRate}, {"burst_taper_enabled", true}, {"burst_taper_type", std::string("linear")}};
         const float        startRampTime = gr::blocks::sdr::SoapySink<CF32, 1UZ>().settings.burst_ramp_time.value;
         expect(gt(startRampTime, 0.f));
 
@@ -970,7 +970,7 @@ const boost::ut::suite<"SoapySink write path"> writePathTests = [] {
         const auto values = placeMarkedPattern(997UZ);
         gr::Graph  flow;
         auto&      source = flow.emplaceBlock<Source>({{"n_samples_max", kRunSamples}, {"values", gr::Tensor<CF32>(values.begin(), values.end())}});
-        auto&      sink   = flow.emplaceBlock<gr::blocks::sdr::SoapySink<CF32, 1UZ>>({{"device", "loopback"}, {"device_parameter", kDevice}, {"sample_rate", kRate}, {"burst_ramp_time", kRampTime}, {"burst_taper_type", std::string("Linear")}});
+        auto&      sink   = flow.emplaceBlock<gr::blocks::sdr::SoapySink<CF32, 1UZ>>({{"device", "loopback"}, {"device_parameter", kDevice}, {"sample_rate", kRate}, {"burst_ramp_time", kRampTime}, {"burst_taper_type", std::string("linear")}});
         expect(flow.connect<"out", "in">(source, sink).has_value());
         gr::scheduler::Simple<> sched;
         expect(sched.exchange(std::move(flow)).has_value());
@@ -1339,7 +1339,7 @@ const boost::ut::suite<"SoapySink BurstTaper"> taperTests = [] {
         device->activateStream(txStream);
         device->activateStream(rxStream);
 
-        gr::algorithm::BurstTaper<float> taper(gr::algorithm::TaperType::RaisedCosine, kRampTime, kSampleRate);
+        gr::algorithm::BurstTaper<float> taper(gr::algorithm::TaperType::raised_cosine, kRampTime, kSampleRate);
         std::ignore = taper.setTarget(true);
 
         std::vector<CF32> txBuf(kTotalTx, CF32{1.0f, 0.0f});
@@ -1402,7 +1402,7 @@ const boost::ut::suite<"SoapySink BurstTaper"> taperTests = [] {
             {"frequency", std::vector{107e6}},
             {"burst_taper_enabled", true},
             {"burst_ramp_time", 0.001f},
-            {"burst_taper_type", std::string("Linear")},
+            {"burst_taper_type", std::string("linear")},
         });
         auto& source   = flow.emplaceBlock<SoapySource<CF32, 1UZ>>({
             {"device", "loopback"},
@@ -1498,7 +1498,7 @@ const boost::ut::suite<"SoapySink shutdown"> shutdownTests = [] {
             {"max_chunk_size", std::uint32_t{1024}},
             {"burst_taper_enabled", true},
             {"burst_ramp_time", 0.01f},
-            {"burst_taper_type", std::string("Linear")},
+            {"burst_taper_type", std::string("linear")},
         });
         expect(flow.connect<"out", "in">(clockSrc, txSink).has_value());
 
@@ -1533,7 +1533,7 @@ const boost::ut::suite<"SoapySink shutdown"> shutdownTests = [] {
             {"max_time_out_us", kTimeOutUs},
             {"burst_taper_enabled", true},
             {"burst_ramp_time", kRampTime},
-            {"burst_taper_type", std::string("Linear")},
+            {"burst_taper_type", std::string("linear")},
         });
         expect(flow.connect<"out", "in">(clockSrc, txSink).has_value());
 

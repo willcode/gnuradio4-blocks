@@ -632,7 +632,7 @@ const boost::ut::suite<"audio device tests"> _audioTests = [] {
         }
 
         // the sample-exact accounting below holds only with the resampling compensator out of the way
-        auto& sink = graph.emplaceBlock<gr::blocks::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}, {"drift_correction", std::string("None")}});
+        auto& sink = graph.emplaceBlock<gr::blocks::audio::AudioSink<float>>({{"io_buffer_size", 0.1f}, {"drift_correction", std::string("none")}});
         coupleStreamFormat(sink);
         sink._useDummyBackendForTests = true;
         expect(graph.connect<"out", "in">(source, sink).has_value()) << caseName;
@@ -895,7 +895,7 @@ const boost::ut::suite<"audio timing drift"> _timingAndDriftTests = [] {
         constexpr double           kRate    = 48000.0;
 
         gr::Graph graph;
-        auto&     source                = graph.emplaceBlock<gr::blocks::audio::AudioSource<float>>({{"sample_rate", static_cast<float>(kRate)}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}, {"emit_timing_tags", true}, {"tag_interval", 0.0f}, {"drift_correction", std::string("None")}});
+        auto&     source                = graph.emplaceBlock<gr::blocks::audio::AudioSource<float>>({{"sample_rate", static_cast<float>(kRate)}, {"num_channels", gr::Size_t(1)}, {"io_buffer_size", 0.1f}, {"emit_timing_tags", true}, {"tag_interval", 0.0f}, {"drift_correction", std::string("none")}});
         source._useDummyBackendForTests = true;
         // without drift compensation every output sample is a captured one, and its index counts the sample periods before it
         auto& sink = graph.emplaceBlock<ArrivalSink<float>>();

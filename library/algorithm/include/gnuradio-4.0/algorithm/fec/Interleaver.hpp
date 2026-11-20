@@ -15,10 +15,10 @@ namespace gr::fec {
 /// they do with it, and only one of them is stream-shaped. A setting starts at `unset`, which no interleaver carries:
 /// the family is required, with no default.
 enum class InterleaverKind : std::uint8_t {
-    Unset,         ///< no family named yet
-    Block,         ///< rows x cols, written row-major and read column-major
-    Convolutional, ///< Forney/Ramsey type II: `branches` delay lines and a commutator, state across calls
-    Permutation    ///< an explicit table, whatever a standard publishes
+    unset,         ///< no family named yet
+    block,         ///< rows x cols, written row-major and read column-major
+    convolutional, ///< Forney/Ramsey type II: `branches` delay lines and a commutator, state across calls
+    permutation    ///< an explicit table, whatever a standard publishes
 };
 
 /**
@@ -102,7 +102,7 @@ public:
         }
 
         Interleaver self;
-        self._kind      = InterleaverKind::Block;
+        self._kind      = InterleaverKind::block;
         self._rows      = rows;
         self._cols      = cols;
         self._frameSize = frame;
@@ -131,7 +131,7 @@ public:
         }
 
         Interleaver self;
-        self._kind      = InterleaverKind::Convolutional;
+        self._kind      = InterleaverKind::convolutional;
         self._branches  = branches;
         self._unitDelay = unitDelay;
         self._fillValue = fillValue;
@@ -163,7 +163,7 @@ public:
         }
 
         Interleaver self;
-        self._kind      = InterleaverKind::Permutation;
+        self._kind      = InterleaverKind::permutation;
         self._frameSize = table.size();
         self._map.assign(table.begin(), table.end());
         self.finishFramed();
@@ -208,7 +208,7 @@ public:
      * the kernel's, and the kernel has no way to report a drop that a return value does not already say.
      */
     std::size_t interleave(std::span<const T> in, std::span<T> out) noexcept {
-        if (_kind == InterleaverKind::Convolutional) {
+        if (_kind == InterleaverKind::convolutional) {
             return runLines(_forward, in, out);
         }
 
@@ -230,7 +230,7 @@ public:
 
     /// @brief The inverse of `interleave()`, with the input and output frame sizes exchanged.
     std::size_t deinterleave(std::span<const T> in, std::span<T> out) noexcept {
-        if (_kind == InterleaverKind::Convolutional) {
+        if (_kind == InterleaverKind::convolutional) {
             return runLines(_reverse, in, out);
         }
 
@@ -278,7 +278,7 @@ private:
         std::size_t              commutator{0UZ};
     };
 
-    InterleaverKind          _kind{InterleaverKind::Block};
+    InterleaverKind          _kind{InterleaverKind::block};
     std::size_t              _rows{0UZ};
     std::size_t              _cols{0UZ};
     std::size_t              _branches{0UZ};

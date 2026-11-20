@@ -162,7 +162,7 @@ struct RecordSink : gr::Block<RecordSink> {
         {std::pmr::string("sample_start"), gr::pmt::Value(sampleStart)},
         {std::pmr::string("n_averaged"), gr::pmt::Value(nAveraged)},
         {std::pmr::string("overlap"), gr::pmt::Value(overlap)},
-        {std::pmr::string("window"), gr::pmt::Value(std::string("Hann"))},
+        {std::pmr::string("window"), gr::pmt::Value(std::string("hann"))},
     };
     ds.timing_events.resize(1UZ);
     return ds;
@@ -564,15 +564,15 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         }
         { // a window change ends the accumulation the same way
             std::vector<gr::DataSet<float>> rows     = repeated(shape1, 3UZ);
-            const gr::DataSet<float>        harris   = withMeta(shape1, "window", std::string("BlackmanHarris"));
+            const gr::DataSet<float>        harris   = withMeta(shape1, "window", std::string("blackman_harris"));
             const std::vector               rowsTail = repeated(harris, 9UZ);
             rows.insert(rows.end(), rowsTail.begin(), rowsTail.end());
             const Run r = runWith({{"n_spectra", gr::Size_t{8U}}}, rows);
             expect(eq(r.nRefusedRecords, std::uint64_t{1ULL}));
             expect(fatal(eq(r.records.size(), 2UZ)));
             expect(eq(metaNumber(r.records[0UZ], "n_spectra"), 3.)) << "the partial reading of the three records under Hann";
-            expect(eq(metaString(r.records[0UZ], "window"), std::string("Hann")));
-            expect(eq(metaString(r.records[1UZ], "window"), std::string("BlackmanHarris"))) << "a full reading under the new window";
+            expect(eq(metaString(r.records[0UZ], "window"), std::string("hann")));
+            expect(eq(metaString(r.records[1UZ], "window"), std::string("blackman_harris"))) << "a full reading under the new window";
         }
         { // a rate change or a retune ends the accumulation the same way
             const gr::DataSet<float> tuned = withMeta(shape1, "center_frequency", 1.42e9);
@@ -623,7 +623,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
                 expect(eq(metaNumber(record, "shape"), 1.));
                 expect(eq(metaNumber(record, "sample_start"), 4242.)) << "the first input record's sample_start";
                 expect(std::abs(metaNumber(record, "sample_rate") - 48000.) < 1e-3) << "the rate is copied from the input record";
-                expect(eq(metaString(record, "window"), std::string("Hann"))) << "the window name is copied from the input record";
+                expect(eq(metaString(record, "window"), std::string("hann"))) << "the window name is copied from the input record";
                 expect(std::abs(metaNumber(record, "sk_std") - 0.5766) < 1e-4) << "the closed-form spread at M=8, d=1 is 0.5766";
                 expect(eq(record.signal_names.at(0UZ), std::string("spectral_kurtosis")));
                 expect(eq(record.axis_values.at(0UZ).size(), 3UZ)) << "the input's frequency axis";
@@ -743,7 +743,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
     // have shape d/2, and bins 1 and 31 have d/(1 + rho^2). Every bin the list leaves out has d to float precision.
     "under Hann bins 1 and N/2 - 1 of a real-input spectrum have about 0.97 d, and the DC and Nyquist bins d/2"_test = [] {
         constexpr std::size_t    kFft   = 64UZ;
-        const std::vector<float> window = gr::algorithm::window::create<float>(gr::algorithm::window::Type::Hann, kFft);
+        const std::vector<float> window = gr::algorithm::window::create<float>(gr::algorithm::window::Type::hann, kFft);
         const auto               direct = [&window](std::size_t k) {
             double re    = 0.;
             double im    = 0.;
@@ -790,7 +790,7 @@ const boost::ut::suite<"SpectralKurtosis"> spectralKurtosisTests = [] {
         constexpr std::size_t                kReadings = 200UZ;
         constexpr std::array<std::size_t, 6> kEdge{0UZ, 1UZ, 2UZ, kBins - 3UZ, kBins - 2UZ, kBins - 1UZ};
 
-        for (const std::string_view windowName : {"Hann", "BlackmanHarris"}) {
+        for (const std::string_view windowName : {"hann", "blackman_harris"}) {
             Rng                rng(0x6c62272e07bb0142ULL);
             std::vector<float> samples(kReadings * kM * kFft + 1UZ);
             for (float& sample : samples) {

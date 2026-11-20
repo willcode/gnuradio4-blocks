@@ -311,15 +311,15 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
             expect(lt(std::abs(block.loop().detectorGain() - kted / sps), 1e-12)) << "per input sample at sps=" << sps;
         }
 
-        SymbolSync<CF> modified = make<CF>({{"detector", std::string("ModifiedMuellerMuller")}, {"rolloff", 0.35}, {"samples_per_symbol", 4.0}});
+        SymbolSync<CF> modified = make<CF>({{"detector", std::string("modified_mueller_muller")}, {"rolloff", 0.35}, {"samples_per_symbol", 4.0}});
         expect(lt(std::abs(modified.loop().detectorGain() - 2.0 * gr::sync::muellerMullerGain(0.35) / 4.0), 1e-12)) << "the modified form is exactly twice";
 
-        SymbolSync<CF> given = make<CF>({{"detector", std::string("Gardner")}, {"detector_gain", 1.06739}, {"samples_per_symbol", 4.0}});
+        SymbolSync<CF> given = make<CF>({{"detector", std::string("gardner")}, {"detector_gain", 1.06739}, {"samples_per_symbol", 4.0}});
         expect(lt(std::abs(given.loop().detectorGain() - 1.06739 / 4.0), 1e-12)) << "a measured Kted divides by sps too";
     };
 
     "the interpolation clock is the least common multiple"_test = [] {
-        for (const auto& [name, outputs, expected] : std::array<std::tuple<std::string, gr::Size_t, int>, 5UZ>{{{"MuellerMuller", 1U, 1}, {"MuellerMuller", 2U, 2}, {"Gardner", 1U, 2}, {"Gardner", 2U, 2}, {"Gardner", 3U, 6}}}) {
+        for (const auto& [name, outputs, expected] : std::array<std::tuple<std::string, gr::Size_t, int>, 5UZ>{{{"mueller_muller", 1U, 1}, {"mueller_muller", 2U, 2}, {"gardner", 1U, 2}, {"gardner", 2U, 2}, {"gardner", 3U, 6}}}) {
             SymbolSync<CF> block = make<CF>({{"detector", name}, {"outputs_per_symbol", outputs}, {"detector_gain", 1.0}, {"samples_per_symbol", 8.0}});
             expect(eq(block.interpolationsPerSymbol(), expected)) << name << " at " << outputs << " outputs per symbol";
         }
@@ -331,18 +331,18 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"outputs_per_symbol", gr::Size_t(0)}})) << "outputs_per_symbol must be positive";
         expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"samples_per_symbol", 4.0}, {"max_deviation", 4.0}})) << "a deviation that reaches sps allows a non-positive period";
         expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector_gain", -1.0}})) << "a negative gain is a sign error";
-        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("Gardner")}, {"rolloff", 0.0}})) << "a blind detector has no gain without excess bandwidth";
-        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("SignalTimesSlopeMl")}, {"rolloff", 0.0}})) << "nor has the maximum-likelihood form";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("gardner")}, {"rolloff", 0.0}})) << "a blind detector has no gain without excess bandwidth";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("signal_times_slope_ml")}, {"rolloff", 0.0}})) << "nor has the maximum-likelihood form";
         expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"interpolator", std::string("cubic")}})) << "an unknown interpolator name";
         expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"constellation", std::string("8psk")}})) << "an unknown constellation";
         expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<float>>({{"constellation", std::string("qpsk")}})) << "a real stream cannot carry qpsk";
-        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("SignalTimesSlopeMl")}, {"detector_gain", 1.0}, {"interpolator", std::string("polyphase")}})) << "the polyphase path has no differentiator";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("signal_times_slope_ml")}, {"detector_gain", 1.0}, {"interpolator", std::string("polyphase")}})) << "the polyphase path has no differentiator";
 
         expect(!gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"samples_per_symbol", 4.0}, {"max_deviation", 3.999}})) << "just inside the bound is legal";
     };
 
     "a refusal names the key the call changed"_test = [] {
-        SymbolSync<CF>               block   = make<CF>({{"detector", std::string("Gardner")}, {"rolloff", 0.35}});
+        SymbolSync<CF>               block   = make<CF>({{"detector", std::string("gardner")}, {"rolloff", 0.35}});
         const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"rolloff", 0.0}});
         expect(fatal(eq(refused.size(), 1UZ))) << "a blind detector has no gain without excess bandwidth";
         expect(eq(refused.front().key, std::string("rolloff"))) << "the detector the call left alone is not refused";
@@ -351,7 +351,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
     "every detector starts on the rolloff alone"_test = [] {
         // Each name takes its gain from the raised-cosine channel the `rolloff` setting describes, so a graph that
         // names a detector and shapes with a matching root-raised cosine needs no `detector_gain` at all.
-        for (std::string name : {"MuellerMuller", "ModifiedMuellerMuller", "ZeroCrossing", "Gardner", "EarlyLate", "SignalTimesSlopeMl", "SignumTimesSlopeMl"}) {
+        for (std::string name : {"mueller_muller", "modified_mueller_muller", "zero_crossing", "gardner", "early_late", "signal_times_slope_ml", "signum_times_slope_ml"}) {
             expect(!gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", name}})) << name << " starts without an explicit gain";
         }
     };
@@ -602,7 +602,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         constexpr std::size_t kSamples = 4000UZ;
         const std::vector<CF> input    = nyquistPsk(kSamples, 4.0, 0.35, true, 1.7, 21U);
 
-        for (const auto& [name, gain, outputs] : std::array<std::tuple<std::string, double, gr::Size_t>, 3UZ>{{{"MuellerMuller", 0.0, 1U}, {"MuellerMuller", 0.0, 2U}, {"EarlyLate", 1.06743, 1U}}}) {
+        for (const auto& [name, gain, outputs] : std::array<std::tuple<std::string, double, gr::Size_t>, 3UZ>{{{"mueller_muller", 0.0, 1U}, {"mueller_muller", 0.0, 2U}, {"early_late", 1.06743, 1U}}}) {
             const gr::property_map settings{{"samples_per_symbol", 4.0}, {"detector", name}, {"detector_gain", gain}, {"outputs_per_symbol", outputs}};
 
             SymbolSync<CF> whole     = make<CF>(settings);
@@ -659,7 +659,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         constexpr std::size_t kSymbols = 2500UZ;
         const std::vector<CF> input    = nyquistPsk(static_cast<std::size_t>(static_cast<double>(kSymbols) * 4.02), 4.02, 0.35, true, 1.1, 29U);
 
-        constexpr std::array<std::pair<std::string_view, double>, 7UZ> kDetectors{{{"MuellerMuller", 1.77355}, {"ModifiedMuellerMuller", 3.54714}, {"ZeroCrossing", 2.60278}, {"Gardner", 1.06739}, {"EarlyLate", 1.06743}, {"SignalTimesSlopeMl", 1.0}, {"SignumTimesSlopeMl", 1.0}}};
+        constexpr std::array<std::pair<std::string_view, double>, 7UZ> kDetectors{{{"mueller_muller", 1.77355}, {"modified_mueller_muller", 3.54714}, {"zero_crossing", 2.60278}, {"gardner", 1.06739}, {"early_late", 1.06743}, {"signal_times_slope_ml", 1.0}, {"signum_times_slope_ml", 1.0}}};
 
         std::array<double, 7UZ> jitter{};
         for (std::size_t which = 0UZ; which < kDetectors.size(); ++which) {
@@ -686,7 +686,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         constexpr std::size_t    kSymbols = 4000UZ;
         const std::vector<float> input    = nyquistPam4(static_cast<std::size_t>(static_cast<double>(kSymbols) * 4.02), 4.02, 0.35, 1.1, 31U);
 
-        SymbolSync<float> block   = make<float>({{"samples_per_symbol", 4.0}, {"constellation", std::string("pam4")}, {"detector", std::string("ZeroCrossing")}, {"detector_gain", 2.60278}, {"noise_bandwidth", 0.02}});
+        SymbolSync<float> block   = make<float>({{"samples_per_symbol", 4.0}, {"constellation", std::string("pam4")}, {"detector", std::string("zero_crossing")}, {"detector_gain", 2.60278}, {"noise_bandwidth", 0.02}});
         const auto        tracked = drive<float>(block, std::span<const float>(input));
         expect(gt(tracked.samples.size(), 3300UZ));
 
@@ -759,7 +759,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
             rotated[i] = input[i] * static_cast<CF>(std::polar(1.0, 0.37 + 2.0 * kPi * 0.0009 * static_cast<double>(i)));
         }
 
-        SymbolSync<CF> gardner = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("Gardner")}, {"detector_gain", 1.06739}, {"noise_bandwidth", 0.02}});
+        SymbolSync<CF> gardner = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("gardner")}, {"detector_gain", 1.06739}, {"noise_bandwidth", 0.02}});
         const auto     blind   = drive<CF>(gardner, std::span<const CF>(rotated));
         const double   period  = meanOfTail(std::span<const float>(blind.aux[2]), 2000UZ);
         expect(lt(std::abs(period - 4.02) / 4.02, 2e-4)) << "a blind detector locks the clock whatever the carrier does, got " << period;
@@ -792,7 +792,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
             input[i] = static_cast<CF>(shaped[i]);
         }
 
-        SymbolSync<CF> block = make<CF>({{"samples_per_symbol", 4.0}, {"interpolator", std::string("polyphase")}, {"rolloff", 0.35}, {"polyphase_arms", gr::Size_t(128)}, {"detector", std::string("Gardner")}, {"detector_gain", 1.06739}, {"noise_bandwidth", 0.02}});
+        SymbolSync<CF> block = make<CF>({{"samples_per_symbol", 4.0}, {"interpolator", std::string("polyphase")}, {"rolloff", 0.35}, {"polyphase_arms", gr::Size_t(128)}, {"detector", std::string("gardner")}, {"detector_gain", 1.06739}, {"noise_bandwidth", 0.02}});
         expect(eq(block.windowLength(), 44UZ)) << "ceil(11*sps) rounded up to even, which is 44 at sps 4 and not 11";
         expect(eq(block.branches().size(), 44UZ * 128UZ));
 
@@ -892,7 +892,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         };
 
         const std::vector<CF> input = nyquistPsk(3000UZ, 4.0, 0.35, true, 1.7, 41U);
-        for (const std::string_view name : {"MuellerMuller", "ModifiedMuellerMuller", "ZeroCrossing", "Gardner", "EarlyLate", "SignalTimesSlopeMl", "SignumTimesSlopeMl"}) {
+        for (const std::string_view name : {"mueller_muller", "modified_mueller_muller", "zero_crossing", "gardner", "early_late", "signal_times_slope_ml", "signum_times_slope_ml"}) {
             const std::string arm = std::format("mmse8 {}", name);
             agrees(std::type_identity<CF>{}, {{"samples_per_symbol", 4.0}, {"detector", std::string(name)}, {"interpolator", std::string("mmse8")}}, input, arm);
         }
@@ -903,14 +903,14 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         // the five here: its reach past the base moves with the loop's period, so a minimum that bounded every
         // period the clamp allows would stand two samples clear of the reach and cost the last symbol of a
         // chunked stream.
-        for (const std::string_view name : {"MuellerMuller", "ModifiedMuellerMuller", "ZeroCrossing", "Gardner", "EarlyLate"}) {
+        for (const std::string_view name : {"mueller_muller", "modified_mueller_muller", "zero_crossing", "gardner", "early_late"}) {
             const std::string arm = std::format("polyphase {}", name);
             agrees(std::type_identity<CF>{}, {{"samples_per_symbol", 4.0}, {"detector", std::string(name)}, {"interpolator", std::string("polyphase")}, {"detector_gain", 1.0}}, input, arm);
         }
 
         // and the real sample type, which is what a post-detection chain reads
         const std::vector<float> pam = nyquistPam4(3000UZ, 4.0, 0.35, 1.1, 43U);
-        agrees(std::type_identity<float>{}, {{"samples_per_symbol", 4.0}, {"constellation", std::string("pam4")}, {"detector", std::string("ZeroCrossing")}, {"detector_gain", 2.60278}, {"noise_bandwidth", 0.02}}, pam, "pam4 real");
+        agrees(std::type_identity<float>{}, {{"samples_per_symbol", 4.0}, {"constellation", std::string("pam4")}, {"detector", std::string("zero_crossing")}, {"detector_gain", 2.60278}, {"noise_bandwidth", 0.02}}, pam, "pam4 real");
     };
 
     "a finite graph terminates, real and complex, all interpolators"_test = [] {
@@ -957,13 +957,13 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
             std::fill_n(psk.begin() + static_cast<std::ptrdiff_t>(i), 4UZ, CF{(rng() & 1U) != 0U ? 1.f : -1.f, 0.f});
         }
 
-        const std::size_t pamOut = finishes(std::type_identity<float>{}, {{"samples_per_symbol", 5.0}, {"constellation", std::string("pam4")}, {"detector", std::string("ZeroCrossing")}, {"detector_gain", 2.60278}, {"noise_bandwidth", 0.02}}, pam);
+        const std::size_t pamOut = finishes(std::type_identity<float>{}, {{"samples_per_symbol", 5.0}, {"constellation", std::string("pam4")}, {"detector", std::string("zero_crossing")}, {"detector_gain", 2.60278}, {"noise_bandwidth", 0.02}}, pam);
         expect(gt(pamOut, 3900UZ)) << "the pam4 zero-crossing graph ran to completion";
 
         const std::size_t pskOut = finishes(std::type_identity<CF>{}, {{"samples_per_symbol", 4.0}, {"noise_bandwidth", 0.02}}, psk);
         expect(gt(pskOut, 1900UZ)) << "the complex default-detector graph ran to completion";
 
-        const std::size_t polyOut = finishes(std::type_identity<CF>{}, {{"samples_per_symbol", 4.0}, {"detector", std::string("Gardner")}, {"detector_gain", 1.0}, {"interpolator", std::string("polyphase")}, {"noise_bandwidth", 0.02}}, psk);
+        const std::size_t polyOut = finishes(std::type_identity<CF>{}, {{"samples_per_symbol", 4.0}, {"detector", std::string("gardner")}, {"detector_gain", 1.0}, {"interpolator", std::string("polyphase")}, {"noise_bandwidth", 0.02}}, psk);
         expect(gt(polyOut, 1800UZ)) << "the polyphase graph, whose held window is symbols long, still ends";
     };
 
@@ -1051,10 +1051,10 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         std::vector<CF>       dirty = clean;
         dirty[kAt]                  = CF{1e3f, 0.f};
 
-        SymbolSync<CF> reference = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("Gardner")}});
+        SymbolSync<CF> reference = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("gardner")}});
         const auto     plain     = drive<CF>(reference, std::span<const CF>(clean));
 
-        SymbolSync<CF> block   = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("Gardner")}});
+        SymbolSync<CF> block   = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("gardner")}});
         const auto     tracked = drive<CF>(block, std::span<const CF>(dirty));
         expect(eq(tracked.samples.size(), plain.samples.size())) << "the sample costs no symbol";
         expect(gt(static_cast<std::size_t>(block.status.clipped_errors.value), 0UZ)) << "the sample's errors are clipped and counted";
@@ -1072,7 +1072,7 @@ const boost::ut::suite<"SymbolSync settings at the initialization"> symbolSyncIn
             {"samples_per_symbol", 8.0},
             {"max_deviation", 1.0},
             {"outputs_per_symbol", gr::Size_t{2U}},
-            {"detector", std::string("Gardner")},
+            {"detector", std::string("gardner")},
             {"constellation", std::string("bpsk")},
             {"arity", gr::Size_t{2U}},
             {"detector_gain", 1.0},

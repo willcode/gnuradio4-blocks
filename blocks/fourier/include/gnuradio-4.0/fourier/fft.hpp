@@ -115,12 +115,12 @@ On the choice of window (mathematically aka. apodisation) functions
     PortOut<U, RequiredSamples<1, 1>> out{};
 
     FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl{};
-    std::vector<value_type>                                   _window = gr::algorithm::window::create<value_type>(gr::algorithm::window::Type::Hann, 1024U);
+    std::vector<value_type>                                   _window = gr::algorithm::window::create<value_type>(gr::algorithm::window::Type::hann, 1024U);
 
     // settings
     struct Settings {
         Annotated<gr::Size_t, Doc<"FFT size">>                                        fftSize{1024U};
-        Annotated<gr::algorithm::window::Type, Doc<gr::algorithm::window::TypeNames>> window = gr::algorithm::window::Type::Hann;
+        Annotated<gr::algorithm::window::Type, Doc<gr::algorithm::window::TypeNames>> window = gr::algorithm::window::Type::hann;
         Annotated<bool, Doc<"decibel output">>                                        outputInDb{false};
         Annotated<bool, Doc<"phase in degrees">>                                      outputInDeg{false};
         Annotated<bool, Doc<"phase unwrapping">>                                      unwrapPhase{false};

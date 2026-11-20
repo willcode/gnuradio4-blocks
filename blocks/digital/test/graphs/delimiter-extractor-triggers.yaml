@@ -21,7 +21,7 @@ blocks:
     parameters:
       name: detector_extractor
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -51,7 +51,7 @@ blocks:
     parameters:
       name: mid_frame_extractor
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -73,7 +73,7 @@ blocks:
     parameters:
       name: passive_extractor
       end_delimiter: "01111110"
-      transparency: BitStuffing
+      transparency: bit_stuffing
       max_payload_items: !!uint32 1024
       trigger_resets: false
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>

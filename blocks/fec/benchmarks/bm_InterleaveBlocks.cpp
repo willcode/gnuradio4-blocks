@@ -74,11 +74,11 @@ int main() {
     const std::vector<Record> input{record(kItems)};
     std::vector<Record>       sink(1UZ);
 
-    Interleave   rectangle({{"kind", std::string("Block")}, {"rows", gr::Size_t{256U}}, {"cols", gr::Size_t{256U}}});
-    Deinterleave rectangleBack({{"kind", std::string("Block")}, {"rows", gr::Size_t{256U}}, {"cols", gr::Size_t{256U}}});
-    Interleave   scatter({{"kind", std::string("Permutation")}, {"table", scatterTable(kItems)}});
-    Interleave   forney({{"kind", std::string("Convolutional")}, {"branches", gr::Size_t{16U}}, {"unit_delay", gr::Size_t{4U}}});
-    Deinterleave forneyBack({{"kind", std::string("Convolutional")}, {"branches", gr::Size_t{16U}}, {"unit_delay", gr::Size_t{4U}}});
+    Interleave   rectangle({{"kind", std::string("block")}, {"rows", gr::Size_t{256U}}, {"cols", gr::Size_t{256U}}});
+    Deinterleave rectangleBack({{"kind", std::string("block")}, {"rows", gr::Size_t{256U}}, {"cols", gr::Size_t{256U}}});
+    Interleave   scatter({{"kind", std::string("permutation")}, {"table", scatterTable(kItems)}});
+    Interleave   forney({{"kind", std::string("convolutional")}, {"branches", gr::Size_t{16U}}, {"unit_delay", gr::Size_t{4U}}});
+    Deinterleave forneyBack({{"kind", std::string("convolutional")}, {"branches", gr::Size_t{16U}}, {"unit_delay", gr::Size_t{4U}}});
     init(rectangle);
     init(rectangleBack);
     init(scatter);

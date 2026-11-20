@@ -1255,7 +1255,7 @@ const suite ZmqBlocksTests = [] {
         expect(fg.connect<"out", "in">(pull, sink).has_value());
 
         std::vector<float>                     vec{1.0f, 2.0f, 3.0f, 4.0f};
-        auto                                   serialized = zdetail::serialize_pmt(gr::pmt::Value(gr::Tensor<float>(gr::data_from, vec)), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+        auto                                   serialized = zdetail::serialize_pmt(gr::pmt::Value(gr::Tensor<float>(gr::data_from, vec)), gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1);
         std::vector<std::vector<std::uint8_t>> messages(n_messages, serialized);
         auto                                   sender = spawn_push_sender(TestEndpoint::bound_by(pull), std::move(messages));
 
@@ -1441,7 +1441,7 @@ const suite ZmqBlocksTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto&      sink     = fg.emplaceBlock<PmtSink>(make_props({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1))}}));
         expect(fg.connect<"out", "in">(pull, sink).has_value());
@@ -1571,7 +1571,7 @@ const suite ZmqBlocksTests = [] {
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"key", gr::pmt::Value(key)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto&             sink     = fg.emplaceBlock<PmtSink>(make_props({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1))}}));
         expect(fg.connect<"out", "in">(sub, sink).has_value());
@@ -1770,7 +1770,7 @@ const suite ZmqBlocksTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(100)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto&      sink     = fg.emplaceBlock<PmtSink>(make_props({{"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1))}}));
         expect(fg.connect<"out", "in">(source, sink).has_value());
@@ -1824,7 +1824,7 @@ const suite ZmqBlocksTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto  receiver = spawn_pull_receiver(TestEndpoint::bound_by(push), fixtures.size());
 
@@ -1867,27 +1867,27 @@ const suite ZmqBlocksTests = [] {
 
     "PMT wire format defaults to GR4 YAML v1"_test = [] {
         PmtBlock block;
-        expect(block.settings.pmt_wire_format == gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
-        expect(eq(gr::meta::enumName(gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1).value(), std::string_view{"GR4_YAML_V1"}));
-        expect(eq(gr::meta::enumName(gr::blocks::zeromq::PmtWireFormat::GR3).value(), std::string_view{"GR3"}));
+        expect(block.settings.pmt_wire_format == gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1);
+        expect(eq(gr::meta::enumName(gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1).value(), std::string_view{"gr4_yaml_v1"}));
+        expect(eq(gr::meta::enumName(gr::blocks::zeromq::PmtWireFormat::gr3).value(), std::string_view{"gr3"}));
 
         const auto fixtures = make_pmt_fixtures();
         for (std::size_t index = 0; index < fixtures.size(); ++index) {
             const auto& value         = fixtures[index];
-            const auto  yaml_v1_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
-            const auto  decoded       = zdetail::deserialize_pmt(yaml_v1_bytes.data(), yaml_v1_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+            const auto  yaml_v1_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1);
+            const auto  decoded       = zdetail::deserialize_pmt(yaml_v1_bytes.data(), yaml_v1_bytes.size(), gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1);
             expect(decoded.value_type() == value.value_type()) << "fixture " << index;
             expect(decoded.container_type() == value.container_type()) << "fixture " << index;
             if (index < 15UZ) {
                 expect(decoded == value) << "scalar fixture " << index;
             } else if (value.container_type() != gr::pmt::Value::ContainerType::Map) {
-                expect(zdetail::serialize_pmt(decoded, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1) == yaml_v1_bytes) << "container fixture " << index;
+                expect(zdetail::serialize_pmt(decoded, gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1) == yaml_v1_bytes) << "container fixture " << index;
             }
         }
 
         const auto& value     = fixtures.front();
-        const auto  gr3_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::GR3);
-        expect(zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR3) == value);
+        const auto  gr3_bytes = zdetail::serialize_pmt(value, gr::blocks::zeromq::PmtWireFormat::gr3);
+        expect(zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::gr3) == value);
 
         const auto                               gr4_header = zdetail::serialize_tag_header(0, {{0, gr::pmt::Value("key"), value, gr::pmt::Value("src")}});
         std::uint64_t                            offset     = 0;
@@ -1903,7 +1903,7 @@ const suite ZmqBlocksTests = [] {
         bool truncated_threw = false;
         try {
             const std::vector<std::uint8_t> truncated{0, 0, 0, 4, 'x'};
-            std::ignore = zdetail::deserialize_pmt(truncated.data(), truncated.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+            std::ignore = zdetail::deserialize_pmt(truncated.data(), truncated.size(), gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1);
         } catch (const std::runtime_error& error) {
             truncated_threw = std::string_view(error.what()).find("truncated") != std::string_view::npos;
         }
@@ -1911,7 +1911,7 @@ const suite ZmqBlocksTests = [] {
 
         bool wrong_format_threw = false;
         try {
-            std::ignore = zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1);
+            std::ignore = zdetail::deserialize_pmt(gr3_bytes.data(), gr3_bytes.size(), gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1);
         } catch (const std::runtime_error& error) {
             wrong_format_threw = !std::string_view(error.what()).empty();
         }
@@ -2096,7 +2096,7 @@ const suite ZmqBlocksTests = [] {
         const auto                  bytes = legacy_pair_chain(legacy_pmt::kMaxNestingDepth + 1UZ);
         zmq::message_t              msg(bytes.data(), bytes.size());
         zdetail::ZmqReceiveCounters counters;
-        const auto                  decoded = zdetail::decode_frame<gr::pmt::Value>(msg, false, gr::blocks::zeromq::PmtWireFormat::GR3, counters);
+        const auto                  decoded = zdetail::decode_frame<gr::pmt::Value>(msg, false, gr::blocks::zeromq::PmtWireFormat::gr3, counters);
         expect(!decoded.has_value());
         expect(eq(counters.snapshot().refused_messages, std::uint64_t{1}));
         expect(eq(counters.snapshot().messages, std::uint64_t{1}));
@@ -2108,7 +2108,7 @@ const suite ZmqBlocksTests = [] {
         const auto selected = zdetail::select_pending_tags(pending, 1);
         bool       threw    = false;
         try {
-            std::ignore = zdetail::serialize_tag_header(0, selected, gr::blocks::zeromq::PmtWireFormat::GR3);
+            std::ignore = zdetail::serialize_tag_header(0, selected, gr::blocks::zeromq::PmtWireFormat::gr3);
         } catch (...) {
             threw = true;
         }
@@ -2273,7 +2273,7 @@ const suite ZmqBlocksTests = [] {
         const auto replies = client.get();
         expect(eq(replies.size(), static_cast<std::size_t>(1)));
         if (replies.size() == 1) {
-            expect(replies[0] == zdetail::serialize_pmt(gr::pmt::Value{}, gr::blocks::zeromq::PmtWireFormat::GR4_YAML_V1));
+            expect(replies[0] == zdetail::serialize_pmt(gr::pmt::Value{}, gr::blocks::zeromq::PmtWireFormat::gr4_yaml_v1));
         }
     };
 
@@ -2317,7 +2317,7 @@ const suite ZmqBlocksTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(100)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
 
         expect(fg.connect<"out", "in">(source, rep).has_value());
@@ -2351,7 +2351,7 @@ const suite ZmqBlocksTests = [] {
             {"endpoint", gr::pmt::Value(endpoint)},
             {"timeout", gr::pmt::Value(100)},
             {"bind", gr::pmt::Value(true)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto& sink   = fg.emplaceBlock<RecordingPmtSink>(make_props({
             {"n_samples_max", gr::pmt::Value(fixtures.size())},
@@ -2388,7 +2388,7 @@ const suite ZmqBlocksTests = [] {
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"key", gr::pmt::Value(key)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto                 receiver = spawn_sub_receiver(TestEndpoint::bound_by(pub), key);
 
@@ -2420,7 +2420,7 @@ const suite ZmqBlocksTests = [] {
             {"timeout", gr::pmt::Value(25)},
             {"bind", gr::pmt::Value(true)},
             {"key", gr::pmt::Value(key)},
-            {"pmt_wire_format", gr::pmt::Value("GR3")},
+            {"pmt_wire_format", gr::pmt::Value("gr3")},
         }));
         auto& sink = fg.emplaceBlock<PmtSink>(make_props({
             {"n_samples_max", gr::pmt::Value(static_cast<gr::Size_t>(1))},

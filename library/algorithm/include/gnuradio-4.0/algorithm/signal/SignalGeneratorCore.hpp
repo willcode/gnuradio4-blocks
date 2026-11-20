@@ -14,7 +14,7 @@
 
 namespace gr::signal {
 
-enum class SignalType : int { Const, Sin, Cos, Square, Saw, Triangle, FastSin, FastCos, UniformNoise, TriangularNoise, GaussianNoise };
+enum class SignalType : int { constant, sin, cos, square, saw, triangle, fast_sin, fast_cos, uniform_noise, triangular_noise, gaussian_noise };
 
 namespace detail {
 
@@ -31,11 +31,11 @@ struct compute_float {
 template<typename T>
 using compute_float_t = typename compute_float<T>::type;
 
-constexpr bool isToneType(SignalType t) noexcept { return static_cast<int>(t) <= static_cast<int>(SignalType::FastCos); }
+constexpr bool isToneType(SignalType t) noexcept { return static_cast<int>(t) <= static_cast<int>(SignalType::fast_cos); }
 
 constexpr ToneType toToneType(SignalType t) noexcept { return static_cast<ToneType>(static_cast<int>(t)); }
 
-constexpr NoiseType toNoiseType(SignalType t) noexcept { return static_cast<NoiseType>(static_cast<int>(t) - static_cast<int>(SignalType::UniformNoise)); }
+constexpr NoiseType toNoiseType(SignalType t) noexcept { return static_cast<NoiseType>(static_cast<int>(t) - static_cast<int>(SignalType::uniform_noise)); }
 
 template<std::integral T, std::floating_point F>
 constexpr T clampToInt(F value) noexcept {
@@ -63,7 +63,7 @@ template<typename T>
 struct SignalGeneratorCore {
     using F = detail::compute_float_t<T>;
 
-    SignalType        _type = SignalType::Sin;
+    SignalType        _type = SignalType::sin;
     ToneGenerator<F>  _tone;
     NoiseGenerator<F> _noise;
     std::uint64_t     _seed = 0;

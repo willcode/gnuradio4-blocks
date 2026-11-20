@@ -258,14 +258,14 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
                     // tolerances: amplitude within 5%, phase within 0.1 rad (~6 deg), frequency within 5%
                     expect(approx(ampMean, ampRatio, T(0.05))) << std::format("amplitude deviation: {} vs. expected {}", ampMean, ampRatio);
-                    if (phaseUnit == PhaseUnit::Degrees) {
+                    if (phaseUnit == PhaseUnit::degrees) {
                         const T expectedDeg = phaseShift * T(180) / std::numbers::pi_v<T>;
                         expect(approx(phaseMean, expectedDeg, T(3.0))) << std::format("phase deviation: {}° vs. expected {}°", phaseMean, expectedDeg);
                     } else {
                         expect(approx(phaseMean, phaseShift, T(0.1))) << std::format("phase deviation: {} rad vs. expected {} rad", phaseMean, phaseShift);
                     }
                     expect(approx(freqMean, static_cast<T>(freq), T(0.05) * static_cast<T>(freq))) << std::format("frequency deviation: {} vs. expected {}", freqMean, freq);
-                } | std::vector{PhaseUnit::Radians, PhaseUnit::Degrees};
+                } | std::vector{PhaseUnit::radians, PhaseUnit::degrees};
             } |
             std::vector<TestCase>{
                 {100e3f, 1e6f}, // 100 kHz carrier at 1 MHz sample rate (10x oversampling)
@@ -394,7 +394,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
 
         auto [refSignal, respSignal] = generateIQTestSignals<float>(freq, fs, 0.8f, 0.3f, 0.f, 0.01f, numSamples);
 
-        for (auto method : {DerivativeMethod::SymmetricDifference, DerivativeMethod::SavitzkyGolay5, DerivativeMethod::SavitzkyGolay7}) {
+        for (auto method : {DerivativeMethod::symmetric_difference, DerivativeMethod::savitzky_golay5, DerivativeMethod::savitzky_golay7}) {
             IQDemodulator<float, Resampling<512U, 1U, false>> demod;
             expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 50.f}, {"f_low_pass", 20000.f}, {"derivative_method", std::string(gr::meta::enumName(method).value_or(""))}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
             demod.start();
@@ -654,7 +654,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         const float f_center = (f_start + f_end) / 2.f;
         expect(freqErrMean < 0.02f * f_center) << "sweep freq mean error:" << freqErrMean;
         expect(freqErrMax < 0.05f * f_center) << "sweep freq max error:" << freqErrMax;
-    } | std::vector<DerivativeMethod>{DerivativeMethod::SymmetricDifference, DerivativeMethod::SavitzkyGolay5, DerivativeMethod::SavitzkyGolay7};
+    } | std::vector<DerivativeMethod>{DerivativeMethod::symmetric_difference, DerivativeMethod::savitzky_golay5, DerivativeMethod::savitzky_golay7};
 
     "IQDemodulator static decimation"_test = [] {
         constexpr float       fs         = 1e6f;
@@ -696,12 +696,12 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         auto [refSignal, respSignal] = generateIQTestSignals<float>(freq, fs, 0.8f, 0.3f, 0.f, 0.01f, numSamples);
 
         // use IQDemodulatorFixed alias with compile-time fixed SavitzkyGolay5
-        IQDemodulatorFixed<float, DerivativeMethod::SavitzkyGolay5> demod;
+        IQDemodulatorFixed<float, DerivativeMethod::savitzky_golay5> demod;
         expect(demod.set({{"sample_rate", fs}, {"f_high_pass", 100.f}, {"f_low_pass", 10000.f}, {"input_chunk_size", static_cast<gr::Size_t>(chunkSize)}}).has_value());
         demod.start();
 
         // verify derivative_method is set correctly from NTTP
-        expect(demod.settings.derivative_method == DerivativeMethod::SavitzkyGolay5) << "derivative method should be SG5 from NTTP";
+        expect(demod.settings.derivative_method == DerivativeMethod::savitzky_golay5) << "derivative method should be SG5 from NTTP";
 
         std::vector<float> ampOut(numChunks), phaseOut(numChunks), freqOut(numChunks);
         auto               status = demod.processBulk(refSignal, respSignal, ampOut, phaseOut, freqOut);
@@ -711,7 +711,7 @@ const boost::ut::suite<"IQDemodulator"> iqDemodulatorTests = [] {
         expect(approx(ampMean, 0.8f, 0.05f)) << "fixed derivative amplitude:" << ampMean;
 
         // verify that changing derivative_method at runtime is refused
-        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(demod), {{"derivative_method", std::string("SymmetricDifference")}}).empty()) << "changing fixed derivative_method is refused";
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(demod), {{"derivative_method", std::string("symmetric_difference")}}).empty()) << "changing fixed derivative_method is refused";
     };
 };
 

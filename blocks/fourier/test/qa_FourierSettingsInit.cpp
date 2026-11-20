@@ -21,7 +21,7 @@ const boost::ut::suite<"fourier blocks initialize at each setting"> settingsInit
     "FFT"_test = [&] {
         const auto failures = initFailures<FFT<float>>({
             {"fftSize", Size_t{512U}},
-            {"window", std::string("Hamming")},
+            {"window", std::string("hamming")},
             {"outputInDb", true},
             {"outputInDeg", true},
             {"unwrapPhase", true},

@@ -51,10 +51,10 @@ public:
         }
         using gr::algorithm::window::Type;
         const double width = transitionHz / sampleRate;
-        if (!(fir::design::windowFigures(Type::Hamming).transitionConstant / width < static_cast<double>(kMaxTaps))) { // checked in double, ahead of any conversion to an integer
+        if (!(fir::design::windowFigures(Type::hamming).transitionConstant / width < static_cast<double>(kMaxTaps))) { // checked in double, ahead of any conversion to an integer
             return kMaxTaps;
         }
-        return fir::design::oddLength(fir::design::windowLength(Type::Hamming, width));
+        return fir::design::oddLength(fir::design::windowLength(Type::hamming, width));
     }
 
     /// @brief The Hamming-windowed low-pass at a quarter of the rate, with unit gain at zero frequency, of `tapCount` taps.
@@ -63,7 +63,7 @@ public:
         if (!n) {
             return std::unexpected(n.error());
         }
-        return fir::design::lowpass(*n, 0.25, fir::design::WindowSpec{gr::algorithm::window::Type::Hamming}, 1.0);
+        return fir::design::lowpass(*n, 0.25, fir::design::WindowSpec{gr::algorithm::window::Type::hamming}, 1.0);
     }
 
     /// @brief A conversion for the rate @p sampleRate and a transition @p transitionHz wide, at its start-of-stream state.

@@ -53,7 +53,7 @@ The block is one symbol in, one symbol out, so every input tag key passes throug
         Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                 phase_offset  = F{0};
         Annotated<gr::Size_t, Doc<"psk label offset">>                                 label_xor     = 0U;
         Annotated<std::vector<F>, Doc<"custom points">>                                points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization = gr::digital::Normalization::power;
 
         GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization);
     } settings;
@@ -111,9 +111,9 @@ precondition. `max_log` is the default and needs no transcendental; it is exact 
         Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                 phase_offset  = F{0};
         Annotated<gr::Size_t, Doc<"psk label offset">>                                 label_xor     = 0U;
         Annotated<std::vector<F>, Doc<"custom points">>                                points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization  = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization  = gr::digital::Normalization::power;
         Annotated<F, Doc<"noise power">, Limits<Over<F{0}>>>                           noise_power    = F{1};
-        Annotated<gr::digital::SoftAlgorithm, Doc<"LLR algorithm">>                    soft_algorithm = gr::digital::SoftAlgorithm::MaxLog;
+        Annotated<gr::digital::SoftAlgorithm, Doc<"LLR algorithm">>                    soft_algorithm = gr::digital::SoftAlgorithm::max_log;
 
         GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization, noise_power, soft_algorithm);
     } settings;
@@ -211,7 +211,7 @@ The block is one symbol in, one symbol out, so every input tag key passes throug
         Annotated<F, Unit<"rad">, Doc<"psk rotation">>                                 phase_offset  = F{0};
         Annotated<gr::Size_t, Doc<"psk label offset">>                                 label_xor     = 0U;
         Annotated<std::vector<F>, Doc<"custom points">>                                points{};
-        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization = gr::digital::Normalization::Power;
+        Annotated<gr::digital::Normalization, Doc<"point normalization">>              normalization = gr::digital::Normalization::power;
 
         GR_MAKE_REFLECTABLE(Settings, constellation, arity, phase_offset, label_xor, points, normalization);
     } settings;

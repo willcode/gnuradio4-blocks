@@ -73,14 +73,14 @@ metric.
     // the AC coupling; the design throws for a corner the sample rate cannot hold
     [[nodiscard]] static std::vector<gr::filter::FilterCoefficients<ValueType>> designHighPass(float sampleRate, float highPass) {
         using namespace gr::filter;
-        return iir::designFilter<ValueType>(Type::HIGHPASS, FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(highPass), .fs = static_cast<double>(sampleRate)}, iir::Design::BUTTERWORTH);
+        return iir::designFilter<ValueType>(Type::highpass, FilterParameters{.order = 2UZ, .fHigh = static_cast<double>(highPass), .fs = static_cast<double>(sampleRate)}, iir::Design::butterworth);
     }
 
     // the averaging low pass, at most half the output rate; the design throws for a corner the sample rate cannot hold
     [[nodiscard]] static std::vector<gr::filter::FilterCoefficients<ValueType>> designLowPass(float sampleRate, float lowPass, gr::Size_t decimation) {
         using namespace gr::filter;
         const double cutoff = std::min(0.5 * (static_cast<double>(sampleRate) / static_cast<double>(decimation)), static_cast<double>(lowPass));
-        return iir::designFilter<ValueType>(Type::LOWPASS, FilterParameters{.order = 2UZ, .fLow = cutoff, .fs = static_cast<double>(sampleRate)}, iir::Design::BUTTERWORTH);
+        return iir::designFilter<ValueType>(Type::lowpass, FilterParameters{.order = 2UZ, .fLow = cutoff, .fs = static_cast<double>(sampleRate)}, iir::Design::butterworth);
     }
 
     void initFilters() {

@@ -44,7 +44,7 @@ const boost::ut::suite<"SvdDenoiser Block"> svdDenoiserBlockTests = [] {
         SvdDenoiser<float> denoiser;
         denoiser.start();
 
-        // With BoundaryPolicy::Default, history is pre-filled with zeros
+        // With BoundaryPolicy::default_value, history is pre-filled with zeros
         // Process a few samples and verify we get finite output
         std::vector<float> outputs;
         for (int i = 0; i < 100; ++i) {

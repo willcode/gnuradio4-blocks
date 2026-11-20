@@ -63,7 +63,7 @@ enum class Frequency {
     Normalised    /// frequency as a fraction of the sampling rate, typically in the range [0, 0.5].
 };
 
-enum class Type { LOWPASS, HIGHPASS, BANDPASS, BANDSTOP };
+enum class Type { lowpass, highpass, bandpass, bandstop };
 
 struct FilterParameters {
     std::size_t order{4UZ};                                      /// default filter order
@@ -484,10 +484,10 @@ template<std::floating_point T>
 namespace iir {
 
 enum class Design {
-    BUTTERWORTH = 0, /// Maximally flat pass-band magnitude response without ripples, commonly used for its smooth response.
-    BESSEL      = 1, /// Linear phase response with a gentle roll-off, ideal for preserving time-domain wave shapes.
-    CHEBYSHEV1  = 2, /// Equi-ripple pass-band with a steeper roll-off than Butterworth, at the expense of pass-band ripple.
-    CHEBYSHEV2  = 3  /// Equi-ripple stop-band with a steeper roll-off, but with ripple only in the stop-band.
+    butterworth = 0, /// Maximally flat pass-band magnitude response without ripples, commonly used for its smooth response.
+    bessel      = 1, /// Linear phase response with a gentle roll-off, ideal for preserving time-domain wave shapes.
+    chebyshev1  = 2, /// Equi-ripple pass-band with a steeper roll-off than Butterworth, at the expense of pass-band ripple.
+    chebyshev2  = 3  /// Equi-ripple stop-band with a steeper roll-off, but with ripple only in the stop-band.
 };
 
 /**
@@ -962,44 +962,44 @@ template<typename T>
     return bandStop;
 }
 
-[[nodiscard]] inline constexpr PoleZeroLocations designAnalogFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
+[[nodiscard]] inline constexpr PoleZeroLocations designAnalogFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::butterworth) {
     // step 1: continuous-time analog prototype
     PoleZeroLocations analogPoleZeros;
     switch (filterDesign) { // only the Elliptic and inverse Chebyshev (Type II) filters have zeros.
-    case Design::BUTTERWORTH: analogPoleZeros = calculateFilterButterworth(params.order); break;
-    case Design::CHEBYSHEV1: analogPoleZeros = calculateFilterChebyshevType1(params.order, params.rippleDb); break;
-    case Design::CHEBYSHEV2: analogPoleZeros = calculateFilterChebyshevType2(params.order, params.attenuationDb); break;
-    case Design::BESSEL: analogPoleZeros = calculateFilterBessel(params.order); break;
+    case Design::butterworth: analogPoleZeros = calculateFilterButterworth(params.order); break;
+    case Design::chebyshev1: analogPoleZeros = calculateFilterChebyshevType1(params.order, params.rippleDb); break;
+    case Design::chebyshev2: analogPoleZeros = calculateFilterChebyshevType2(params.order, params.attenuationDb); break;
+    case Design::bessel: analogPoleZeros = calculateFilterBessel(params.order); break;
     }
 
     // step 2: frequency transformation (s to analog filter with desired cutoff frequencies)
-    if (filterType != Type::HIGHPASS && !std::isfinite(params.fLow)) {
+    if (filterType != Type::highpass && !std::isfinite(params.fLow)) {
         throw std::invalid_argument("FilterParameters::fLow is NaN -> please set");
     }
-    if (filterType != Type::LOWPASS && !std::isfinite(params.fHigh)) {
+    if (filterType != Type::lowpass && !std::isfinite(params.fHigh)) {
         throw std::invalid_argument("FilterParameters::fHigh is NaN -> please set");
     }
 
     switch (filterType) {
-    case Type::BANDPASS: analogPoleZeros = lowPassProtoToBandPass(analogPoleZeros, params); break;
-    case Type::BANDSTOP: analogPoleZeros = lowPassProtoToBandStop(analogPoleZeros, params); break;
-    case Type::HIGHPASS: analogPoleZeros = lowPassProtoToHighPass(analogPoleZeros, params); break;
-    case Type::LOWPASS: analogPoleZeros = lowPassProtoToLowPass(analogPoleZeros, params); break;
+    case Type::bandpass: analogPoleZeros = lowPassProtoToBandPass(analogPoleZeros, params); break;
+    case Type::bandstop: analogPoleZeros = lowPassProtoToBandStop(analogPoleZeros, params); break;
+    case Type::highpass: analogPoleZeros = lowPassProtoToHighPass(analogPoleZeros, params); break;
+    case Type::lowpass: analogPoleZeros = lowPassProtoToLowPass(analogPoleZeros, params); break;
     }
     return analogPoleZeros;
 }
 
 template<std::floating_point T, std::size_t maxSectionSize = std::is_same_v<std::remove_cvref_t<T>, double> ? 4UZ : 2UZ /* == 2 -> aka. 'biquads' */>
 requires((maxSectionSize & 1) == 0) // to handle complex conjugate pole-zero pairs
-[[nodiscard]] inline constexpr auto designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::BUTTERWORTH) {
+[[nodiscard]] inline constexpr auto designFilter(const Type filterType, FilterParameters params, const Design filterDesign = Design::butterworth) {
     PoleZeroLocations analogPoleZeros = designAnalogFilter(filterType, params, filterDesign);
 
     T referenceFrequency;
     switch (filterType) {
-    case Type::BANDPASS: referenceFrequency = std::sqrt(static_cast<T>(params.fLow * params.fHigh)); break;
-    case Type::BANDSTOP: referenceFrequency = static_cast<T>(0); break;
-    case Type::HIGHPASS: referenceFrequency = static_cast<T>(0.49 * params.fs); break;
-    case Type::LOWPASS: referenceFrequency = static_cast<T>(0); break;
+    case Type::bandpass: referenceFrequency = std::sqrt(static_cast<T>(params.fLow * params.fHigh)); break;
+    case Type::bandstop: referenceFrequency = static_cast<T>(0); break;
+    case Type::highpass: referenceFrequency = static_cast<T>(0.49 * params.fs); break;
+    case Type::lowpass: referenceFrequency = static_cast<T>(0); break;
     }
 
     if (!std::isfinite(params.fs)) {
@@ -1186,21 +1186,21 @@ template<std::floating_point T>
     const double minWidthFromOrder  = 0.1 / static_cast<double>(params.order); // N.B. Butterworth approximation: 20 dB attenuation per decade and order
     double       minTransitionWidth = minWidthFromOrder;
     switch (filterType) {
-    case Type::LOWPASS: return std::min(minTransitionWidth, std::min(std::abs(params.fLow / params.fs), std::abs(0.5 - params.fLow / params.fs))); // attenuation at Nyquist and corner frequencies
-    case Type::HIGHPASS: return std::min(minTransitionWidth, std::abs(params.fHigh / params.fs));                                                  // attenuation at DC
-    case Type::BANDPASS: return std::min(minTransitionWidth, std::min(std::abs(params.fLow / params.fs), std::abs(0.5 - params.fHigh / params.fs)));
-    case Type::BANDSTOP: return std::min(minTransitionWidth, std::min(std::abs(0.5 - params.fHigh / params.fs), std::min(params.fLow, 0.5 * std::abs(params.fHigh - params.fLow)) / params.fs));
+    case Type::lowpass: return std::min(minTransitionWidth, std::min(std::abs(params.fLow / params.fs), std::abs(0.5 - params.fLow / params.fs))); // attenuation at Nyquist and corner frequencies
+    case Type::highpass: return std::min(minTransitionWidth, std::abs(params.fHigh / params.fs));                                                  // attenuation at DC
+    case Type::bandpass: return std::min(minTransitionWidth, std::min(std::abs(params.fLow / params.fs), std::abs(0.5 - params.fHigh / params.fs)));
+    case Type::bandstop: return std::min(minTransitionWidth, std::min(std::abs(0.5 - params.fHigh / params.fs), std::min(params.fLow, 0.5 * std::abs(params.fHigh - params.fLow)) / params.fs));
     }
     return 0.;
 }
 
 template<std::floating_point T>
-[[nodiscard]] inline constexpr FilterCoefficients<T> designFilter(const Type filterType, FilterParameters params, gr::algorithm::window::Type window = algorithm::window::Type::Kaiser) {
+[[nodiscard]] inline constexpr FilterCoefficients<T> designFilter(const Type filterType, FilterParameters params, gr::algorithm::window::Type window = algorithm::window::Type::kaiser) {
     const std::size_t N = estimateNumberOfTapsKaiser(params.attenuationDb, 2. * std::numbers::pi * estimateRequiredTransitionWidth(filterType, params));
 
     // design high-pass FIR filter using the window method
     switch (filterType) {
-    case Type::LOWPASS: {
+    case Type::lowpass: {
         auto lowPassCoefficients    = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
         const auto [ok, actualGain] = normaliseFilterCoefficients(lowPassCoefficients, static_cast<T>(0), static_cast<T>(params.gain));
         if (ok) {
@@ -1209,7 +1209,7 @@ template<std::floating_point T>
         throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
-    case Type::HIGHPASS: {
+    case Type::highpass: {
         // generate low-pass filter coefficients with "mirror" frequency (f_s/2 - f_c)
         auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>((0.5 - params.fHigh / params.fs)), static_cast<T>(params.param));
 
@@ -1225,7 +1225,7 @@ template<std::floating_point T>
         throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
-    case Type::BANDPASS: {
+    case Type::bandpass: {
         auto bandPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
         auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.param));
 
@@ -1238,7 +1238,7 @@ template<std::floating_point T>
         throw std::invalid_argument(std::format("({}, {}, {}) gain correction {} for target gain {} too small for fs = {} f = [{},{}]", //
             magic_enum::enum_name(filterType), params.order, magic_enum::enum_name(window), actualGain, params.gain, params.fs, params.fLow, params.fHigh));
     }
-    case Type::BANDSTOP: {
+    case Type::bandstop: {
         auto       bandStopCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fLow / params.fs), static_cast<T>(params.param));
         const auto highPassCoefficients = generateCoefficients<T>(N, window, static_cast<T>(params.fHigh / params.fs), static_cast<T>(params.param));
 

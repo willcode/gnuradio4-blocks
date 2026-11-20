@@ -340,7 +340,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         constexpr std::size_t kConverged   = 1200UZ;
 
         const Scene scene = frameScene(kFrames, kFrameLength, kTraining, 1234ULL);
-        const Run   run   = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"training_sequence", scene.training}}, std::span<const CF>(scene.received), std::span<const gr::Tag>(scene.triggers));
+        const Run   run   = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"training_sequence", scene.training}}, std::span<const CF>(scene.received), std::span<const gr::Tag>(scene.triggers));
 
         expect(eq(run.samples.size(), scene.symbols.size())) << "one output symbol per input at one sample per symbol";
         expect(eq(run.bursts, 2ULL)) << "one training run per frame";
@@ -357,7 +357,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
 
     "with no trigger the block adapts on decisions and stays finite"_test = [] {
         const Scene scene = frameScene(2UZ, 1000UZ, 64UZ, 1234ULL);
-        const Run   run   = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"training_sequence", scene.training}}, std::span<const CF>(scene.received));
+        const Run   run   = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"training_sequence", scene.training}}, std::span<const CF>(scene.received));
 
         expect(eq(run.samples.size(), scene.symbols.size()));
         expect(eq(run.bursts, 0ULL)) << "no trigger ever arrived, so no training run ever started";
@@ -395,7 +395,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
             const auto wanted = placement.size();
 
             for (const gr::Size_t sps : {1U, 2U}) {
-                const gr::property_map settings{{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"samples_per_symbol", sps}, {"training_sequence", training}};
+                const gr::property_map settings{{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"samples_per_symbol", sps}, {"training_sequence", training}};
 
                 for (const std::size_t call : kCalls) {
                     const std::size_t      partition[]{call};
@@ -427,7 +427,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         const std::vector<CF> symbols  = qpsk(kSymbols, 777ULL);
         const std::vector<CF> received = throughFilter(std::span<const CF>(symbols), std::span<const CF>(kChannel));
 
-        LinearEqualizer<float> equalizer({{"num_taps", kNumTaps}, {"algorithm", std::string("Cma")}, {"step_size", 0.003}});
+        LinearEqualizer<float> equalizer({{"num_taps", kNumTaps}, {"algorithm", std::string("cma")}, {"step_size", 0.003}});
         init(equalizer);
         std::vector<std::vector<float>> trace;
         const std::vector<CF>           output = drive(equalizer, std::span<const CF>(received), 1UZ, {}, std::span<const std::size_t>(kOneAtATime), &trace);
@@ -459,7 +459,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         expect(lt(acquired, 2000UZ)) << std::format("{} symbols to first cross {:.0f} dB", acquired, kCrossing);
         expect(eq(equalizer.nTrainingBursts(), 0ULL)) << "the modulus rule reads no reference at all";
 
-        LinearEqualizer<float> cold({{"num_taps", kNumTaps}, {"algorithm", std::string("Cma")}, {"step_size", 0.003}});
+        LinearEqualizer<float> cold({{"num_taps", kNumTaps}, {"algorithm", std::string("cma")}, {"step_size", 0.003}});
         init(cold);
         equalizer.start();
         expect(that % (equalizer.taps() == cold.taps())) << "a restart adapts again from the spike, not from the last run's taps";
@@ -485,7 +485,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
             if (which == 1UZ) {
                 tags.emplace_back(kFreezeAt, gr::property_map{{"freeze", true}});
             }
-            const Run run = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"training_sequence", scene.training}}, std::span<const CF>(rotated), std::span<const gr::Tag>(tags));
+            const Run run = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"training_sequence", scene.training}}, std::span<const CF>(rotated), std::span<const gr::Tag>(tags));
             expect(eq(run.bursts, 1ULL));
             expect(allFinite(run.samples));
             mse[which] = meanSquaredError(run.samples, scene.symbols, kGroupDelay, kTail);
@@ -523,7 +523,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         std::vector<double> mse(2UZ);
         for (const gr::Size_t sps : {1U, 2U}) {
             const std::span<const CF> input = sps == 1U ? std::span<const CF>(offsetPhase) : std::span<const CF>(received);
-            const Run                 run   = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"samples_per_symbol", sps}, {"training_sequence", training}}, input, std::span<const gr::Tag>(triggers));
+            const Run                 run   = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"reference", std::string("training")}, {"step_size", 0.01}, {"samples_per_symbol", sps}, {"training_sequence", training}}, input, std::span<const gr::Tag>(triggers));
 
             expect(eq(run.samples.size(), kSymbols));
             expect(eq(run.bursts, 1ULL));
@@ -539,7 +539,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         const std::vector<CF> symbols   = qpsk(4000UZ, 5150ULL);
         const std::vector<CF> received  = throughFilter(std::span<const CF>(symbols), std::span<const CF>(kChannel));
 
-        const Run run = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"step_size", kStepSize}}, std::span<const CF>(received));
+        const Run run = throughGraph({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"step_size", kStepSize}}, std::span<const CF>(received));
 
         std::println("step size {}: {} resets over {} symbols", kStepSize, run.resets, run.samples.size());
         expect(gt(run.resets, gr::Size_t{0})) << std::format("a step size of {} walks the taps past the divergence bound", kStepSize);
@@ -562,7 +562,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
             return differ;
         };
 
-        LinearEqualizer<float> held({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"step_size", 0.01}, {"freeze", true}});
+        LinearEqualizer<float> held({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"step_size", 0.01}, {"freeze", true}});
         init(held);
         const std::vector<float>        start = held.taps();
         std::vector<std::vector<float>> trace;
@@ -573,7 +573,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         expect(eq(matchesStaticFir(output, start, 0UZ), 0UZ)) << "and the output is that filter run over the input, bit for bit";
 
         // the same claim about a set of taps that is not the initial spike: adapt for a while, then hold
-        LinearEqualizer<float> converged({{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"step_size", 0.01}});
+        LinearEqualizer<float> converged({{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"step_size", 0.01}});
         init(converged);
         std::ignore = drive(converged, std::span<const CF>(received).first(kAdapted), 1UZ, {}, std::span<const std::size_t>(kInCalls));
 
@@ -621,7 +621,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         const std::vector<CF> received = throughFilter(std::span<const CF>(symbols), std::span<const CF>(kChannel));
 
         for (const gr::Size_t sps : {1U, 2U}) {
-            const gr::property_map settings{{"num_taps", kNumTaps}, {"algorithm", std::string("Lms")}, {"step_size", 0.01}, {"samples_per_symbol", sps}};
+            const gr::property_map settings{{"num_taps", kNumTaps}, {"algorithm", std::string("lms")}, {"step_size", 0.01}, {"samples_per_symbol", sps}};
 
             auto run = [&](std::span<const std::size_t> partition) {
                 LinearEqualizer<float> equalizer(settings);
@@ -656,7 +656,7 @@ const boost::ut::suite<"linear equalizer"> linearEqualizerTests = [] {
         expect(throws([] { construct<LinearEqualizer<float>>({{"reference", std::string("training")}, {"training_sequence", std::vector<float>{1.0f, 0.0f, 1.0f}}}); })) << "the sequence is interleaved re,im and needs an even count";
 
         expect(nothrow([] { construct<LinearEqualizer<float>>(); }));
-        expect(nothrow([] { construct<LinearEqualizer<float>>({{"algorithm", std::string("Nlms")}}); }));
+        expect(nothrow([] { construct<LinearEqualizer<float>>({{"algorithm", std::string("nlms")}}); }));
         expect(nothrow([] { construct<LinearEqualizer<float>>({{"num_taps", 127U}, {"samples_per_symbol", 2U}}); }));
     };
 };

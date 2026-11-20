@@ -70,7 +70,7 @@ struct Rng {
 
 [[nodiscard]] std::vector<CD> modulate(std::span<const float> symbols) {
     gr::digital::CpmPulse<float> pulse;
-    pulse.configure(gr::digital::CpmPulseShape::Gaussian, kSpan, kSps, kModIndex, kBt);
+    pulse.configure(gr::digital::CpmPulseShape::gaussian, kSpan, kSps, kModIndex, kBt);
 
     std::vector<double> increments(symbols.size() * kSps);
     std::ignore = pulse.incrementsFor(symbols, std::span<double>(increments));

@@ -33,7 +33,7 @@ inline std::string format_variant(const auto& value) noexcept {
 
 GR_REGISTER_BLOCK(gr::blocks::testing::SettingsChangeRecorder, [T], [ int32_t, float ])
 
-enum class TestEnum { TEST_STATE1, TEST_STATE2, TEST_STATE3 };
+enum class TestEnum { test_state1, test_state2, test_state3 };
 
 template<typename T>
 struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
@@ -50,8 +50,8 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
         Annotated<std::vector<std::string>, Doc<"string vector">>   string_vector_setting{};
         std::array<T, 3UZ>                                          array_setting{T(3), T(2), T(1)};
         std::array<std::string, 3UZ>                                string_array_setting{"", "", ""};
-        TestEnum                                                    test_enum_setting           = TestEnum::TEST_STATE1;
-        Annotated<TestEnum, Doc<"annotated enum">>                  annotated_test_enum_setting = TestEnum::TEST_STATE1;
+        TestEnum                                                    test_enum_setting           = TestEnum::test_state1;
+        Annotated<TestEnum, Doc<"annotated enum">>                  annotated_test_enum_setting = TestEnum::test_state1;
 
         GR_MAKE_REFLECTABLE(Settings, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting, array_setting, string_array_setting, test_enum_setting, annotated_test_enum_setting);
     } settings;

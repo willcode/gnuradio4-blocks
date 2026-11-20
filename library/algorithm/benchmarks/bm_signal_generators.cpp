@@ -97,15 +97,15 @@ template<std::integral T, std::size_t NRep = 500UZ>
 void benchIntegerOutput(std::string_view typeName) {
     using namespace benchmark;
     for (const auto& [type, name] : std::vector<std::pair<gr::signal::SignalType, std::string_view>>{
-             {gr::signal::SignalType::Sin, "std::sin"},
-             {gr::signal::SignalType::FastSin, "phasor sin"},
-             {gr::signal::SignalType::Cos, "std::cos"},
-             {gr::signal::SignalType::FastCos, "phasor cos"},
-             {gr::signal::SignalType::UniformNoise, "std::uniform_real_distribution"},
-             {gr::signal::SignalType::TriangularNoise, "triangular (Irwin-Hall)"},
-             {gr::signal::SignalType::GaussianNoise, "std::normal_distribution"},
+             {gr::signal::SignalType::sin, "std::sin"},
+             {gr::signal::SignalType::fast_sin, "phasor sin"},
+             {gr::signal::SignalType::cos, "std::cos"},
+             {gr::signal::SignalType::fast_cos, "phasor cos"},
+             {gr::signal::SignalType::uniform_noise, "std::uniform_real_distribution"},
+             {gr::signal::SignalType::triangular_noise, "triangular (Irwin-Hall)"},
+             {gr::signal::SignalType::gaussian_noise, "std::normal_distribution"},
          }) {
-        const bool isNoise = static_cast<int>(type) >= static_cast<int>(gr::signal::SignalType::UniformNoise);
+        const bool isNoise = static_cast<int>(type) >= static_cast<int>(gr::signal::SignalType::uniform_noise);
         for (std::size_t N : {100UZ, 1024UZ, 65536UZ}) {
             gr::signal::SignalGeneratorCore<T> core;
             core.configure(type, isNoise ? 0.f : 1000.f, 48000.f, 0.f, 30000.f, 0.f, isNoise ? 42ULL : 0ULL);

@@ -274,7 +274,7 @@ struct NarrowOutputSpan : OutputSpan<std::uint8_t> {
     NarrowOutputSpan(std::span<std::uint8_t> items, std::size_t at, std::vector<gr::Tag>* published) : OutputSpan<std::uint8_t>(items, at, published), streamIndex(static_cast<std::uint32_t>(at)) {}
 };
 
-constexpr std::array<const char*, 2> kOrders{"MsbFirst", "LsbFirst"};
+constexpr std::array<const char*, 2> kOrders{"msb_first", "lsb_first"};
 
 struct Marker {
     const char*    key;
@@ -494,7 +494,7 @@ const boost::ut::suite<"RepackBits"> repackBitsTests = [] {
         const std::array<std::uint8_t, 3> threeBytes{0xC5U, 0x3AU, 0x9FU};
 
         RepackBits msb = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 3U}});
-        RepackBits lsb = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 3U}, {"input_bit_order", std::string("LsbFirst")}, {"output_bit_order", std::string("LsbFirst")}});
+        RepackBits lsb = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 3U}, {"input_bit_order", std::string("lsb_first")}, {"output_bit_order", std::string("lsb_first")}});
 
         const std::array<std::uint8_t, 8> msbSymbols{6U, 1U, 2U, 3U, 5U, 2U, 3U, 7U};
         const std::array<std::uint8_t, 8> lsbSymbols{5U, 0U, 3U, 5U, 3U, 6U, 7U, 4U};
@@ -502,13 +502,13 @@ const boost::ut::suite<"RepackBits"> repackBitsTests = [] {
         expect(std::ranges::equal(drive(lsb, std::span<const std::uint8_t>(threeBytes)).samples, lsbSymbols));
 
         RepackBits msbBack = make<RepackBits>({{"bits_in", 3U}, {"bits_out", 8U}});
-        RepackBits lsbBack = make<RepackBits>({{"bits_in", 3U}, {"bits_out", 8U}, {"input_bit_order", std::string("LsbFirst")}, {"output_bit_order", std::string("LsbFirst")}});
+        RepackBits lsbBack = make<RepackBits>({{"bits_in", 3U}, {"bits_out", 8U}, {"input_bit_order", std::string("lsb_first")}, {"output_bit_order", std::string("lsb_first")}});
         expect(std::ranges::equal(drive(msbBack, std::span<const std::uint8_t>(msbSymbols)).samples, threeBytes)) << "three bytes are one period and nothing is left over";
         expect(std::ranges::equal(drive(lsbBack, std::span<const std::uint8_t>(lsbSymbols)).samples, threeBytes));
 
         const std::array<std::uint8_t, 2> twoBytes{0xF5U, 0x08U};
         RepackBits                        nibblesMsb = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 4U}});
-        RepackBits                        nibblesLsb = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 4U}, {"input_bit_order", std::string("LsbFirst")}, {"output_bit_order", std::string("LsbFirst")}});
+        RepackBits                        nibblesLsb = make<RepackBits>({{"bits_in", 8U}, {"bits_out", 4U}, {"input_bit_order", std::string("lsb_first")}, {"output_bit_order", std::string("lsb_first")}});
         expect(std::ranges::equal(drive(nibblesMsb, std::span<const std::uint8_t>(twoBytes)).samples, std::array<std::uint8_t, 4>{0xFU, 0x5U, 0x0U, 0x8U}));
         expect(std::ranges::equal(drive(nibblesLsb, std::span<const std::uint8_t>(twoBytes)).samples, std::array<std::uint8_t, 4>{0x5U, 0xFU, 0x8U, 0x0U}));
     };
@@ -665,7 +665,7 @@ const boost::ut::suite<"RepackBits"> repackBitsTests = [] {
             expect(std::ranges::equal(std::span<const std::uint8_t>(flushed.samples).first(13UZ), dropped.samples)) << "the two answers differ only in the padded item";
 
             const unsigned last = flushed.samples.back();
-            if (std::string(orderOut) == "MsbFirst") {
+            if (std::string(orderOut) == "msb_first") {
                 expect(eq(last & 0x3U, 0U)) << "the pad takes the positions the later bits would have gone to";
                 expect(eq(last >> 2U, 1U)) << "the one real bit is the top of the field";
             } else {
@@ -732,7 +732,7 @@ const boost::ut::suite<"PackBits"> packBitsTests = [] {
         const std::array<std::uint8_t, 8> bits{1U, 0U, 1U, 1U, 0U, 0U, 1U, 0U};
 
         PackBits msb = make<PackBits>();
-        PackBits lsb = make<PackBits>({{"bit_order", std::string("LsbFirst")}});
+        PackBits lsb = make<PackBits>({{"bit_order", std::string("lsb_first")}});
         expect(std::ranges::equal(drive(msb, std::span<const std::uint8_t>(bits)).samples, std::array<std::uint8_t, 1>{0xB2U}));
         expect(std::ranges::equal(drive(lsb, std::span<const std::uint8_t>(bits)).samples, std::array<std::uint8_t, 1>{0x4DU})) << "the two orders are bit reversals of each other whenever the input is one bit wide";
     };
@@ -741,7 +741,7 @@ const boost::ut::suite<"PackBits"> packBitsTests = [] {
         const std::vector<std::uint8_t> loud = randomFields(256UZ, 8U, 0x21b1a9c6ULL);
 
         PackBits  msb = make<PackBits>({{"k", 1U}});
-        PackBits  lsb = make<PackBits>({{"k", 1U}, {"bit_order", std::string("LsbFirst")}});
+        PackBits  lsb = make<PackBits>({{"k", 1U}, {"bit_order", std::string("lsb_first")}});
         const Run one = drive(msb, std::span<const std::uint8_t>(loud));
         const Run two = drive(lsb, std::span<const std::uint8_t>(loud));
 
@@ -850,7 +850,7 @@ const boost::ut::suite<"UnpackBits"> unpackBitsTests = [] {
         const std::array<std::uint8_t, 2> bytes{0xF5U, 0x08U};
 
         UnpackBits msb = make<UnpackBits>();
-        UnpackBits lsb = make<UnpackBits>({{"bit_order", std::string("LsbFirst")}});
+        UnpackBits lsb = make<UnpackBits>({{"bit_order", std::string("lsb_first")}});
         expect(std::ranges::equal(drive(msb, std::span<const std::uint8_t>(bytes)).samples, std::array<std::uint8_t, 16>{1U, 1U, 1U, 1U, 0U, 1U, 0U, 1U, 0U, 0U, 0U, 0U, 1U, 0U, 0U, 0U}));
         expect(std::ranges::equal(drive(lsb, std::span<const std::uint8_t>(bytes)).samples, std::array<std::uint8_t, 16>{1U, 0U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U, 0U, 1U, 0U, 0U, 0U, 0U}));
     };
@@ -887,7 +887,7 @@ const boost::ut::suite<"UnpackBits"> unpackBitsTests = [] {
         }
 
         UnpackBits msb = make<UnpackBits>({{"k", 1U}});
-        UnpackBits lsb = make<UnpackBits>({{"k", 1U}, {"bit_order", std::string("LsbFirst")}});
+        UnpackBits lsb = make<UnpackBits>({{"k", 1U}, {"bit_order", std::string("lsb_first")}});
         const Run  one = drive(msb, std::span<const std::uint8_t>(loud));
         expect(std::ranges::equal(one.samples, drive(lsb, std::span<const std::uint8_t>(loud)).samples)) << "the two orders agree at k = 1";
         for (std::size_t i = 0UZ; i < loud.size(); ++i) {
@@ -1091,7 +1091,7 @@ const boost::ut::suite<"record repack"> recordRepackTests = [] {
             lcg = lcg * 6364136223846793005ULL + 1442695040888963407ULL;
             bit = static_cast<std::uint8_t>((lcg >> 33U) & 1ULL);
         }
-        for (const gr::math::BitOrder order : {gr::math::BitOrder::MsbFirst, gr::math::BitOrder::LsbFirst}) {
+        for (const gr::math::BitOrder order : {gr::math::BitOrder::msb_first, gr::math::BitOrder::lsb_first}) {
             const auto packed = through({{"bits_in", gr::Size_t{1U}}, {"bits_out", gr::Size_t{8U}}, {"output_bit_order", std::string(gr::meta::enumName(order).value_or(""))}}, {recordOf(bits)});
 
             std::vector<std::uint8_t> want(8UZ);

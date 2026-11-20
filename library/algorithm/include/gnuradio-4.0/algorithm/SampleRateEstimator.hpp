@@ -102,7 +102,7 @@ struct SampleRateEstimator {
     void rebuildFilter() {
         if (_updateRate > 0.0 && filter_cutoff_hz > 0.f) {
             double cutoff = std::min(static_cast<double>(filter_cutoff_hz), _updateRate * 0.4);
-            auto   coeffs = filter::iir::designFilter<double>(filter::Type::LOWPASS, filter::FilterParameters{.order = filter_order, .fLow = cutoff, .fs = _updateRate}, filter::iir::Design::BUTTERWORTH);
+            auto   coeffs = filter::iir::designFilter<double>(filter::Type::lowpass, filter::FilterParameters{.order = filter_order, .fLow = cutoff, .fs = _updateRate}, filter::iir::Design::butterworth);
             _lpFilter     = filter::Filter<double>(coeffs);
             _lpFilter.reset(_periodEst);
         }
@@ -124,10 +124,10 @@ struct SampleRateEstimator {
  *   As implemented in zita-ajbridge and adopted by PipeWire and JACK.
  */
 enum class DriftCorrection {
-    None,               // no correction
-    Linear,             // insert/drop with linear interpolation at splice boundary
-    Cubic,              // insert/drop with cubic Hermite interpolation at splice boundary
-    AdaptiveResampling, // continuous variable-rate cubic Hermite resampling (Adriaensen)
+    none,                // no correction
+    linear,              // insert/drop with linear interpolation at splice boundary
+    cubic,               // insert/drop with cubic Hermite interpolation at splice boundary
+    adaptive_resampling, // continuous variable-rate cubic Hermite resampling (Adriaensen)
 };
 
 /**
@@ -143,7 +143,7 @@ struct DriftCompensator {
     static constexpr double kMaxAccumulator = 2.0;
     static constexpr double kStartPhase     = -2.0; // AdaptiveResampling: the first output frame, in frames from the first input frame
 
-    DriftCorrection mode{DriftCorrection::Linear};
+    DriftCorrection mode{DriftCorrection::linear};
     double          fractionalAccumulator{0.0};
     double          resamplerPhase{0.0}; // AdaptiveResampling: position of the next output frame, in input frames from the next call's first
 
@@ -159,11 +159,11 @@ struct DriftCompensator {
     }
 
     std::size_t compensateSource(std::span<T> output, std::size_t nProduced, double estimatedRate, double nominalRate, std::size_t channelCount) {
-        if (mode == DriftCorrection::None || estimatedRate <= 0.0 || nominalRate <= 0.0 || nProduced == 0U || channelCount == 0U) {
+        if (mode == DriftCorrection::none || estimatedRate <= 0.0 || nominalRate <= 0.0 || nProduced == 0U || channelCount == 0U) {
             return nProduced;
         }
 
-        if (mode == DriftCorrection::AdaptiveResampling) {
+        if (mode == DriftCorrection::adaptive_resampling) {
             return resampleInPlace(output, nProduced, estimatedRate / nominalRate, channelCount);
         }
 
@@ -194,12 +194,12 @@ struct DriftCompensator {
     }
 
     std::size_t compensateSink(std::span<const T> input, std::span<T> adjusted, std::size_t nAvailable, double estimatedRate, double nominalRate, std::size_t channelCount) {
-        if (mode == DriftCorrection::None || estimatedRate <= 0.0 || nominalRate <= 0.0 || nAvailable == 0U || channelCount == 0U) {
+        if (mode == DriftCorrection::none || estimatedRate <= 0.0 || nominalRate <= 0.0 || nAvailable == 0U || channelCount == 0U) {
             std::copy_n(input.begin(), static_cast<std::ptrdiff_t>(nAvailable), adjusted.begin());
             return nAvailable;
         }
 
-        if (mode == DriftCorrection::AdaptiveResampling) {
+        if (mode == DriftCorrection::adaptive_resampling) {
             return resampleSink(input, adjusted, nAvailable, nominalRate / estimatedRate, channelCount);
         }
 
@@ -271,7 +271,7 @@ private:
     template<typename Span>
     [[nodiscard]] T interpolateAtSplice(Span data, std::size_t nProduced, std::size_t ch, std::size_t channelCount, double t) const {
         const std::size_t nFrames = nProduced / channelCount;
-        if (mode == DriftCorrection::Cubic && nFrames >= 2U) {
+        if (mode == DriftCorrection::cubic && nFrames >= 2U) {
             const double y0 = nFrames >= 3U ? getSample(data, nFrames - 3U, ch, channelCount) : getSample(data, nFrames - 2U, ch, channelCount);
             const double y1 = getSample(data, nFrames - 2U, ch, channelCount);
             const double y2 = getSample(data, nFrames - 1U, ch, channelCount);

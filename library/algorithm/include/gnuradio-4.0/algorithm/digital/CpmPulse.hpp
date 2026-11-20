@@ -20,20 +20,20 @@ namespace gr::digital {
 
 /// The frequency-pulse families continuous-phase modulation is built from.
 enum class CpmPulseShape {
-    Rect,          ///< uniform over the pulse's whole span; one symbol long it is CPFSK, and on two levels classic FSK
-    RaisedCosine, ///< a raised cosine spanning the whole pulse, the partial-response form
-    Gaussian       ///< a Gaussian of bandwidth-symbol-time product bt convolved with one symbol of rectangle: GFSK
+    rect,          ///< uniform over the pulse's whole span; one symbol long it is CPFSK, and on two levels classic FSK
+    raised_cosine, ///< a raised cosine spanning the whole pulse, the partial-response form
+    gaussian       ///< a Gaussian of bandwidth-symbol-time product bt convolved with one symbol of rectangle: GFSK
 };
 
 [[nodiscard]] inline CpmPulseShape cpmPulseShapeFrom(std::string_view name) {
     if (name == "rect") {
-        return CpmPulseShape::Rect;
+        return CpmPulseShape::rect;
     }
     if (name == "raised_cosine") {
-        return CpmPulseShape::RaisedCosine;
+        return CpmPulseShape::raised_cosine;
     }
     if (name == "gaussian") {
-        return CpmPulseShape::Gaussian;
+        return CpmPulseShape::gaussian;
     }
     throw std::invalid_argument(std::format("gr::digital::CpmPulse: unknown pulse '{}'; rect, raised_cosine or gaussian", name));
 }
@@ -95,7 +95,7 @@ struct CpmPulse {
         if (!(modulationIndex > 0.) || !(modulationIndex <= kMaxModulationIndex)) {
             throw std::invalid_argument(std::format("gr::digital::CpmPulse: modulation index {} is outside (0, {}]", modulationIndex, kMaxModulationIndex));
         }
-        if (shape == CpmPulseShape::Gaussian && !(bt > 0.)) {
+        if (shape == CpmPulseShape::gaussian && !(bt > 0.)) {
             throw std::invalid_argument(std::format("gr::digital::CpmPulse: bandwidth-symbol-time product {} must be positive", bt));
         }
 
@@ -159,8 +159,8 @@ private:
         std::vector<double> g(nTaps);
 
         switch (shape) {
-        case CpmPulseShape::Rect: std::ranges::fill(g, 1.); break;
-        case CpmPulseShape::RaisedCosine:
+        case CpmPulseShape::rect: std::ranges::fill(g, 1.); break;
+        case CpmPulseShape::raised_cosine:
             // Sampled at the midpoint of each sample interval rather than at its left edge, which is where the
             // rectangle and the Gaussian already sit. The left-edge grid would put a zero tap at the start, none at
             // the end, and the pulse's center half a sample after the grid's.
@@ -168,7 +168,7 @@ private:
                 g[k] = 1. - std::cos(2. * std::numbers::pi_v<double> * (static_cast<double>(k) + 0.5) / static_cast<double>(nTaps));
             }
             break;
-        case CpmPulseShape::Gaussian: {
+        case CpmPulseShape::gaussian: {
             // The Gaussian spans the pulse less the one symbol the rectangle adds back, so the moving sum below comes
             // out at exactly nTaps. Its taps sit on a grid centered on the pulse's own center, on a whole sample or
             // between two as the length parity requires, which is what keeps the result symmetric for every span and

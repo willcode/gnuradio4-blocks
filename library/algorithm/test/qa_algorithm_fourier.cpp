@@ -928,40 +928,40 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
 
         // check all windows for unwanted changes
         using enum gr::algorithm::window::Type;
-        expect(equalVectors(create<T>(None, 8), RectangularRef)) << std::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(None, 8), RectangularRef);
-        expect(equalVectors(create<T>(Rectangular, 8), RectangularRef)) << std::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(Rectangular, 8), RectangularRef);
-        expect(equalVectors(create<T>(Hamming, 8), HammingRef)) << std::format("<{}> equal Hamming vector {} vs. ref: {}", type_name<T>(), create<T>(Hamming, 8), HammingRef);
-        expect(equalVectors(create<T>(Hann, 8), HannRef)) << std::format("<{}> equal Hann vector {} vs. ref: {}", type_name<T>(), create<T>(Hann, 8), HannRef);
-        expect(equalVectors(create<T>(Blackman, 8), BlackmanRef)) << std::format("<{}> equal Blackman vvector {} vs. ref: {}", type_name<T>(), create<T>(Blackman, 8), BlackmanRef);
-        expect(equalVectors(create<T>(BlackmanHarris, 8), BlackmanHarrisRef)) << std::format("<{}> equal BlackmanHarris vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanHarris, 8), BlackmanHarrisRef);
-        expect(equalVectors(create<T>(BlackmanNuttall, 8), BlackmanNuttallRef)) << std::format("<{}> equal BlackmanNuttall vector {} vs. ref: {}", type_name<T>(), create<T>(BlackmanNuttall, 8), BlackmanNuttallRef);
-        expect(equalVectors(create<T>(Exponential, 8), ExponentialRef)) << std::format("<{}> equal Exponential vector {} vs. ref: {}", type_name<T>(), create<T>(Exponential, 8), ExponentialRef);
-        expect(equalVectors(create<T>(FlatTop, 8), FlatTopRef)) << std::format("<{}> equal FlatTop vector {} vs. ref: {}", type_name<T>(), create<T>(FlatTop, 8), FlatTopRef);
-        expect(equalVectors(create<T>(Nuttall, 8), NuttallRef)) << std::format("<{}> equal Nuttall vector {} vs. ref: {}", type_name<T>(), create<T>(Nuttall, 8), NuttallRef);
-        expect(equalVectors(create<T>(Kaiser, 8), KaiserRef)) << std::format("<{}> equal Kaiser vector {} vs. ref: {}", type_name<T>(), create<T>(Kaiser, 8), KaiserRef);
-        expect(equalVectors(create<T>(Bartlett, 8), BartlettRef)) << std::format("<{}> equal Bartlett vector {} vs. ref: {}", type_name<T>(), create<T>(Bartlett, 8), BartlettRef);
-        expect(equalVectors(create<T>(Welch, 8), WelchRef)) << std::format("<{}> equal Welch vector {} vs. ref: {}", type_name<T>(), create<T>(Welch, 8), WelchRef);
-        expect(equalVectors(create<T>(Parzen, 8), ParzenRef)) << std::format("<{}> equal Parzen vector {} vs. ref: {}", type_name<T>(), create<T>(Parzen, 8), ParzenRef);
-        expect(equalVectors(create<T>(Tukey, 8), TukeyRef)) << std::format("<{}> equal Tukey vector {} vs. ref: {}", type_name<T>(), create<T>(Tukey, 8), TukeyRef);
-        expect(equalVectors(create<T>(Gaussian, 8), GaussianRef)) << std::format("<{}> equal Gaussian vector {} vs. ref: {}", type_name<T>(), create<T>(Gaussian, 8), GaussianRef);
+        expect(equalVectors(create<T>(none, 8), RectangularRef)) << std::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(none, 8), RectangularRef);
+        expect(equalVectors(create<T>(rectangular, 8), RectangularRef)) << std::format("<{}> equal Rectangular vector {} vs. ref: {}", type_name<T>(), create<T>(rectangular, 8), RectangularRef);
+        expect(equalVectors(create<T>(hamming, 8), HammingRef)) << std::format("<{}> equal Hamming vector {} vs. ref: {}", type_name<T>(), create<T>(hamming, 8), HammingRef);
+        expect(equalVectors(create<T>(hann, 8), HannRef)) << std::format("<{}> equal Hann vector {} vs. ref: {}", type_name<T>(), create<T>(hann, 8), HannRef);
+        expect(equalVectors(create<T>(blackman, 8), BlackmanRef)) << std::format("<{}> equal Blackman vvector {} vs. ref: {}", type_name<T>(), create<T>(blackman, 8), BlackmanRef);
+        expect(equalVectors(create<T>(blackman_harris, 8), BlackmanHarrisRef)) << std::format("<{}> equal BlackmanHarris vector {} vs. ref: {}", type_name<T>(), create<T>(blackman_harris, 8), BlackmanHarrisRef);
+        expect(equalVectors(create<T>(blackman_nuttall, 8), BlackmanNuttallRef)) << std::format("<{}> equal BlackmanNuttall vector {} vs. ref: {}", type_name<T>(), create<T>(blackman_nuttall, 8), BlackmanNuttallRef);
+        expect(equalVectors(create<T>(exponential, 8), ExponentialRef)) << std::format("<{}> equal Exponential vector {} vs. ref: {}", type_name<T>(), create<T>(exponential, 8), ExponentialRef);
+        expect(equalVectors(create<T>(flat_top, 8), FlatTopRef)) << std::format("<{}> equal FlatTop vector {} vs. ref: {}", type_name<T>(), create<T>(flat_top, 8), FlatTopRef);
+        expect(equalVectors(create<T>(nuttall, 8), NuttallRef)) << std::format("<{}> equal Nuttall vector {} vs. ref: {}", type_name<T>(), create<T>(nuttall, 8), NuttallRef);
+        expect(equalVectors(create<T>(kaiser, 8), KaiserRef)) << std::format("<{}> equal Kaiser vector {} vs. ref: {}", type_name<T>(), create<T>(kaiser, 8), KaiserRef);
+        expect(equalVectors(create<T>(bartlett, 8), BartlettRef)) << std::format("<{}> equal Bartlett vector {} vs. ref: {}", type_name<T>(), create<T>(bartlett, 8), BartlettRef);
+        expect(equalVectors(create<T>(welch, 8), WelchRef)) << std::format("<{}> equal Welch vector {} vs. ref: {}", type_name<T>(), create<T>(welch, 8), WelchRef);
+        expect(equalVectors(create<T>(parzen, 8), ParzenRef)) << std::format("<{}> equal Parzen vector {} vs. ref: {}", type_name<T>(), create<T>(parzen, 8), ParzenRef);
+        expect(equalVectors(create<T>(tukey, 8), TukeyRef)) << std::format("<{}> equal Tukey vector {} vs. ref: {}", type_name<T>(), create<T>(tukey, 8), TukeyRef);
+        expect(equalVectors(create<T>(gaussian, 8), GaussianRef)) << std::format("<{}> equal Gaussian vector {} vs. ref: {}", type_name<T>(), create<T>(gaussian, 8), GaussianRef);
 
         // test zero length
-        expect(eq(create<T>(None, 0).size(), 0u)) << std::format("<{}> zero size None vectors", type_name<T>());
-        expect(eq(create<T>(Rectangular, 0).size(), 0u)) << std::format("<{}> zero size Rectangular vectors", type_name<T>());
-        expect(eq(create<T>(Hamming, 0).size(), 0u)) << std::format("<{}> zero size Hamming vectors", type_name<T>());
-        expect(eq(create<T>(Hann, 0).size(), 0u)) << std::format("<{}> zero size Hann vectors", type_name<T>());
-        expect(eq(create<T>(Blackman, 0).size(), 0u)) << std::format("<{}> zero size Blackman vectors", type_name<T>());
-        expect(eq(create<T>(BlackmanHarris, 0).size(), 0u)) << std::format("<{}> zero size BlackmanHarris vectors", type_name<T>());
-        expect(eq(create<T>(BlackmanNuttall, 0).size(), 0u)) << std::format("<{}> zero size BlackmanNuttall vectors", type_name<T>());
-        expect(eq(create<T>(Exponential, 0).size(), 0u)) << std::format("<{}> zero size Exponential vectors", type_name<T>());
-        expect(eq(create<T>(FlatTop, 0).size(), 0u)) << std::format("<{}> zero size FlatTop vectors", type_name<T>());
-        expect(eq(create<T>(Nuttall, 0).size(), 0u)) << std::format("<{}> zero size Nuttall vectors", type_name<T>());
-        expect(eq(create<T>(Kaiser, 0).size(), 0u)) << std::format("<{}> zero size Kaiser vectors", type_name<T>());
-        expect(eq(create<T>(Bartlett, 0).size(), 0u)) << std::format("<{}> zero size Bartlett vectors", type_name<T>());
-        expect(eq(create<T>(Welch, 0).size(), 0u)) << std::format("<{}> zero size Welch vectors", type_name<T>());
-        expect(eq(create<T>(Parzen, 0).size(), 0u)) << std::format("<{}> zero size Parzen vectors", type_name<T>());
-        expect(eq(create<T>(Tukey, 0).size(), 0u)) << std::format("<{}> zero size Tukey vectors", type_name<T>());
-        expect(eq(create<T>(Gaussian, 0).size(), 0u)) << std::format("<{}> zero size Gaussian vectors", type_name<T>());
+        expect(eq(create<T>(none, 0).size(), 0u)) << std::format("<{}> zero size None vectors", type_name<T>());
+        expect(eq(create<T>(rectangular, 0).size(), 0u)) << std::format("<{}> zero size Rectangular vectors", type_name<T>());
+        expect(eq(create<T>(hamming, 0).size(), 0u)) << std::format("<{}> zero size Hamming vectors", type_name<T>());
+        expect(eq(create<T>(hann, 0).size(), 0u)) << std::format("<{}> zero size Hann vectors", type_name<T>());
+        expect(eq(create<T>(blackman, 0).size(), 0u)) << std::format("<{}> zero size Blackman vectors", type_name<T>());
+        expect(eq(create<T>(blackman_harris, 0).size(), 0u)) << std::format("<{}> zero size BlackmanHarris vectors", type_name<T>());
+        expect(eq(create<T>(blackman_nuttall, 0).size(), 0u)) << std::format("<{}> zero size BlackmanNuttall vectors", type_name<T>());
+        expect(eq(create<T>(exponential, 0).size(), 0u)) << std::format("<{}> zero size Exponential vectors", type_name<T>());
+        expect(eq(create<T>(flat_top, 0).size(), 0u)) << std::format("<{}> zero size FlatTop vectors", type_name<T>());
+        expect(eq(create<T>(nuttall, 0).size(), 0u)) << std::format("<{}> zero size Nuttall vectors", type_name<T>());
+        expect(eq(create<T>(kaiser, 0).size(), 0u)) << std::format("<{}> zero size Kaiser vectors", type_name<T>());
+        expect(eq(create<T>(bartlett, 0).size(), 0u)) << std::format("<{}> zero size Bartlett vectors", type_name<T>());
+        expect(eq(create<T>(welch, 0).size(), 0u)) << std::format("<{}> zero size Welch vectors", type_name<T>());
+        expect(eq(create<T>(parzen, 0).size(), 0u)) << std::format("<{}> zero size Parzen vectors", type_name<T>());
+        expect(eq(create<T>(tukey, 0).size(), 0u)) << std::format("<{}> zero size Tukey vectors", type_name<T>());
+        expect(eq(create<T>(gaussian, 0).size(), 0u)) << std::format("<{}> zero size Gaussian vectors", type_name<T>());
     } | std::tuple<float, double>();
 
     "basic window tests"_test = [](auto& val) {
@@ -971,7 +971,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         const auto w = create(window, 1024U);
         expect(eq(w.size(), 1024U));
 
-        if (window == FlatTop || window == Blackman || window == Nuttall) {
+        if (window == flat_top || window == blackman || window == nuttall) {
             return; // min max out of [0, 1] by design and/or numerical corner cases
         }
         const auto [min, max] = std::ranges::minmax_element(w);
@@ -987,7 +987,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             const auto window     = entry.first;
             const auto windowName = entry.second;
             for (const std::size_t n : {1UZ, 2UZ, 3UZ, 64UZ, 65UZ, 1023UZ}) {
-                if (window == Kaiser && n == 1UZ) {
+                if (window == kaiser && n == 1UZ) {
                     expect(throws<std::invalid_argument>([window] { std::ignore = create<T>(window, 1UZ); })) << "Kaiser rejects n == 1";
                     continue;
                 }
@@ -1005,16 +1005,16 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         }
     } | std::tuple<float, double>();
 
-    // a setting stored as HannExp still names a window, and the window it names is Hann
-    "HannExp names the Hann window"_test = []<typename T>() {
-        const auto parsed = magic_enum::enum_cast<gr::algorithm::window::Type>("HannExp");
-        expect(parsed.has_value()) << "HannExp resolves to a window";
-        expect(magic_enum::enum_name(parsed.value()) == std::string_view{"HannExp"}) << "the name round-trips through the enum";
+    // hann_exp keeps its ordinal, and the window it names is Hann
+    "hann_exp names the Hann window"_test = []<typename T>() {
+        const auto parsed = magic_enum::enum_cast<gr::algorithm::window::Type>("hann_exp");
+        expect(parsed.has_value()) << "hann_exp resolves to a window";
+        expect(magic_enum::enum_name(parsed.value()) == std::string_view{"hann_exp"}) << "the name round-trips through the enum";
 
         for (const std::size_t n : {2UZ, 9UZ, 64UZ, 1023UZ}) {
             const auto aliased = create<T>(parsed.value(), n);
-            const auto hann    = create<T>(gr::algorithm::window::Type::Hann, n);
-            expect(std::ranges::equal(aliased, hann)) << std::format("<{}> n={} HannExp coefficients equal Hann", type_name<T>(), n);
+            const auto hann    = create<T>(gr::algorithm::window::Type::hann, n);
+            expect(std::ranges::equal(aliased, hann)) << std::format("<{}> n={} hann_exp coefficients equal Hann", type_name<T>(), n);
         }
     } | std::tuple<float, double>();
 
@@ -1039,17 +1039,17 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
     "window endpoints"_test = [] {
         using enum gr::algorithm::window::Type;
         for (const std::size_t n : {3UZ, 9UZ, 64UZ, 1023UZ}) {
-            for (const auto window : {Bartlett, Welch, Hann}) {
+            for (const auto window : {bartlett, welch, hann}) {
                 const auto w = create<double>(window, n);
                 expect(eq(w.front(), 0.)) << std::format("{} n={} starts at zero", magic_enum::enum_name(window), n);
                 expect(eq(w.back(), 0.)) << std::format("{} n={} ends at zero", magic_enum::enum_name(window), n);
             }
-            const auto   parzen   = create<double>(Parzen, n);
-            const double expected = 2. / (static_cast<double>(n) * static_cast<double>(n) * static_cast<double>(n));
-            expect(approx(parzen.front() / expected, 1., 1e-9)) << std::format("Parzen n={} ends at 2/N^3 = {:e}, is {:e}", n, expected, parzen.front());
+            const auto   parzenWindow = create<double>(parzen, n);
+            const double expected     = 2. / (static_cast<double>(n) * static_cast<double>(n) * static_cast<double>(n));
+            expect(approx(parzenWindow.front() / expected, 1., 1e-9)) << std::format("Parzen n={} ends at 2/N^3 = {:e}, is {:e}", n, expected, parzenWindow.front());
         }
         for (const std::size_t n : {2UZ, 9UZ, 1023UZ}) {
-            expect(std::ranges::all_of(create<double>(Rectangular, n), [](double v) { return v == 1.; })) << std::format("Rectangular n={} is exactly one everywhere", n);
+            expect(std::ranges::all_of(create<double>(rectangular, n), [](double v) { return v == 1.; })) << std::format("Rectangular n={} is exactly one everywhere", n);
         }
     };
 
@@ -1057,20 +1057,20 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
     "Tukey degenerates to Rectangular and to Hann"_test = [] {
         using enum gr::algorithm::window::Type;
         for (const std::size_t n : {9UZ, 64UZ, 1023UZ}) {
-            expect(std::ranges::equal(create<double>(Tukey, n, 0.), create<double>(Rectangular, n))) << std::format("Tukey(0) n={} equals Rectangular bit-exactly", n);
-            expect(equalVectors(create<double>(Tukey, n, 1.), create<double>(Hann, n), 1e-12)) << std::format("Tukey(1) n={} equals Hann", n);
+            expect(std::ranges::equal(create<double>(tukey, n, 0.), create<double>(rectangular, n))) << std::format("Tukey(0) n={} equals Rectangular bit-exactly", n);
+            expect(equalVectors(create<double>(tukey, n, 1.), create<double>(hann, n), 1e-12)) << std::format("Tukey(1) n={} equals Hann", n);
         }
     };
 
     // the shape parameter is one scalar carrying four different quantities; NaN asks for the window's own default
     "window parameter validation"_test = [] {
         using enum gr::algorithm::window::Type;
-        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(Tukey, 64UZ, -0.1); })) << "Tukey alpha below zero";
-        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(Tukey, 64UZ, 1.1); })) << "Tukey alpha above one";
-        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(Gaussian, 64UZ, 0.); })) << "Gaussian sigma at zero";
-        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(Gaussian, 64UZ, 0.51); })) << "Gaussian sigma above one half";
-        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(Kaiser, 64UZ, -1.); })) << "Kaiser beta below zero";
-        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(Exponential, 64UZ, -1.); })) << "Exponential decay below zero";
+        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(tukey, 64UZ, -0.1); })) << "Tukey alpha below zero";
+        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(tukey, 64UZ, 1.1); })) << "Tukey alpha above one";
+        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(gaussian, 64UZ, 0.); })) << "Gaussian sigma at zero";
+        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(gaussian, 64UZ, 0.51); })) << "Gaussian sigma above one half";
+        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(kaiser, 64UZ, -1.); })) << "Kaiser beta below zero";
+        expect(throws<std::invalid_argument>([] { std::ignore = create<double>(exponential, 64UZ, -1.); })) << "Exponential decay below zero";
 
         for (const auto& [window, windowName] : magic_enum::enum_entries<gr::algorithm::window::Type>()) {
             expect(nothrow([window] { std::ignore = create<double>(window, 64UZ); })) << std::format("{} accepts a NaN parameter", windowName);
@@ -1082,28 +1082,28 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             expect(eq(shape, gr::algorithm::window::detail::defaultParameter<double>(window))) << std::format("{} has one default under both names", windowName);
             expect(std::ranges::equal(create<double>(window, 64UZ), create<double>(window, 64UZ, shape))) << std::format("{} with NaN is {} with its default", windowName, windowName);
         }
-        expect(throws<std::invalid_argument>([] { gr::algorithm::window::validateParameter<double>(Tukey, 1.1); })) << "the public check refuses what create refuses";
-        expect(std::ranges::equal(create<double>(Kaiser, 64UZ), create<double>(Kaiser, 64UZ, 1.6))) << "Kaiser defaults to beta = 1.6";
-        expect(std::ranges::equal(create<double>(Tukey, 64UZ), create<double>(Tukey, 64UZ, 0.5))) << "Tukey defaults to alpha = 0.5";
-        expect(std::ranges::equal(create<double>(Gaussian, 64UZ), create<double>(Gaussian, 64UZ, 0.4))) << "Gaussian defaults to sigma = 0.4";
-        expect(std::ranges::equal(create<double>(Exponential, 64UZ), create<double>(Exponential, 64UZ, 60.))) << "Exponential defaults to 60 dB of decay";
+        expect(throws<std::invalid_argument>([] { gr::algorithm::window::validateParameter<double>(tukey, 1.1); })) << "the public check refuses what create refuses";
+        expect(std::ranges::equal(create<double>(kaiser, 64UZ), create<double>(kaiser, 64UZ, 1.6))) << "Kaiser defaults to beta = 1.6";
+        expect(std::ranges::equal(create<double>(tukey, 64UZ), create<double>(tukey, 64UZ, 0.5))) << "Tukey defaults to alpha = 0.5";
+        expect(std::ranges::equal(create<double>(gaussian, 64UZ), create<double>(gaussian, 64UZ, 0.4))) << "Gaussian defaults to sigma = 0.4";
+        expect(std::ranges::equal(create<double>(exponential, 64UZ), create<double>(exponential, 64UZ, 60.))) << "Exponential defaults to 60 dB of decay";
         // a shallower decay is a wider window: 20 dB leaves the edges at a tenth, 60 dB at a thousandth
-        expect(approx(create<double>(Exponential, 65UZ, 20.).front(), 0.1, 1e-3)) << "Exponential(20 dB) edge value";
-        expect(approx(create<double>(Exponential, 65UZ, 60.).front(), 0.001, 1e-5)) << "Exponential(60 dB) edge value";
+        expect(approx(create<double>(exponential, 65UZ, 20.).front(), 0.1, 1e-3)) << "Exponential(20 dB) edge value";
+        expect(approx(create<double>(exponential, 65UZ, 60.).front(), 0.001, 1e-5)) << "Exponential(60 dB) edge value";
     };
 
     // sigma is a fraction of the half-length rather than a count of samples, so the shape -- and with it
     // the whole table row -- holds across N.
     "Gaussian sigma is scale invariant"_test = [] {
         using enum gr::algorithm::window::Type;
-        const double shortWindow = windowMetrics::peakSidelobeDb(create<double>(Gaussian, 255UZ, 0.4), 1UZ << 18);
-        const double longWindow  = windowMetrics::peakSidelobeDb(create<double>(Gaussian, 1023UZ, 0.4), 1UZ << 18);
+        const double shortWindow = windowMetrics::peakSidelobeDb(create<double>(gaussian, 255UZ, 0.4), 1UZ << 18);
+        const double longWindow  = windowMetrics::peakSidelobeDb(create<double>(gaussian, 1023UZ, 0.4), 1UZ << 18);
         expect(approx(shortWindow, longWindow, 0.5)) << std::format("Gaussian(0.4) peak sidelobe level: {:.2f} dB at N=255 vs {:.2f} dB at N=1023", shortWindow, longWindow);
     };
 
     "Rectangular ENBW is exactly one"_test = [] {
         for (const std::size_t n : {2UZ, 3UZ, 8UZ, 9UZ, 64UZ, 65UZ, 255UZ, 1023UZ}) {
-            expect(eq(windowMetrics::enbw(create<double>(gr::algorithm::window::Type::Rectangular, n)), 1.)) << std::format("Rectangular n={} ENBW", n);
+            expect(eq(windowMetrics::enbw(create<double>(gr::algorithm::window::Type::rectangular, n)), 1.)) << std::format("Rectangular n={} ENBW", n);
         }
     };
 
@@ -1124,51 +1124,51 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
         constexpr double        own    = std::numeric_limits<double>::quiet_NaN(); // the window's own default
         static const std::array kTable = std::to_array<Row>({
             //                                PSL dB     ENBW      CG      A dB
-            {Rectangular, own, /*        */ -13.26, 1.0000, 1.0000, 20.96},
-            {Bartlett, own, /*           */ -26.52, 1.3346, 0.4995, 26.26},
-            {Welch, own, /*              */ -21.29, 1.2012, 0.6660, 31.38},
-            {Hann, own, /*               */ -31.47, 1.5015, 0.4995, 43.94},
-            {Hamming, own, /*            */ -43.19, 1.3686, 0.5379, 53.40},
-            {Parzen, own, /*             */ -53.05, 1.9175, 0.3750, 56.64},
-            {Blackman, own, /*           */ -58.11, 1.7284, 0.4196, 75.29},
-            {FlatTop, own, /*            */ -76.62, 3.7739, 0.2155, 95.70},
-            {BlackmanHarris, own, /*     */ -92.01, 2.0063, 0.3584, 109.29},
-            {Nuttall, own, /*            */ -93.32, 2.0232, 0.3554, 111.96},
-            {BlackmanNuttall, own, /*    */ -98.16, 1.9780, 0.3632, 114.90},
+            {rectangular, own, /*        */ -13.26, 1.0000, 1.0000, 20.96},
+            {bartlett, own, /*           */ -26.52, 1.3346, 0.4995, 26.26},
+            {welch, own, /*              */ -21.29, 1.2012, 0.6660, 31.38},
+            {hann, own, /*               */ -31.47, 1.5015, 0.4995, 43.94},
+            {hamming, own, /*            */ -43.19, 1.3686, 0.5379, 53.40},
+            {parzen, own, /*             */ -53.05, 1.9175, 0.3750, 56.64},
+            {blackman, own, /*           */ -58.11, 1.7284, 0.4196, 75.29},
+            {flat_top, own, /*            */ -76.62, 3.7739, 0.2155, 95.70},
+            {blackman_harris, own, /*     */ -92.01, 2.0063, 0.3584, 109.29},
+            {nuttall, own, /*            */ -93.32, 2.0232, 0.3554, 111.96},
+            {blackman_nuttall, own, /*    */ -98.16, 1.9780, 0.3632, 114.90},
             // Exponential's transform leaves its main lobe without a null bound, so neither figure is an
             // attenuation in the sense the rows above use them: it stays above -49.48 dB out to 38.4 bins, and
             // the windowed sinc's transition band is 330 taps wide. Pinned as a regression anchor.
-            {Exponential, own, /*        */ -49.48, 3.4626, 0.1445, 47.27},
+            {exponential, own, /*        */ -49.48, 3.4626, 0.1445, 47.27},
 
-            {Kaiser, 0.0, /*             */ -13.26, 1.0000, 1.0000, 20.96},
-            {Kaiser, 1.6, /*             */ -16.70, 1.0238, 0.8482, 26.53},
-            {Kaiser, 3.0, /*             */ -23.76, 1.1372, 0.6837, 36.88},
-            {Kaiser, 4.0, /*             */ -29.98, 1.2476, 0.6032, 45.36},
-            {Kaiser, 5.0, /*             */ -36.73, 1.3601, 0.5443, 54.13},
-            {Kaiser, 6.0, /*             */ -43.81, 1.4682, 0.4996, 63.02},
-            {Kaiser, 7.0, /*             */ -51.12, 1.5705, 0.4642, 72.00},
-            {Kaiser, 8.0, /*             */ -58.63, 1.6673, 0.4353, 81.08},
-            {Kaiser, 9.0, /*             */ -66.30, 1.7593, 0.4112, 90.26},
-            {Kaiser, 10.0, /*            */ -74.10, 1.8469, 0.3908, 99.44},
-            {Kaiser, 12.0, /*            */ -89.92, 2.0111, 0.3575, 117.35},
-            {Kaiser, 14.0, /*            */ -105.90, 2.1632, 0.3315, 135.06},
+            {kaiser, 0.0, /*             */ -13.26, 1.0000, 1.0000, 20.96},
+            {kaiser, 1.6, /*             */ -16.70, 1.0238, 0.8482, 26.53},
+            {kaiser, 3.0, /*             */ -23.76, 1.1372, 0.6837, 36.88},
+            {kaiser, 4.0, /*             */ -29.98, 1.2476, 0.6032, 45.36},
+            {kaiser, 5.0, /*             */ -36.73, 1.3601, 0.5443, 54.13},
+            {kaiser, 6.0, /*             */ -43.81, 1.4682, 0.4996, 63.02},
+            {kaiser, 7.0, /*             */ -51.12, 1.5705, 0.4642, 72.00},
+            {kaiser, 8.0, /*             */ -58.63, 1.6673, 0.4353, 81.08},
+            {kaiser, 9.0, /*             */ -66.30, 1.7593, 0.4112, 90.26},
+            {kaiser, 10.0, /*            */ -74.10, 1.8469, 0.3908, 99.44},
+            {kaiser, 12.0, /*            */ -89.92, 2.0111, 0.3575, 117.35},
+            {kaiser, 14.0, /*            */ -105.90, 2.1632, 0.3315, 135.06},
 
             // Tukey buys almost nothing in stopband attenuation until alpha is close to one -- 0.0 to 0.75 sits
             // between 21 and 25 dB, because only at exactly 1 does the taper reach the center
-            {Tukey, 0.0, /*              */ -13.26, 1.0000, 1.0000, 20.96},
-            {Tukey, 0.1, /*              */ -13.31, 1.0398, 0.9491, 20.99},
-            {Tukey, 0.25, /*             */ -13.60, 1.1031, 0.8741, 21.15},
-            {Tukey, 0.5, /*              */ -15.12, 1.2234, 0.7493, 22.03},
-            {Tukey, 0.75, /*             */ -19.39, 1.3613, 0.6244, 24.89},
-            {Tukey, 0.9, /*              */ -24.97, 1.4477, 0.5495, 30.05},
-            {Tukey, 1.0, /*              */ -31.47, 1.5015, 0.4995, 43.94},
+            {tukey, 0.0, /*              */ -13.26, 1.0000, 1.0000, 20.96},
+            {tukey, 0.1, /*              */ -13.31, 1.0398, 0.9491, 20.99},
+            {tukey, 0.25, /*             */ -13.60, 1.1031, 0.8741, 21.15},
+            {tukey, 0.5, /*              */ -15.12, 1.2234, 0.7493, 22.03},
+            {tukey, 0.75, /*             */ -19.39, 1.3613, 0.6244, 24.89},
+            {tukey, 0.9, /*              */ -24.97, 1.4477, 0.5495, 30.05},
+            {tukey, 1.0, /*              */ -31.47, 1.5015, 0.4995, 43.94},
 
-            {Gaussian, 0.2, /*           */ -128.86, 2.8237, 0.2504, 151.23},
-            {Gaussian, 0.25, /*          */ -87.74, 2.2592, 0.3130, 106.77},
-            {Gaussian, 0.3, /*           */ -64.23, 1.8857, 0.3753, 84.59},
-            {Gaussian, 0.35, /*          */ -52.12, 1.6272, 0.4364, 69.53},
-            {Gaussian, 0.4, /*           */ -43.30, 1.4468, 0.4947, 59.23},
-            {Gaussian, 0.5, /*           */ -31.92, 1.2334, 0.5977, 45.37},
+            {gaussian, 0.2, /*           */ -128.86, 2.8237, 0.2504, 151.23},
+            {gaussian, 0.25, /*          */ -87.74, 2.2592, 0.3130, 106.77},
+            {gaussian, 0.3, /*           */ -64.23, 1.8857, 0.3753, 84.59},
+            {gaussian, 0.35, /*          */ -52.12, 1.6272, 0.4364, 69.53},
+            {gaussian, 0.4, /*           */ -43.30, 1.4468, 0.4947, 59.23},
+            {gaussian, 0.5, /*           */ -31.92, 1.2334, 0.5977, 45.37},
         });
 
         constexpr std::size_t nFft        = 1UZ << 18;
@@ -1185,7 +1185,7 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
             // The FIR design header states the same attenuation for the windows whose shape is fixed, and
             // designs lengths from it. Nothing else reads the two tables against each other, and they are
             // written independently, so a row that drifts from the other is caught here.
-            if (std::isnan(row.param) && row.window != Exponential) {
+            if (std::isnan(row.param) && row.window != exponential) {
                 expect(approx(gr::filter::fir::design::windowFigures(row.window).attenuationDb, row.attenuationDb, dbTolerance)) << std::format("{} attenuation as the FIR design header tables it", label);
             }
         }
@@ -1193,8 +1193,8 @@ const boost::ut::suite<"FFT algorithms and window functions"> windowTests = [] {
 
     "window corner cases"_test = []<typename T>() {
         static_assert(not magic_enum::enum_cast<gr::algorithm::window::Type>("UnknownWindow", magic_enum::case_insensitive).has_value());
-        expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 1); })) << "invalid Kaiser window size";
-        expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::Kaiser, 2, -1.f); })) << "invalid Kaiser window beta";
+        expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::kaiser, 1); })) << "invalid Kaiser window size";
+        expect(throws<std::invalid_argument>([] { std::ignore = create(gr::algorithm::window::Type::kaiser, 2, -1.f); })) << "invalid Kaiser window beta";
     } | std::tuple<float, double>();
 };
 

@@ -29,7 +29,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
     "double sine matches ToneGenerator directly"_test = [] {
         constexpr float             phase = std::numbers::pi_v<float> / 4.f;
         SignalGeneratorCore<double> core;
-        core.configure(SignalType::Sin, 256.f, 2048.f, phase, 1.f, 2.f, 0);
+        core.configure(SignalType::sin, 256.f, 2048.f, phase, 1.f, 2.f, 0);
 
         gr::signal::ToneGenerator<double> ref;
         ref.configure(gr::signal::ToneType::Sin, 256., 2048., static_cast<double>(phase), 1., 2.);
@@ -41,7 +41,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "double noise matches NoiseGenerator directly"_test = [] {
         SignalGeneratorCore<double> core;
-        core.configure(SignalType::GaussianNoise, 0.f, 0.f, 0.f, 1.f, 0.f, 42);
+        core.configure(SignalType::gaussian_noise, 0.f, 0.f, 0.f, 1.f, 0.f, 42);
 
         gr::signal::NoiseGenerator<double> ref;
         ref.configure(gr::signal::NoiseType::Gaussian, 1., 0., 42);
@@ -53,10 +53,10 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "double fill matches generateSample sequence"_test = [] {
         SignalGeneratorCore<double> core1;
-        core1.configure(SignalType::Saw, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core1.configure(SignalType::saw, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         SignalGeneratorCore<double> core2;
-        core2.configure(SignalType::Saw, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core2.configure(SignalType::saw, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         std::vector<double> filled(50);
         core1.fill(filled);
@@ -71,10 +71,10 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
     "float sine converts from double precision"_test = [] {
         constexpr float            phase = std::numbers::pi_v<float> / 4.f;
         SignalGeneratorCore<float> core;
-        core.configure(SignalType::Sin, 256.f, 2048.f, phase, 1.f, 0.f, 0);
+        core.configure(SignalType::sin, 256.f, 2048.f, phase, 1.f, 0.f, 0);
 
         SignalGeneratorCore<double> ref;
-        ref.configure(SignalType::Sin, 256.f, 2048.f, phase, 1.f, 0.f, 0);
+        ref.configure(SignalType::sin, 256.f, 2048.f, phase, 1.f, 0.f, 0);
 
         for (int i = 0; i < 50; ++i) {
             const float  val    = core.generateSample();
@@ -87,10 +87,10 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "int16_t sine output matches truncated double"_test = [] {
         SignalGeneratorCore<std::int16_t> core;
-        core.configure(SignalType::Sin, 256.f, 2048.f, 0.f, 100.f, 0.f, 0);
+        core.configure(SignalType::sin, 256.f, 2048.f, 0.f, 100.f, 0.f, 0);
 
         SignalGeneratorCore<double> ref;
-        ref.configure(SignalType::Sin, 256.f, 2048.f, 0.f, 100.f, 0.f, 0);
+        ref.configure(SignalType::sin, 256.f, 2048.f, 0.f, 100.f, 0.f, 0);
 
         for (int i = 0; i < 100; ++i) {
             const auto   val      = core.generateSample();
@@ -102,7 +102,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "int8_t clamp at overflow"_test = [] {
         SignalGeneratorCore<std::int8_t> core;
-        core.configure(SignalType::Sin, 256.f, 2048.f, 0.f, 200.f, 0.f, 0);
+        core.configure(SignalType::sin, 256.f, 2048.f, 0.f, 200.f, 0.f, 0);
 
         bool hasMax = false;
         bool hasMin = false;
@@ -123,7 +123,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "uint8_t clamp negative to zero"_test = [] {
         SignalGeneratorCore<std::uint8_t> core;
-        core.configure(SignalType::Sin, 256.f, 2048.f, 0.f, 200.f, 0.f, 0);
+        core.configure(SignalType::sin, 256.f, 2048.f, 0.f, 200.f, 0.f, 0);
 
         bool hasZero = false;
         bool hasMax  = false;
@@ -143,7 +143,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "uint16_t with offset"_test = [] {
         SignalGeneratorCore<std::uint16_t> core;
-        core.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 1000.f, 32768.f, 0);
+        core.configure(SignalType::sin, 100.f, 1000.f, 0.f, 1000.f, 32768.f, 0);
 
         bool inRange = true;
         for (int i = 0; i < 200; ++i) {
@@ -157,7 +157,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "int32_t noise output"_test = [] {
         SignalGeneratorCore<std::int32_t> core;
-        core.configure(SignalType::UniformNoise, 0.f, 0.f, 0.f, 1000.f, 0.f, 42);
+        core.configure(SignalType::uniform_noise, 0.f, 0.f, 0.f, 1000.f, 0.f, 42);
 
         bool hasPositive = false;
         bool hasNegative = false;
@@ -178,7 +178,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "int64_t large amplitude no UB"_test = [] {
         SignalGeneratorCore<std::int64_t> core;
-        core.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 1e18f, 0.f, 0);
+        core.configure(SignalType::sin, 100.f, 1000.f, 0.f, 1e18f, 0.f, 0);
 
         for (int i = 0; i < 100; ++i) {
             const auto val = core.generateSample();
@@ -189,7 +189,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "uint64_t clamp negative values"_test = [] {
         SignalGeneratorCore<std::uint64_t> core;
-        core.configure(SignalType::Sin, 256.f, 2048.f, 0.f, 100.f, 0.f, 0);
+        core.configure(SignalType::sin, 256.f, 2048.f, 0.f, 100.f, 0.f, 0);
 
         bool hasZero = false;
         for (int i = 0; i < 100; ++i) {
@@ -205,7 +205,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "complex<double> sine analytic signal"_test = [] {
         SignalGeneratorCore<std::complex<double>> core;
-        core.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core.configure(SignalType::sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         for (int i = 0; i < 50; ++i) {
             const auto s = core.generateSample();
@@ -215,7 +215,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "complex<float> sine analytic signal"_test = [] {
         SignalGeneratorCore<std::complex<float>> core;
-        core.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 2.f, 0.f, 0);
+        core.configure(SignalType::sin, 100.f, 1000.f, 0.f, 2.f, 0.f, 0);
 
         for (int i = 0; i < 50; ++i) {
             const auto s = core.generateSample();
@@ -225,7 +225,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "complex<double> cos analytic signal"_test = [] {
         SignalGeneratorCore<std::complex<double>> core;
-        core.configure(SignalType::Cos, 100.f, 1000.f, 0.f, 3.f, 0.f, 0);
+        core.configure(SignalType::cos, 100.f, 1000.f, 0.f, 3.f, 0.f, 0);
 
         for (int i = 0; i < 50; ++i) {
             const auto s = core.generateSample();
@@ -235,7 +235,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "complex<double> Gaussian Option B"_test = [] {
         SignalGeneratorCore<std::complex<double>> core;
-        core.configure(SignalType::GaussianNoise, 0.f, 0.f, 0.f, 1.f, 0.f, 88);
+        core.configure(SignalType::gaussian_noise, 0.f, 0.f, 0.f, 1.f, 0.f, 88);
 
         constexpr int N        = 100'000;
         double        powerSum = 0.0;
@@ -248,7 +248,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "complex<double> square has zero imag"_test = [] {
         SignalGeneratorCore<std::complex<double>> core;
-        core.configure(SignalType::Square, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core.configure(SignalType::square, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         for (int i = 0; i < 50; ++i) {
             const auto s = core.generateSample();
@@ -258,10 +258,10 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "complex fillComplex matches generateSample"_test = [] {
         SignalGeneratorCore<std::complex<double>> core1;
-        core1.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core1.configure(SignalType::sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         SignalGeneratorCore<std::complex<double>> core2;
-        core2.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core2.configure(SignalType::sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         std::vector<std::complex<double>> filled(30);
         core1.fill(filled);
@@ -277,7 +277,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "reset restores deterministic state"_test = [] {
         SignalGeneratorCore<double> core;
-        core.configure(SignalType::GaussianNoise, 0.f, 0.f, 0.f, 1.f, 0.f, 55);
+        core.configure(SignalType::gaussian_noise, 0.f, 0.f, 0.f, 1.f, 0.f, 55);
 
         std::vector<double> first(30);
         core.fill(first);
@@ -294,7 +294,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
 
     "tone reset restores waveform"_test = [] {
         SignalGeneratorCore<double> core;
-        core.configure(SignalType::Sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
+        core.configure(SignalType::sin, 100.f, 1000.f, 0.f, 1.f, 0.f, 0);
 
         std::vector<double> first(20);
         core.fill(first);
@@ -310,7 +310,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
     // --- all signal types produce non-zero output ---
 
     "all SignalType values produce non-zero output"_test = [] {
-        for (auto type : {SignalType::Const, SignalType::Sin, SignalType::Cos, SignalType::Square, SignalType::Saw, SignalType::Triangle, SignalType::FastSin, SignalType::FastCos, SignalType::UniformNoise, SignalType::TriangularNoise, SignalType::GaussianNoise}) {
+        for (auto type : {SignalType::constant, SignalType::sin, SignalType::cos, SignalType::square, SignalType::saw, SignalType::triangle, SignalType::fast_sin, SignalType::fast_cos, SignalType::uniform_noise, SignalType::triangular_noise, SignalType::gaussian_noise}) {
             SignalGeneratorCore<double> core;
             core.configure(type, 100.f, 1000.f, 0.f, 1.f, 0.f, 42);
             bool hasNonZero = false;
@@ -325,7 +325,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
     };
 
     "all SignalType values work with int16"_test = [] {
-        for (auto type : {SignalType::Const, SignalType::Sin, SignalType::Cos, SignalType::Square, SignalType::Saw, SignalType::Triangle, SignalType::FastSin, SignalType::FastCos, SignalType::UniformNoise, SignalType::TriangularNoise, SignalType::GaussianNoise}) {
+        for (auto type : {SignalType::constant, SignalType::sin, SignalType::cos, SignalType::square, SignalType::saw, SignalType::triangle, SignalType::fast_sin, SignalType::fast_cos, SignalType::uniform_noise, SignalType::triangular_noise, SignalType::gaussian_noise}) {
             SignalGeneratorCore<std::int16_t> core;
             core.configure(type, 100.f, 1000.f, 0.f, 100.f, 0.f, 42);
             bool hasNonZero = false;
@@ -342,7 +342,7 @@ const boost::ut::suite signalGeneratorCoreTests = [] {
     };
 
     "all SignalType values work with complex<double>"_test = [] {
-        for (auto type : {SignalType::Const, SignalType::Sin, SignalType::Cos, SignalType::Square, SignalType::Saw, SignalType::Triangle, SignalType::FastSin, SignalType::FastCos, SignalType::UniformNoise, SignalType::TriangularNoise, SignalType::GaussianNoise}) {
+        for (auto type : {SignalType::constant, SignalType::sin, SignalType::cos, SignalType::square, SignalType::saw, SignalType::triangle, SignalType::fast_sin, SignalType::fast_cos, SignalType::uniform_noise, SignalType::triangular_noise, SignalType::gaussian_noise}) {
             SignalGeneratorCore<std::complex<double>> core;
             core.configure(type, 100.f, 1000.f, 0.f, 1.f, 0.f, 42);
             bool hasNonZero = false;

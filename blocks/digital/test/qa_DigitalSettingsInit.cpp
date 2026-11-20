@@ -48,7 +48,7 @@ using gr::testing::OffDefault;
         {"phase_offset", 0.1f},
         {"label_xor", gr::Size_t{1U}},
         {"points", std::vector<float>{1.f, 0.f, -1.f, 0.f}},
-        {"normalization", std::string("Amplitude")},
+        {"normalization", std::string("amplitude")},
     };
 }
 
@@ -96,33 +96,33 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
                                                                                                                                                         });
         expect(packet.empty()) << failuresOf(packet);
         expectInitializes<PacketFramer<std::uint8_t>>({{"max_payload_items", gr::Size_t{64U}}, {"header_format", std::string("fixed_length")}, {"fixed_payload_items", gr::Size_t{8U}}}, "a fixed-length packet framer");
-        expectInitializes<PacketFramer<std::uint8_t>>({{"max_payload_items", gr::Size_t{64U}}, {"header_format", std::string("length_plain")}, {"length_bits", gr::Size_t{16U}}, {"byte_order", std::string("Little")}, {"count_covers", std::string("Payload")}, {"count_unit_items", gr::Size_t{1U}}, {"check_items", gr::Size_t{2U}}}, "a plain-length packet framer");
-        expectInitializes<PacketFramer<std::uint8_t>>({{"max_payload_items", gr::Size_t{64U}}, {"header_format", std::string("length_golay24")}, {"length_bits", gr::Size_t{12U}}, {"flags_position", std::string("Low")}, {"count_covers", std::string("WholeFrame")}, {"frame_prefix_items", gr::Size_t{4U}}}, "a Golay-header packet framer");
+        expectInitializes<PacketFramer<std::uint8_t>>({{"max_payload_items", gr::Size_t{64U}}, {"header_format", std::string("length_plain")}, {"length_bits", gr::Size_t{16U}}, {"byte_order", std::string("little")}, {"count_covers", std::string("payload")}, {"count_unit_items", gr::Size_t{1U}}, {"check_items", gr::Size_t{2U}}}, "a plain-length packet framer");
+        expectInitializes<PacketFramer<std::uint8_t>>({{"max_payload_items", gr::Size_t{64U}}, {"header_format", std::string("length_golay24")}, {"length_bits", gr::Size_t{12U}}, {"flags_position", std::string("low")}, {"count_covers", std::string("whole_frame")}, {"frame_prefix_items", gr::Size_t{4U}}}, "a Golay-header packet framer");
 
         const std::vector<std::string> length = gr::testing::requiredInitFailures<LengthHeaderFramer>({{"max_payload_items", gr::Size_t{64U}}}, {
                                                                                                                                                     {"sync_word", std::string("0101")},
                                                                                                                                                     {"header_format", std::string("length_repeated")},
                                                                                                                                                     {"max_payload_items", gr::Size_t{64U}},
                                                                                                                                                     {"payload_pack_bits", gr::Size_t{8U}},
-                                                                                                                                                    {"payload_bit_order", std::string("LsbFirst")},
+                                                                                                                                                    {"payload_bit_order", std::string("lsb_first")},
                                                                                                                                                 });
         expect(length.empty()) << failuresOf(length);
         expectInitializes<LengthHeaderFramer>({{"header_format", std::string("fixed_length")}, {"fixed_payload_items", gr::Size_t{8U}}, {"max_payload_items", gr::Size_t{64U}}}, "a fixed-length framer");
-        expectInitializes<LengthHeaderFramer>({{"header_format", std::string("length_plain")}, {"length_bits", gr::Size_t{16U}}, {"byte_order", std::string("Little")}, {"count_covers", std::string("Payload")}, {"count_unit_items", gr::Size_t{1U}}, {"check_items", gr::Size_t{2U}}, {"max_payload_items", gr::Size_t{64U}}}, "a plain-length framer");
-        expectInitializes<LengthHeaderFramer>({{"header_format", std::string("length_golay24")}, {"length_bits", gr::Size_t{12U}}, {"flags_position", std::string("Low")}, {"count_covers", std::string("WholeFrame")}, {"frame_prefix_items", gr::Size_t{4U}}, {"max_payload_items", gr::Size_t{64U}}}, "a Golay-header framer");
+        expectInitializes<LengthHeaderFramer>({{"header_format", std::string("length_plain")}, {"length_bits", gr::Size_t{16U}}, {"byte_order", std::string("little")}, {"count_covers", std::string("payload")}, {"count_unit_items", gr::Size_t{1U}}, {"check_items", gr::Size_t{2U}}, {"max_payload_items", gr::Size_t{64U}}}, "a plain-length framer");
+        expectInitializes<LengthHeaderFramer>({{"header_format", std::string("length_golay24")}, {"length_bits", gr::Size_t{12U}}, {"flags_position", std::string("low")}, {"count_covers", std::string("whole_frame")}, {"frame_prefix_items", gr::Size_t{4U}}, {"max_payload_items", gr::Size_t{64U}}}, "a Golay-header framer");
     };
 
     "the delimiter blocks"_test = [] {
         const std::vector<std::string> extractor = gr::testing::requiredInitFailures<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("01111110")}, {"max_payload_items", gr::Size_t{64U}}}, {
                                                                                                                                                                                                                  {"end_delimiter", std::string("01111110")},
-                                                                                                                                                                                                                 {"frame_open", std::string("Immediate")},
+                                                                                                                                                                                                                 {"frame_open", std::string("immediate")},
                                                                                                                                                                                                                  {"bits_per_item", gr::Size_t{2U}},
-                                                                                                                                                                                                                 {"bit_order", std::string("LsbFirst")},
-                                                                                                                                                                                                                 {"transparency", std::string("BitStuffing")},
+                                                                                                                                                                                                                 {"bit_order", std::string("lsb_first")},
+                                                                                                                                                                                                                 {"transparency", std::string("bit_stuffing")},
                                                                                                                                                                                                                  {"max_payload_items", gr::Size_t{64U}},
                                                                                                                                                                                                                  {"min_payload_items", gr::Size_t{2U}},
                                                                                                                                                                                                                  {"payload_pack_bits", gr::Size_t{8U}},
-                                                                                                                                                                                                                 {"payload_bit_order", std::string("LsbFirst")},
+                                                                                                                                                                                                                 {"payload_bit_order", std::string("lsb_first")},
                                                                                                                                                                                                                  {"trigger", std::string("sync")},
                                                                                                                                                                                                                  {"trigger_resets", false},
                                                                                                                                                                                                                  {"frame_label", std::string("frame")},
@@ -133,19 +133,19 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
                                                                                                                                                                                                                  {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}},
                                                                                                                                                                                                              });
         expect(extractor.empty()) << failuresOf(extractor);
-        expectInitializes<DelimiterExtractor<std::uint8_t>>({{"frame_open", std::string("Start")}, {"start_delimiter", std::string("0111")}, {"end_delimiter", std::string("01111110")}, {"max_payload_items", gr::Size_t{64U}}}, "an extractor with a start delimiter");
-        expectInitializes<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("01111110")}, {"transparency", std::string("BitStuffing")}, {"stuff_after_ones", gr::Size_t{4U}}, {"abort_ones", gr::Size_t{8U}}, {"max_payload_items", gr::Size_t{64U}}}, "an extractor's bit stuffing");
-        expectInitializes<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8U}}, {"transparency", std::string("ByteEscape")}, {"escape_item", gr::Size_t{0xDBU}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{64U}}}, "an extractor's byte escaping");
+        expectInitializes<DelimiterExtractor<std::uint8_t>>({{"frame_open", std::string("start")}, {"start_delimiter", std::string("0111")}, {"end_delimiter", std::string("01111110")}, {"max_payload_items", gr::Size_t{64U}}}, "an extractor with a start delimiter");
+        expectInitializes<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"stuff_after_ones", gr::Size_t{4U}}, {"abort_ones", gr::Size_t{8U}}, {"max_payload_items", gr::Size_t{64U}}}, "an extractor's bit stuffing");
+        expectInitializes<DelimiterExtractor<std::uint8_t>>({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8U}}, {"transparency", std::string("byte_escape")}, {"escape_item", gr::Size_t{0xDBU}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{64U}}}, "an extractor's byte escaping");
 
         const std::vector<std::string> framer = gr::testing::requiredInitFailures<DelimiterFramer>({{"end_delimiter", std::string("01111110")}, {"max_payload_items", gr::Size_t{64U}}}, {
                                                                                                                                                                                              {"end_delimiter", std::string("01111110")},
-                                                                                                                                                                                             {"frame_open", std::string("Immediate")},
+                                                                                                                                                                                             {"frame_open", std::string("immediate")},
                                                                                                                                                                                              {"bits_per_item", gr::Size_t{2U}},
-                                                                                                                                                                                             {"bit_order", std::string("LsbFirst")},
-                                                                                                                                                                                             {"transparency", std::string("BitStuffing")},
+                                                                                                                                                                                             {"bit_order", std::string("lsb_first")},
+                                                                                                                                                                                             {"transparency", std::string("bit_stuffing")},
                                                                                                                                                                                              {"max_payload_items", gr::Size_t{64U}},
                                                                                                                                                                                              {"payload_pack_bits", gr::Size_t{8U}},
-                                                                                                                                                                                             {"payload_bit_order", std::string("LsbFirst")},
+                                                                                                                                                                                             {"payload_bit_order", std::string("lsb_first")},
                                                                                                                                                                                              {"start_delimiter", std::string("0111")},
                                                                                                                                                                                              {"stuff_after_ones", gr::Size_t{4U}},
                                                                                                                                                                                              {"abort_ones", gr::Size_t{8U}},
@@ -153,36 +153,36 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
                                                                                                                                                                                              {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}},
                                                                                                                                                                                          });
         expect(framer.empty()) << failuresOf(framer);
-        expectInitializes<DelimiterFramer>({{"frame_open", std::string("Start")}, {"start_delimiter", std::string("0111")}, {"end_delimiter", std::string("01111110")}, {"max_payload_items", gr::Size_t{64U}}}, "a framer with a start delimiter");
-        expectInitializes<DelimiterFramer>({{"end_delimiter", std::string("01111110")}, {"transparency", std::string("BitStuffing")}, {"stuff_after_ones", gr::Size_t{4U}}, {"abort_ones", gr::Size_t{8U}}, {"max_payload_items", gr::Size_t{64U}}}, "a framer's bit stuffing");
-        expectInitializes<DelimiterFramer>({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8U}}, {"transparency", std::string("ByteEscape")}, {"escape_item", gr::Size_t{0xDBU}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{64U}}}, "a framer's byte escaping");
+        expectInitializes<DelimiterFramer>({{"frame_open", std::string("start")}, {"start_delimiter", std::string("0111")}, {"end_delimiter", std::string("01111110")}, {"max_payload_items", gr::Size_t{64U}}}, "a framer with a start delimiter");
+        expectInitializes<DelimiterFramer>({{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"stuff_after_ones", gr::Size_t{4U}}, {"abort_ones", gr::Size_t{8U}}, {"max_payload_items", gr::Size_t{64U}}}, "a framer's bit stuffing");
+        expectInitializes<DelimiterFramer>({{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8U}}, {"transparency", std::string("byte_escape")}, {"escape_item", gr::Size_t{0xDBU}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", gr::Size_t{64U}}}, "a framer's byte escaping");
     };
 
     "the bit and symbol blocks"_test = [] {
-        const std::vector<OffDefault> packing{{"k", gr::Size_t{4U}}, {"bit_order", std::string("LsbFirst")}, {"flush_partial", false}};
+        const std::vector<OffDefault> packing{{"k", gr::Size_t{4U}}, {"bit_order", std::string("lsb_first")}, {"flush_partial", false}};
         expect(gr::testing::initFailures<PackBits>(packing).empty());
         expect(gr::testing::initFailures<UnpackBits>(packing).empty());
-        const std::vector<OffDefault> repacking{{"bits_in", gr::Size_t{2U}}, {"bits_out", gr::Size_t{4U}}, {"input_bit_order", std::string("LsbFirst")}, {"output_bit_order", std::string("LsbFirst")}};
+        const std::vector<OffDefault> repacking{{"bits_in", gr::Size_t{2U}}, {"bits_out", gr::Size_t{4U}}, {"input_bit_order", std::string("lsb_first")}, {"output_bit_order", std::string("lsb_first")}};
         expect(gr::testing::initFailures<RepackBits>(with(repacking, {{"flush_partial", false}})).empty());
         expect(gr::testing::initFailures<RecordRepackBits>(repacking).empty());
 
-        const std::vector<OffDefault> coding{{"modulus", gr::Size_t{4U}}, {"coding", std::string("Nrzi")}, {"initial_state", gr::Size_t{1U}}};
+        const std::vector<OffDefault> coding{{"modulus", gr::Size_t{4U}}, {"coding", std::string("nrzi")}, {"initial_state", gr::Size_t{1U}}};
         expect(gr::testing::initFailures<DifferentialEncoder<std::uint8_t>>(coding).empty());
         expect(gr::testing::initFailures<DifferentialDecoder<std::uint8_t>>(coding).empty());
         expect(gr::testing::initFailures<DifferentialPhasor<float>>({}).empty());
 
-        expect(gr::testing::requiredInitFailures<ManchesterEncoder>({{"convention", std::string("Ieee8023")}}, {{"convention", std::string("GeThomas")}, {"bits_per_item", gr::Size_t{4U}}, {"bit_order", std::string("LsbFirst")}}).empty());
-        const std::vector<std::string> decoder = gr::testing::requiredInitFailures<ManchesterDecoder>({{"convention", std::string("Ieee8023")}}, {
-                                                                                                                                                      {"convention", std::string("GeThomas")},
+        expect(gr::testing::requiredInitFailures<ManchesterEncoder>({{"convention", std::string("ieee802_3")}}, {{"convention", std::string("ge_thomas")}, {"bits_per_item", gr::Size_t{4U}}, {"bit_order", std::string("lsb_first")}}).empty());
+        const std::vector<std::string> decoder = gr::testing::requiredInitFailures<ManchesterDecoder>({{"convention", std::string("ieee802_3")}}, {
+                                                                                                                                                      {"convention", std::string("ge_thomas")},
                                                                                                                                                       {"bits_per_item", gr::Size_t{4U}},
-                                                                                                                                                      {"bit_order", std::string("LsbFirst")},
+                                                                                                                                                      {"bit_order", std::string("lsb_first")},
                                                                                                                                                       {"chip_phase", gr::Size_t{1U}},
                                                                                                                                                       {"align_tag_key", std::string("sync")},
                                                                                                                                                       {"align_tag_value", std::string("frame")},
                                                                                                                                                       {"flush_partial", false},
                                                                                                                                                   });
         expect(decoder.empty()) << failuresOf(decoder);
-        expect(gr::testing::initFailures<ManchesterCombine>({{"input", std::string("Chips")}, {"averaging_symbols", gr::Size_t{128U}}, {"hold_symbols", gr::Size_t{32U}}, {"phase", std::string("odd")}}).empty());
+        expect(gr::testing::initFailures<ManchesterCombine>({{"input", std::string("chips")}, {"averaging_symbols", gr::Size_t{128U}}, {"hold_symbols", gr::Size_t{32U}}, {"phase", std::string("odd")}}).empty());
 
         expect(gr::testing::initFailures<LevelTracker<float>>({{"n_levels", gr::Size_t{8U}}, {"spread_rate", 0.02}, {"offset_rate", 0.2}, {"spread_limit", 0.1}}).empty());
         expect(gr::testing::initFailures<PamSlicer<float>>({{"n_levels", gr::Size_t{8U}}, {"labels", std::vector<gr::Size_t>{3U, 2U, 0U, 1U}}}).empty());
@@ -193,7 +193,7 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
         const std::vector<std::string> additive = gr::testing::requiredInitFailures<AdditiveScrambler<std::uint8_t>>({{"taps", std::string("1,3,5,8")}, {"seed", std::string("11111111")}}, {
                                                                                                                                                                                                 {"sequence_repeat", false},
                                                                                                                                                                                                 {"bits_per_item", gr::Size_t{1U}},
-                                                                                                                                                                                                {"bit_order", std::string("LsbFirst")},
+                                                                                                                                                                                                {"bit_order", std::string("lsb_first")},
                                                                                                                                                                                                 {"reset_tag_key", std::string("sync")},
                                                                                                                                                                                                 {"reset_tag_value", std::string("frame")},
                                                                                                                                                                                                 {"reset_period", gr::Size_t{100U}},
@@ -206,7 +206,7 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
         const std::vector<OffDefault> multiplicative{
             {"seed", std::string("00000000000000000000001")},
             {"bits_per_item", gr::Size_t{1U}},
-            {"bit_order", std::string("LsbFirst")},
+            {"bit_order", std::string("lsb_first")},
             {"invert_output", true},
             {"reset_tag_key", std::string("sync")},
             {"reset_tag_value", std::string("frame")},
@@ -226,14 +226,14 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
         expect(decoder.empty()) << failuresOf(decoder);
         const std::vector<std::string> encoder = gr::testing::initFailures<ConstellationEncoder<float>>(constellationSettings());
         expect(encoder.empty()) << failuresOf(encoder);
-        const std::vector<std::string> soft = gr::testing::initFailures<ConstellationSoftDecoder<float>>(with(constellationSettings(), {{"noise_power", 0.5f}, {"soft_algorithm", std::string("Exact")}}));
+        const std::vector<std::string> soft = gr::testing::initFailures<ConstellationSoftDecoder<float>>(with(constellationSettings(), {{"noise_power", 0.5f}, {"soft_algorithm", std::string("exact")}}));
         expect(soft.empty()) << failuresOf(soft);
         expect(gr::testing::initFailures<SymbolMap>({{"map", std::vector<std::uint8_t>{1U, 0U}}}).empty());
 
         const std::vector<std::string> cpm = gr::testing::initFailures<CpmModulate<float>>({
             {"modulation_index", 1.0},
             {"samples_per_symbol", gr::Size_t{4U}},
-            {"pulse", std::string("RaisedCosine")},
+            {"pulse", std::string("raised_cosine")},
             {"pulse_length", gr::Size_t{2U}},
             {"bt", 0.5},
             {"amplitude", 2.0f},
@@ -242,7 +242,7 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
 
         const std::vector<std::string> equalizer = gr::testing::initFailures<LinearEqualizer<float>>(with(constellationSettings(), {
                                                                                                                                        {"num_taps", gr::Size_t{7U}},
-                                                                                                                                       {"algorithm", std::string("Nlms")},
+                                                                                                                                       {"algorithm", std::string("nlms")},
                                                                                                                                        {"step_size", 0.05},
                                                                                                                                        {"samples_per_symbol", gr::Size_t{2U}},
                                                                                                                                        {"training_sequence", std::vector<float>{1.f, 0.f, -1.f, 0.f}},
@@ -264,7 +264,7 @@ const boost::ut::suite<"digital settings at the initialization"> digitalInitTest
             {"final_xor", std::uint64_t{0ULL}},
             {"input_reflected", false},
             {"result_reflected", false},
-            {"crc_byte_order", std::string("Little")},
+            {"crc_byte_order", std::string("little")},
             {"skip_header_bytes", gr::Size_t{2U}},
         };
         const std::vector<std::string> append = gr::testing::initFailures<CrcAppend>(crc);
