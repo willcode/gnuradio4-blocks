@@ -34,8 +34,7 @@ std::vector<CF> makeQpsk() {
 
 CostasLoop make(gr::Size_t order, bool soft) {
     CostasLoop block({{"order", order}, {"soft_decisions", soft}, {"detector_gain", 1.41421356}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

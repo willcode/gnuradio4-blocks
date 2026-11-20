@@ -25,6 +25,7 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/sync/SymbolSync.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 // The interpolator's normal equations, its response accuracy and its differentiator belong to
@@ -115,8 +116,7 @@ struct ValueSink : gr::Block<ValueSink<T>> {
 template<typename T>
 [[nodiscard]] SymbolSync<T> make(gr::property_map settings = {}) {
     SymbolSync<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -326,26 +326,33 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
     };
 
     "degenerate parameters throw"_test = [] {
-        expect(throws([] { std::ignore = make<CF>({{"samples_per_symbol", 1.0}}); })) << "samples_per_symbol must exceed 1";
-        expect(throws([] { std::ignore = make<CF>({{"samples_per_symbol", 0.5}}); })) << "nor below it";
-        expect(throws([] { std::ignore = make<CF>({{"outputs_per_symbol", gr::Size_t(0)}}); })) << "outputs_per_symbol must be positive";
-        expect(throws([] { std::ignore = make<CF>({{"samples_per_symbol", 4.0}, {"max_deviation", 4.0}}); })) << "a deviation that reaches sps allows a non-positive period";
-        expect(throws([] { std::ignore = make<CF>({{"detector_gain", -1.0}}); })) << "a negative gain is a sign error";
-        expect(throws([] { std::ignore = make<CF>({{"detector", std::string("Gardner")}, {"rolloff", 0.0}}); })) << "a blind detector has no gain without excess bandwidth";
-        expect(throws([] { std::ignore = make<CF>({{"detector", std::string("SignalTimesSlopeMl")}, {"rolloff", 0.0}}); })) << "nor has the maximum-likelihood form";
-        expect(throws([] { std::ignore = make<CF>({{"interpolator", std::string("cubic")}}); })) << "an unknown interpolator name";
-        expect(throws([] { std::ignore = make<CF>({{"constellation", std::string("8psk")}}); })) << "an unknown constellation";
-        expect(throws([] { std::ignore = make<float>({{"constellation", std::string("qpsk")}}); })) << "a real stream cannot carry qpsk";
-        expect(throws([] { std::ignore = make<CF>({{"detector", std::string("SignalTimesSlopeMl")}, {"detector_gain", 1.0}, {"interpolator", std::string("polyphase")}}); })) << "the polyphase path has no differentiator";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"samples_per_symbol", 1.0}})) << "samples_per_symbol must exceed 1";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"samples_per_symbol", 0.5}})) << "nor below it";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"outputs_per_symbol", gr::Size_t(0)}})) << "outputs_per_symbol must be positive";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"samples_per_symbol", 4.0}, {"max_deviation", 4.0}})) << "a deviation that reaches sps allows a non-positive period";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector_gain", -1.0}})) << "a negative gain is a sign error";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("Gardner")}, {"rolloff", 0.0}})) << "a blind detector has no gain without excess bandwidth";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("SignalTimesSlopeMl")}, {"rolloff", 0.0}})) << "nor has the maximum-likelihood form";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"interpolator", std::string("cubic")}})) << "an unknown interpolator name";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"constellation", std::string("8psk")}})) << "an unknown constellation";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<float>>({{"constellation", std::string("qpsk")}})) << "a real stream cannot carry qpsk";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", std::string("SignalTimesSlopeMl")}, {"detector_gain", 1.0}, {"interpolator", std::string("polyphase")}})) << "the polyphase path has no differentiator";
 
-        expect(nothrow([] { std::ignore = make<CF>({{"samples_per_symbol", 4.0}, {"max_deviation", 3.999}}); })) << "just inside the bound is legal";
+        expect(!gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"samples_per_symbol", 4.0}, {"max_deviation", 3.999}})) << "just inside the bound is legal";
+    };
+
+    "a refusal names the key the call changed"_test = [] {
+        SymbolSync<CF>               block   = make<CF>({{"detector", std::string("Gardner")}, {"rolloff", 0.35}});
+        const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"rolloff", 0.0}});
+        expect(fatal(eq(refused.size(), 1UZ))) << "a blind detector has no gain without excess bandwidth";
+        expect(eq(refused.front().key, std::string("rolloff"))) << "the detector the call left alone is not refused";
     };
 
     "every detector starts on the rolloff alone"_test = [] {
         // Each name takes its gain from the raised-cosine channel the `rolloff` setting describes, so a graph that
         // names a detector and shapes with a matching root-raised cosine needs no `detector_gain` at all.
         for (std::string name : {"MuellerMuller", "ModifiedMuellerMuller", "ZeroCrossing", "Gardner", "EarlyLate", "SignalTimesSlopeMl", "SignumTimesSlopeMl"}) {
-            expect(nothrow([&name] { std::ignore = make<CF>({{"detector", name}}); })) << name << " starts without an explicit gain";
+            expect(!gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"detector", name}})) << name << " starts without an explicit gain";
         }
     };
 
@@ -689,8 +696,8 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         const double error = meanPamError(std::span<const float>(tracked.samples), tracked.samples.size() - 2000UZ);
         expect(lt(error, 0.1)) << "the four-level output slices, mean distance " << error;
 
-        expect(throws([] { std::ignore = make<CF>({{"constellation", std::string("pam4")}}); })) << "pam4 refuses a complex stream";
-        expect(throws([] { std::ignore = make<float>({{"constellation", std::string("qpsk")}}); })) << "qpsk still refuses a real one";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"constellation", std::string("pam4")}})) << "pam4 refuses a complex stream";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<float>>({{"constellation", std::string("qpsk")}})) << "qpsk still refuses a real one";
     };
 
     "the symbol instant comes first and the side ports repeat across the group"_test = [] {
@@ -802,8 +809,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         const double   before = block.loop().frequency();
         expect(gt(first.samples.size(), 600UZ));
 
-        std::ignore = block.settings().setStaged({{"samples_per_symbol", 5.0}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"samples_per_symbol", 5.0}});
         expect(lt(std::abs(block.loop().frequency() - 5.0), 1e-12)) << "the tracked period restarts at the new nominal, was " << before;
         expect(eq(block._positioned, true)) << "and the stream position is not restarted";
 
@@ -843,9 +849,9 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
 
         // arity 2 is the binary decision a real stream carries, and a width the detectors cannot slice is refused
         // rather than sliced wrongly
-        expect(nothrow([] { std::ignore = make<float>({{"constellation", std::string("psk")}, {"arity", gr::Size_t{2}}}); }));
-        expect(throws([] { std::ignore = make<CF>({{"constellation", std::string("psk")}, {"arity", gr::Size_t{8}}}); })) << "8-PSK has no hard decision here";
-        expect(throws([] { std::ignore = make<CF>({{"constellation", std::string("qam")}, {"arity", gr::Size_t{16}}}); })) << "the shared names this slicer cannot carry are refused, not ignored";
+        expect(!gr::testing::initRefused<gr::blocks::sync::SymbolSync<float>>({{"constellation", std::string("psk")}, {"arity", gr::Size_t{2}}}));
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"constellation", std::string("psk")}, {"arity", gr::Size_t{8}}})) << "8-PSK has no hard decision here";
+        expect(gr::testing::initRefused<gr::blocks::sync::SymbolSync<CF>>({{"constellation", std::string("qam")}, {"arity", gr::Size_t{16}}})) << "the shared names this slicer cannot carry are refused, not ignored";
     };
 
     "under a scheduler the symbol count is the stream's, not the chunking's"_test = [] {
@@ -981,9 +987,9 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
             // One sample reaches the windows that hold it and then the detector's two-symbol history.
             const std::size_t reach = block.windowLength() / 4UZ + 2UZ;
             expect(eq(tracked.samples.size(), plain.samples.size())) << "the NaN at " << at << " costs no symbol";
-            expect(gt(static_cast<std::size_t>(block.non_finite_errors.value), 0UZ)) << "the NaN at " << at << " reaches the detector";
-            expect(le(static_cast<std::size_t>(block.non_finite_errors.value), reach)) << "and only the symbols whose window or history holds it";
-            expect(eq(static_cast<std::size_t>(block.period_resets.value), 0UZ));
+            expect(gt(static_cast<std::size_t>(block.status.non_finite_errors.value), 0UZ)) << "the NaN at " << at << " reaches the detector";
+            expect(le(static_cast<std::size_t>(block.status.non_finite_errors.value), reach)) << "and only the symbols whose window or history holds it";
+            expect(eq(static_cast<std::size_t>(block.status.period_resets.value), 0UZ));
             expect(le(static_cast<std::size_t>(std::ranges::count_if(tracked.samples, [](CF s) { return !std::isfinite(s.real()); })), block.windowLength() / 4UZ)) << "a NaN output only where the window holds the NaN";
             expect(std::ranges::all_of(tracked.aux[1], [](float p) { return std::isfinite(p); })) << "the instant period stays finite, NaN at " << at;
             expect(std::ranges::all_of(tracked.aux[2], [](float p) { return std::isfinite(p); })) << "and the loop's period with it";
@@ -1008,8 +1014,8 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         SymbolSync<CF> block   = make<CF>({{"samples_per_symbol", 4.0}});
         const auto     tracked = drive<CF>(block, std::span<const CF>(infinite));
         expect(eq(tracked.samples.size(), reference.samples.size())) << "the infinite stream yields the silent stream's symbol count";
-        expect(eq(static_cast<std::size_t>(block.non_finite_errors.value), tracked.samples.size())) << "every symbol's error is non-finite and counted";
-        expect(eq(static_cast<std::size_t>(block.period_resets.value), 0UZ));
+        expect(eq(static_cast<std::size_t>(block.status.non_finite_errors.value), tracked.samples.size())) << "every symbol's error is non-finite and counted";
+        expect(eq(static_cast<std::size_t>(block.status.period_resets.value), 0UZ));
         expect(eq(block.loop().frequency(), 4.0)) << "the loop holds the frequency it started at";
         expect(std::ranges::all_of(tracked.aux[0], [](float e) { return e == 0.f; })) << "the error port carries 0 for a symbol the loop skipped";
         expect(std::ranges::all_of(tracked.aux[1], [](float p) { return p == 4.f; })) << "and the instant period is the nominal one";
@@ -1023,9 +1029,9 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
 
         SymbolSync<CF> block   = make<CF>({{"samples_per_symbol", 4.0}});
         const auto     tracked = drive<CF>(block, std::span<const CF>(dirty));
-        expect(gt(static_cast<std::size_t>(block.clipped_errors.value), 0UZ)) << "the oversized error is clipped and counted";
-        expect(eq(static_cast<std::size_t>(block.non_finite_errors.value), 0UZ)) << "the error itself is finite";
-        expect(eq(static_cast<std::size_t>(block.period_resets.value), 0UZ)) << "the clipped error keeps the period inside the bound";
+        expect(gt(static_cast<std::size_t>(block.status.clipped_errors.value), 0UZ)) << "the oversized error is clipped and counted";
+        expect(eq(static_cast<std::size_t>(block.status.non_finite_errors.value), 0UZ)) << "the error itself is finite";
+        expect(eq(static_cast<std::size_t>(block.status.period_resets.value), 0UZ)) << "the clipped error keeps the period inside the bound";
         expect(gt(tracked.samples.size(), 2900UZ)) << "the stream runs on past the sample";
         expect(lt(meanErrorVector(std::span<const CF>(tracked.samples), tracked.samples.size() - 500UZ), 0.01)) << "and the output after it slices";
 
@@ -1033,7 +1039,7 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         SymbolSync<CF> loose   = make<CF>({{"samples_per_symbol", 4.0}, {"detector_gain", 0.01}});
         const auto     reset   = drive<CF>(loose, std::span<const CF>(dirty));
         const double   ceiling = 2.0 * loose.loop().maxFrequency();
-        expect(gt(static_cast<std::size_t>(loose.period_resets.value), 0UZ)) << "the oversized period is reset and counted";
+        expect(gt(static_cast<std::size_t>(loose.status.period_resets.value), 0UZ)) << "the oversized period is reset and counted";
         expect(gt(reset.samples.size(), 2000UZ)) << "the stream runs on past the sample";
         expect(std::ranges::all_of(reset.aux[1], [ceiling](float p) { return p > 0.f && static_cast<double>(p) <= ceiling; })) << "every instant period is positive and at most twice the clamp's upper bound";
         expect(le(loose.loop().frequency(), loose.loop().maxFrequency())) << "the loop's frequency stays inside its clamp";
@@ -1051,10 +1057,34 @@ const boost::ut::suite<"SymbolSync"> symbolSyncTests = [] {
         SymbolSync<CF> block   = make<CF>({{"samples_per_symbol", 4.0}, {"detector", std::string("Gardner")}});
         const auto     tracked = drive<CF>(block, std::span<const CF>(dirty));
         expect(eq(tracked.samples.size(), plain.samples.size())) << "the sample costs no symbol";
-        expect(gt(static_cast<std::size_t>(block.clipped_errors.value), 0UZ)) << "the sample's errors are clipped and counted";
-        expect(eq(static_cast<std::size_t>(reference.clipped_errors.value), 0UZ)) << "the clean run clips nothing";
-        expect(eq(static_cast<std::size_t>(block.period_resets.value), 0UZ));
+        expect(gt(static_cast<std::size_t>(block.status.clipped_errors.value), 0UZ)) << "the sample's errors are clipped and counted";
+        expect(eq(static_cast<std::size_t>(reference.status.clipped_errors.value), 0UZ)) << "the clean run clips nothing";
+        expect(eq(static_cast<std::size_t>(block.status.period_resets.value), 0UZ));
         expect(lt(meanErrorVector(std::span<const CF>(tracked.samples), tracked.samples.size() - 500UZ), 0.01)) << "the output after the sample slices";
+    };
+};
+
+const boost::ut::suite<"SymbolSync settings at the initialization"> symbolSyncInitTests = [] {
+    using namespace boost::ut;
+
+    "SymbolSync initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::SymbolSync<std::complex<float>>>({
+            {"samples_per_symbol", 8.0},
+            {"max_deviation", 1.0},
+            {"outputs_per_symbol", gr::Size_t{2U}},
+            {"detector", std::string("Gardner")},
+            {"constellation", std::string("bpsk")},
+            {"arity", gr::Size_t{2U}},
+            {"detector_gain", 1.0},
+            {"noise_bandwidth", 0.02},
+            {"damping", 0.8},
+            {"interpolator", std::string("mmse6")},
+            {"polyphase_arms", gr::Size_t{64U}},
+            {"rolloff", 0.5},
+            {"trigger", std::string("sync")},
+            {"trigger_presets", false},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

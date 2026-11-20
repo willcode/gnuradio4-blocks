@@ -6,6 +6,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <random>
@@ -16,6 +17,7 @@
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/sync/CostasLoop.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 // The S-curves, their slopes and the clipping onsets are evaluated in double against the same error law the block
@@ -38,8 +40,7 @@ constexpr double kBandwidth = 0.01;
 
 template<typename TBlock>
 void configure(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
 }
 
 CostasLoop makeCostas(gr::property_map settings = {}) {
@@ -242,11 +243,11 @@ const boost::ut::suite<"CostasLoop"> costasTests = [] {
     };
 
     "degenerate settings are refused rather than silently reinterpreted"_test = [] {
-        expect(throws([] { std::ignore = makeCostas({{"order", gr::Size_t(3)}}); })) << "an order with no law";
-        expect(throws([] { std::ignore = makeCostas({{"detector_gain", 0.0}}); })) << "a zero detector gain";
-        expect(throws([] { std::ignore = makeCostas({{"error_limit", -1.0}}); })) << "a negative error limit";
-        expect(throws([] { std::ignore = makeCostas({{"noise_power", 0.0}}); })) << "a zero noise power";
-        expect(throws([] { std::ignore = makeCostas({{"min_frequency", 1.f}, {"max_frequency", -1.f}}); })) << "crossed bounds";
+        expect(gr::testing::initRefused<gr::blocks::sync::CostasLoop>({{"order", gr::Size_t(3)}})) << "an order with no law";
+        expect(gr::testing::initRefused<gr::blocks::sync::CostasLoop>({{"detector_gain", 0.0}})) << "a zero detector gain";
+        expect(gr::testing::initRefused<gr::blocks::sync::CostasLoop>({{"error_limit", -1.0}})) << "a negative error limit";
+        expect(gr::testing::initRefused<gr::blocks::sync::CostasLoop>({{"noise_power", 0.0}})) << "a zero noise power";
+        expect(gr::testing::initRefused<gr::blocks::sync::CostasLoop>({{"min_frequency", 1.f}, {"max_frequency", -1.f}})) << "crossed bounds";
     };
 
     "tags ride through, the two loop tags do not, and a wild payload cannot hang the block"_test = [] {
@@ -324,6 +325,25 @@ const boost::ut::suite<"CostasLoop"> costasTests = [] {
                 }
             }
         }
+    };
+};
+
+const boost::ut::suite<"CostasLoop settings at the initialization"> costasInitTests = [] {
+    using namespace boost::ut;
+
+    "CostasLoop initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::CostasLoop>({
+            {"noise_bandwidth", 0.02},
+            {"damping", 1.0},
+            {"order", gr::Size_t{2U}},
+            {"detector_gain", 2.0},
+            {"max_frequency", 0.5f},
+            {"min_frequency", -0.5f},
+            {"error_limit", 2.0},
+            {"soft_decisions", true},
+            {"noise_power", 0.5},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

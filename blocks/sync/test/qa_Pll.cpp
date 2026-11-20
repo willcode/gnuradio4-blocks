@@ -6,15 +6,18 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <random>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/sync/Pll.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 // Frequencies are radians per sample throughout, as they are in the blocks. The settling anchors quoted below were
@@ -35,8 +38,7 @@ constexpr double kBandwidth = 0.01;
 
 template<typename TBlock>
 void configure(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
 }
 
 PllCarrierTracking makeCarrier(gr::property_map settings = {}) {
@@ -253,7 +255,7 @@ const boost::ut::suite<"Pll"> pllTests = [] {
             expect(eq(held.samples[i], 0.f)) << "a pinned loop must not move at i=" << i;
         }
         expect(pinned.loop().saturated()) << "saturated() must say so";
-        expect(!pinned.locked) << "a saturated loop is not locked";
+        expect(!pinned.status.locked) << "a saturated loop is not locked";
 
         // A bound below the offset: the loop pushes against it, reaches it, and never crosses it. It cannot hold
         // still there — an offset it cannot reach keeps the phase turning, so the error changes sign once a cycle —
@@ -264,11 +266,11 @@ const boost::ut::suite<"Pll"> pllTests = [] {
         expect(le(extremes.max, 0.05f)) << "the frequency must never cross the bound";
         expect(ge(extremes.min, -0.05f)) << "either bound";
         expect(eq(extremes.max, 0.05f)) << "and must reach it";
-        expect(!capped.locked) << "a loop outside its clamp is not locked";
+        expect(!capped.status.locked) << "a loop outside its clamp is not locked";
 
-        expect(throws([] { std::ignore = makeFreqDet({{"min_frequency", 1.f}, {"max_frequency", -1.f}}); })) << "crossed bounds";
-        expect(throws([] { std::ignore = makeFreqDet({{"noise_bandwidth", 0.0}}); })) << "zero bandwidth";
-        expect(throws([] { std::ignore = makeFreqDet({{"damping", -1.0}}); })) << "negative damping";
+        expect(gr::testing::initRefused<gr::blocks::sync::PllFreqDet>({{"min_frequency", 1.f}, {"max_frequency", -1.f}})) << "crossed bounds";
+        expect(gr::testing::initRefused<gr::blocks::sync::PllFreqDet>({{"noise_bandwidth", 0.0}})) << "zero bandwidth";
+        expect(gr::testing::initRefused<gr::blocks::sync::PllFreqDet>({{"damping", -1.0}})) << "negative damping";
     };
 
     "saturating the loop leaves no windup to unwind"_test = [] {
@@ -301,7 +303,7 @@ const boost::ut::suite<"Pll"> pllTests = [] {
             }
             PllCarrierTracking carrier = makeCarrier(std::move(merged));
             std::ignore                = driveCarrier(carrier, input, 0UZ, {false, false, true});
-            return std::pair{carrier.lockMetric(), static_cast<bool>(carrier.locked)};
+            return std::pair{carrier.lockMetric(), static_cast<bool>(carrier.status.locked)};
         };
 
         const std::vector<CF> clean           = tone(kSamples, 0.001);
@@ -380,20 +382,20 @@ const boost::ut::suite<"Pll"> pllTests = [] {
 
         PllRefOut wired = makeRefOut(settings);
         std::ignore     = driveRefOut(wired, std::span<const CF>(clean), 0UZ, {false, false, true});
-        expect(wired.locked) << "a clean carrier with the lock port connected";
+        expect(wired.status.locked) << "a clean carrier with the lock port connected";
         expect(gt(wired.lockMetric(), 0.9f));
 
         // the amplitude reference is a square root a sample and the only one in this family, so it is not paid for
         // where nothing reads it — and the metric is then not maintained
         PllRefOut bare = makeRefOut(settings);
         std::ignore    = driveRefOut(bare, std::span<const CF>(clean), 0UZ, {false, false, false});
-        expect(!bare.locked) << "with the port unwired the detector never runs";
+        expect(!bare.status.locked) << "with the port unwired the detector never runs";
         expect(eq(bare.lockMetric(), 0.f));
 
         // the squelch reads the metric as much as the port does, so it keeps the detector running on its own
         PllCarrierTracking gated = makeCarrier({{"noise_bandwidth", kBandwidth}, {"lock_time_constant", 2000.0}, {"squelch_when_unlocked", true}});
         std::ignore              = driveCarrier(gated, std::span<const CF>(clean), 0UZ, {false, false, false});
-        expect(gated.locked) << "the squelch is a reader too";
+        expect(gated.status.locked) << "the squelch is a reader too";
         expect(gt(gated.lockMetric(), 0.9f));
     };
 
@@ -465,8 +467,7 @@ const boost::ut::suite<"Pll"> pllTests = [] {
         const float phase     = detector.loop().phase();
         const float frequency = detector.loop().frequency();
 
-        std::ignore = detector.settings().setStaged({{"noise_bandwidth", 0.05}});
-        std::ignore = detector.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(detector), {{"noise_bandwidth", 0.05}});
         expect(eq(detector.loop().phase(), phase)) << "the phase must not move";
         expect(eq(detector.loop().frequency(), frequency)) << "nor the frequency";
         expect(neq(detector.loop().beta(), 0.f));
@@ -474,6 +475,45 @@ const boost::ut::suite<"Pll"> pllTests = [] {
         const auto second = driveFreqDet(detector, std::span<const CF>(input).subspan(kSplit));
         expect(eq(first.samples.size() + second.samples.size(), kSamples)) << "no sample repeated or dropped";
         expect(eq(first.consumed + second.consumed, kSamples));
+    };
+};
+
+const boost::ut::suite<"Pll settings at the initialization"> pllInitTests = [] {
+    using namespace boost::ut;
+
+    "PllCarrierTracking initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::PllCarrierTracking>({
+            {"noise_bandwidth", 0.02},
+            {"damping", 1.0},
+            {"max_frequency", 1.f},
+            {"min_frequency", -1.f},
+            {"lock_time_constant", 500.0},
+            {"lock_threshold", 0.5},
+            {"squelch_when_unlocked", true},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "PllFreqDet initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::PllFreqDet>({
+            {"noise_bandwidth", 0.02},
+            {"damping", 1.0},
+            {"max_frequency", 1.f},
+            {"min_frequency", -1.f},
+            {"lock_time_constant", 500.0},
+            {"lock_threshold", 0.5},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "PllRefOut initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::PllRefOut>({
+            {"noise_bandwidth", 0.02},
+            {"damping", 1.0},
+            {"max_frequency", 1.f},
+            {"min_frequency", -1.f},
+            {"lock_time_constant", 500.0},
+            {"lock_threshold", 0.5},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

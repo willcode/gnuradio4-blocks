@@ -6,16 +6,19 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <format>
 #include <limits>
 #include <numbers>
 #include <random>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/filter/FilterDesign.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/sync/FllBandEdge.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 // The tap geometry, the detector gain and the real-tap identity are properties of gr::sync::BandEdgeFilter and are
@@ -35,8 +38,7 @@ constexpr double kPi = std::numbers::pi;
 
 template<typename TBlock>
 void configure(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
 }
 
 FllBandEdge makeFll(gr::property_map settings = {}) {
@@ -111,8 +113,7 @@ const boost::ut::suite<"FllBandEdge"> fllTests = [] {
         FllBandEdge block = makeFll({{"samples_per_symbol", 4.0}, {"noise_bandwidth", 0.01}});
         expect(lt(std::abs(static_cast<double>(block.loop().beta()) - expectedBeta(0.01, 4.0)), 1e-6));
 
-        std::ignore = block.settings().setStaged({{"noise_bandwidth", 0.05}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"noise_bandwidth", 0.05}});
         expect(eq(block.loop().alpha(), 0.f)) << "the bandwidth setter must not resurrect alpha";
         expect(lt(std::abs(static_cast<double>(block.loop().beta()) - expectedBeta(0.05, 4.0)), 1e-6)) << "and must recompute beta from the first-order form";
     };
@@ -124,8 +125,7 @@ const boost::ut::suite<"FllBandEdge"> fllTests = [] {
         const float              limit = block.loop().maxFrequency();
         const std::vector<float> taps  = block.filters().prototype;
 
-        std::ignore = block.settings().setStaged({{"samples_per_symbol", 4.0}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"samples_per_symbol", 4.0}});
 
         expect(eq(block.loop().beta(), beta)) << "the gain must be bit-identical, not a factor of 2*pi away";
         expect(eq(block.loop().maxFrequency(), limit)) << "and so must the clamp";
@@ -219,12 +219,12 @@ const boost::ut::suite<"FllBandEdge"> fllTests = [] {
     };
 
     "degenerate settings are refused rather than designing something meaningless"_test = [] {
-        expect(throws([] { std::ignore = makeFll({{"samples_per_symbol", 0.0}}); })) << "zero samples per symbol";
-        expect(throws([] { std::ignore = makeFll({{"rolloff", 1.5}}); })) << "a rolloff outside [0, 1]";
-        expect(throws([] { std::ignore = makeFll({{"filter_length", gr::Size_t(2)}}); })) << "two taps";
-        expect(throws([] { std::ignore = makeFll({{"detector_gain", -1.0}}); })) << "a negative detector gain";
-        expect(throws([] { std::ignore = makeFll({{"noise_bandwidth", 0.0}}); })) << "zero bandwidth";
-        expect(throws([] { std::ignore = makeFll({{"min_frequency", 1.f}, {"max_frequency", -1.f}}); })) << "crossed bounds";
+        expect(gr::testing::initRefused<gr::blocks::sync::FllBandEdge>({{"samples_per_symbol", 0.0}})) << "zero samples per symbol";
+        expect(gr::testing::initRefused<gr::blocks::sync::FllBandEdge>({{"rolloff", 1.5}})) << "a rolloff outside [0, 1]";
+        expect(gr::testing::initRefused<gr::blocks::sync::FllBandEdge>({{"filter_length", gr::Size_t(2)}})) << "two taps";
+        expect(gr::testing::initRefused<gr::blocks::sync::FllBandEdge>({{"detector_gain", -1.0}})) << "a negative detector gain";
+        expect(gr::testing::initRefused<gr::blocks::sync::FllBandEdge>({{"noise_bandwidth", 0.0}})) << "zero bandwidth";
+        expect(gr::testing::initRefused<gr::blocks::sync::FllBandEdge>({{"min_frequency", 1.f}, {"max_frequency", -1.f}})) << "crossed bounds";
     };
 
     "tags ride through, the two loop tags do not, and a wild payload cannot hang the block"_test = [] {
@@ -272,6 +272,24 @@ const boost::ut::suite<"FllBandEdge"> fllTests = [] {
                 }
             }
         }
+    };
+};
+
+const boost::ut::suite<"FllBandEdge settings at the initialization"> fllInitTests = [] {
+    using namespace boost::ut;
+
+    "FllBandEdge initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::FllBandEdge>({
+            {"samples_per_symbol", 2.5},
+            {"rolloff", 0.5},
+            {"filter_length", gr::Size_t{31U}},
+            {"noise_bandwidth", 0.02},
+            {"detector_gain", 1.0},
+            {"max_frequency", 0.5f},
+            {"min_frequency", -0.5f},
+            {"normalized_discriminant", true},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

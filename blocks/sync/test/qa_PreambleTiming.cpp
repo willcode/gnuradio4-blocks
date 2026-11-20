@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <numbers>
 #include <random>
 #include <span>
@@ -27,6 +28,7 @@
 #include <gnuradio-4.0/sync/PreambleTiming.hpp>
 #include <gnuradio-4.0/sync/SymbolSync.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 // The estimator, its bound, the detection threshold and the lattice belong to gr::sync::PreambleToneEstimator and are
@@ -243,8 +245,7 @@ struct Capture {
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -575,6 +576,23 @@ const boost::ut::suite<"PreambleTiming"> preambleTimingTests = [] {
             expect(lt(preset, 0.06)) << "the preset puts the loop on the symbol before the data starts";
             expect(lt(preset, 0.5 * plain)) << "and the untagged run is the acquisition the preset removes";
         }
+    };
+};
+
+const boost::ut::suite<"PreambleTiming settings at the initialization"> preambleInitTests = [] {
+    using namespace boost::ut;
+
+    "PreambleTiming initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::sync::PreambleTiming<float>>({
+            {"sample_rate", 96000.f},
+            {"symbol_rate", 4800.f},
+            {"preamble_symbols", gr::Size_t{32U}},
+            {"threshold", 0.5},
+            {"hold_off_symbols", gr::Size_t{8U}},
+            {"trigger_label", std::string("burst")},
+            {"preset_period", false},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

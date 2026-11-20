@@ -5,7 +5,6 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
-#include <format>
 #include <optional>
 #include <string_view>
 
@@ -26,20 +25,20 @@ namespace detail {
 /// @brief The loop every block in this module holds by value: `float` state, phase reduced modulo `2*pi` every step.
 using CarrierLoop = gr::sync::ControlLoop<float>;
 
-/// @brief Validate the shared loop settings and hand them to the kernel without disturbing its two state variables.
+/// @brief Hands the shared loop settings to the kernel without disturbing its two state variables.
 inline void applyCarrierSettings(CarrierLoop& loop, double noiseBandwidth, double damping, float minFrequency, float maxFrequency) {
-    if (!(noiseBandwidth > 0.0) || !std::isfinite(noiseBandwidth)) {
-        throw gr::exception(std::format("noise_bandwidth is a normalized noise bandwidth and must be positive and finite, got {}", noiseBandwidth));
-    }
-    if (!(damping > 0.0) || !std::isfinite(damping)) {
-        throw gr::exception(std::format("damping must be positive and finite, got {}", damping));
-    }
-    if (!(minFrequency <= maxFrequency)) {
-        throw gr::exception(std::format("min_frequency ({}) must not exceed max_frequency ({}) — crossed bounds are a limit cycle, not a clamp", minFrequency, maxFrequency));
-    }
     loop.setFrequencyLimits(minFrequency, maxFrequency);
     loop.setDamping(damping);
     loop.setNoiseBandwidth(noiseBandwidth);
+}
+
+/// @brief The fault in the shared loop settings @p s, under the setting at fault, or nothing when the loop can take them.
+template<typename TSettings>
+[[nodiscard]] std::optional<gr::Refused> checkCarrierSettings(const TSettings& s) {
+    if (s.min_frequency.value > s.max_frequency.value) {
+        return gr::Refused(s.min_frequency, "must be <= max_frequency");
+    }
+    return {};
 }
 
 /// @brief The samples a 1:1 call may produce: the shortest connected span, ignoring the optional ports left unwired.

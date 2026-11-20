@@ -5,8 +5,8 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
-#include <format>
 #include <numbers>
+#include <optional>
 #include <tuple>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -98,6 +98,11 @@ reads no rate tag. `noise_bandwidth` is `Bn*T`, the closed loop's one-sided nois
 rate. The lock metric is maintained only while the `lock` port is connected or `squelch_when_unlocked` is set, so
 `locked` reads false and `lockMetric()` stays frozen otherwise. `phase_est` and `freq_est` tags set the loop state
 before the tagged sample and are consumed; everything else passes through at its own offset.
+
+`noise_bandwidth` is the closed-loop one-sided noise bandwidth Bn*T. The frequency bounds clamp the loop frequency, and
+pi is Nyquist. `locked` is true while the lock metric, averaged over `lock_time_constant` samples, is above
+`lock_threshold` and the loop is not parked on a bound. `squelch_when_unlocked` zeroes the output while unlocked, a hard
+gate that clicks at each edge.
 )"">;
 
     PortIn<std::complex<float>>  in;
@@ -106,30 +111,35 @@ before the tagged sample and are consumed; everything else passes through at its
     PortOut<float, Optional>     phase;
     PortOut<float, Optional>     lock;
 
-    Annotated<double, "noise_bandwidth", Doc<"closed-loop one-sided noise bandwidth, normalized: Bn*T in cycles/sample">> noise_bandwidth       = 0.01;
-    Annotated<double, "damping", Doc<"loop damping factor; sqrt(2)/2 is the classical maximally flat choice">>            damping               = std::numbers::sqrt2 / 2.0;
-    Annotated<float, "max_frequency", Unit<"rad/sample">, Doc<"upper clamp on the loop frequency; pi is Nyquist">>        max_frequency         = std::numbers::pi_v<float>;
-    Annotated<float, "min_frequency", Unit<"rad/sample">, Doc<"lower clamp; must not exceed max_frequency">>              min_frequency         = -std::numbers::pi_v<float>;
-    Annotated<double, "lock_time_constant", Doc<"averaging length of the lock metric, in samples">>                       lock_time_constant    = 1000.0;
-    Annotated<double, "lock_threshold", Doc<"lock metric above which locked is true; dimensionless, in [0, 1]">>          lock_threshold        = 0.7;
-    Annotated<bool, "squelch_when_unlocked", Doc<"zero the output while unlocked; a hard gate, clicking at each edge">>   squelch_when_unlocked = false;
-    Annotated<bool, "locked", Doc<"observable: metric above threshold and the loop not parked on a bound">>               locked                = false;
+    struct Settings {
+        Annotated<double, Unit<"cycles/sample">, Doc<"loop noise bandwidth">, Limits<Over<0.0>>> noise_bandwidth       = 0.01;
+        Annotated<double, Doc<"damping factor">, Limits<Over<0.0>>>                              damping               = std::numbers::sqrt2 / 2.0;
+        Annotated<float, Unit<"rad/sample">, Doc<"maximum loop frequency">>                      max_frequency         = std::numbers::pi_v<float>;
+        Annotated<float, Unit<"rad/sample">, Doc<"minimum loop frequency">>                      min_frequency         = -std::numbers::pi_v<float>;
+        Annotated<double, Unit<"samples">, Doc<"lock metric averaging length">>                  lock_time_constant    = 1000.0;
+        Annotated<double, Doc<"lock threshold">>                                                 lock_threshold        = 0.7;
+        Annotated<bool, Doc<"unlocked squelch">>                                                 squelch_when_unlocked = false;
 
-    GR_MAKE_REFLECTABLE(PllCarrierTracking, in, out, freq, phase, lock, noise_bandwidth, damping, max_frequency, min_frequency, lock_time_constant, lock_threshold, squelch_when_unlocked, locked);
+        GR_MAKE_REFLECTABLE(Settings, noise_bandwidth, damping, max_frequency, min_frequency, lock_time_constant, lock_threshold, squelch_when_unlocked);
+    } settings;
+
+    struct Status {
+        Annotated<bool, Doc<"lock state">> locked = false;
+
+        GR_MAKE_REFLECTABLE(Status, locked);
+    } status;
+
+    GR_MAKE_REFLECTABLE(PllCarrierTracking, in, out, freq, phase, lock, settings, status);
 
     detail::CarrierLoop  _loop{0.01, std::numbers::sqrt2 / 2.0, detail::kArgumentDetectorGain};
     detail::LockDetector _lock{};
     std::uint64_t        _ignoredTags = 0ULL;
 
-    /// The loop gains, the frequency clamp and the lock metric are derived from the members, and a batch that moves
-    /// no value never calls back, so a block constructed at its declared defaults is born with the clamp it names.
-    explicit PllCarrierTracking(property_map init = {}) : Block<PllCarrierTracking, NoTagPropagation>(std::move(init)) { configure(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkCarrierSettings(s); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
-
-    void configure() {
-        detail::applyCarrierSettings(_loop, noise_bandwidth, damping, min_frequency, max_frequency);
-        _lock.setTimeConstant(lock_time_constant);
+    void applySettings(const Settings& s) {
+        detail::applyCarrierSettings(_loop, s.noise_bandwidth, s.damping, s.min_frequency, s.max_frequency);
+        _lock.setTimeConstant(s.lock_time_constant);
     }
 
     void reset() {
@@ -154,9 +164,9 @@ before the tagged sample and are consumed; everything else passes through at its
         const bool  wantFreq   = freqSpan.isConnected;
         const bool  wantPhase  = phaseSpan.isConnected;
         const bool  wantLock   = lockSpan.isConnected;
-        const bool  gate       = squelch_when_unlocked;
+        const bool  gate       = settings.squelch_when_unlocked;
         const bool  wantMetric = wantLock || gate;
-        const float threshold  = static_cast<float>(lock_threshold);
+        const float threshold  = static_cast<float>(settings.lock_threshold);
 
         const auto&       rawTags = inSpan.rawTags;
         const std::size_t nTags   = rawTags.size();
@@ -196,8 +206,8 @@ before the tagged sample and are consumed; everything else passes through at its
             }
         }
 
-        locked      = wantMetric && _lock.metric() > threshold && !_loop.saturated();
-        std::ignore = inSpan.consume(nSamples);
+        status.locked = wantMetric && _lock.metric() > threshold && !_loop.saturated();
+        std::ignore   = inSpan.consume(nSamples);
         outSpan.publish(nSamples);
         freqSpan.publish(wantFreq ? nSamples : 0UZ);
         phaseSpan.publish(wantPhase ? nSamples : 0UZ);
@@ -222,6 +232,10 @@ Against QuadratureDemod, which measures the same quantity, the estimate is filte
 noise bandwidth is `noise_bandwidth` rather than the full band; the price is that the tracking bandwidth must exceed the
 modulation bandwidth, or the modulation is filtered away with the noise. Parameters, units, the lock metric and the tag
 contract are PllCarrierTracking's, and so is the freedom from an AGC.
+
+`noise_bandwidth` is the closed-loop one-sided noise bandwidth Bn*T. The frequency bounds clamp the loop frequency, and
+pi is Nyquist. `locked` is true while the lock metric, averaged over `lock_time_constant` samples, is above
+`lock_threshold` and the loop is not parked on a bound.
 )"">;
 
     PortIn<std::complex<float>> in;
@@ -229,27 +243,34 @@ contract are PllCarrierTracking's, and so is the freedom from an AGC.
     PortOut<float, Optional>    phase;
     PortOut<float, Optional>    lock;
 
-    Annotated<double, "noise_bandwidth", Doc<"closed-loop one-sided noise bandwidth, normalized: Bn*T in cycles/sample">> noise_bandwidth    = 0.01;
-    Annotated<double, "damping", Doc<"loop damping factor; sqrt(2)/2 is the classical maximally flat choice">>            damping            = std::numbers::sqrt2 / 2.0;
-    Annotated<float, "max_frequency", Unit<"rad/sample">, Doc<"upper clamp on the loop frequency; pi is Nyquist">>        max_frequency      = std::numbers::pi_v<float>;
-    Annotated<float, "min_frequency", Unit<"rad/sample">, Doc<"lower clamp; must not exceed max_frequency">>              min_frequency      = -std::numbers::pi_v<float>;
-    Annotated<double, "lock_time_constant", Doc<"averaging length of the lock metric, in samples">>                       lock_time_constant = 1000.0;
-    Annotated<double, "lock_threshold", Doc<"lock metric above which locked is true; dimensionless, in [0, 1]">>          lock_threshold     = 0.7;
-    Annotated<bool, "locked", Doc<"observable: metric above threshold and the loop not parked on a bound">>               locked             = false;
+    struct Settings {
+        Annotated<double, Unit<"cycles/sample">, Doc<"loop noise bandwidth">, Limits<Over<0.0>>> noise_bandwidth    = 0.01;
+        Annotated<double, Doc<"damping factor">, Limits<Over<0.0>>>                              damping            = std::numbers::sqrt2 / 2.0;
+        Annotated<float, Unit<"rad/sample">, Doc<"maximum loop frequency">>                      max_frequency      = std::numbers::pi_v<float>;
+        Annotated<float, Unit<"rad/sample">, Doc<"minimum loop frequency">>                      min_frequency      = -std::numbers::pi_v<float>;
+        Annotated<double, Unit<"samples">, Doc<"lock metric averaging length">>                  lock_time_constant = 1000.0;
+        Annotated<double, Doc<"lock threshold">>                                                 lock_threshold     = 0.7;
 
-    GR_MAKE_REFLECTABLE(PllFreqDet, in, out, phase, lock, noise_bandwidth, damping, max_frequency, min_frequency, lock_time_constant, lock_threshold, locked);
+        GR_MAKE_REFLECTABLE(Settings, noise_bandwidth, damping, max_frequency, min_frequency, lock_time_constant, lock_threshold);
+    } settings;
+
+    struct Status {
+        Annotated<bool, Doc<"lock state">> locked = false;
+
+        GR_MAKE_REFLECTABLE(Status, locked);
+    } status;
+
+    GR_MAKE_REFLECTABLE(PllFreqDet, in, out, phase, lock, settings, status);
 
     detail::CarrierLoop  _loop{0.01, std::numbers::sqrt2 / 2.0, detail::kArgumentDetectorGain};
     detail::LockDetector _lock{};
     std::uint64_t        _ignoredTags = 0ULL;
 
-    explicit PllFreqDet(property_map init = {}) : Block<PllFreqDet, NoTagPropagation>(std::move(init)) { configure(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkCarrierSettings(s); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
-
-    void configure() {
-        detail::applyCarrierSettings(_loop, noise_bandwidth, damping, min_frequency, max_frequency);
-        _lock.setTimeConstant(lock_time_constant);
+    void applySettings(const Settings& s) {
+        detail::applyCarrierSettings(_loop, s.noise_bandwidth, s.damping, s.min_frequency, s.max_frequency);
+        _lock.setTimeConstant(s.lock_time_constant);
     }
 
     void reset() {
@@ -271,7 +292,7 @@ contract are PllCarrierTracking's, and so is the freedom from an AGC.
 
         const bool  wantPhase = phaseSpan.isConnected;
         const bool  wantLock  = lockSpan.isConnected;
-        const float threshold = static_cast<float>(lock_threshold);
+        const float threshold = static_cast<float>(settings.lock_threshold);
 
         const auto&       rawTags = inSpan.rawTags;
         const std::size_t nTags   = rawTags.size();
@@ -301,8 +322,8 @@ contract are PllCarrierTracking's, and so is the freedom from an AGC.
             }
         }
 
-        locked      = wantLock && _lock.metric() > threshold && !_loop.saturated();
-        std::ignore = inSpan.consume(nSamples);
+        status.locked = wantLock && _lock.metric() > threshold && !_loop.saturated();
+        std::ignore   = inSpan.consume(nSamples);
         outSpan.publish(nSamples);
         phaseSpan.publish(wantPhase ? nSamples : 0UZ);
         lockSpan.publish(wantLock ? nSamples : 0UZ);
@@ -323,6 +344,10 @@ who wants the pilot at its measured amplitude multiplies by the `lock` port or b
 `p_n` is the phase before this sample's update, so `PllCarrierTracking.out[n] * PllRefOut.out[n] == x[n]` sample for
 sample on the same input with the same parameters. Parameters, units, the lock metric and the tag contract are
 PllCarrierTracking's, and so is the freedom from an AGC.
+
+`noise_bandwidth` is the closed-loop one-sided noise bandwidth Bn*T. The frequency bounds clamp the loop frequency, and
+pi is Nyquist. `locked` is true while the lock metric, averaged over `lock_time_constant` samples, is above
+`lock_threshold` and the loop is not parked on a bound.
 )"">;
 
     PortIn<std::complex<float>>  in;
@@ -331,27 +356,34 @@ PllCarrierTracking's, and so is the freedom from an AGC.
     PortOut<float, Optional>     phase;
     PortOut<float, Optional>     lock;
 
-    Annotated<double, "noise_bandwidth", Doc<"closed-loop one-sided noise bandwidth, normalized: Bn*T in cycles/sample">> noise_bandwidth    = 0.01;
-    Annotated<double, "damping", Doc<"loop damping factor; sqrt(2)/2 is the classical maximally flat choice">>            damping            = std::numbers::sqrt2 / 2.0;
-    Annotated<float, "max_frequency", Unit<"rad/sample">, Doc<"upper clamp on the loop frequency; pi is Nyquist">>        max_frequency      = std::numbers::pi_v<float>;
-    Annotated<float, "min_frequency", Unit<"rad/sample">, Doc<"lower clamp; must not exceed max_frequency">>              min_frequency      = -std::numbers::pi_v<float>;
-    Annotated<double, "lock_time_constant", Doc<"averaging length of the lock metric, in samples">>                       lock_time_constant = 1000.0;
-    Annotated<double, "lock_threshold", Doc<"lock metric above which locked is true; dimensionless, in [0, 1]">>          lock_threshold     = 0.7;
-    Annotated<bool, "locked", Doc<"observable: metric above threshold and the loop not parked on a bound">>               locked             = false;
+    struct Settings {
+        Annotated<double, Unit<"cycles/sample">, Doc<"loop noise bandwidth">, Limits<Over<0.0>>> noise_bandwidth    = 0.01;
+        Annotated<double, Doc<"damping factor">, Limits<Over<0.0>>>                              damping            = std::numbers::sqrt2 / 2.0;
+        Annotated<float, Unit<"rad/sample">, Doc<"maximum loop frequency">>                      max_frequency      = std::numbers::pi_v<float>;
+        Annotated<float, Unit<"rad/sample">, Doc<"minimum loop frequency">>                      min_frequency      = -std::numbers::pi_v<float>;
+        Annotated<double, Unit<"samples">, Doc<"lock metric averaging length">>                  lock_time_constant = 1000.0;
+        Annotated<double, Doc<"lock threshold">>                                                 lock_threshold     = 0.7;
 
-    GR_MAKE_REFLECTABLE(PllRefOut, in, out, freq, phase, lock, noise_bandwidth, damping, max_frequency, min_frequency, lock_time_constant, lock_threshold, locked);
+        GR_MAKE_REFLECTABLE(Settings, noise_bandwidth, damping, max_frequency, min_frequency, lock_time_constant, lock_threshold);
+    } settings;
+
+    struct Status {
+        Annotated<bool, Doc<"lock state">> locked = false;
+
+        GR_MAKE_REFLECTABLE(Status, locked);
+    } status;
+
+    GR_MAKE_REFLECTABLE(PllRefOut, in, out, freq, phase, lock, settings, status);
 
     detail::CarrierLoop  _loop{0.01, std::numbers::sqrt2 / 2.0, detail::kArgumentDetectorGain};
     detail::LockDetector _lock{};
     std::uint64_t        _ignoredTags = 0ULL;
 
-    explicit PllRefOut(property_map init = {}) : Block<PllRefOut, NoTagPropagation>(std::move(init)) { configure(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkCarrierSettings(s); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
-
-    void configure() {
-        detail::applyCarrierSettings(_loop, noise_bandwidth, damping, min_frequency, max_frequency);
-        _lock.setTimeConstant(lock_time_constant);
+    void applySettings(const Settings& s) {
+        detail::applyCarrierSettings(_loop, s.noise_bandwidth, s.damping, s.min_frequency, s.max_frequency);
+        _lock.setTimeConstant(s.lock_time_constant);
     }
 
     void reset() {
@@ -375,7 +407,7 @@ PllCarrierTracking's, and so is the freedom from an AGC.
         const bool  wantFreq  = freqSpan.isConnected;
         const bool  wantPhase = phaseSpan.isConnected;
         const bool  wantLock  = lockSpan.isConnected;
-        const float threshold = static_cast<float>(lock_threshold);
+        const float threshold = static_cast<float>(settings.lock_threshold);
 
         const auto&       rawTags = inSpan.rawTags;
         const std::size_t nTags   = rawTags.size();
@@ -409,8 +441,8 @@ PllCarrierTracking's, and so is the freedom from an AGC.
             }
         }
 
-        locked      = wantLock && _lock.metric() > threshold && !_loop.saturated();
-        std::ignore = inSpan.consume(nSamples);
+        status.locked = wantLock && _lock.metric() > threshold && !_loop.saturated();
+        std::ignore   = inSpan.consume(nSamples);
         outSpan.publish(nSamples);
         freqSpan.publish(wantFreq ? nSamples : 0UZ);
         phaseSpan.publish(wantPhase ? nSamples : 0UZ);

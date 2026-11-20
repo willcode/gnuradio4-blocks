@@ -41,8 +41,7 @@ std::vector<float> makeTone() {
 
 PreambleTiming<float> make(std::size_t preambleSymbols) {
     PreambleTiming<float> block({{"sample_rate", kSampleRate}, {"symbol_rate", kSymbolRate}, {"preamble_symbols", static_cast<gr::Size_t>(preambleSymbols)}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

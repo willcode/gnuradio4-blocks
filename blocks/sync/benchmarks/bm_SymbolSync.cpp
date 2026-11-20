@@ -52,8 +52,7 @@ std::vector<CF> makeShapedQpsk() {
 
 SymbolSync<CF> make(double sps, std::string detector, double gain, std::string interpolator) {
     SymbolSync<CF> block({{"samples_per_symbol", sps}, {"detector", std::move(detector)}, {"detector_gain", gain}, {"interpolator", std::move(interpolator)}, {"rolloff", 0.35}, {"noise_bandwidth", 0.01}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

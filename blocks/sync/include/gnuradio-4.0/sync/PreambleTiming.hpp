@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -58,28 +58,37 @@ output, because the tag names a sample that can lie a symbol ahead of the read p
 latency, the analysis window itself being history rather than delay, and a tag arriving from upstream rides through at
 the call offset the framework gives it rather than being delayed with the stream. `float` only: the statistic is defined
 on the real discriminator stream, and an alternating preamble on a complex stream carries a different timing line.
+
+`sample_rate` serves to write gr:trigger_offset in seconds. The samples per symbol are sample_rate / symbol_rate, and
+the training tone sits at half the symbol rate. A preamble is declared when the tone's bin holds `threshold` of a
+window's energy. `hold_off_symbols` stays under the spacing between two bursts' preambles. `trigger_label` is a burst
+gate under the reserved gr:trigger_name key beside the timing payload. With `preset_period`, the tag carries the nominal
+period beside the phase, clock_est rather than time_est.
 )"">;
 
     PortIn<T>                in;
     PortOut<T>               out;
     PortOut<float, Optional> statistic;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"the stream's rate; read to write gr:trigger_offset in the seconds its declaration requires">>                                          sample_rate      = 48000.f;
-    Annotated<float, "symbol_rate", Unit<"Hz">, Doc<"symbol rate; samples per symbol is sample_rate/symbol_rate and the training tone sits at half of it">>                                 symbol_rate      = 9600.f;
-    Annotated<gr::Size_t, "preamble_symbols", Unit<"symbols">, Doc<"alternating symbols the analysis window spans; 0 disables the block, which then passes the stream through">>            preamble_symbols = 0U;
-    Annotated<double, "threshold", Doc<"the share of a window's energy in the tone's bin that declares a preamble; in (0, 1)">>                                                             threshold        = 0.35;
-    Annotated<gr::Size_t, "hold_off_symbols", Unit<"symbols">, Doc<"symbols after a tag during which no second tag is emitted; must stay under the spacing between two bursts' preambles">> hold_off_symbols = 0U;
-    Annotated<std::string, "trigger_label", Doc<"a burst gate under the reserved gr:trigger_name key beside the timing payload; empty writes no trigger keys at all">>                      trigger_label{};
-    Annotated<bool, "preset_period", Doc<"whether the tag carries the nominal period beside the phase, that is clock_est rather than time_est">>                                            preset_period = true;
+    struct Settings {
+        Annotated<float, Unit<"Hz">, Doc<"sample rate">, Limits<Over<0.f>>>               sample_rate      = 48000.f;
+        Annotated<float, Unit<"Hz">, Doc<"symbol rate">, Limits<Over<0.f>>>               symbol_rate      = 9600.f;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"preamble length (0 = pass through)">> preamble_symbols = 0U;
+        Annotated<double, Doc<"tone energy threshold">, Limits<Over<0.0>, Under<1.0>>>    threshold        = 0.35;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"hold-off length">>                    hold_off_symbols = 0U;
+        Annotated<std::string, Doc<"burst trigger name (empty = off)">>                   trigger_label{};
+        Annotated<bool, Doc<"period preset">>                                             preset_period = true;
 
-    GR_MAKE_REFLECTABLE(PreambleTiming, in, out, statistic, sample_rate, symbol_rate, preamble_symbols, threshold, hold_off_symbols, trigger_label, preset_period);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, symbol_rate, preamble_symbols, threshold, hold_off_symbols, trigger_label, preset_period);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PreambleTiming, in, out, statistic, settings);
 
     std::uint64_t nDetections = 0ULL; ///< tags emitted, one per burst
     std::uint64_t nSuppressed = 0ULL; ///< up-crossings that fell inside a hold-off and produced no tag
 
     gr::sync::PreambleToneEstimator _estimator{};
 
-    bool          _configured       = false;
     bool          _enabled          = false;
     double        _samplesPerSymbol = 5.0;
     std::uint64_t _symbolStride     = 5ULL; /// `ceil(samples_per_symbol)`: how far past a window an instant can sit
@@ -102,31 +111,29 @@ on the real discriminator stream, and an alternating preamble on a complex strea
     std::uint64_t _suppressUntil = 0ULL;
     bool          _anchored      = false;
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
-            throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.preamble_symbols.value == 0U) {
+            return {}; // the block is a wire
         }
-        if (!(symbol_rate > 0.f) || !std::isfinite(symbol_rate)) {
-            throw gr::exception(std::format("symbol_rate must be positive and finite, got {}", symbol_rate.value));
+        const double sps = static_cast<double>(s.sample_rate.value) / static_cast<double>(s.symbol_rate.value);
+        if (sps <= 1.0) {
+            return gr::Refused(s.symbol_rate, "must be < sample_rate");
         }
-        if (!(threshold > 0.0) || !(threshold < 1.0)) {
-            throw gr::exception(std::format("threshold is a share of a window's energy and must lie in (0, 1), got {}", threshold.value));
-        }
+        gr::sync::PreambleToneEstimator trial; // the estimator judges the window the two settings make
+        trial.configure(sps, s.preamble_symbols.value);
+        return {};
+    }
 
-        const double sps  = static_cast<double>(sample_rate.value) / static_cast<double>(symbol_rate.value);
+    void applySettings(const Settings& s) {
+        const double sps  = static_cast<double>(s.sample_rate.value) / static_cast<double>(s.symbol_rate.value);
         _samplesPerSymbol = sps;
-        _holdOff          = static_cast<std::uint64_t>(std::llround(sps * static_cast<double>(hold_off_symbols.value)));
+        _holdOff          = static_cast<std::uint64_t>(std::llround(sps * s.hold_off_symbols.value));
 
-        if (preamble_symbols > 0U && !(sps > 1.0)) {
-            throw gr::exception(std::format("sample_rate / symbol_rate is {} — the tone at half the symbol rate needs more than two samples a period", sps));
-        }
-
-        static constexpr std::array kRestartKeys{"sample_rate", "symbol_rate", "preamble_symbols"};
-        if (_configured && !std::ranges::any_of(kRestartKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
+        const bool reshape = s.sample_rate.changed() || s.symbol_rate.changed() || s.preamble_symbols.changed();
+        if (!reshape) {
             return;
         }
-        _configured = true;
-        _enabled    = preamble_symbols > 0U;
+        _enabled = s.preamble_symbols.value > 0U;
 
         if (!_enabled) {
             _holdBack = 0ULL;
@@ -136,7 +143,7 @@ on the real discriminator stream, and an alternating preamble on a complex strea
             return;
         }
 
-        _estimator.configure(sps, static_cast<double>(preamble_symbols.value));
+        _estimator.configure(sps, s.preamble_symbols.value);
         _symbolStride = static_cast<std::uint64_t>(std::ceil(sps));
 
         // The tag names a sample the block has not published, and that sample can lie anywhere from the chosen
@@ -257,7 +264,7 @@ private:
         if (!_estimator.filled()) {
             return;
         }
-        const bool above = value > threshold;
+        const bool above = value > settings.threshold;
         const bool rose  = above && !_above;
         _above           = above;
 
@@ -315,11 +322,11 @@ private:
         // "a burst starts here", which a framer downstream resynchronizes on, so it is written only where a graph
         // asks for a burst gate by naming one.
         property_map tag{};
-        if (!trigger_label.value.empty()) {
-            tag[property_map::key_type(gr::tag::TRIGGER_NAME.key())]   = trigger_label.value;
-            tag[property_map::key_type(gr::tag::TRIGGER_OFFSET.key())] = fraction / sample_rate.value;
+        if (!settings.trigger_label.value.empty()) {
+            tag[property_map::key_type(gr::tag::TRIGGER_NAME.key())]   = settings.trigger_label.value;
+            tag[property_map::key_type(gr::tag::TRIGGER_OFFSET.key())] = fraction / settings.sample_rate.value;
         }
-        if (preset_period) {
+        if (settings.preset_period) {
             tag[property_map::key_type("clock_est")] = std::vector<float>{fraction, static_cast<float>(_samplesPerSymbol)};
         } else {
             tag[property_map::key_type("time_est")] = fraction;

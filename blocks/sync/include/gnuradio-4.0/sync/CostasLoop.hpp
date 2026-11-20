@@ -6,8 +6,8 @@
 #include <complex>
 #include <concepts>
 #include <cstdint>
-#include <format>
 #include <numbers>
+#include <optional>
 #include <tuple>
 
 #include <gnuradio-4.0/Block.hpp>
@@ -90,6 +90,11 @@ the amplitude the block will actually see - 1, 1.41421356 and 1.08239220 for the
 `order` selects the law at design time, and at order 8 the constellation must sit at odd multiples of pi/8, off the
 axes, or the loop diverges rather than tracks. Frequencies are radians per sample on every port and parameter, and
 `noise_bandwidth` is `Bn*T`, the closed loop's normalized one-sided noise bandwidth.
+
+`noise_bandwidth` is the closed-loop one-sided noise bandwidth Bn*T. `order` is the constellation's rotational symmetry:
+2 for BPSK, 4 QPSK, 8 8PSK. `detector_gain` is the measured S-curve slope Kdet, 1 for order 2 at unit amplitude.
+`error_limit` clips the error signal symmetrically and engages at unit-amplitude QPSK. With `soft_decisions`, each
+decision is weighted by tanh(snr*u) instead of sliced, against the linear `noise_power`.
 )"">;
 
     PortIn<std::complex<float>>  in;
@@ -98,45 +103,33 @@ axes, or the loop diverges rather than tracks. Frequencies are radians per sampl
     PortOut<float, Optional>     phase;
     PortOut<float, Optional>     error;
 
-    Annotated<double, "noise_bandwidth", Doc<"closed-loop one-sided noise bandwidth, normalized: Bn*T in cycles/sample">> noise_bandwidth = 0.01;
-    Annotated<double, "damping", Doc<"loop damping factor; sqrt(2)/2 is the classical maximally flat choice">>            damping         = std::numbers::sqrt2 / 2.0;
-    Annotated<gr::Size_t, "order", Doc<"rotational symmetry of the constellation: 2 BPSK, 4 QPSK, 8 8PSK">>               order           = 4U;
-    Annotated<double, "detector_gain", Doc<"Kdet, the measured S-curve slope; 1 is order 2 at unit amplitude">>           detector_gain   = 1.0;
-    Annotated<float, "max_frequency", Unit<"rad/sample">, Doc<"upper clamp on the loop frequency">>                       max_frequency   = 1.0f;
-    Annotated<float, "min_frequency", Unit<"rad/sample">, Doc<"lower clamp; must not exceed max_frequency">>              min_frequency   = -1.0f;
-    // The clip bounds the loop gain when the input runs hot. At 1.0 it engages within the intended
-    // operating range -- an order-4 S-curve peaks at A*sqrt(2) -- so a caller who wants the detector's
-    // full characteristic raises it to twice that peak; qa_CostasLoop measures Kdet with it raised.
-    Annotated<double, "error_limit", Doc<"symmetric clip on the error signal; engages at unit-amplitude QPSK">>     error_limit    = 1.0;
-    Annotated<bool, "soft_decisions", Doc<"weight each decision by tanh(snr*u) instead of slicing it">>             soft_decisions = false;
-    Annotated<double, "noise_power", Doc<"linear noise power the soft decisions are scaled against; not decibels">> noise_power    = 1.0;
+    struct Settings {
+        Annotated<double, Unit<"cycles/sample">, Doc<"loop noise bandwidth">, Limits<Over<0.0>>> noise_bandwidth = 0.01;
+        Annotated<double, Doc<"damping factor">, Limits<Over<0.0>>>                              damping         = std::numbers::sqrt2 / 2.0;
+        Annotated<gr::Size_t, Doc<"constellation symmetry order">, Limits<OneOf<2U, 4U, 8U>>>    order           = 4U;
+        Annotated<double, Doc<"detector gain">, Limits<Over<0.0>>>                               detector_gain   = 1.0;
+        Annotated<float, Unit<"rad/sample">, Doc<"maximum loop frequency">>                      max_frequency   = 1.0f;
+        Annotated<float, Unit<"rad/sample">, Doc<"minimum loop frequency">>                      min_frequency   = -1.0f;
+        // The clip bounds the loop gain when the input runs hot. At 1.0 it engages within the intended
+        // operating range -- an order-4 S-curve peaks at A*sqrt(2) -- so a caller who wants the detector's
+        // full characteristic raises it to twice that peak; qa_CostasLoop measures Kdet with it raised.
+        Annotated<double, Doc<"error clip">, Limits<Over<0.0>>>  error_limit    = 1.0;
+        Annotated<bool, Doc<"soft decisions">>                   soft_decisions = false;
+        Annotated<double, Doc<"noise power">, Limits<Over<0.0>>> noise_power    = 1.0;
 
-    GR_MAKE_REFLECTABLE(CostasLoop, in, out, freq, phase, error, noise_bandwidth, damping, order, detector_gain, max_frequency, min_frequency, error_limit, soft_decisions, noise_power);
+        GR_MAKE_REFLECTABLE(Settings, noise_bandwidth, damping, order, detector_gain, max_frequency, min_frequency, error_limit, soft_decisions, noise_power);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(CostasLoop, in, out, freq, phase, error, settings);
 
     detail::CarrierLoop _loop{0.01, std::numbers::sqrt2 / 2.0, 1.0};
     std::uint64_t       _ignoredTags = 0ULL;
 
-    /// The loop gains and the frequency clamp are derived from the members, and a batch that moves no value never
-    /// calls back, so a block constructed at its declared defaults is born with the clamp its settings name.
-    explicit CostasLoop(property_map init = {}) : Block<CostasLoop, NoTagPropagation>(std::move(init)) { configure(); }
+    std::optional<gr::Refused> checkSettings(const Settings& s) const { return detail::checkCarrierSettings(s); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { configure(); }
-
-    void configure() {
-        if (order != 2U && order != 4U && order != 8U) {
-            throw gr::exception(std::format("order must be 2, 4 or 8, got {}", order.value));
-        }
-        if (!(detector_gain > 0.0) || !std::isfinite(detector_gain)) {
-            throw gr::exception(std::format("detector_gain is the detector's S-curve slope and must be positive and finite, got {}", detector_gain.value));
-        }
-        if (!(error_limit > 0.0) || !std::isfinite(error_limit)) {
-            throw gr::exception(std::format("error_limit must be positive and finite, got {}", error_limit.value));
-        }
-        if (!(noise_power > 0.0) || !std::isfinite(noise_power)) {
-            throw gr::exception(std::format("noise_power is a linear power and must be positive and finite, got {}", noise_power.value));
-        }
-        detail::applyCarrierSettings(_loop, noise_bandwidth, damping, min_frequency, max_frequency);
-        _loop.setDetectorGain(detector_gain);
+    void applySettings(const Settings& s) {
+        detail::applyCarrierSettings(_loop, s.noise_bandwidth, s.damping, s.min_frequency, s.max_frequency);
+        _loop.setDetectorGain(s.detector_gain);
     }
 
     void reset() {
@@ -155,14 +148,14 @@ axes, or the loop diverges rather than tracks. Frequencies are radians per sampl
         nSamples             = detail::syncCount(nSamples, errorSpan);
 
         // The law is selected once per call. Six bodies, each with its decisions inlined and nothing left to branch on.
-        if (soft_decisions) {
-            switch (order.value) {
+        if (settings.soft_decisions) {
+            switch (settings.order.value) {
             case 2U: return sweep<2UZ, true>(inSpan, outSpan, freqSpan, phaseSpan, errorSpan, nSamples);
             case 4U: return sweep<4UZ, true>(inSpan, outSpan, freqSpan, phaseSpan, errorSpan, nSamples);
             default: return sweep<8UZ, true>(inSpan, outSpan, freqSpan, phaseSpan, errorSpan, nSamples);
             }
         }
-        switch (order.value) {
+        switch (settings.order.value) {
         case 2U: return sweep<2UZ, false>(inSpan, outSpan, freqSpan, phaseSpan, errorSpan, nSamples);
         case 4U: return sweep<4UZ, false>(inSpan, outSpan, freqSpan, phaseSpan, errorSpan, nSamples);
         default: return sweep<8UZ, false>(inSpan, outSpan, freqSpan, phaseSpan, errorSpan, nSamples);
@@ -175,8 +168,8 @@ private:
         const bool  wantFreq  = freqSpan.isConnected;
         const bool  wantPhase = phaseSpan.isConnected;
         const bool  wantError = errorSpan.isConnected;
-        const float limit     = static_cast<float>(error_limit);
-        const float noise     = static_cast<float>(noise_power);
+        const float limit     = static_cast<float>(settings.error_limit);
+        const float noise     = static_cast<float>(settings.noise_power);
 
         const auto&       rawTags = inSpan.rawTags;
         const std::size_t nTags   = rawTags.size();

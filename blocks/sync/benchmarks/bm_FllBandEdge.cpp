@@ -48,8 +48,7 @@ std::vector<CF> makeShapedQpsk() {
 
 FllBandEdge make(gr::Size_t nTaps, bool normalized) {
     FllBandEdge block({{"samples_per_symbol", 4.0}, {"rolloff", 0.35}, {"filter_length", nTaps}, {"normalized_discriminant", normalized}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

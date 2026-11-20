@@ -32,8 +32,7 @@ std::vector<CF> makeTone() {
 
 template<typename TBlock>
 void configure(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
 }
 
 /// @brief One `processBulk` over the whole buffer, with the side ports wired or not. No allocation inside the timer.

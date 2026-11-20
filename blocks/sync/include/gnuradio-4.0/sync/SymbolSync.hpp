@@ -8,7 +8,7 @@
 #include <concepts>
 #include <cstdint>
 #include <cstdio>
-#include <format>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <optional>
@@ -39,6 +39,14 @@ inline constexpr std::string_view kTimeEstKey = "time_est";
 /// @brief Stream tag: a two-element real tensor `{offset, period}` — `time_est`, plus the average period in input samples per symbol.
 inline constexpr std::string_view kClockEstKey = "clock_est";
 
+/// @brief The slicer the decision-directed detectors use: this block's own `bpsk`, `qpsk` and `pam4`, or the shared
+/// `psk` with `arity`, which the constellation-carrying blocks use.
+enum class SlicerConstellation : std::uint8_t { bpsk, qpsk, pam4, psk };
+
+/// @brief How SymbolSync interpolates between input samples: a Farrow MMSE filter of 8, 6 or 12 taps, or the polyphase
+/// matched-filter bank.
+enum class TimingInterpolator : std::uint8_t { mmse8, mmse6, mmse12, polyphase };
+
 /// @brief The polyphase partition this bank runs, under the name the timing machinery knows it by.
 [[nodiscard]] inline std::vector<float> partitionBranchMajor(std::span<const float> prototype, std::size_t arms) { return gr::filter::fir::design::polyphasePartition(prototype, arms); }
 
@@ -54,21 +62,15 @@ namespace detail {
  */
 using TimingLoop = gr::sync::ControlLoop<double, gr::sync::PhaseWrap::None>;
 
-/// @brief The interpolator's tap count, or 0 for the polyphase matched-filter path.
-[[nodiscard]] inline int interpolatorTapsFromName(std::string_view name) {
-    if (name == "mmse8") {
-        return 8;
+/// @brief The interpolator's tap count, 0 for the polyphase matched-filter path.
+[[nodiscard]] inline int interpolatorTaps(TimingInterpolator interpolator) noexcept {
+    switch (interpolator) {
+    case TimingInterpolator::mmse8: return 8;
+    case TimingInterpolator::mmse6: return 6;
+    case TimingInterpolator::mmse12: return 12;
+    case TimingInterpolator::polyphase: break;
     }
-    if (name == "mmse6") {
-        return 6;
-    }
-    if (name == "mmse12") {
-        return 12;
-    }
-    if (name == "polyphase") {
-        return 0;
-    }
-    throw gr::exception(std::format("interpolator must be one of mmse8, mmse6, mmse12, polyphase, got '{}'", name));
+    return 0;
 }
 
 /// @brief A `time_est` or `clock_est` payload that passed validation, waiting for the position to reach it.
@@ -124,6 +126,14 @@ or minus 16 is clipped to that limit and counted in `clipped_errors`; a noiseles
 rolloff 0.2 or more stays below it. A period above twice the upper clamp is reset to `samples_per_symbol` and counted
 in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`, or one and a half times
 `samples_per_symbol` when `max_deviation` is 0.
+
+`samples_per_symbol` need not be an integer. `outputs_per_symbol` is fixed at design time as the internal clock's
+modulus. `detector_gain` is Kted in error units per symbol period; 0 selects the raised-cosine gain of the detector in
+use. `noise_bandwidth` is normalized to the symbol rate, Bn*Tsym, and the loop is critically damped by default;
+under-damped timing loops are not useful. `polyphase_arms` is rounded up to a power of two, and `matched_filter_taps` is
+the polyphase prototype at arms * samples_per_symbol. `rolloff` also sets the M&M closed-form gain. `trigger` names the
+gr:trigger_name a timing tag carries for its payload to be honored; with `trigger_presets` off, every time_est and
+clock_est is counted and ignored. `clipped_errors` counts timing errors clipped to +/-16.
 )"">;
 
     PortIn<T>                in;
@@ -132,27 +142,35 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
     PortOut<float, Optional> instant_period;
     PortOut<float, Optional> average_period;
 
-    Annotated<double, "samples_per_symbol", Doc<"nominal input samples per symbol; must exceed 1 and need not be an integer">>                                                        samples_per_symbol = 4.0;
-    Annotated<double, "max_deviation", Unit<"samples">, Doc<"period clamp about samples_per_symbol; 0 selects half of it">>                                                           max_deviation      = 0.0;
-    Annotated<gr::Size_t, "outputs_per_symbol", Doc<"output samples per symbol; design-time, the internal clock's modulus">>                                                          outputs_per_symbol = 1U;
-    Annotated<gr::sync::TimingDetector, "detector", Doc<"the timing error detector the loop runs on">>                                                                                detector           = gr::sync::TimingDetector::MuellerMuller;
-    Annotated<std::string, "constellation", Doc<"bpsk, qpsk or pam4 (real streams); also the shared spelling psk with arity 2 or 4. The slicer the decision-directed detectors use">> constellation      = std::string(std::same_as<T, float> ? "bpsk" : "qpsk");
-    Annotated<gr::Size_t, "arity", Unit<"symbols">, Doc<"M for the shared 'psk' spelling; the block's own names carry their size">>                                                   arity              = 4U;
-    Annotated<double, "detector_gain", Doc<"Kted in error units per symbol period; 0 selects the raised-cosine gain of the detector in use">>                                         detector_gain      = 0.0;
-    Annotated<double, "noise_bandwidth", Doc<"closed-loop noise bandwidth normalized to the symbol rate: Bn*Tsym">>                                                                   noise_bandwidth    = 0.01;
-    Annotated<double, "damping", Doc<"loop damping; critically damped by default, under-damped timing loops are not useful">>                                                         damping            = 1.0;
-    Annotated<std::string, "interpolator", Doc<"mmse8, mmse6, mmse12 or polyphase; polyphase also matched-filters">>                                                                  interpolator       = std::string("mmse8");
-    Annotated<gr::Size_t, "polyphase_arms", Doc<"branches in the polyphase bank; rounded up to a power of two">>                                                                      polyphase_arms     = 128U;
-    Annotated<std::vector<float>, "matched_filter_taps", Doc<"polyphase prototype at arms*sps; empty designs a root-raised cosine">>                                                  matched_filter_taps{};
-    Annotated<double, "rolloff", Doc<"excess bandwidth of the designed prototype, and of the M&M closed-form gain">>                                                                  rolloff = 0.35;
-    Annotated<std::string, "trigger", Doc<"the gr:trigger_name a timing tag must carry for its payload to be honored; empty honors any timing tag">>                                  trigger{};
-    Annotated<bool, "trigger_presets", Doc<"whether a matching timing tag presets at all; false ignores every time_est and clock_est and counts it">>                                 trigger_presets = true;
+    struct Settings {
+        Annotated<double, Doc<"samples per symbol">, Limits<Over<1.0>>>                                samples_per_symbol = 4.0;
+        Annotated<double, Unit<"samples">, Doc<"period deviation limit (0 = half)">, Limits<Min<0.0>>> max_deviation      = 0.0;
+        Annotated<gr::Size_t, Doc<"outputs per symbol">, Limits<Min<1U>>>                              outputs_per_symbol = 1U;
+        Annotated<gr::sync::TimingDetector, Doc<"timing error detector">>                              detector           = gr::sync::TimingDetector::MuellerMuller;
+        Annotated<SlicerConstellation, Doc<"decision slicer">>                                         constellation      = std::same_as<T, float> ? SlicerConstellation::bpsk : SlicerConstellation::qpsk;
+        Annotated<gr::Size_t, Unit<"symbols">, Doc<"psk order">>                                       arity              = 4U;
+        Annotated<double, Doc<"detector gain (0 = derived)">, Limits<Min<0.0>>>                        detector_gain      = 0.0;
+        Annotated<double, Doc<"loop noise bandwidth">, Limits<Over<0.0>>>                              noise_bandwidth    = 0.01;
+        Annotated<double, Doc<"damping factor">, Limits<Over<0.0>>>                                    damping            = 1.0;
+        Annotated<TimingInterpolator, Doc<"interpolator form">>                                        interpolator       = TimingInterpolator::mmse8;
+        Annotated<gr::Size_t, Doc<"polyphase arm count">>                                              polyphase_arms     = 128U;
+        Annotated<std::vector<float>, Doc<"matched filter taps (empty = designed)">>                   matched_filter_taps{};
+        Annotated<double, Doc<"excess bandwidth">, Limits<Min<0.0>, Max<1.0>>>                         rolloff = 0.35;
+        Annotated<std::string, Doc<"timing tag trigger name (empty = any)">>                           trigger{};
+        Annotated<bool, Doc<"timing tag presets">>                                                     trigger_presets = true;
 
-    Annotated<gr::Size_t, "non_finite_errors", Doc<"Read-only: symbols whose timing error was NaN or infinite">>   non_finite_errors = 0U;
-    Annotated<gr::Size_t, "period_resets", Doc<"Read-only: symbols whose period was reset to samples_per_symbol">> period_resets     = 0U;
-    Annotated<gr::Size_t, "clipped_errors", Doc<"Read-only: symbols whose timing error was clipped to +/-16">>     clipped_errors    = 0U;
+        GR_MAKE_REFLECTABLE(Settings, samples_per_symbol, max_deviation, outputs_per_symbol, detector, constellation, arity, detector_gain, noise_bandwidth, damping, interpolator, polyphase_arms, matched_filter_taps, rolloff, trigger, trigger_presets);
+    } settings;
 
-    GR_MAKE_REFLECTABLE(SymbolSync, in, out, error, instant_period, average_period, samples_per_symbol, max_deviation, outputs_per_symbol, detector, constellation, arity, detector_gain, noise_bandwidth, damping, interpolator, polyphase_arms, matched_filter_taps, rolloff, trigger, trigger_presets, non_finite_errors, period_resets, clipped_errors);
+    struct Status {
+        Annotated<gr::Size_t, Doc<"non-finite errors">> non_finite_errors = 0U;
+        Annotated<gr::Size_t, Doc<"period resets">>     period_resets     = 0U;
+        Annotated<gr::Size_t, Doc<"clipped errors">>    clipped_errors    = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, non_finite_errors, period_resets, clipped_errors);
+    } status;
+
+    GR_MAKE_REFLECTABLE(SymbolSync, in, out, error, instant_period, average_period, settings, status);
 
     detail::TimingLoop _loop{0.01, 1.0, 1.0, 1.0, 8.0};
     // Tap count follows `interpolator` (mmse6/8/12); the 128 phase steps and the 0.25 design band are
@@ -168,7 +186,6 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
     bool               _polyphase    = false;
     bool               _qpsk         = false;
     bool               _pam4         = false;
-    bool               _configured   = false;
 
     static constexpr std::uint8_t kDetectorStep = 1U;
     static constexpr std::uint8_t kOutputStep   = 2U;
@@ -200,79 +217,57 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
     std::uint64_t                                       _tagsSeenThrough = 0ULL;
     std::uint64_t                                       _ignoredTags     = 0ULL;
 
-    /// The loop, the interpolator and the schedule are derived from the members, and a batch that moves no value
-    /// never calls back, so a block constructed at its declared defaults is born configured. `newSettings` is a
-    /// cost hint below; `_configured` is what guarantees the first build.
-    explicit SymbolSync(property_map init = {}) : Block<SymbolSync<T>, NoTagPropagation>(std::move(init)) { configure(property_map{}); }
+    /// The events of the work call under way, which it adds to the three counters once at its end.
+    struct CallEvents {
+        gr::Size_t nonFinite = 0U;
+        gr::Size_t resets    = 0U;
+        gr::Size_t clipped   = 0U;
+    };
+    CallEvents _events{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) { configure(newSettings); }
-
-    void configure(const property_map& newSettings) {
-        if (!(samples_per_symbol > 1.0) || !std::isfinite(samples_per_symbol)) {
-            throw gr::exception(std::format("samples_per_symbol must exceed 1 — below two samples per symbol no detector has a usable S-curve — got {}", samples_per_symbol.value));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const double sps = s.samples_per_symbol.value;
+        if (s.max_deviation.value >= sps) {
+            return gr::Refused(s.max_deviation, "must be < samples_per_symbol");
         }
-        if (outputs_per_symbol < 1U) {
-            throw gr::exception(std::format("outputs_per_symbol must be at least one, got {}", outputs_per_symbol.value));
-        }
-        if (!(max_deviation >= 0.0) || !std::isfinite(max_deviation)) {
-            throw gr::exception(std::format("max_deviation must be finite and not negative; 0 selects half of samples_per_symbol, got {}", max_deviation.value));
-        }
-        const double deviation = max_deviation > 0.0 ? max_deviation.value : 0.5 * samples_per_symbol.value;
-        if (deviation >= samples_per_symbol) {
-            throw gr::exception(std::format("max_deviation ({}) must stay below samples_per_symbol ({}) — the clamp has to keep the period positive", deviation, samples_per_symbol.value));
-        }
-        if (!(rolloff >= 0.0) || !(rolloff <= 1.0)) {
-            throw gr::exception(std::format("rolloff must lie in [0, 1], got {}", rolloff.value));
-        }
-        if (!(noise_bandwidth > 0.0) || !std::isfinite(noise_bandwidth)) {
-            throw gr::exception(std::format("noise_bandwidth is a normalized noise bandwidth and must be positive and finite, got {}", noise_bandwidth.value));
-        }
-        if (!(damping > 0.0) || !std::isfinite(damping)) {
-            throw gr::exception(std::format("damping must be positive and finite, got {}", damping.value));
-        }
-        if (!(detector_gain >= 0.0) || !std::isfinite(detector_gain)) {
-            throw gr::exception(std::format("detector_gain is a measured S-curve slope and must be positive and finite; 0 selects the raised-cosine gain of the detector in use, got {}", detector_gain.value));
-        }
-
-        const gr::sync::TimingDetector       kind   = detector;
-        const int                            nTaps  = detail::interpolatorTapsFromName(interpolator);
-        const double                         gain   = effectiveDetectorGain(kind);
-        const gr::sync::TimingDetectorTraits traits = gr::sync::traitsOf(kind);
-
-        if (!(gain > 0.0)) {
-            throw gr::exception(std::format("detector '{}' has no gain at rolloff {}: a pulse with no excess bandwidth carries no timing line for a detector that reads no decisions", detector.value, rolloff.value));
-        }
-
-        const std::string_view shape = constellationShape();
+        const std::string_view shape = shapeOf(s.constellation.value, s.arity.value);
         if (shape.empty()) {
-            throw gr::exception(std::format("constellation must be bpsk, qpsk or pam4, or the shared spelling psk with arity 2 or 4, got '{}' with arity {}", constellation.value, arity.value));
+            return gr::Refused(s.arity, "must be 2 or 4 when constellation is psk");
         }
-        if constexpr (std::same_as<T, float>) {
-            if (shape == "qpsk") {
-                throw gr::exception("constellation qpsk needs a complex stream; a real one carries bpsk or pam4");
-            }
-        } else {
-            if (shape == "pam4") {
-                throw gr::exception("constellation pam4 needs a real stream; a complex one carries bpsk or qpsk");
-            }
+        if (std::same_as<T, float> && shape == "qpsk") {
+            return gr::Refused(s.constellation, "qpsk requires a complex stream");
         }
+        if (!std::same_as<T, float> && shape == "pam4") {
+            return gr::Refused(s.constellation, "pam4 requires a real stream");
+        }
+        if (detectorGainOf(s.detector.value, s.detector_gain.value, s.rolloff.value, shape) <= 0.0) {
+            return gr::Refused(s.rolloff, "must be > 0 when detector_gain is 0");
+        }
+        if (s.interpolator.value == TimingInterpolator::polyphase && gr::sync::traitsOf(s.detector.value).needsDerivative) {
+            return gr::Refused(s.interpolator, "polyphase requires a derivative-free detector");
+        }
+        return {};
+    }
 
-        _kind   = kind;
-        _traits = traits;
-        _qpsk   = shape == "qpsk";
-        _pam4   = shape == "pam4";
+    void applySettings(const Settings& s) {
+        const double deviation = s.max_deviation > 0.0 ? s.max_deviation.value : 0.5 * s.samples_per_symbol;
 
-        _loop.setFrequencyLimits(samples_per_symbol - deviation, samples_per_symbol + deviation);
-        _loop.setDamping(damping);
-        _loop.setNoiseBandwidth(noise_bandwidth);
-        _loop.setDetectorGain(gr::sync::detectorGainPerSample(gain, samples_per_symbol));
+        _kind   = s.detector;
+        _traits = gr::sync::traitsOf(_kind);
+        _qpsk   = constellationShape() == "qpsk";
+        _pam4   = constellationShape() == "pam4";
 
-        static constexpr std::array kRestartKeys{"samples_per_symbol", "outputs_per_symbol", "detector", "constellation", "arity", "interpolator", "polyphase_arms", "matched_filter_taps", "rolloff"};
-        if (!_configured || std::ranges::any_of(kRestartKeys, [&newSettings](std::string_view key) { return newSettings.contains(key); })) {
-            buildInterpolator(nTaps);
+        _loop.setFrequencyLimits(s.samples_per_symbol - deviation, s.samples_per_symbol + deviation);
+        _loop.setDamping(s.damping);
+        _loop.setNoiseBandwidth(s.noise_bandwidth);
+        _loop.setDetectorGain(gr::sync::detectorGainPerSample(effectiveDetectorGain(_kind), s.samples_per_symbol));
+
+        // these settings shape the interpolator and the clock, which start again
+        const bool reshape = s.samples_per_symbol.changed() || s.outputs_per_symbol.changed() || s.detector.changed() || s.constellation.changed() || s.arity.changed() || s.interpolator.changed() || s.polyphase_arms.changed() || s.matched_filter_taps.changed() || s.rolloff.changed();
+        if (reshape) {
+            buildInterpolator(detail::interpolatorTaps(s.interpolator.value));
             restart();
         }
-        _configured = true;
 
         // The input port's minimum is the loop's own production condition at the position the block currently
         // holds: the base's lead over the point the last call consumed to, plus the furthest the detector reads
@@ -294,32 +289,36 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
         _baseLead        = 0ULL;
         _positioned      = false;
 
-        non_finite_errors = 0U;
-        period_resets     = 0U;
-        clipped_errors    = 0U;
+        _events                  = {};
+        status.non_finite_errors = 0U;
+        status.period_resets     = 0U;
+        status.clipped_errors    = 0U;
     }
 
-    /// @brief The decision shape a constellation name selects, empty for a name this slicer cannot carry.
+    /// @brief The decision shape the constellation selects, empty for a `psk` arity this slicer cannot carry.
     ///
-    /// Both vocabularies are accepted: this block's own `bpsk`, `qpsk` and `pam4`, and the shared spelling `psk`
-    /// with `arity`, which the constellation-carrying blocks use. The detectors slice a binary or quadrature
-    /// decision, so `psk` is carried at arity 2 and 4 and refused above that rather than sliced wrongly.
-    [[nodiscard]] std::string_view constellationShape() const noexcept {
-        if (constellation == "psk") {
-            if (arity == 2U) {
-                return "bpsk";
-            }
-            return arity == 4U ? "qpsk" : "";
+    /// The detectors slice a binary or quadrature decision, so `psk` is carried at arity 2 and 4 and refused above
+    /// that rather than sliced wrongly.
+    [[nodiscard]] std::string_view constellationShape() const noexcept { return shapeOf(settings.constellation.value, settings.arity.value); }
+
+    /// @brief The decision shape @p constellation with @p size selects, empty when none.
+    [[nodiscard]] static std::string_view shapeOf(SlicerConstellation constellation, gr::Size_t size) noexcept {
+        switch (constellation) {
+        case SlicerConstellation::bpsk: return "bpsk";
+        case SlicerConstellation::qpsk: return "qpsk";
+        case SlicerConstellation::pam4: return "pam4";
+        case SlicerConstellation::psk: break;
         }
-        if (constellation == "bpsk" || constellation == "qpsk" || constellation == "pam4") {
-            return constellation.value;
+        if (size == 2U) {
+            return "bpsk";
         }
-        return "";
+        return size == 4U ? "qpsk" : "";
     }
 
     /// @brief The average of `E[|Re{a}|]` and `E[|Im{a}|]` for the sliced constellation at unit power.
-    [[nodiscard]] double meanAxisMagnitude() const noexcept {
-        const std::string_view shape = constellationShape();
+    [[nodiscard]] double meanAxisMagnitude() const noexcept { return meanAxisOf(constellationShape()); }
+
+    [[nodiscard]] static double meanAxisOf(std::string_view shape) noexcept {
         if (shape == "qpsk") {
             return std::numbers::sqrt2 / 2.0;
         }
@@ -330,18 +329,20 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
     }
 
     /// @brief `Kted` per symbol: what `detector_gain` says, or the raised-cosine value for the detector in use.
-    [[nodiscard]] double effectiveDetectorGain(gr::sync::TimingDetector kind) const {
-        if (detector_gain > 0.0) {
-            return detector_gain.value;
+    [[nodiscard]] double effectiveDetectorGain(gr::sync::TimingDetector kind) const { return detectorGainOf(kind, settings.detector_gain.value, settings.rolloff.value, constellationShape()); }
+
+    [[nodiscard]] static double detectorGainOf(gr::sync::TimingDetector kind, double detectorGain, double excessBandwidth, std::string_view shape) {
+        if (detectorGain > 0.0) {
+            return detectorGain;
         }
         switch (kind) {
-        case gr::sync::TimingDetector::MuellerMuller: return gr::sync::muellerMullerGain(rolloff);
-        case gr::sync::TimingDetector::ModifiedMuellerMuller: return gr::sync::modifiedMuellerMullerGain(rolloff);
-        case gr::sync::TimingDetector::ZeroCrossing: return gr::sync::zeroCrossingGain(rolloff);
-        case gr::sync::TimingDetector::Gardner: return gr::sync::gardnerGain(rolloff);
-        case gr::sync::TimingDetector::EarlyLate: return gr::sync::earlyLateGain(rolloff);
-        case gr::sync::TimingDetector::SignalTimesSlopeMl: return gr::sync::signalTimesSlopeGain(rolloff);
-        case gr::sync::TimingDetector::SignumTimesSlopeMl: return gr::sync::signumTimesSlopeGain(rolloff, meanAxisMagnitude());
+        case gr::sync::TimingDetector::MuellerMuller: return gr::sync::muellerMullerGain(excessBandwidth);
+        case gr::sync::TimingDetector::ModifiedMuellerMuller: return gr::sync::modifiedMuellerMullerGain(excessBandwidth);
+        case gr::sync::TimingDetector::ZeroCrossing: return gr::sync::zeroCrossingGain(excessBandwidth);
+        case gr::sync::TimingDetector::Gardner: return gr::sync::gardnerGain(excessBandwidth);
+        case gr::sync::TimingDetector::EarlyLate: return gr::sync::earlyLateGain(excessBandwidth);
+        case gr::sync::TimingDetector::SignalTimesSlopeMl: return gr::sync::signalTimesSlopeGain(excessBandwidth);
+        case gr::sync::TimingDetector::SignumTimesSlopeMl: return gr::sync::signumTimesSlopeGain(excessBandwidth, meanAxisOf(shape));
         }
         return 0.0;
     }
@@ -354,6 +355,16 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
 
     /// @brief The detector and the interpolator are chosen once per call, so the loop below has neither in it.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& errorSpan, OutputSpanLike auto& instantSpan, OutputSpanLike auto& averageSpan) {
+        const work::Status result = sweepFor(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
+        status.non_finite_errors.value += _events.nonFinite;
+        status.period_resets.value += _events.resets;
+        status.clipped_errors.value += _events.clipped;
+        _events = {};
+        return result;
+    }
+
+private:
+    [[nodiscard]] work::Status sweepFor(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& errorSpan, OutputSpanLike auto& instantSpan, OutputSpanLike auto& averageSpan) {
         using gr::sync::TimingDetector;
         switch (_kind) {
         case TimingDetector::MuellerMuller: return dispatch<TimingDetector::MuellerMuller>(inSpan, outSpan, errorSpan, instantSpan, averageSpan);
@@ -366,7 +377,6 @@ in `period_resets`. The upper clamp is `samples_per_symbol` plus `max_deviation`
         }
     }
 
-private:
     template<gr::sync::TimingDetector D>
     [[nodiscard]] work::Status dispatch(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& errorSpan, OutputSpanLike auto& instantSpan, OutputSpanLike auto& averageSpan) {
         if constexpr (!gr::sync::traitsOf(D).needsDerivative) {
@@ -409,20 +419,20 @@ private:
         double instant = _loop.frequency();
         if (std::isfinite(_error)) [[likely]] {
             if (std::abs(_error) > kErrorLimit) [[unlikely]] {
-                _error         = std::copysign(kErrorLimit, _error);
-                clipped_errors = clipped_errors + 1U;
+                _error = std::copysign(kErrorLimit, _error);
+                ++_events.clipped;
             }
             instant = _loop.step(static_cast<double>(_error));
         } else {
-            _error            = 0.f;
-            non_finite_errors = non_finite_errors + 1U;
+            _error = 0.f;
+            ++_events.nonFinite;
         }
         const double period = instant > 0.0 ? instant : _loop.frequency();
         if (period <= 2.0 * _loop.maxFrequency()) [[likely]] {
             return period;
         }
-        period_resets = period_resets + 1U;
-        return samples_per_symbol;
+        ++_events.resets;
+        return settings.samples_per_symbol;
     }
 
     /// @brief A 64-bit sample offset narrowed to an index; a template, so the cast stands where `std::size_t` is 32
@@ -540,9 +550,9 @@ private:
     }
 
     void restart() {
-        _interpolationsPerSymbol         = std::lcm(_traits.inputsPerSymbol, static_cast<int>(outputs_per_symbol.value));
+        _interpolationsPerSymbol         = std::lcm(_traits.inputsPerSymbol, static_cast<int>(settings.outputs_per_symbol.value));
         const std::size_t detectorStride = static_cast<std::size_t>(_interpolationsPerSymbol / _traits.inputsPerSymbol);
-        const std::size_t outputStride   = static_cast<std::size_t>(_interpolationsPerSymbol / static_cast<int>(outputs_per_symbol.value));
+        const std::size_t outputStride   = static_cast<std::size_t>(_interpolationsPerSymbol / static_cast<int>(settings.outputs_per_symbol.value));
 
         // The three clocks are a modulo of an integer counter, but a modulo by
         // a value the compiler cannot see is a hardware divide, three of them per interpolation, so the whole cycle is
@@ -554,8 +564,8 @@ private:
         _counter = _interpolationsPerSymbol - 1;
 
         _cycleLength = static_cast<double>(_interpolationsPerSymbol);
-        _loop.reset(0.0, samples_per_symbol);
-        _instantPeriod       = samples_per_symbol;
+        _loop.reset(0.0, settings.samples_per_symbol);
+        _instantPeriod       = settings.samples_per_symbol;
         _interpolationPeriod = _instantPeriod / _cycleLength;
         _mu                  = 0.0;
         _error               = 0.f;
@@ -575,24 +585,20 @@ private:
             _anchorDelay  = _bank.delay();
             return;
         }
-        if (_traits.needsDerivative) {
-            throw gr::exception("the maximum-likelihood detectors need the interpolating differentiator, which the polyphase path does not carry — select an mmse interpolator");
-        }
-
         std::size_t arms = 1UZ;
-        while (arms < static_cast<std::size_t>(polyphase_arms.value)) {
+        while (arms < static_cast<std::size_t>(settings.polyphase_arms.value)) {
             arms <<= 1U;
         }
 
-        std::vector<float> prototype = matched_filter_taps;
+        std::vector<float> prototype = settings.matched_filter_taps;
         if (prototype.empty()) {
             // The design returns an odd tap count, so ask for one short of the bank and let the partition pad the
             // last branch: the prototype stays centered to within one interpolated sample, 1/arms of an input sample.
             // Eleven symbols of span is a conventional root-raised-cosine truncation: long enough that the
             // matched-filter residue is well inside the timing error the loop already carries at any usable rolloff.
-            std::size_t branch = static_cast<std::size_t>(std::ceil(11.0 * samples_per_symbol));
+            std::size_t branch = static_cast<std::size_t>(std::ceil(11.0 * settings.samples_per_symbol));
             branch += branch % 2UZ;
-            prototype = gr::filter::fir::design::rootRaisedCosine(branch * arms - 1UZ, static_cast<double>(arms) * samples_per_symbol, rolloff, static_cast<double>(arms));
+            prototype = gr::filter::fir::design::rootRaisedCosine(branch * arms - 1UZ, static_cast<double>(arms) * settings.samples_per_symbol, settings.rolloff, static_cast<double>(arms));
         }
 
         _arms         = arms;
@@ -699,7 +705,7 @@ private:
      * estimator and a correlator, say — can send each block's presets to the block that asked for them.
      */
     [[nodiscard]] bool namedForThisBlock(const property_map& map) const noexcept {
-        if (trigger.value.empty()) {
+        if (settings.trigger.value.empty()) {
             return true;
         }
         const auto named = map.find(property_map::key_type(gr::tag::TRIGGER_NAME.key()));
@@ -707,7 +713,7 @@ private:
             return false;
         }
         const auto* label = named->second.get_if<std::pmr::string>();
-        return label != nullptr && std::string_view(label->data(), label->size()) == std::string_view(trigger.value);
+        return label != nullptr && std::string_view(label->data(), label->size()) == std::string_view(settings.trigger.value);
     }
 
     /// @brief Read `clock_est`'s `{offset, period}` out of a two-element real tensor.
@@ -758,7 +764,7 @@ private:
                 instant = finiteNumber(time->second);
             }
 
-            const bool usable = trigger_presets && namedForThisBlock(tag.map) && instant.has_value() && std::abs(*instant) <= 1.0 && (period == 0.0 || (period >= _loop.minFrequency() && period <= _loop.maxFrequency()));
+            const bool usable = settings.trigger_presets && namedForThisBlock(tag.map) && instant.has_value() && std::abs(*instant) <= 1.0 && (period == 0.0 || (period >= _loop.minFrequency() && period <= _loop.maxFrequency()));
             if (usable) {
                 _timingTags.push_back({at, *instant, period});
             } else {
