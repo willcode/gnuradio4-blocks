@@ -22,8 +22,7 @@ namespace {
 
 template<typename TBlock>
 void applySettings(TBlock& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
 }
 
 /// @brief `value` modulo 2^N in the integer type `T`.

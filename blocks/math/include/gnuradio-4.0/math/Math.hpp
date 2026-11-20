@@ -59,32 +59,37 @@ template<typename T, typename op>
 struct MathOpImpl : Block<MathOpImpl<T, op>, detail::ConstOpDroppedKeys<T, op>> {
     PortIn<T>  in{};
     PortOut<T> out{};
-    T          value = detail::defaultValue<T>();
 
-    GR_MAKE_REFLECTABLE(MathOpImpl, in, out, value);
+    struct Settings {
+        T value = detail::defaultValue<T>();
+
+        GR_MAKE_REFLECTABLE(Settings, value);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(MathOpImpl, in, out, settings);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr V processOne(const V& a) const noexcept {
         if constexpr (std::same_as<op, std::divides<T>> && std::integral<T>) {
-            if (value == T{}) {
+            if (settings.value == T{}) {
                 return V{};
             }
         }
         if constexpr (gr::meta::any_simd<V, T>) {
             if constexpr (std::same_as<op, std::multiplies<T>>) {
-                return a * value;
+                return a * settings.value;
             } else if constexpr (std::same_as<op, std::divides<T>>) {
-                return a / value;
+                return a / settings.value;
             } else if constexpr (std::same_as<op, std::plus<T>>) {
-                return a + value;
+                return a + settings.value;
             } else if constexpr (std::same_as<op, std::minus<T>>) {
-                return a - value;
+                return a - settings.value;
             } else {
                 static_assert(gr::meta::always_false<T>, "unknown op");
                 return V{};
             }
         } else { // non-simd branch
-            return detail::SafeOp<T, op>{}(a, value);
+            return detail::SafeOp<T, op>{}(a, settings.value);
         }
     }
 };
@@ -119,20 +124,20 @@ struct MathOpMultiPortImpl : Block<MathOpMultiPortImpl<T, op>, detail::MultiPort
     )"">;
 
     // ports
-    // The input vector starts at the default `n_inputs`. `settingsChanged` resizes it only when the value changes.
+    // The input vector starts at the default `n_inputs`. `applySettings` resizes it only when the value changes.
     std::vector<PortIn<T>> in = std::vector<PortIn<T>>(1UZ);
     PortOut<T>             out;
 
     // settings
-    Annotated<gr::Size_t, "n_inputs", Visible, Doc<"Number of inputs">, Limits<1U, 32U>> n_inputs = 1U;
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"input count">, Limits<Min<1U>, Max<32U>>, PortCountFor<"in">> n_inputs = 1U;
 
-    GR_MAKE_REFLECTABLE(MathOpMultiPortImpl, in, out, n_inputs);
+        GR_MAKE_REFLECTABLE(Settings, n_inputs);
+    } settings;
 
-    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") && old_settings.at("n_inputs") != new_settings.at("n_inputs")) {
-            in.resize(n_inputs);
-        }
-    }
+    GR_MAKE_REFLECTABLE(MathOpMultiPortImpl, in, out, settings);
+
+    void applySettings(const Settings& s) { in.resize(s.n_inputs); }
 
     template<gr::InputSpanLike TInSpan>
     gr::work::Status processBulk(const std::span<TInSpan>& ins, gr::OutputSpanLike auto& sout) const {

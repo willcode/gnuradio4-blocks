@@ -1,5 +1,9 @@
 #include <boost/ut.hpp>
 
+#include <format>
+#include <string>
+#include <vector>
+
 #include <gnuradio-4.0/math/ExpressionBlocks.hpp>
 
 #include <gnuradio-4.0/Graph.hpp>
@@ -9,6 +13,7 @@
 
 #include <gnuradio-4.0/Message.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 namespace gr::blocks::math {
 static_assert(std::is_constructible_v<ExpressionSISO<float>, property_map>, "Block type ExpressionSISO must be constructible from property_map");
@@ -36,9 +41,9 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(approx(source.default_value, T(21), T(1e-3f)));
-        expect(approx(exprBlock.param_a.value, T(2), T(1e-3f)));
-        expect(eq(tagSink._samples.size(), source.n_samples_max));
+        expect(approx(source.settings.default_value, T(21), T(1e-3f)));
+        expect(approx(exprBlock.settings.param_a.value, T(2), T(1e-3f)));
+        expect(eq(tagSink._samples.size(), source.settings.n_samples_max));
         expect(approx(tagSink._samples[0], T(42), T(1e-3f)));
     } | std::tuple<float, double>{};
 
@@ -59,13 +64,36 @@ const boost::ut::suite<"basic expression block tests"> basicMath = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(approx(source1.default_value, T(7), T(1e-3f)));
-        expect(approx(source2.default_value, T(5), T(1e-3f)));
-        expect(approx(exprBlock.param_a.value, T(3), T(1e-3f)));
-        expect(eq(tagSink._samples.size(), source1.n_samples_max));
-        expect(eq(tagSink._samples.size(), source2.n_samples_max));
+        expect(approx(source1.settings.default_value, T(7), T(1e-3f)));
+        expect(approx(source2.settings.default_value, T(5), T(1e-3f)));
+        expect(approx(exprBlock.settings.param_a.value, T(3), T(1e-3f)));
+        expect(eq(tagSink._samples.size(), source1.settings.n_samples_max));
+        expect(eq(tagSink._samples.size(), source2.settings.n_samples_max));
         expect(approx(tagSink._samples[0], T(42), T(1e-3f)));
     } | std::tuple<float, double>{};
+};
+
+const boost::ut::suite<"ExpressionBlocks settings at the initialization"> expressionInitTests = [] {
+    using namespace boost::ut;
+
+    "ExpressionSISO initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::math::ExpressionSISO<float>>({
+            {"expr_string", std::string("a*x")},
+            {"param_a", 2.f},
+            {"param_b", 3.f},
+            {"param_c", 4.f},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
+    "ExpressionDISO initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::math::ExpressionDISO<float>>({
+            {"expr_string", std::string("x+y")},
+            {"param_a", 2.f},
+            {"param_b", 3.f},
+            {"param_c", 4.f},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
 };
 
 int main() { /* not needed for UT */ }

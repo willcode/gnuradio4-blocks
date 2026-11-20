@@ -53,8 +53,7 @@ void benchmarkBlock(std::string_view name, gr::property_map settings = {}) {
     std::vector<R>       output(kSamples);
 
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
 
     auto pass = [&block, &input, &output] {
         processSpan(block, std::span<const T>(input), std::span<R>(output));

@@ -36,11 +36,11 @@ const boost::ut::suite<"bulk expression block tests"> bulkExpression = [] {
         }
         expect(sched.runAndWait().has_value());
 
-        expect(eq(tagSink._samples.size(), source.n_samples_max));
-        expect(approx(exprBlock.param_a.value, T(2), T(1e-3f)));
+        expect(eq(tagSink._samples.size(), source.settings.n_samples_max));
+        expect(approx(exprBlock.settings.param_a.value, T(2), T(1e-3f)));
         for (std::size_t i = 0; i < tagSink._samples.size(); ++i) {
             T expected = T(1 + i) * T(2);
-            expect(approx(tagSink._samples[i], expected, T(1e-6))) << std::format("should be: output[{}] ({}) == {} * input[{}] ({}) ", i, tagSink._samples[i], exprBlock.param_a, i, expected);
+            expect(approx(tagSink._samples[i], expected, T(1e-6))) << std::format("should be: output[{}] ({}) == {} * input[{}] ({}) ", i, tagSink._samples[i], exprBlock.settings.param_a, i, expected);
         }
     } | std::tuple<float, double>{};
 

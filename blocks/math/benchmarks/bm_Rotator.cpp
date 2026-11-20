@@ -22,8 +22,7 @@ std::vector<T> generateTone(std::size_t nSamples, double frequency) {
 
 template<typename T>
 void initialize(gr::blocks::math::Rotator<T>& rotator) {
-    rotator.settings().init();
-    std::ignore = rotator.settings().applyStagedParameters();
+    std::ignore = rotator.check({});
 }
 
 template<typename T>

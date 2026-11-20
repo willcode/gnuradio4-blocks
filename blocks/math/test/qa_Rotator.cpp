@@ -16,6 +16,7 @@
 #include <gnuradio-4.0/algorithm/ImChart.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 #include <gnuradio-4.0/testing/GraphTestBlocks.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -84,10 +85,9 @@ RotationError rotationError(std::size_t nSamples, double increment, std::size_t 
     using value_t = typename T::value_type;
 
     gr::blocks::math::Rotator<T> rot({{"phase_increment", static_cast<value_t>(increment)}, {"initial_phase", value_t(0)}});
-    rot.settings().init();
-    std::ignore = rot.settings().applyStagedParameters();
+    boost::ut::expect(rot.check({}).has_value());
 
-    const double applied = static_cast<double>(rot.phase_increment);
+    const double applied = static_cast<double>(rot.settings.phase_increment);
 
     std::vector<T> input(nSamples);
     for (std::size_t i = 0UZ; i < nSamples; ++i) {
@@ -114,8 +114,7 @@ RotationError rotationError(std::size_t nSamples, double increment, std::size_t 
 template<typename T>
 std::vector<std::complex<T>> execRotator(const std::vector<std::complex<T>>& input, const gr::property_map& initSettings) {
     gr::blocks::math::Rotator<std::complex<T>> rot(initSettings);
-    rot.settings().init();
-    std::ignore = rot.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
+    boost::ut::expect(rot.check({}).has_value());
 
     std::vector<std::complex<T>> output(input.size());
     std::ignore = rot.processBulk(std::span<const std::complex<T>>(input), std::span<std::complex<T>>(output));
@@ -169,11 +168,10 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         using value_t          = typename T::value_type;
         value_t    phase_shift = std::numbers::pi_v<value_t> / value_t(2);
         Rotator<T> rot({{"phase_increment", phase_shift}, {"initial_phase", value_t(0)}, {"sample_rate", 1.f}});
-        rot.settings().init();
-        std::ignore = rot.settings().applyStagedParameters(); // needed for unit-test only when executed outside a Scheduler/Graph
+        boost::ut::expect(rot.check({}).has_value());
 
-        expect(approx(rot.frequency_shift, 0.25f, 1e-3f));
-        expect(approx(rot.initial_phase, value_t(0), value_t(1e-3f)));
+        expect(approx(rot.settings.frequency_shift, 0.25f, 1e-3f));
+        expect(approx(rot.settings.initial_phase, value_t(0), value_t(1e-3f)));
 
         const std::vector<T> input(8UZ, std::complex<value_t>(1, 0));
         std::vector<T>       output(8UZ);
@@ -310,36 +308,50 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     "Rotator - sample_rate change preserves the commanded Hz shift"_test = [] {
         using T = std::complex<double>;
         Rotator<T> rot({{"frequency_shift", 10.f}, {"sample_rate", 1000.f}});
-        rot.settings().init();
-        std::ignore = rot.settings().applyStagedParameters();
+        boost::ut::expect(rot.check({}).has_value());
 
-        const double incrementAt1k = static_cast<double>(rot.phase_increment);
+        const double incrementAt1k = static_cast<double>(rot.settings.phase_increment);
         expect(approx(incrementAt1k, 2.0 * std::numbers::pi * 10.0 / 1000.0, 1e-6));
 
-        std::ignore = rot.settings().setStaged({{"sample_rate", 2000.f}});
-        std::ignore = rot.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(rot), {{"sample_rate", 2000.f}});
 
-        expect(approx(static_cast<float>(rot.frequency_shift), 10.f, 1e-4f)) << "commanded shift must survive a sample_rate change";
-        expect(approx(static_cast<double>(rot.phase_increment), incrementAt1k / 2.0, 1e-9)) << "increment must rescale with sample_rate";
+        expect(approx(static_cast<float>(rot.settings.frequency_shift), 10.f, 1e-4f)) << "commanded shift must survive a sample_rate change";
+        expect(approx(static_cast<double>(rot.settings.phase_increment), incrementAt1k / 2.0, 1e-9)) << "increment must rescale with sample_rate";
+    };
+
+    "Rotator - a phase_increment sent at the value it holds does not lead"_test = [] {
+        using T = std::complex<double>;
+        Rotator<T> rot({{"frequency_shift", 10.f}, {"sample_rate", 1000.f}});
+        boost::ut::expect(rot.check({}).has_value());
+        const double held = rot.settings.phase_increment.value;
+
+        // a host that sends the whole pair with one of them edited: the edited shift leads
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(rot), {{"phase_increment", held}, {"frequency_shift", 20.f}}).empty());
+        expect(approx(static_cast<float>(rot.settings.frequency_shift), 20.f, 1e-4f)) << "the shift the call moves leads";
+        expect(approx(static_cast<double>(rot.settings.phase_increment), 2.0 * std::numbers::pi * 20.0 / 1000.0, 1e-6)) << "and the increment follows it";
+
+        // beside a new sample_rate, the commanded shift survives as it does without the increment
+        const double heldAt20 = rot.settings.phase_increment.value;
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(rot), {{"phase_increment", heldAt20}, {"sample_rate", 2000.f}}).empty());
+        expect(approx(static_cast<float>(rot.settings.frequency_shift), 20.f, 1e-4f)) << "the shift survives a sample_rate change that resends the increment";
+        expect(approx(static_cast<double>(rot.settings.phase_increment), heldAt20 / 2.0, 1e-9)) << "and the increment rescales";
     };
 
     "Rotator - settings change without initial_phase keeps phase continuity"_test = [] {
         using T = std::complex<double>;
         Rotator<T> rot({{"frequency_shift", 1.f}, {"sample_rate", 64.f}});
-        rot.settings().init();
-        std::ignore = rot.settings().applyStagedParameters();
+        boost::ut::expect(rot.check({}).has_value());
 
         const std::vector<T> input(32UZ, T(1.0, 0.0));
         std::vector<T>       first(32UZ);
         std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(first));
 
-        std::ignore = rot.settings().setStaged({{"frequency_shift", 1.f}});
-        std::ignore = rot.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(rot), {{"frequency_shift", 1.f}});
 
         std::vector<T> second(32UZ);
         std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(second));
 
-        const T continued = first.back() * std::polar(1.0, static_cast<double>(rot.phase_increment));
+        const T continued = first.back() * std::polar(1.0, static_cast<double>(rot.settings.phase_increment));
         expect(approx(second.front().real(), continued.real(), 1e-9)) << "phase must not reset on a settings change that omits initial_phase";
         expect(approx(second.front().imag(), continued.imag(), 1e-9)) << "phase must not reset on a settings change that omits initial_phase";
     };
@@ -347,20 +359,18 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     "Rotator - a changed initial_phase restarts the accumulator"_test = [] {
         using T = std::complex<double>;
         Rotator<T> rot({{"frequency_shift", 1.f}, {"sample_rate", 64.f}});
-        rot.settings().init();
-        std::ignore = rot.settings().applyStagedParameters();
+        boost::ut::expect(rot.check({}).has_value());
 
         const std::vector<T> input(32UZ, T(1.0, 0.0));
         std::vector<T>       discard(32UZ);
         std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(discard));
 
-        const double increment = static_cast<double>(rot.phase_increment);
+        const double increment = static_cast<double>(rot.settings.phase_increment);
 
         // `initial_phase` is a value, not an event: it restarts the accumulator where it is applied at a phase the
         // block does not already hold, and the first sample of the next call is one increment past it
         const auto restartAt = [&](double phase) {
-            std::ignore = rot.settings().setStaged({{"initial_phase", phase}});
-            std::ignore = rot.settings().applyStagedParameters();
+            std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(rot), {{"initial_phase", phase}});
 
             std::vector<T> restarted(32UZ);
             std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(restarted));
@@ -417,20 +427,18 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
     "Rotator - phase is continuous across a frequency change mid-stream"_test = [] {
         using T = std::complex<double>;
         Rotator<T> rot({{"frequency_shift", 2.f}, {"sample_rate", 64.f}});
-        rot.settings().init();
-        std::ignore = rot.settings().applyStagedParameters();
+        boost::ut::expect(rot.check({}).has_value());
 
         const std::vector<T> input(4100UZ, T(1.0, 0.0)); // spans a re-seed boundary and ends mid-lane
         std::vector<T>       before(4100UZ);
         std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(before));
 
-        std::ignore = rot.settings().setStaged({{"frequency_shift", -7.f}});
-        std::ignore = rot.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(rot), {{"frequency_shift", -7.f}});
 
         std::vector<T> after(4100UZ);
         std::ignore = rot.processBulk(std::span<const T>(input), std::span<T>(after));
 
-        const T continued = before.back() * std::polar(1.0, static_cast<double>(rot.phase_increment));
+        const T continued = before.back() * std::polar(1.0, static_cast<double>(rot.settings.phase_increment));
         expect(approx(after.front().real(), continued.real(), 1e-9)) << "a frequency change must advance the phase, not restart it";
         expect(approx(after.front().imag(), continued.imag(), 1e-9)) << "a frequency change must advance the phase, not restart it";
     };
@@ -447,14 +455,12 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         }
 
         Rotator<T> bulk(kInit);
-        bulk.settings().init();
-        std::ignore = bulk.settings().applyStagedParameters();
+        boost::ut::expect(bulk.check({}).has_value());
         std::vector<T> bulkOut(kN);
         std::ignore = bulk.processBulk(std::span<const T>(input), std::span<T>(bulkOut));
 
         Rotator<T> stepwise(kInit);
-        stepwise.settings().init();
-        std::ignore  = stepwise.settings().applyStagedParameters();
+        boost::ut::expect(stepwise.check({}).has_value());
         double worst = 0.;
         T      last{};
         for (std::size_t i = 0UZ; i < kN; ++i) {
@@ -466,16 +472,14 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         // the phase carries across a retune, and the two entry points share it
         const T    unit{1.0, 0.0};
         Rotator<T> retuned(kInit);
-        retuned.settings().init();
-        std::ignore = retuned.settings().applyStagedParameters();
+        boost::ut::expect(retuned.check({}).has_value());
         T before{};
         for (std::size_t i = 0UZ; i < kN; ++i) {
             before = retuned.rotateOne(unit);
         }
 
-        std::ignore       = retuned.settings().setStaged({{"frequency_shift", -7.f}});
-        std::ignore       = retuned.settings().applyStagedParameters();
-        const T continued = before * std::polar(1.0, static_cast<double>(retuned.phase_increment));
+        std::ignore       = gr::testing::setAndApply(gr::settings::detail::settingsOf(retuned), {{"frequency_shift", -7.f}});
+        const T continued = before * std::polar(1.0, static_cast<double>(retuned.settings.phase_increment));
         const T after     = retuned.rotateOne(unit);
         expect(approx(after.real(), continued.real(), 1e-9)) << "a retune must advance the phase, not restart it";
         expect(approx(after.imag(), continued.imag(), 1e-9)) << "a retune must advance the phase, not restart it";
@@ -483,7 +487,7 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         const std::vector<T> ones(4UZ, unit);
         std::vector<T>       tail(4UZ);
         std::ignore     = retuned.processBulk(std::span<const T>(ones), std::span<T>(tail));
-        const T resumed = after * std::polar(1.0, static_cast<double>(retuned.phase_increment));
+        const T resumed = after * std::polar(1.0, static_cast<double>(retuned.settings.phase_increment));
         expect(approx(tail.front().real(), resumed.real(), 1e-9)) << "a bulk call must resume the phase a single-sample call left";
         expect(approx(tail.front().imag(), resumed.imag(), 1e-9)) << "a bulk call must resume the phase a single-sample call left";
     };
@@ -518,6 +522,20 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         }
         auto output = execRotator(input, {{"frequency_shift", -1.5f}, {"sample_rate", fs}});
         plotTimeDomain(input, output, fs, "2->.5 Hz");
+    };
+};
+
+const boost::ut::suite<"Rotator settings at the initialization"> rotatorInitTests = [] {
+    using namespace boost::ut;
+
+    "Rotator initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::math::Rotator<std::complex<float>>>({
+            {"sample_rate", 2.f},
+            {"frequency_shift", 0.1f},
+            {"phase_increment", 0.2f},
+            {"initial_phase", 0.3f},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
     };
 };
 

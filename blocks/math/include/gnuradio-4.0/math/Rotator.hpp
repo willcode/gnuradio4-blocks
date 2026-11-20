@@ -35,39 +35,37 @@ is attached to.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                           sample_rate     = 1.f;
-    Annotated<float, "frequency shift", Doc<"rel. frequency shift">, Unit<"Hz">>                     frequency_shift = 0.0f;
-    Annotated<value_type, "phase_increment", Unit<"rad">, Doc<"how many radians to add per sample">> phase_increment{0};
-    Annotated<value_type, "initial_phase", Unit<"rad">, Doc<"starting offset for each new chunk">>   initial_phase{0};
+    struct Settings {
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">>                      sample_rate     = 1.f;
+        Annotated<float, Doc<"frequency shift">, Unit<"Hz">>                  frequency_shift = 0.0f;
+        Annotated<value_type, Unit<"rad">, Doc<"phase increment per sample">> phase_increment{0};
+        Annotated<value_type, Unit<"rad">, Doc<"initial phase">>              initial_phase{0};
+
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, frequency_shift, initial_phase, phase_increment);
+    } settings;
 
     // kept in double regardless of T: a value_type accumulator rounds the re-seed phase once per call,
     // which for 'complex<float>' is ~2.4e-7 rad and dominates every other error over a stream
     double _accumulated_phase{0.};
 
-    GR_MAKE_REFLECTABLE(Rotator, in, out, sample_rate, frequency_shift, initial_phase, phase_increment);
+    GR_MAKE_REFLECTABLE(Rotator, in, out, settings);
 
-    // 'frequency_shift' is the commanded quantity and survives a 'sample_rate' change;
-    // setting 'phase_increment' instead commands the increment and re-derives the shift.
-    // 'initial_phase' applied at a phase the block does not hold restarts the accumulator there; re-applying the
-    // phase it already holds moves no value and does not restart it.
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const bool haveShift     = newSettings.contains("frequency_shift");
-        const bool haveIncrement = newSettings.contains("phase_increment");
-        if (haveShift && haveIncrement) {
-            throw gr::exception(std::format("cannot set both 'frequency_shift' and 'phase_increment' in new setting (XOR): {}", newSettings));
-        }
-
-        // The two settings name one rotation: the key that moved is the master and the other follows from the
-        // members, so a batch that names neither of them still leaves the increment stating what the members say.
-        if (haveIncrement) {
-            frequency_shift = static_cast<float>(phase_increment / (value_type(2) * std::numbers::pi_v<value_type>)) * sample_rate;
+    // 'frequency_shift' and 'phase_increment' spell one rotation: the one a change moves leads and the other follows,
+    // 'phase_increment' when a change moves both. A change that moves neither, a new 'sample_rate' alone, keeps the
+    // commanded shift. 'initial_phase' applied at a phase the block does not hold restarts the accumulator there.
+    // non-const: assigns the follower of 'frequency_shift' and 'phase_increment', so a host reads the rotation in force
+    void applySettings(Settings& s) {
+        // at the setup both read as changed, and 'phase_increment' leads only where the construction gave it
+        const bool incrementLeads = s.phase_increment.changed() && (this->isGiven(s.phase_increment) || !s.frequency_shift.changed());
+        if (incrementLeads) {
+            s.frequency_shift = static_cast<float>(s.phase_increment / (value_type(2) * std::numbers::pi_v<value_type>)) * s.sample_rate;
         } else {
-            phase_increment = value_type(2) * static_cast<value_type>(std::numbers::pi_v<float> * frequency_shift / sample_rate);
+            s.phase_increment = value_type(2) * static_cast<value_type>(std::numbers::pi_v<float> * s.frequency_shift / s.sample_rate);
         }
 
         // a settings change is not a phase discontinuity: the running phase moves only when `initial_phase` does
-        if (newSettings.contains("initial_phase")) {
-            _accumulated_phase = static_cast<double>(initial_phase);
+        if (s.initial_phase.changed()) {
+            _accumulated_phase = static_cast<double>(s.initial_phase);
         }
     }
 
@@ -114,9 +112,9 @@ is attached to.
             return;
         }
         if (const double* asDouble = it->second.template get_if<double>(); asDouble != nullptr) {
-            it->second = *asDouble - static_cast<double>(frequency_shift.value);
+            it->second = *asDouble - static_cast<double>(settings.frequency_shift.value);
         } else if (const float* asFloat = it->second.template get_if<float>(); asFloat != nullptr) {
-            it->second = *asFloat - frequency_shift.value;
+            it->second = *asFloat - settings.frequency_shift.value;
         }
     }
 
@@ -131,8 +129,8 @@ is attached to.
         constexpr double      twoPi           = 2. * std::numbers::pi_v<double>;
 
         const double                   startPhase = _accumulated_phase;
-        const double                   phaseStep  = static_cast<double>(phase_increment);
-        const std::complex<value_type> increment  = std::polar(value_type(1), static_cast<value_type>(phase_increment));
+        const double                   phaseStep  = static_cast<double>(settings.phase_increment);
+        const std::complex<value_type> increment  = std::polar(value_type(1), static_cast<value_type>(settings.phase_increment));
         const std::complex<double>     laneStep   = std::polar(1., static_cast<double>(kLanes) * phaseStep);
         const value_type               stepRe     = static_cast<value_type>(laneStep.real());
         const value_type               stepIm     = static_cast<value_type>(laneStep.imag());

@@ -1,7 +1,12 @@
 #include <boost/ut.hpp>
 
+#include <format>
+#include <string>
+#include <vector>
+
 #include "MathTestHelpers.hpp"
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/SettingsLimits.hpp>
 
 const boost::ut::suite<"basic math tests"> basicMath = [] {
@@ -14,11 +19,11 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
         const Add<float> block;
         const auto       outside = gr::blocks::testing::settingsOutsideLimits(block);
         expect(outside.empty()) << std::format("settings outside their limits: {}", outside);
-        expect(eq(block.in.size(), static_cast<std::size_t>(block.n_inputs)));
+        expect(eq(block.in.size(), static_cast<std::size_t>(block.settings.n_inputs)));
     };
 
     "given its default input count keeps that many inputs"_test = [] {
-        const Size_t nDefault = Add<float>{}.n_inputs;
+        const Size_t nDefault = Add<float>{}.settings.n_inputs;
         Add<float>   block({{"n_inputs", nDefault}});
         block.init(block.progress);
         expect(eq(block.in.size(), static_cast<std::size_t>(nDefault)));
@@ -57,6 +62,17 @@ const boost::ut::suite<"basic math tests"> basicMath = [] {
                 gr::Tensor<T>(gr::data_from, {0, 10, 50, 7})},                         //
             .output = gr::Tensor<T>(gr::data_from, {12, 16, 12, 4})});                 //
     } | kArithmeticTypes;
+};
+
+const boost::ut::suite<"Math settings at the initialization"> mathInitTests = [] {
+    using namespace boost::ut;
+
+    "Add initializes at its defaults and with each setting off its default"_test = [] {
+        const std::vector<std::string> failures = gr::testing::initFailures<gr::blocks::math::Add<float>>({
+            {"n_inputs", gr::Size_t{2U}},
+        });
+        expect(failures.empty()) << std::format("{}", failures);
+    };
 };
 
 int main() { /* not needed for UT */ }

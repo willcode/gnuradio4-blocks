@@ -93,18 +93,6 @@ struct Ports : Block<Derived, TDropped> {
     GR_MAKE_REFLECTABLE(Ports, in, out);
 };
 
-/// the ports of `Power` and its integer exponent `n`
-template<typename Derived, typename T, typename R, typename TDropped = DroppedTagKeys<>>
-struct PowerPorts : Block<Derived, TDropped> {
-    using Block<Derived, TDropped>::Block;
-
-    PortIn<T>                                             in;
-    PortOut<R>                                            out;
-    Annotated<std::int32_t, "n", Doc<"integer exponent">> n = 2;
-
-    GR_MAKE_REFLECTABLE(PowerPorts, in, out, n);
-};
-
 template<typename op, typename Derived, typename T, typename R>
 struct ports_of {
     using type = Ports<Derived, T, R, DroppedKeys<op, R>>;
@@ -116,6 +104,36 @@ struct ports_of<op, Derived, T, R> {
     using type = typename op::template ports<Derived, T, R>;
 };
 
+/// the settings of a `Unary` block: `scale` and `offset` of the result type
+template<typename R>
+struct AffineSettings {
+    Annotated<R, Doc<"result scale">>  scale  = R(1);
+    Annotated<R, Doc<"result offset">> offset = R{};
+
+    GR_MAKE_REFLECTABLE(AffineSettings, scale, offset);
+};
+
+/// the settings of `Power`: its integer exponent `n`, `scale` and `offset`
+template<typename R>
+struct PowerSettings {
+    Annotated<std::int32_t, Doc<"exponent">> n      = 2;
+    Annotated<R, Doc<"result scale">>        scale  = R(1);
+    Annotated<R, Doc<"result offset">>       offset = R{};
+
+    GR_MAKE_REFLECTABLE(PowerSettings, n, scale, offset);
+};
+
+template<typename op, typename R>
+struct settings_of {
+    using type = AffineSettings<R>;
+};
+
+template<typename op, typename R>
+requires requires { typename op::template settings<R>; }
+struct settings_of<op, R> {
+    using type = typename op::template settings<R>;
+};
+
 /*
  * An operation is a type with:
  * - `template<typename T> using result`, the output type for the input type `T`;
@@ -125,8 +143,10 @@ struct ports_of<op, Derived, T, R> {
  * - `static apply(x, block)`, the function of one sample or of one simd vector;
  * - `Description`, the documentation of the blocks it makes;
  * - optionally `kChangesFrequency`, true when the operation changes the frequency of a complex carrier;
- * - optionally `template<typename Derived, typename T, typename R> using ports`, the ports and the
- *   settings of its blocks, `Ports` when absent. A `ports` type passes `DroppedKeys<op, R>` to `Block`;
+ * - optionally `template<typename Derived, typename T, typename R> using ports`, the ports of its blocks, `Ports`
+ *   when absent. A `ports` type passes `DroppedKeys<op, R>` to `Block`;
+ * - optionally `template<typename R> using settings`, the settings of its blocks, `AffineSettings` when absent. A
+ *   `settings` type holds `scale` and `offset`;
  * - optionally `lanes(re, im)`, the function of the real and the imaginary parts of a complex sample on simd vectors
  *   of float lanes, with `kSpanLoop<op>` set (below).
  */
@@ -257,11 +277,11 @@ struct Power {
     using result                            = T;
     static constexpr bool kSimd             = true;
     static constexpr bool kChangesFrequency = true;
-    template<typename Derived, typename T, typename R>
-    using ports = PowerPorts<Derived, T, R, DroppedKeys<Power, R>>;
+    template<typename R>
+    using settings = PowerSettings<R>;
     template<typename V, typename B>
     [[nodiscard]] static constexpr V apply(const V& x, const B& block) noexcept {
-        const std::int32_t n        = block.n.value;
+        const std::int32_t n        = block.settings.n.value;
         std::uint32_t      exponent = n < 0 ? 0U - static_cast<std::uint32_t>(n) : static_cast<std::uint32_t>(n);
         V                  base     = x;
         V                  power    = V(1);
@@ -663,10 +683,11 @@ struct Unary : unary::ports_of<op, Unary<op, T>, T, typename op::template result
     using R           = typename op::template result<T>;
     using Description = typename op::Description;
 
-    Annotated<R, "scale", Doc<"factor applied to the result">>      scale  = R(1);
-    Annotated<R, "offset", Doc<"value added to the scaled result">> offset = R{};
+    using Settings = typename unary::settings_of<op, R>::type;
 
-    GR_MAKE_REFLECTABLE(Unary, scale, offset);
+    Settings settings;
+
+    GR_MAKE_REFLECTABLE(Unary, settings);
 
     static_assert(std::same_as<typename Unary::DroppedTagKeysControl, unary::DroppedKeys<op, R>>, "the ports of an operation pass unary::DroppedKeys<op, R> to Block");
 
@@ -675,13 +696,13 @@ struct Unary : unary::ports_of<op, Unary<op, T>, T, typename op::template result
 
     bool _affine = false; // scale or offset differs from the identity
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { _affine = scale.value != R(1) || offset.value != R{}; }
+    void applySettings(const Settings& s) { _affine = s.scale.value != R(1) || s.offset.value != R{}; }
 
     template<gr::meta::t_or_simd<T> V>
     requires(kSimdPath)
     [[nodiscard]] constexpr V processOne(const V& x) const noexcept {
         const V y = op::apply(x, *this);
-        return _affine ? unary::affine(y, scale.value, offset.value) : y;
+        return _affine ? unary::affine(y, settings.scale.value, settings.offset.value) : y;
     }
 
     [[nodiscard]] work::Status processBulk(std::span<const T> input, std::span<R> output) const noexcept
@@ -690,7 +711,7 @@ struct Unary : unary::ports_of<op, Unary<op, T>, T, typename op::template result
         unary::overParts<op>(input, output);
         if (_affine) {
             for (R& y : output.first(std::min(input.size(), output.size()))) {
-                y = unary::affine(y, scale.value, offset.value);
+                y = unary::affine(y, settings.scale.value, settings.offset.value);
             }
         }
         return work::Status::OK;
@@ -705,10 +726,10 @@ struct Unary : unary::ports_of<op, Unary<op, T>, T, typename op::template result
         }
         if constexpr (meta::complex_like<R>) {
             // the product by components, without the library's NaN and infinity recovery
-            const R& s = scale.value;
-            return R(y.real() * s.real() - y.imag() * s.imag(), y.real() * s.imag() + y.imag() * s.real()) + offset.value;
+            const R& s = settings.scale.value;
+            return R(y.real() * s.real() - y.imag() * s.imag(), y.real() * s.imag() + y.imag() * s.real()) + settings.offset.value;
         } else {
-            return unary::affine(y, scale.value, offset.value);
+            return unary::affine(y, settings.scale.value, settings.offset.value);
         }
     }
 };

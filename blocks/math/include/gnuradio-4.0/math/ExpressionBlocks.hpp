@@ -2,8 +2,12 @@
 #define EXPRESSIONBLOCKS_HPP
 
 #include <algorithm>
+#include <array>
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
+#include <initializer_list>
+#include <string>
+#include <string_view>
 
 #include <exprtk.hpp>
 
@@ -22,6 +26,26 @@ inline std::string formatParserError(const auto& parser, std::string_view expres
             exprtk::parser_error::to_str(error.mode), error.diagnostic, expression);
     }
     return ss.str();
+}
+
+/// The parser's errors for @p expression over the scalar @p variables and the @p vectors a block binds, empty when it
+/// compiles. The check reads them before the block binds the expression.
+template<typename T>
+[[nodiscard]] std::string parseErrors(const std::string& expression, std::initializer_list<std::string_view> variables, std::initializer_list<std::string_view> vectors = {}) {
+    T                       scalar{};
+    std::array<T, 1UZ>      vector{};
+    exprtk::symbol_table<T> symbols;
+    for (const std::string_view name : variables) {
+        symbols.add_variable(std::string(name), scalar);
+    }
+    for (const std::string_view name : vectors) {
+        symbols.add_vector(std::string(name), vector.data(), vector.size());
+    }
+    symbols.add_constants();
+    exprtk::expression<T> compiled;
+    compiled.register_symbol_table(symbols);
+    exprtk::parser<T> parser;
+    return parser.compile(expression, compiled) ? std::string{} : formatParserError(parser, expression);
 }
 
 struct VectorInfo {
@@ -82,49 +106,67 @@ For full syntax, conditionals, loops, and advanced features:
 @see https://www.partow.net/programming/exprtk/index.html
 @see https://github.com/ArashPartow/exprtk
 )"">;
-    template<typename U, fixed_string description = "", typename... Arguments>
-    using A = Annotated<U, description, Arguments...>;
+    template<typename U, typename... Arguments>
+    using A = Annotated<U, Arguments...>;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    A<std::string, "expr string", Doc<"for syntax see: https://github.com/ArashPartow/exprtk">> expr_string = "clamp(-1.0, sin(2 * pi * x) + cos(x / 2 * pi), +1.0)";
-    A<T, "a", Doc<"free parameter 'a' for use in expressions">, Visible>                        param_a     = T(1.0);
-    A<T, "b", Doc<"free parameter 'b' for use in expressions">, Visible>                        param_b     = T(0.0);
-    A<T, "c", Doc<"free parameter 'c' for use in expressions">, Visible>                        param_c     = T(0.0);
+    struct Settings {
+        A<std::string, Doc<"expression">>            expr_string = "clamp(-1.0, sin(2 * pi * x) + cos(x / 2 * pi), +1.0)";
+        A<T, Doc<"expression parameter a">, Visible> param_a     = T(1.0);
+        A<T, Doc<"expression parameter b">, Visible> param_b     = T(0.0);
+        A<T, Doc<"expression parameter c">, Visible> param_c     = T(0.0);
 
-    GR_MAKE_REFLECTABLE(ExpressionSISO, in, out, expr_string, param_a, param_b, param_c);
+        GR_MAKE_REFLECTABLE(Settings, expr_string, param_a, param_b, param_c);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ExpressionSISO, in, out, settings);
 
     exprtk::symbol_table<T> _symbol_table{};
     exprtk::expression<T>   _expression{};
     T                       _in;
     T                       _out;
 
-    void initExpression(std::source_location location = std::source_location::current()) {
+    [[nodiscard]] std::string initExpression() {
         reset();
         _symbol_table.clear();
         _symbol_table.add_variable("x", _in);
         _symbol_table.add_variable("y", _out);
 
-        _symbol_table.add_variable(std::string(param_a.description()), param_a.value);
-        _symbol_table.add_variable(std::string(param_b.description()), param_b.value);
-        _symbol_table.add_variable(std::string(param_c.description()), param_c.value);
+        _symbol_table.add_variable("a", settings.param_a.value);
+        _symbol_table.add_variable("b", settings.param_b.value);
+        _symbol_table.add_variable("c", settings.param_c.value);
 
         _symbol_table.add_constants();
         _expression.register_symbol_table(_symbol_table);
 
-        if (exprtk::parser<T> parser; !parser.compile(expr_string, _expression)) {
-            throw gr::exception(detail::formatParserError(parser, expr_string), location);
+        if (exprtk::parser<T> parser; !parser.compile(settings.expr_string, _expression)) {
+            return detail::formatParserError(parser, settings.expr_string);
+        }
+        return {};
+    }
+
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (const std::string errors = detail::parseErrors<T>(s.expr_string, {"x", "y", "a", "b", "c"}); !errors.empty()) {
+            return gr::Refused(s.expr_string, errors);
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.expr_string.changed()) {
+            if (const std::string errors = initExpression(); !errors.empty()) {
+                this->fail(s.expr_string, errors);
+            }
         }
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("expr_string")) {
-            initExpression();
+    void start() {
+        if (const std::string errors = initExpression(); !errors.empty()) {
+            throw gr::exception(errors);
         }
     }
-
-    void start() { initExpression(); }
 
     void reset() {
         _in  = T(0);
@@ -159,19 +201,23 @@ For full syntax, conditionals, loops, and advanced features:
 @see https://www.partow.net/programming/exprtk/index.html
 @see https://github.com/ArashPartow/exprtk
 )"">;
-    template<typename U, fixed_string description = "", typename... Arguments>
-    using A = Annotated<U, description, Arguments...>;
+    template<typename U, typename... Arguments>
+    using A = Annotated<U, Arguments...>;
 
     PortIn<T>  in0;
     PortIn<T>  in1;
     PortOut<T> out;
 
-    A<std::string, "expr string", Doc<"for syntax see: https://github.com/ArashPartow/exprtk">> expr_string = "a*(x+y)";
-    A<T, "a", Doc<"free parameter 'a' for use in expressions">, Visible>                        param_a     = T(1.0);
-    A<T, "b", Doc<"free parameter 'b' for use in expressions">, Visible>                        param_b     = T(0.0);
-    A<T, "c", Doc<"free parameter 'c' for use in expressions">, Visible>                        param_c     = T(0.0);
+    struct Settings {
+        A<std::string, Doc<"expression">>            expr_string = "a*(x+y)";
+        A<T, Doc<"expression parameter a">, Visible> param_a     = T(1.0);
+        A<T, Doc<"expression parameter b">, Visible> param_b     = T(0.0);
+        A<T, Doc<"expression parameter c">, Visible> param_c     = T(0.0);
 
-    GR_MAKE_REFLECTABLE(ExpressionDISO, in0, in1, out, expr_string, param_a, param_b, param_c);
+        GR_MAKE_REFLECTABLE(Settings, expr_string, param_a, param_b, param_c);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ExpressionDISO, in0, in1, out, settings);
 
     exprtk::symbol_table<T> _symbol_table{};
     exprtk::expression<T>   _expression{};
@@ -179,32 +225,46 @@ For full syntax, conditionals, loops, and advanced features:
     T                       _in1;
     T                       _out;
 
-    void initExpression(std::source_location location = std::source_location::current()) {
+    [[nodiscard]] std::string initExpression() {
         reset();
         _symbol_table.clear();
         _symbol_table.add_variable("x", _in0);
         _symbol_table.add_variable("y", _in1);
         _symbol_table.add_variable("z", _out);
 
-        _symbol_table.add_variable(std::string(param_a.description()), param_a.value);
-        _symbol_table.add_variable(std::string(param_b.description()), param_b.value);
-        _symbol_table.add_variable(std::string(param_c.description()), param_c.value);
+        _symbol_table.add_variable("a", settings.param_a.value);
+        _symbol_table.add_variable("b", settings.param_b.value);
+        _symbol_table.add_variable("c", settings.param_c.value);
 
         _symbol_table.add_constants();
         _expression.register_symbol_table(_symbol_table);
 
-        if (exprtk::parser<T> parser; !parser.compile(expr_string, _expression)) {
-            throw gr::exception(detail::formatParserError(parser, expr_string), location);
+        if (exprtk::parser<T> parser; !parser.compile(settings.expr_string, _expression)) {
+            return detail::formatParserError(parser, settings.expr_string);
+        }
+        return {};
+    }
+
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (const std::string errors = detail::parseErrors<T>(s.expr_string, {"x", "y", "z", "a", "b", "c"}); !errors.empty()) {
+            return gr::Refused(s.expr_string, errors);
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.expr_string.changed()) {
+            if (const std::string errors = initExpression(); !errors.empty()) {
+                this->fail(s.expr_string, errors);
+            }
         }
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (newSettings.contains("expr_string")) {
-            initExpression();
+    void start() {
+        if (const std::string errors = initExpression(); !errors.empty()) {
+            throw gr::exception(errors);
         }
     }
-
-    void start() { initExpression(); };
 
     void reset() {
         _in0 = T(0);
@@ -240,19 +300,23 @@ For full syntax, conditionals, loops, and advanced features:
 @see https://www.partow.net/programming/exprtk/index.html
 @see https://github.com/ArashPartow/exprtk
 )"">;
-    template<typename U, fixed_string description = "", typename... Arguments>
-    using A = Annotated<U, description, Arguments...>;
+    template<typename U, typename... Arguments>
+    using A = Annotated<U, Arguments...>;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    A<std::string, "expr string", Doc<"for syntax see: https://github.com/ArashPartow/exprtk">> expr_string    = "vecOut := a * vecIn;";
-    A<T, "a", Doc<"free parameter 'a' for use in expressions">, Visible>                        param_a        = T(1.0);
-    A<T, "b", Doc<"free parameter 'b' for use in expressions">, Visible>                        param_b        = T(0.0);
-    A<T, "c", Doc<"free parameter 'c' for use in expressions">, Visible>                        param_c        = T(0.0);
-    A<bool, "runtime_checks", Doc<"e.g. vector index range checks etc.">, Visible>              runtime_checks = true;
+    struct Settings {
+        A<std::string, Doc<"expression">>            expr_string    = "vecOut := a * vecIn;";
+        A<T, Doc<"expression parameter a">, Visible> param_a        = T(1.0);
+        A<T, Doc<"expression parameter b">, Visible> param_b        = T(0.0);
+        A<T, Doc<"expression parameter c">, Visible> param_c        = T(0.0);
+        A<bool, Doc<"runtime checks">, Visible>      runtime_checks = true;
 
-    GR_MAKE_REFLECTABLE(ExpressionBulk, in, out, expr_string, param_a, param_b, param_c, runtime_checks);
+        GR_MAKE_REFLECTABLE(Settings, expr_string, param_a, param_b, param_c, runtime_checks);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ExpressionBulk, in, out, settings);
 
     // vector_views that reference _vecInData and _vecOutData
     // will be registered once and then just rebased as needed.
@@ -269,7 +333,7 @@ For full syntax, conditionals, loops, and advanced features:
     exprtk::symbol_table<T>   _symbol_table{};
     exprtk::expression<T>     _expression{};
 
-    void initExpression(std::source_location location = std::source_location::current()) {
+    [[nodiscard]] std::string initExpression() {
         _expression = exprtk::expression<T>();
         _symbol_table.clear();
 
@@ -289,32 +353,46 @@ For full syntax, conditionals, loops, and advanced features:
         _symbol_table.add_vector("vecIn", _vecIn);
         _symbol_table.add_vector("vecOut", _vecOut);
 
-        _symbol_table.add_variable(std::string(param_a.description()), param_a.value);
-        _symbol_table.add_variable(std::string(param_b.description()), param_b.value);
-        _symbol_table.add_variable(std::string(param_c.description()), param_c.value);
+        _symbol_table.add_variable("a", settings.param_a.value);
+        _symbol_table.add_variable("b", settings.param_b.value);
+        _symbol_table.add_variable("c", settings.param_c.value);
 
         _symbol_table.add_constants();
         _expression.register_symbol_table(_symbol_table);
 
         exprtk::parser<T> parser;
-        if (runtime_checks) {
+        if (settings.runtime_checks) {
             _vec_rtc.vector_map[_vecIn.data()]  = "vecIn";
             _vec_rtc.vector_map[_vecOut.data()] = "vecOut";
             parser.register_vector_access_runtime_check(_vec_rtc);
         }
 
-        if (!parser.compile(expr_string, _expression)) {
-            throw gr::exception(detail::formatParserError(parser, expr_string), location);
+        if (!parser.compile(settings.expr_string, _expression)) {
+            return detail::formatParserError(parser, settings.expr_string);
+        }
+        return {};
+    }
+
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (const std::string errors = detail::parseErrors<T>(s.expr_string, {"a", "b", "c"}, {"vecIn", "vecOut"}); !errors.empty()) {
+            return gr::Refused(s.expr_string, errors);
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.expr_string.changed()) {
+            if (const std::string errors = initExpression(); !errors.empty()) {
+                this->fail(s.expr_string, errors);
+            }
         }
     }
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        if (newSettings.contains("expr_string")) {
-            initExpression();
+    void start() {
+        if (const std::string errors = initExpression(); !errors.empty()) {
+            throw gr::exception(errors);
         }
     }
-
-    void start() { initExpression(); }
 
     work::Status processBulk(InputSpanLike auto& inputSpan, OutputSpanLike auto& outputSpan) {
         if (inputSpan.size() != _vecInData.size() || outputSpan.size() != _vecOutData.size()) {
@@ -327,7 +405,7 @@ For full syntax, conditionals, loops, and advanced features:
             _vecOut.rebase(_vecOutData.data());
             _vecOut.set_size(_vecOutData.size());
 
-            if (runtime_checks) {
+            if (settings.runtime_checks) {
                 _vec_rtc.vector_map.clear();
                 _vec_rtc.vector_map[_vecIn.data()]  = "vecIn";
                 _vec_rtc.vector_map[_vecOut.data()] = "vecOut";
