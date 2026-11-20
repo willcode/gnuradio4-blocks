@@ -418,7 +418,7 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
         }
 
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
-        expect(eq(sink.count, nSamples));
+        expect(eq(sink.status.count.value, static_cast<std::uint64_t>(nSamples)));
 
         std::println("N.B. 'basic RTL soapy data generation test' test finished");
     };
@@ -463,9 +463,9 @@ const boost::ut::suite<"Soapy Block API "> soapyBlockAPI = [] {
             watchdogThread.join();
         }
 
-        expect(eq(sink1.count, nSamples));
+        expect(eq(sink1.status.count.value, static_cast<std::uint64_t>(nSamples)));
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "watchdog should not fire";
-        expect(eq(sink2.count, nSamples));
+        expect(eq(sink2.status.count.value, static_cast<std::uint64_t>(nSamples)));
 
         std::println("N.B. 'basic LimeSDR soapy data generation test' test finished");
     };

@@ -25,6 +25,7 @@
 #include <gnuradio-4.0/sdr/LoopbackDevice.hpp>
 #include <gnuradio-4.0/sdr/SoapySink.hpp>
 #include <gnuradio-4.0/sdr/SoapySource.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -52,16 +53,21 @@ struct KeepFirstOfChunk : gr::Block<KeepFirstOfChunk, gr::Resampling<>> {
 // end-of-stream tag follows the last sample on a call that publishes no samples.
 struct ClockEndingOnCue : gr::Block<ClockEndingOnCue> {
     gr::PortOut<std::uint8_t> out;
-    gr::Size_t                n_samples = 100U;
 
-    GR_MAKE_REFLECTABLE(ClockEndingOnCue, out, n_samples);
+    struct Settings {
+        gr::Size_t n_samples = 100U;
+
+        GR_MAKE_REFLECTABLE(Settings, n_samples);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ClockEndingOnCue, out, settings);
 
     std::function<bool()> endWhen;
     gr::Size_t            _sent = 0U;
 
     gr::work::Status processBulk(gr::OutputSpanLike auto& output) {
-        if (_sent < n_samples) {
-            const std::size_t n = std::min(output.size(), static_cast<std::size_t>(n_samples - _sent));
+        if (_sent < settings.n_samples) {
+            const std::size_t n = std::min(output.size(), static_cast<std::size_t>(settings.n_samples - _sent));
             std::ranges::fill(std::span(output.data(), n), std::uint8_t{0});
             output.publish(n);
             _sent += static_cast<gr::Size_t>(n);
@@ -292,12 +298,12 @@ std::array<std::vector<CF32>, nChannels> transmitThroughLoopback(const std::stri
     gr::property_map couplings;
     for (const gr::Tag& tag : tags) {
         for (const auto& entry : tag.map) {
-            if (sink.settings().writableMembers().contains(std::string(entry.first))) {
+            if (sink.writableMembers().contains(std::string(entry.first))) {
                 couplings.insert_or_assign(entry.first, gr::pmt::Value(std::string(entry.first)));
             }
         }
     }
-    sink.settings().setTagCouplings(couplings);
+    expect(sink.setTagCouplings(couplings).has_value());
     std::array<Source*, nChannels> sources{};
     for (std::size_t ch = 0UZ; ch < nChannels; ++ch) {
         sources[ch]        = std::addressof(flow.emplaceBlock<Source>({{"n_samples_max", nSamples}, {"values", gr::Tensor<CF32>(patterns[ch].begin(), patterns[ch].end())}}));
@@ -314,7 +320,7 @@ std::array<std::vector<CF32>, nChannels> transmitThroughLoopback(const std::stri
     expect(sched.exchange(std::move(flow)).has_value());
     expect(runWithWatchdog(sched, std::chrono::seconds{10}).has_value());
     if (settingsAfterRun != nullptr) {
-        *settingsAfterRun = sink.settings().get();
+        *settingsAfterRun = gr::settings::heldValues(sink.get());
     }
 
     std::vector<gr::Size_t> channels(nChannels);
@@ -376,7 +382,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
         Sched sched;
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched).has_value());
-        expect(eq(sink.count.value, nSamples));
+        expect(eq(sink.status.count.value, nSamples));
     };
 
     "2-channel rxOnly delivers to both sinks"_test = [] {
@@ -399,8 +405,8 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
         Sched sched;
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched).has_value());
-        expect(eq(sink1.count.value, nSamples)) << "channel 0";
-        expect(eq(sink2.count.value, nSamples)) << "channel 1";
+        expect(eq(sink1.status.count.value, nSamples)) << "channel 0";
+        expect(eq(sink2.status.count.value, nSamples)) << "channel 1";
     };
 
     "rxOnly propagates tags through the graph"_test = [] {
@@ -664,7 +670,7 @@ const boost::ut::suite<"SoapySource + Loopback"> integrationTests = [] {
         // short watchdog — loopback without TX will not deliver samples
         auto ret = runWithWatchdog(sched, std::chrono::seconds{3});
         expect(ret.has_value());
-        expect(lt(sink.count.value, nSamples)) << "loopback without TX should not deliver all samples";
+        expect(lt(sink.status.count.value, nSamples)) << "loopback without TX should not deliver all samples";
     };
 };
 
@@ -699,7 +705,7 @@ const boost::ut::suite<"SoapySource read path"> readPathTests = [] {
         Sched sched;
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched).has_value());
-        return Received{.samples = std::vector<CF32>(sink._samples.begin(), sink._samples.end()), .tags = sink._tags, .maxChunkSize = source.max_chunk_size, .outputCapacity = source.out.bufferSize()};
+        return Received{.samples = std::vector<CF32>(sink._samples.begin(), sink._samples.end()), .tags = sink._tags, .maxChunkSize = source.settings.max_chunk_size, .outputCapacity = source.out.bufferSize()};
     };
 
     "every sample arrives once and in order, and a read's tags mark its first sample"_test = [&receive] {
@@ -781,7 +787,7 @@ const boost::ut::suite<"SoapySource read path"> readPathTests = [] {
             Sched sched;
             expect(sched.exchange(std::move(flow)).has_value());
             expect(sched.runAndWait().has_value());
-            expect(eq(sink.count.value, kDecimated));
+            expect(eq(sink.status.count.value, kDecimated));
         });
     };
 
@@ -810,7 +816,7 @@ const boost::ut::suite<"SoapySource read path"> readPathTests = [] {
             Sched sched;
             expect(sched.exchange(std::move(flow)).has_value());
             expect(sched.runAndWait().has_value());
-            expect(eq(sink.count.value, kOutputs));
+            expect(eq(sink.status.count.value, kOutputs));
             const std::size_t capacity = source.out.bufferSize();
             expect(lt(capacity / 2UZ, std::size_t{kChunk}) and le(std::size_t{kChunk}, capacity)) << std::format("the chunk lies between half the output buffer of {} samples and all of it", capacity);
         });
@@ -840,7 +846,7 @@ const boost::ut::suite<"SoapySource read path"> readPathTests = [] {
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched).has_value());
 
-        const std::size_t nRead = source.max_chunk_size;
+        const std::size_t nRead = source.settings.max_chunk_size;
         for (const auto& [sink, frequency] : {std::pair{&sink0, kFrequency}, std::pair{&sink1, kSecond}}) {
             expect(ge(sink->_samples.size(), std::size_t{nSamples}));
             const auto brokenAt = firstPhaseBreak(sink->_samples, frequency, static_cast<double>(kRate));
@@ -919,7 +925,7 @@ const boost::ut::suite<"SoapySink write path"> writePathTests = [] {
     // A setting given at construction does not follow tags. The sink starts with its default ramp time.
     "a ramp time cut to zero while the sink runs leaves the ramp-down the run started with"_test = [] {
         const property_map settings{{"sample_rate", kRate}, {"burst_taper_enabled", true}, {"burst_taper_type", std::string("Linear")}};
-        const float        startRampTime = gr::blocks::sdr::SoapySink<CF32, 1UZ>().burst_ramp_time.value;
+        const float        startRampTime = gr::blocks::sdr::SoapySink<CF32, 1UZ>().settings.burst_ramp_time.value;
         expect(gt(startRampTime, 0.f));
 
         const auto       values = placeMarkedPattern(997UZ);
@@ -971,10 +977,10 @@ const boost::ut::suite<"SoapySink write path"> writePathTests = [] {
 
         expect(runWithWatchdog(sched, std::chrono::seconds{10}).has_value());
         const auto firstRun = takeReceived();
-        std::ignore         = sink.settings().setStaged({{"burst_taper_enabled", true}});
+        std::ignore         = sink.set({{"burst_taper_enabled", true}}, gr::settings::noWait);
         expect(runWithWatchdog(sched, std::chrono::seconds{10}).has_value());
         const auto secondRun = takeReceived();
-        expect(sink.burst_taper_enabled.value) << "the staged setting reached the sink";
+        expect(sink.settings.burst_taper_enabled.value) << "the staged setting reached the sink";
 
         const auto untapered = expectedTransmission(values, kRunSamples, std::nullopt, kRate);
         expect(eq(firstRun.size(), untapered.size()) && !firstDifference(firstRun, untapered).has_value()) << "the first run is untapered";
@@ -1007,7 +1013,7 @@ const boost::ut::suite<"SoapySink write path"> writePathTests = [] {
         expect(!sawCall(callLog(*probe), "setGainMode(")) << "the first run asks the device for no AGC state";
 
         std::ignore = probe->writeSetting("call_log", "");
-        std::ignore = sink.settings().setStaged({{"gain_mode", true}});
+        std::ignore = sink.set({{"gain_mode", true}}, gr::settings::noWait);
         expect(runWithWatchdog(sched, std::chrono::seconds{10}).has_value());
         expect(sawCall(callLog(*probe), "setGainMode(TX,0,true)")) << "the second run writes the staged AGC state";
         expect(probe->isAutomaticGainControl(SOAPY_SDR_TX, 0)) << "the device took it";
@@ -1055,7 +1061,7 @@ const boost::ut::suite<"SoapySink + SoapySource shared device"> txRxTests = [] {
         Sched sched;
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched).has_value());
-        expect(eq(rxSink.count.value, nSamples)) << std::format("expected {} samples, got {}", nSamples, rxSink.count.value);
+        expect(eq(rxSink.status.count.value, nSamples)) << std::format("expected {} samples, got {}", nSamples, rxSink.status.count.value);
     };
 
     "shared device handle verified via Device::make()"_test = [] {
@@ -1142,8 +1148,8 @@ const boost::ut::suite<"SoapySink + SoapySource shared device"> txRxTests = [] {
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched, std::chrono::seconds{20}).has_value());
         constexpr auto kMinExpected = static_cast<gr::Size_t>(nSamples * 0.9);
-        expect(ge(rxSink1.count.value, kMinExpected)) << std::format("channel 0: got {}, expected at least {}", rxSink1.count.value, kMinExpected);
-        expect(ge(rxSink2.count.value, kMinExpected)) << std::format("channel 1: got {}, expected at least {}", rxSink2.count.value, kMinExpected);
+        expect(ge(rxSink1.status.count.value, kMinExpected)) << std::format("channel 0: got {}, expected at least {}", rxSink1.status.count.value, kMinExpected);
+        expect(ge(rxSink2.status.count.value, kMinExpected)) << std::format("channel 1: got {}, expected at least {}", rxSink2.status.count.value, kMinExpected);
     };
 
     "2-channel TX with a small staging buffer keeps both channels fed"_test = [] {
@@ -1179,8 +1185,8 @@ const boost::ut::suite<"SoapySink + SoapySource shared device"> txRxTests = [] {
 
         // a per-channel accounting error starves one channel while the other keeps flowing
         constexpr auto kMinExpected = static_cast<gr::Size_t>(nSamples * 0.9);
-        expect(ge(rxSink1.count.value, kMinExpected)) << std::format("channel 0: got {}", rxSink1.count.value);
-        expect(ge(rxSink2.count.value, kMinExpected)) << std::format("channel 1: got {}", rxSink2.count.value);
+        expect(ge(rxSink1.status.count.value, kMinExpected)) << std::format("channel 0: got {}", rxSink1.status.count.value);
+        expect(ge(rxSink2.status.count.value, kMinExpected)) << std::format("channel 1: got {}", rxSink2.status.count.value);
     };
 };
 
@@ -1246,8 +1252,8 @@ const boost::ut::suite<"LimeSDR hardware"> limeTests = [] {
             expect(false) << std::format("scheduler error: {}", ret.error());
         }
 
-        std::println("LimeSDR full-duplex: RX received {} of {} samples", rxSink.count.value, nSamples);
-        expect(eq(rxSink.count.value, nSamples));
+        std::println("LimeSDR full-duplex: RX received {} of {} samples", rxSink.status.count.value, nSamples);
+        expect(eq(rxSink.status.count.value, nSamples));
     };
 
     "2-channel duplex on LimeSDR"_test = [&] {
@@ -1304,9 +1310,9 @@ const boost::ut::suite<"LimeSDR hardware"> limeTests = [] {
         expect(ret.has_value());
 
         constexpr auto kMinExpected = static_cast<gr::Size_t>(nSamples * 0.9);
-        std::println("LimeSDR 2-ch duplex: ch0={}, ch1={} of {} samples (min {})", rxSink1.count.value, rxSink2.count.value, nSamples, kMinExpected);
-        expect(ge(rxSink1.count.value, kMinExpected)) << "channel 0";
-        expect(ge(rxSink2.count.value, kMinExpected)) << "channel 1";
+        std::println("LimeSDR 2-ch duplex: ch0={}, ch1={} of {} samples (min {})", rxSink1.status.count.value, rxSink2.status.count.value, nSamples, kMinExpected);
+        expect(ge(rxSink1.status.count.value, kMinExpected)) << "channel 0";
+        expect(ge(rxSink2.status.count.value, kMinExpected)) << "channel 1";
     };
 };
 
@@ -1411,7 +1417,7 @@ const boost::ut::suite<"SoapySink BurstTaper"> taperTests = [] {
         Sched sched;
         expect(sched.exchange(std::move(flow)).has_value());
         expect(runWithWatchdog(sched, std::chrono::seconds{10}).has_value());
-        expect(ge(rxSink.count.value, nSamples * 4U / 5U)) << std::format("expected ~{} RX samples, got {}", nSamples, rxSink.count);
+        expect(ge(rxSink.status.count.value, nSamples * 4U / 5U)) << std::format("expected ~{} RX samples, got {}", nSamples, rxSink.status.count);
     };
 
     "taper disabled passes unmodified signal"_test = [] {
@@ -1449,16 +1455,11 @@ const boost::ut::suite<"SoapySink BurstTaper"> taperTests = [] {
         static constexpr float kRampTime = 1e-3f;
         // sets the ramp time on a fresh sink and returns the ramp time it then holds, with the refusal's reason
         const auto rampTimeAfterSetting = [](float rampTime, std::string& reason) {
-            gr::Graph flow;
-            auto&     sink = flow.emplaceBlock<SoapySink<CF32, 1UZ>>({{"burst_ramp_time", kRampTime}});
-            try {
-                std::ignore = sink.settings().set({{"burst_ramp_time", rampTime}});
-            } catch (const gr::exception& e) {
-                reason = e.message;
+            SoapySink<CF32, 1UZ> sink({{"burst_ramp_time", kRampTime}}); // no graph holds it, so a set applies at the call
+            if (const auto result = sink.set({{"burst_ramp_time", rampTime}}); !result.has_value()) {
+                reason = gr::settings::describeRejected(result.error());
             }
-            std::ignore = sink.settings().activateContext();
-            std::ignore = sink.settings().applyStagedParameters();
-            return sink.burst_ramp_time.value;
+            return sink.settings.burst_ramp_time.value;
         };
 
         for (const float refused : {-kRampTime, std::numeric_limits<float>::quiet_NaN()}) {
@@ -1709,8 +1710,8 @@ const boost::ut::suite<"SoapySource device configuration"> configurationTests = 
         {
             gr::Graph   reference;
             auto&       block    = reference.emplaceBlock<SoapySource<CF32, 1UZ>>();
-            const auto& writable = block.settings().writableMembers();
-            for (const auto& [key, value] : block.settings().get()) {
+            const auto& writable = block.writableMembers();
+            for (const auto& [key, value] : gr::settings::heldValues(block.get())) {
                 if (writable.contains(std::string(key))) {
                     full.insert_or_assign(key, value);
                 }
@@ -1762,7 +1763,7 @@ const boost::ut::suite<"SoapySource device configuration"> configurationTests = 
                 }
             };
             waitFor("setFrequency(RX,0,RF,");
-            std::ignore = source.settings().setStaged({{"gain_mode", true}});
+            std::ignore = source.set({{"gain_mode", true}}, gr::settings::noWait);
             waitFor("setGainMode(RX,0,true)");
             sched.requestStop();
         });
@@ -2071,40 +2072,60 @@ const boost::ut::suite<"Soapy blocks that cannot start"> startFailureTests = [] 
         });
     };
 
-    // The settings refuse a ramp time below zero. The case writes it to the member directly.
-    "a sink whose taper the library refuses fails the run before the device takes a sample"_test = [] {
-        struct Refused {
-            std::string_view what;
-            float            rampTime;
-            float            sampleRate;
-        };
-        for (const Refused& refused : {Refused{"a ramp time below zero", -1e-3f, 1e6f}, Refused{"a sample rate of zero", 1e-3f, 0.f}, Refused{"a sample rate that is NaN", 1e-3f, std::numeric_limits<float>::quiet_NaN()}}) {
-            gr::algorithm::BurstTaper<float> taper;
-            const auto                       libraryAnswer = taper.configure(gr::algorithm::TaperType::Linear, refused.rampTime, refused.sampleRate);
-            expect(fatal(!libraryAnswer.has_value())) << std::format("{}: the taper refuses it", refused.what);
+    "a negative ramp or a zero rate is refused"_test = [] {
+        expect(gr::testing::initRefused<SoapySink<CF32, 1UZ>>({{"device", "loopback"}, {"burst_taper_enabled", true}, {"burst_ramp_time", -1e-3f}})) << "a ramp time below zero";
+        expect(gr::testing::initRefused<SoapySink<CF32, 1UZ>>({{"device", "loopback"}, {"sample_rate", 0.f}})) << "a sample rate of zero";
+    };
 
-            const std::string parameters = "device_mode=tx_only,record_writes=true";
-            auto              probe      = soapy::Device::make(loopbackKwargs("loopback", parameters));
-            expect(fatal(probe.has_value())) << "the probe must open the device the sink would open";
-            std::ignore = probe->writeSetting("write_log", "");
-
-            withinBound(std::chrono::seconds{5}, refused.what, [&refused, &libraryAnswer, &parameters, &probe] {
-                gr::Graph flow;
-                auto&     source     = flow.emplaceBlock<TagSource<CF32, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", gr::Size_t{1000}}});
-                auto&     sink       = flow.emplaceBlock<SoapySink<CF32, 1UZ>>({{"device", "loopback"}, {"device_parameter", parameters}, {"sample_rate", refused.sampleRate}, {"burst_taper_enabled", true}, {"burst_taper_type", std::string("Linear")}});
-                sink.burst_ramp_time = refused.rampTime;
-                expect(flow.connect<"out", "in">(source, sink).has_value());
-
-                gr::MsgPortIn fromScheduler;
-                Sched         sched;
-                expect(sched.exchange(std::move(flow)).has_value());
-                expect(sched.msgOut.connect(fromScheduler).has_value());
-                const auto result = sched.runAndWait();
-
-                expect(!result.has_value() && result.error().message.contains(libraryAnswer.error().message)) << std::format("{}: the run fails with the taper's reason", refused.what);
-                expect(sink.state() == State::ERROR) << std::format("{}: start() threw", refused.what);
-                expect(probe->readSetting("write_log").empty()) << std::format("{}: the device received no write", refused.what);
-            });
+    // Only the taper can tell whether it counts a ramp's samples, so the settings take the ramp and the start fails with
+    // the taper's answer, before it opens the device.
+    "a sink whose ramp the taper cannot count fails at start with the taper's answer"_test = [] {
+        SoapySink<CF32, 1UZ> sink({{"device", "loopback"}, {"device_parameter", "device_mode=tx_only"}, {"sample_rate", 1e6f}, {"burst_taper_enabled", true}, {"burst_ramp_time", 1e15f}});
+        expect(fatal(sink.check({}).has_value())) << "the settings take a ramp only the taper can judge";
+        std::string reason;
+        try {
+            sink.start();
+        } catch (const gr::exception& refused) {
+            reason = refused.what();
         }
+        expect(reason.contains("burst taper") && reason.contains("more samples than")) << reason;
+        expect(sink._device.get() == nullptr) << "the start opened no device";
+    };
+
+    "a SoapySource refuses a zero sample rate and a chunk size that is not a power of 2"_test = [] {
+        expect(gr::testing::initRefused<SoapySource<CF32, 1UZ>>({{"device", "loopback"}, {"sample_rate", 0.f}})) << "a sample rate of zero";
+        expect(gr::testing::initRefused<SoapySource<CF32, 1UZ>>({{"device", "loopback"}, {"max_chunk_size", std::uint32_t{3000U}}})) << "a chunk of 3000 samples";
+        expect(gr::testing::initRefused<SoapySource<CF32, 1UZ>>({{"device", "loopback"}, {"max_chunk_size", std::uint32_t{0U}}})) << "a chunk of no samples";
+    };
+
+    // No device is opened: the limits of sample_rate refuse a NaN, so the graph refuses the sink as it is added.
+    "a sink given a sample rate that is NaN is refused as it is added to the graph"_test = [] {
+        gr::Graph   flow;
+        std::string reason;
+        try {
+            std::ignore = flow.emplaceBlock<SoapySink<CF32, 1UZ>>({{"device", "loopback"}, {"sample_rate", std::numeric_limits<float>::quiet_NaN()}});
+        } catch (const gr::exception& refused) {
+            reason = refused.what();
+        }
+        expect(reason.contains("sample_rate") && reason.contains("must be > 0")) << reason;
+        expect(eq(flow.blocks().size(), 0UZ)) << "the graph holds no sink";
+    };
+};
+
+// Each block initializes at its defaults and with each setting alone off its default: its hook runs at every
+// initialization with every setting changed, and opens no device there.
+const boost::ut::suite<"Soapy blocks initialize at each setting"> settingsInitTests = [] {
+    using namespace boost::ut;
+    using namespace gr::blocks::sdr;
+    const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+
+    "SoapySource"_test = [&report] {
+        const auto failures = gr::testing::initFailures<SoapySource<CF32, 1UZ>>({{"device", std::string("loopback")}, {"sample_rate", 2e6f}, {"frequency", std::vector{100e6}}, {"rx_gains", std::vector{10.0}}, {"gain_mode", true}, {"frequency_correction", 1.0}, {"dc_blocker_enabled", true}, {"ppm_estimator_cutoff", 0.5f}});
+        expect(failures.empty()) << report(failures);
+    };
+
+    "SoapySink"_test = [&report] {
+        const auto failures = gr::testing::initFailures<SoapySink<CF32, 1UZ>>({{"device", std::string("loopback")}, {"sample_rate", 2e6f}, {"frequency", std::vector{100e6}}, {"tx_gains", std::vector{10.0}}, {"gain_mode", true}, {"burst_taper_enabled", true}, {"burst_ramp_time", 0.01f}});
+        expect(failures.empty()) << report(failures);
     };
 };

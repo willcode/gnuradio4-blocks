@@ -346,8 +346,8 @@ std::vector<Write> transmitAfterChunkRaise(std::size_t nSamples, std::uint32_t c
         while (!stoken.stop_requested() && !gr::lifecycle::isActive(sink.state())) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        std::ignore = sink.settings().setStaged({{"max_chunk_size", raised}});
-        while (!stoken.stop_requested() && sink.settings().changed()) {
+        std::ignore = sink.set({{"max_chunk_size", raised}}, gr::settings::noWait);
+        while (!stoken.stop_requested() && sink.template get<std::uint32_t>("max_chunk_size").value_or(0U) != raised) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         std::ignore = device.writeSetting("hold_writes", "false");

@@ -1,8 +1,10 @@
 #ifndef GNURADIO_SOAPY_SINK_HPP
 #define GNURADIO_SOAPY_SINK_HPP
 
+#include <bit>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <format>
 #include <limits>
 #include <mutex>
@@ -42,9 +44,8 @@ caller gives it a value, which leaves the device's own gain, bandwidth, antenna,
 unchanged. A setting the caller gives is applied whatever that value is. A block restored from a fully
 serialized settings map has been given every setting that map holds. A setting changed while the block
 runs reaches the device then. gain_mode, frequency_correction and dc_offset_mode reach the device at a start
-when the caller gave them at construction or changed them while the block was stopped. A change to one of
-them made by a settings message or setStaged() while the block runs is not written again at a later start. A
-settings().set() call counts the key as given from then on. tx_gain_elements names the driver's gain elements
+when a caller gave them, at construction or by a later settings call or message, whether the block was running
+or stopped; a value a tag carried gives no key. tx_gain_elements names the driver's gain elements
 directly and is applied in the order the driver lists them, after the AGC state.
 
 Two tags mark transmit bursts. A write ends at a sample tagged gr:tx_eob = true and carries SOAPY_SDR_END_BURST. A
@@ -58,9 +59,14 @@ write after an end of burst. A tag on any input applies to every channel at that
 that is not a bool and a gr:tx_time that is not an integer from 0 to 2^63 - 1. It reports the first such tag of a run on
 its message port. The burst taper ramps up the stream's first samples and ramps down after its last. It does not shape
 the bursts in between. No ramp-down follows a stream whose last sample ended a burst. The taper takes its settings when
-the block starts. The start fails when the taper refuses them.)">;
+the block starts.
 
-    using TSizeChecker  = Limits<std::uint32_t{1}, std::numeric_limits<std::uint32_t>::max(), [](std::uint32_t x) { return std::has_single_bit(x); }>;
+The master clock rate is set before the sample rate. `dc_offset` and `iq_balance` are written I0, Q0, I1, Q1, ... per
+channel. `stream_args`, `tune_args` and `device_settings` are comma-separated key=value lists. The overall gain per
+channel is distributed by the driver. `burst_safety_rampdown` forces a ramp-down at the end of stream or shutdown when a
+taper is in use.
+)">;
+
     using TBasePort     = PortIn<T>;
     using TPortType     = std::conditional_t<nPorts == 1U, TBasePort, std::conditional_t<nPorts == std::dynamic_extent, std::vector<TBasePort>, std::array<TBasePort, nPorts>>>;
     using StagingBuffer = gr::CircularBuffer<T>;
@@ -69,40 +75,44 @@ the block starts. The start fails when the taper refuses them.)">;
 
     TPortType in;
 
-    Annotated<std::string, "device", Visible, Doc<"SoapySDR driver name">>                                                                 device;
-    Annotated<std::string, "device_parameter", Visible, Doc<"additional driver parameters">>                                               device_parameter;
-    Annotated<double, "master_clock_rate", Unit<"Hz">, Doc<"device master clock rate (0 = auto, set before sample_rate)">>                 master_clock_rate = 0.0;
-    Annotated<std::string, "clock_source", Doc<"clock reference source (e.g. internal, external, gpsdo)">>                                 clock_source;
-    Annotated<float, "sample_rate", Unit<"Hz">, Visible, Doc<"DAC sample rate">>                                                           sample_rate  = 1'000'000.f;
-    Annotated<gr::Size_t, "num_channels", Visible, Doc<"number of TX channels">>                                                           num_channels = 1U;
-    Annotated<std::vector<std::string>, "tx_antennae", Visible, Doc<"per-channel TX antenna selection">>                                   tx_antennae;
-    Annotated<std::vector<double>, "frequency", Unit<"Hz">, Visible, Doc<"per-channel center frequency">>                                  frequency = initDefaultValues(107'000'000.);
-    Annotated<std::vector<double>, "tx_bandwidths", Unit<"Hz">, Visible, Doc<"per-channel TX RF bandwidth (0 = the driver's own choice)">> tx_bandwidths;
-    Annotated<std::vector<double>, "tx_gains", Unit<"dB">, Visible, Doc<"per-channel overall TX gain, distributed by the driver">>         tx_gains;
-    Annotated<property_map, "tx_gain_elements", Visible, Doc<"TX gain in dB per named gain element">>                                      tx_gain_elements{};
-    Annotated<bool, "gain_mode", Doc<"enable automatic gain control (AGC)">>                                                               gain_mode            = false;
-    Annotated<double, "frequency_correction", Unit<"ppm">, Doc<"crystal oscillator drift compensation">>                                   frequency_correction = 0.0;
-    Annotated<bool, "dc_offset_mode", Doc<"enable hardware automatic DC offset removal">>                                                  dc_offset_mode       = false;
-    Annotated<std::vector<double>, "dc_offset", Doc<"manual DC offset correction [I0,Q0,I1,Q1,...] per channel">>                          dc_offset;
-    Annotated<std::vector<double>, "iq_balance", Doc<"manual IQ balance correction [I0,Q0,I1,Q1,...] per channel">>                        iq_balance;
-    Annotated<std::string, "time_source", Doc<"PPS/GPS time reference (e.g. external, gpsdo)">>                                            time_source;
-    Annotated<double, "reference_clock_rate", Unit<"Hz">, Doc<"reference oscillator rate (0 = auto)">>                                     reference_clock_rate = 0.0;
-    Annotated<std::string, "stream_args", Doc<"SoapySDR stream kwargs (comma-separated key=value)">>                                       stream_args;
-    Annotated<std::string, "tune_args", Doc<"per-channel tuning kwargs (comma-separated key=value)">>                                      tune_args;
-    Annotated<std::string, "frontend_mapping", Doc<"logical-to-physical channel mapping">>                                                 frontend_mapping;
-    Annotated<std::string, "device_settings", Doc<"device-level settings (comma-separated key=value)">>                                    device_settings;
-    Annotated<std::uint32_t, "max_chunk_size", Doc<"max samples per write">, Visible, TSizeChecker>                                        max_chunk_size        = 512U << 4U;
-    Annotated<std::uint32_t, "max_time_out_us", Unit<"us">, Doc<"SoapySDR polling timeout">>                                               max_time_out_us       = 1'000;
-    Annotated<gr::Size_t, "max_underflow_count", Doc<"max consecutive underflows before stop (0 = disable)">>                              max_underflow_count   = 10U;
-    Annotated<bool, "verbose_underflow", Doc<"log each underflow event">>                                                                  verbose_underflow     = false;
-    Annotated<bool, "log_device_state", Doc<"log what the device holds once, after setup">>                                                log_device_state      = true;
-    Annotated<bool, "burst_taper_enabled", Doc<"enable TX burst taper (ramp up/down on start/shutdown)">>                                  burst_taper_enabled   = false;
-    Annotated<float, "burst_ramp_time", Unit<"s">, Doc<"taper ramp duration">, Limits<0.f, std::numeric_limits<float>::max()>>             burst_ramp_time       = 0.001f;
-    Annotated<std::string, "burst_taper_type", Doc<"None, Linear, RaisedCosine, Tukey, Gaussian, Mushroom, MushroomSine">>                 burst_taper_type      = std::string("RaisedCosine");
-    Annotated<float, "burst_shape_param", Doc<"taper shape parameter (type-dependent)">>                                                   burst_shape_param     = 1.0f;
-    Annotated<bool, "burst_safety_rampdown", Doc<"force ramp-down on EoS/shutdown if taper not Off">>                                      burst_safety_rampdown = true;
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"SoapySDR driver name">>                                      device;
+        Annotated<std::string, Visible, Doc<"driver parameters">>                                         device_parameter;
+        Annotated<double, Unit<"Hz">, Doc<"master clock rate (0 = auto)">>                                master_clock_rate = 0.0;
+        Annotated<std::string, Doc<"clock source">>                                                       clock_source;
+        Annotated<float, Unit<"Hz">, Visible, Doc<"sample rate">, Limits<Over<0.f>>>                      sample_rate  = 1'000'000.f;
+        Annotated<gr::Size_t, Visible, Doc<"channel count">>                                              num_channels = 1U;
+        Annotated<std::vector<std::string>, Visible, Doc<"antenna per channel">>                          tx_antennae;
+        Annotated<std::vector<double>, Unit<"Hz">, Visible, Doc<"center frequency per channel">>          frequency = initDefaultValues(107'000'000.);
+        Annotated<std::vector<double>, Unit<"Hz">, Visible, Doc<"RF bandwidth per channel (0 = driver)">> tx_bandwidths;
+        Annotated<std::vector<double>, Unit<"dB">, Visible, Doc<"gain per channel">>                      tx_gains;
+        Annotated<property_map, Unit<"dB">, Visible, Doc<"gain per element">>                             tx_gain_elements{};
+        Annotated<bool, Doc<"automatic gain control">>                                                    gain_mode            = false;
+        Annotated<double, Unit<"ppm">, Doc<"frequency correction">>                                       frequency_correction = 0.0;
+        Annotated<bool, Doc<"automatic DC offset removal">>                                               dc_offset_mode       = false;
+        Annotated<std::vector<double>, Doc<"DC offset correction">>                                       dc_offset;
+        Annotated<std::vector<double>, Doc<"IQ balance correction">>                                      iq_balance;
+        Annotated<std::string, Doc<"time source">>                                                        time_source;
+        Annotated<double, Unit<"Hz">, Doc<"reference clock rate (0 = auto)">>                             reference_clock_rate = 0.0;
+        Annotated<std::string, Doc<"stream arguments">>                                                   stream_args;
+        Annotated<std::string, Doc<"tuning arguments per channel">>                                       tune_args;
+        Annotated<std::string, Doc<"frontend mapping">>                                                   frontend_mapping;
+        Annotated<std::string, Doc<"device settings">>                                                    device_settings;
+        Annotated<std::uint32_t, Doc<"samples per write limit">, Visible>                                 max_chunk_size        = 512U << 4U;
+        Annotated<std::uint32_t, Unit<"us">, Doc<"polling timeout">>                                      max_time_out_us       = 1'000;
+        Annotated<gr::Size_t, Doc<"underflow limit (0 = unlimited)">>                                     max_underflow_count   = 10U;
+        Annotated<bool, Doc<"underflow logging">>                                                         verbose_underflow     = false;
+        Annotated<bool, Doc<"device state logging">>                                                      log_device_state      = true;
+        Annotated<bool, Doc<"burst taper">>                                                               burst_taper_enabled   = false;
+        Annotated<float, Unit<"s">, Doc<"burst ramp time">, Limits<Min<0.f>>>                             burst_ramp_time       = 0.001f;
+        Annotated<algorithm::TaperType, Doc<"burst taper type">>                                          burst_taper_type      = algorithm::TaperType::RaisedCosine;
+        Annotated<float, Doc<"taper shape parameter">>                                                    burst_shape_param     = 1.0f;
+        Annotated<bool, Doc<"safety ramp-down">>                                                          burst_safety_rampdown = true;
 
-    GR_MAKE_REFLECTABLE(SoapySink, in, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, tx_antennae, frequency, tx_bandwidths, tx_gains, tx_gain_elements, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_underflow_count, verbose_underflow, log_device_state, burst_taper_enabled, burst_ramp_time, burst_taper_type, burst_shape_param, burst_safety_rampdown);
+        GR_MAKE_REFLECTABLE(Settings, device, device_parameter, master_clock_rate, clock_source, sample_rate, num_channels, tx_antennae, frequency, tx_bandwidths, tx_gains, tx_gain_elements, gain_mode, frequency_correction, dc_offset_mode, dc_offset, iq_balance, time_source, reference_clock_rate, stream_args, tune_args, frontend_mapping, device_settings, max_chunk_size, max_time_out_us, max_underflow_count, verbose_underflow, log_device_state, burst_taper_enabled, burst_ramp_time, burst_taper_type, burst_shape_param, burst_safety_rampdown);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SoapySink, in, settings);
 
     soapy::Device                               _device{};
     soapy::Device::Stream<T, SOAPY_SDR_TX>      _txStream{};
@@ -113,7 +123,6 @@ the block starts. The start fails when the taper refuses them.)">;
     bool                                        _ioThreadDone = true;
     std::atomic<bool>                           _ioThreadStarted{false};
     algorithm::BurstTaper<float>                _taper;
-    std::set<std::string>                       _changedWhileStopped;         // keys a settings change carried with no device open
     bool                                        _taperInUse          = false; // burst_taper_enabled as the run started
     bool                                        _safetyRampDownInUse = false; // burst_safety_rampdown as the run started
     std::vector<StagingBuffer>                  _stagingBuffers;
@@ -160,11 +169,16 @@ the block starts. The start fails when the taper refuses them.)">;
     bool                  _endBurstOwed     = false; // the device took a burst's last sample without END_BURST
     bool                  _burstTagReported = false; // mistyped burst tag reported this run (scheduler thread only)
 
-    // Throws when the burst taper is enabled and refuses its ramp time or sample rate, or when the device cannot be
-    // opened, configured or activated. On a shared device the stream can activate after start() returns, and work()
-    // then reports a refusal as ERROR. The settings staged while the block was stopped are applied first.
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (!std::has_single_bit(s.max_chunk_size.value)) {
+            return gr::Refused(s.max_chunk_size, "must be a power of 2");
+        }
+        return {};
+    }
+
+    // Throws when the device cannot be opened, configured or activated. On a shared device the stream can activate
+    // after start() returns, and work() then reports a refusal as ERROR.
     void start() {
-        this->applyChangedSettings(false);
         _underflowCount.store(0U, std::memory_order_relaxed);
         _stalledWrites.store(0UZ, std::memory_order_relaxed);
         _rampAbandoned.store(false, std::memory_order_relaxed);
@@ -182,8 +196,8 @@ the block starts. The start fails when the taper refuses them.)">;
         configureTaper();
         reinitDevice();
 
-        _chunkSize          = static_cast<std::size_t>(max_chunk_size.value);
-        std::size_t nCh     = (nPorts != std::dynamic_extent) ? nPorts : static_cast<std::size_t>(num_channels.value);
+        _chunkSize          = static_cast<std::size_t>(settings.max_chunk_size.value);
+        std::size_t nCh     = (nPorts != std::dynamic_extent) ? nPorts : static_cast<std::size_t>(settings.num_channels.value);
         std::size_t bufSize = std::bit_ceil(_chunkSize * 4UZ);
         _stagingBuffers.clear();
         _stagingWriters.clear();
@@ -224,7 +238,7 @@ the block starts. The start fails when the taper refuses them.)">;
         _device.reset();
     }
 
-    // Releases the device, then throws. The framework calls no stop() after a start() that throws.
+    // Releases the device, then throws.
     [[noreturn]] void failStart(std::string_view reason, std::source_location location = std::source_location::current()) {
         stop();
         throw gr::exception(reason, location);
@@ -533,10 +547,10 @@ the block starts. The start fails when the taper refuses them.)">;
             int flags = SOAPY_SDR_END_BURST;
             int ret   = 0;
             if constexpr (nPorts == 1U) {
-                ret = _txStream.writeStream(flags, 0LL, static_cast<long>(max_time_out_us), std::span<const T>(scratch.data(), 1UZ));
+                ret = _txStream.writeStream(flags, 0LL, static_cast<long>(settings.max_time_out_us), std::span<const T>(scratch.data(), 1UZ));
             } else {
                 std::vector<std::span<const T>> zeroSample(_stagingReaders.size(), std::span<const T>(scratch.data(), 1UZ));
-                ret = _txStream.writeStreamFromBufferList(flags, 0LL, static_cast<long>(max_time_out_us), std::span<std::span<const T>>(zeroSample));
+                ret = _txStream.writeStreamFromBufferList(flags, 0LL, static_cast<long>(settings.max_time_out_us), std::span<std::span<const T>>(zeroSample));
             }
             if (ret > 0) {
                 std::lock_guard lock(_burstMarkMutex);
@@ -551,50 +565,45 @@ the block starts. The start fails when the taper refuses them.)">;
         this->emitMessage("ioWriteLoop()", {{"error", std::format("END_BURST after sample {} was not sent and the burst stays open", _samplesWritten - 1U)}});
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, property_map& newSettings, property_map& /*forwardSettings*/) {
+    void applySettings(const Settings& s) {
         if (!_device.get()) {
-            for (const auto& [key, value] : newSettings) {
-                _changedWhileStopped.emplace(key);
-            }
             return;
         }
-        // A key is named here only because a settings change carried it, which makes it the caller's
-        // whatever its value.
-        if (newSettings.contains("frequency")) {
+        if (s.frequency.changed()) {
             applyFrequency();
         }
-        if (newSettings.contains("sample_rate")) {
+        if (s.sample_rate.changed()) {
             applySampleRate();
         }
-        if (newSettings.contains("tx_antennae")) {
+        if (s.tx_antennae.changed()) {
             applyAntenna();
         }
-        if (newSettings.contains("tx_bandwidths")) {
+        if (s.tx_bandwidths.changed()) {
             applyBandwidth();
         }
         // The AGC state precedes the gains: a driver may refuse a gain write while its AGC is on.
-        if (newSettings.contains("gain_mode")) {
+        if (s.gain_mode.changed()) {
             applyGainMode();
         }
-        if (newSettings.contains("tx_gains")) {
+        if (s.tx_gains.changed()) {
             applyGain();
         }
-        if (newSettings.contains("tx_gain_elements")) {
+        if (s.tx_gain_elements.changed()) {
             applyGainElements();
         }
-        if (newSettings.contains("frequency_correction")) {
+        if (s.frequency_correction.changed()) {
             applyFrequencyCorrection();
         }
-        if (newSettings.contains("dc_offset_mode")) {
+        if (s.dc_offset_mode.changed()) {
             applyDcOffsetMode();
         }
-        if (newSettings.contains("dc_offset")) {
+        if (s.dc_offset.changed()) {
             applyDcOffset();
         }
-        if (newSettings.contains("iq_balance")) {
+        if (s.iq_balance.changed()) {
             applyIqBalance();
         }
-        if (newSettings.contains("device_settings")) {
+        if (s.device_settings.changed()) {
             applyDeviceSettings();
         }
     }
@@ -675,7 +684,7 @@ the block starts. The start fails when the taper refuses them.)">;
         }
 
         int  flags = burst.flags;
-        auto ret   = _txStream.writeStream(flags, burst.timeNs, static_cast<long>(max_time_out_us), std::span<const T>(samples, n));
+        auto ret   = _txStream.writeStream(flags, burst.timeNs, static_cast<long>(settings.max_time_out_us), std::span<const T>(samples, n));
 
         if (ret == SOAPY_SDR_TIMEOUT) {
             _taper._phase        = savedPhase;
@@ -748,7 +757,7 @@ the block starts. The start fails when the taper refuses them.)">;
         }
 
         int  flags = burst.flags;
-        auto ret   = _txStream.writeStreamFromBufferList(flags, burst.timeNs, static_cast<long>(max_time_out_us), std::span<std::span<const T>>(writeSpans));
+        auto ret   = _txStream.writeStreamFromBufferList(flags, burst.timeNs, static_cast<long>(settings.max_time_out_us), std::span<std::span<const T>>(writeSpans));
 
         if (ret == SOAPY_SDR_TIMEOUT || ret < 0) {
             _taper._phase        = savedPhase;
@@ -839,7 +848,7 @@ the block starts. The start fails when the taper refuses them.)">;
     // takes a few samples per call still drains and still ramps down, however many calls that needs.
     [[nodiscard]] std::size_t stalledWriteBudget() const {
         constexpr std::size_t kStalledShutdownUs = 1'000'000UZ;
-        const std::size_t     timeoutUs          = std::max<std::size_t>(1UZ, static_cast<std::size_t>(max_time_out_us));
+        const std::size_t     timeoutUs          = std::max<std::size_t>(1UZ, static_cast<std::size_t>(settings.max_time_out_us));
         return std::max<std::size_t>(1UZ, kStalledShutdownUs / timeoutUs);
     }
 
@@ -941,7 +950,7 @@ the block starts. The start fails when the taper refuses them.)">;
                 std::fill_n(scratch.data(), n, lastTransmitted(0UZ));
                 applyTaper(scratch.data(), n);
                 saturateForDevice(scratch.data(), n);
-                ret = _txStream.writeStream(flags, 0LL, static_cast<long>(max_time_out_us), std::span<const T>(scratch.data(), n));
+                ret = _txStream.writeStream(flags, 0LL, static_cast<long>(settings.max_time_out_us), std::span<const T>(scratch.data(), n));
             } else {
                 writeSpans.clear();
                 for (std::size_t ch = 0UZ; ch < nCh; ++ch) {
@@ -952,7 +961,7 @@ the block starts. The start fails when the taper refuses them.)">;
                     saturateForDevice(chScratch[ch].data(), n);
                     writeSpans.push_back(std::span<const T>(chScratch[ch].data(), n));
                 }
-                ret = _txStream.writeStreamFromBufferList(flags, 0LL, static_cast<long>(max_time_out_us), std::span<std::span<const T>>(writeSpans));
+                ret = _txStream.writeStreamFromBufferList(flags, 0LL, static_cast<long>(settings.max_time_out_us), std::span<std::span<const T>>(writeSpans));
             }
 
             if (ret <= 0 && ret != SOAPY_SDR_TIMEOUT) {
@@ -985,49 +994,24 @@ the block starts. The start fails when the taper refuses them.)">;
     // Takes the burst_* settings for the run. A change to them while the block runs applies at its next start().
     void configureTaper() {
         _taperInUse          = false;
-        _safetyRampDownInUse = burst_safety_rampdown;
-        if (!burst_taper_enabled) {
+        _safetyRampDownInUse = settings.burst_safety_rampdown;
+        if (!settings.burst_taper_enabled) {
             _taper.reset();
             return;
         }
-        auto type = parseTaperType(burst_taper_type.value);
-        if (auto r = _taper.configure(type, burst_ramp_time, sample_rate, burst_shape_param); !r) {
-            failStart(std::format("burst taper: {}", r.error().message));
+        const std::expected<void, gr::Error> configured = _taper.configure(settings.burst_taper_type, settings.burst_ramp_time, settings.sample_rate, settings.burst_shape_param);
+        if (!configured) {
+            throw gr::exception(std::format("burst taper: {}", configured.error().message));
         }
         std::ignore = _taper.setTarget(true);
         _taperInUse = true;
     }
 
-    static algorithm::TaperType parseTaperType(const std::string& name) {
-        if (name == "None") {
-            return algorithm::TaperType::None;
-        }
-        if (name == "Linear") {
-            return algorithm::TaperType::Linear;
-        }
-        if (name == "RaisedCosine") {
-            return algorithm::TaperType::RaisedCosine;
-        }
-        if (name == "Tukey") {
-            return algorithm::TaperType::Tukey;
-        }
-        if (name == "Gaussian") {
-            return algorithm::TaperType::Gaussian;
-        }
-        if (name == "Mushroom") {
-            return algorithm::TaperType::Mushroom;
-        }
-        if (name == "MushroomSine") {
-            return algorithm::TaperType::MushroomSine;
-        }
-        return algorithm::TaperType::RaisedCosine;
-    }
-
     void reinitDevice() {
         _txStream.reset();
-        _devKwargs = soapy::Kwargs{{"driver", device.value}};
-        if (!device_parameter->empty()) {
-            _devKwargs.merge(soapy::parseKwargsString(device_parameter.value));
+        _devKwargs = soapy::Kwargs{{"driver", settings.device.value}};
+        if (!settings.device_parameter->empty()) {
+            _devKwargs.merge(soapy::parseKwargsString(settings.device_parameter.value));
         }
         _activation = soapy::detail::DeviceRegistry::Registration(_devKwargs);
 
@@ -1038,7 +1022,7 @@ the block starts. The start fails when the taper refuses them.)">;
         _device = std::move(*devResult);
 
         std::size_t nChannelMax    = _device.getNumChannels(SOAPY_SDR_TX);
-        std::size_t nChannelNeeded = (nPorts != std::dynamic_extent) ? nPorts : static_cast<std::size_t>(num_channels.value);
+        std::size_t nChannelNeeded = (nPorts != std::dynamic_extent) ? nPorts : static_cast<std::size_t>(settings.num_channels.value);
         if (nChannelMax < nChannelNeeded) {
             failStart(std::format("TX channel mismatch: need {} but device has {}", nChannelNeeded, nChannelMax));
         }
@@ -1055,15 +1039,15 @@ the block starts. The start fails when the taper refuses them.)">;
         applyFrequency();
         // A bool or a zero carries no "not given" value of its own, so what the caller wrote decides
         // whether these three reach the device. A later change carries that decision in itself.
-        if (isSetByCaller("frequency_correction")) {
+        if (this->isGiven(settings.frequency_correction)) {
             applyFrequencyCorrection();
         }
-        if (isSetByCaller("gain_mode")) {
+        if (this->isGiven(settings.gain_mode)) {
             applyGainMode();
         }
         applyGain();
         applyGainElements();
-        if (isSetByCaller("dc_offset_mode")) {
+        if (this->isGiven(settings.dc_offset_mode)) {
             applyDcOffsetMode();
         }
         applyDcOffset();
@@ -1076,9 +1060,9 @@ the block starts. The start fails when the taper refuses them.)">;
             failStart(std::format("TX format '{}' not supported (available: {})", requestedFormat, gr::join(supportedFormats, ", ")));
         }
 
-        std::vector<gr::Size_t> channelIndices(num_channels);
+        std::vector<gr::Size_t> channelIndices(settings.num_channels);
         std::iota(channelIndices.begin(), channelIndices.end(), gr::Size_t{0});
-        soapy::Kwargs parsedStreamArgs = stream_args->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(stream_args.value);
+        soapy::Kwargs parsedStreamArgs = settings.stream_args->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(settings.stream_args.value);
         auto          streamResult     = _device.setupStream<T, SOAPY_SDR_TX>(channelIndices, parsedStreamArgs);
         if (!streamResult) {
             failStart(std::format("{} (requested: {})", streamResult.error(), requestedFormat));
@@ -1087,31 +1071,31 @@ the block starts. The start fails when the taper refuses them.)">;
     }
 
     void applyClockConfig() {
-        if (!clock_source->empty()) {
-            if (auto r = _device.setClockSource(clock_source.value); !r) {
+        if (!settings.clock_source->empty()) {
+            if (auto r = _device.setClockSource(settings.clock_source.value); !r) {
                 this->emitErrorMessage("applyClockConfig()", r.error());
             }
         }
-        if (!time_source->empty()) {
-            if (auto r = _device.setTimeSource(time_source.value); !r) {
+        if (!settings.time_source->empty()) {
+            if (auto r = _device.setTimeSource(settings.time_source.value); !r) {
                 this->emitErrorMessage("applyClockConfig()", r.error());
             }
         }
-        if (master_clock_rate > 0.0) {
-            if (auto r = _device.setMasterClockRate(master_clock_rate); !r) {
+        if (settings.master_clock_rate > 0.0) {
+            if (auto r = _device.setMasterClockRate(settings.master_clock_rate); !r) {
                 this->emitErrorMessage("applyClockConfig()", r.error());
             }
         }
-        if (reference_clock_rate > 0.0) {
-            if (auto r = _device.setReferenceClockRate(reference_clock_rate); !r) {
+        if (settings.reference_clock_rate > 0.0) {
+            if (auto r = _device.setReferenceClockRate(settings.reference_clock_rate); !r) {
                 this->emitErrorMessage("applyClockConfig()", r.error());
             }
         }
     }
 
     void applySampleRate() {
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
-            if (auto r = _device.setSampleRate(SOAPY_SDR_TX, i, static_cast<double>(sample_rate)); !r) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
+            if (auto r = _device.setSampleRate(SOAPY_SDR_TX, i, static_cast<double>(settings.sample_rate)); !r) {
                 this->emitErrorMessage("applySampleRate()", r.error());
             }
         }
@@ -1120,11 +1104,11 @@ the block starts. The start fails when the taper refuses them.)">;
     // A driver accepts an antenna name it does not have without reporting an error, so the name is checked
     // against the device's own list first.
     void applyAntenna() {
-        if (tx_antennae->empty()) {
+        if (settings.tx_antennae->empty()) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
-            const auto& ant = tx_antennae->at(std::min(static_cast<std::size_t>(i), tx_antennae->size() - 1UZ));
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
+            const auto& ant = settings.tx_antennae->at(std::min(static_cast<std::size_t>(i), settings.tx_antennae->size() - 1UZ));
             if (ant.empty()) {
                 continue;
             }
@@ -1143,12 +1127,12 @@ the block starts. The start fails when the taper refuses them.)">;
     // writes the tuning residual into the correction component of a driver that has one. The RF component is
     // named where the driver lists it.
     void applyFrequency() {
-        if (frequency->empty()) {
+        if (settings.frequency->empty()) {
             return;
         }
-        const soapy::Kwargs tuneArgs = tune_args->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(tune_args.value);
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
-            double     freq       = frequency->at(std::min(static_cast<std::size_t>(i), frequency->size() - 1UZ));
+        const soapy::Kwargs tuneArgs = settings.tune_args->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(settings.tune_args.value);
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
+            double     freq       = settings.frequency->at(std::min(static_cast<std::size_t>(i), settings.frequency->size() - 1UZ));
             const auto components = _device.listFrequencyComponents(SOAPY_SDR_TX, i);
             const auto result     = (std::ranges::find(components, std::string("RF")) != components.end()) ? _device.setFrequencyComponent(SOAPY_SDR_TX, i, "RF", freq, tuneArgs) : _device.setCenterFrequency(SOAPY_SDR_TX, i, freq, tuneArgs);
             if (!result) {
@@ -1158,11 +1142,11 @@ the block starts. The start fails when the taper refuses them.)">;
     }
 
     void applyBandwidth() {
-        if (tx_bandwidths->empty()) {
+        if (settings.tx_bandwidths->empty()) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
-            double bw = tx_bandwidths->at(std::min(static_cast<std::size_t>(i), tx_bandwidths->size() - 1UZ));
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
+            double bw = settings.tx_bandwidths->at(std::min(static_cast<std::size_t>(i), settings.tx_bandwidths->size() - 1UZ));
             if (auto r = _device.setBandwidth(SOAPY_SDR_TX, i, bw); !r) {
                 this->emitErrorMessage("applyBandwidth()", r.error());
             }
@@ -1170,11 +1154,11 @@ the block starts. The start fails when the taper refuses them.)">;
     }
 
     void applyGain() {
-        if (tx_gains->empty()) {
+        if (settings.tx_gains->empty()) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
-            double g = tx_gains->at(std::min(static_cast<std::size_t>(i), tx_gains->size() - 1UZ));
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
+            double g = settings.tx_gains->at(std::min(static_cast<std::size_t>(i), settings.tx_gains->size() - 1UZ));
             if (!withinRange(_device.getGainRange(SOAPY_SDR_TX, i), g)) {
                 this->emitErrorMessage("applyGain()", std::format("channel {}: {} dB is outside the device's overall gain range {}", i, g, _device.getGainRange(SOAPY_SDR_TX, i)));
                 continue;
@@ -1188,14 +1172,14 @@ the block starts. The start fails when the taper refuses them.)">;
     // Elements are applied in the order the driver lists them, which is the order the driver itself uses when
     // it distributes an overall gain across them.
     void applyGainElements() {
-        if (tx_gain_elements->empty()) {
+        if (settings.tx_gain_elements->empty()) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             const auto available = _device.listAvailableGainElements(SOAPY_SDR_TX, i);
             for (const auto& name : available) {
-                const auto entry = tx_gain_elements->find(name);
-                if (entry == tx_gain_elements->end()) {
+                const auto entry = settings.tx_gain_elements->find(name);
+                if (entry == settings.tx_gain_elements->end()) {
                     continue;
                 }
                 const auto gain = pmt::convert_safely<double>(entry->second);
@@ -1211,7 +1195,7 @@ the block starts. The start fails when the taper refuses them.)">;
                     this->emitErrorMessage("applyGainElements()", r.error());
                 }
             }
-            for (const auto& entry : tx_gain_elements.value) {
+            for (const auto& entry : settings.tx_gain_elements.value) {
                 if (std::ranges::find(available, std::string(entry.first)) == available.end()) {
                     this->emitErrorMessage("applyGainElements()", std::format("channel {} has no gain element '{}' (device has: {})", i, entry.first, gr::join(available, ", ")));
                 }
@@ -1220,77 +1204,77 @@ the block starts. The start fails when the taper refuses them.)">;
     }
 
     void applyGainMode() {
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             if (!_device.hasAutomaticGainControl(SOAPY_SDR_TX, i)) {
                 continue;
             }
-            if (auto r = _device.setAutomaticGainControl(SOAPY_SDR_TX, i, gain_mode); !r) {
+            if (auto r = _device.setAutomaticGainControl(SOAPY_SDR_TX, i, settings.gain_mode); !r) {
                 this->emitErrorMessage("applyGainMode()", r.error());
             }
         }
     }
 
     void applyFrequencyCorrection() {
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             if (!_device.hasFrequencyCorrection(SOAPY_SDR_TX, i)) {
                 continue;
             }
-            if (auto r = _device.setFrequencyCorrection(SOAPY_SDR_TX, i, frequency_correction); !r) {
+            if (auto r = _device.setFrequencyCorrection(SOAPY_SDR_TX, i, settings.frequency_correction); !r) {
                 this->emitErrorMessage("applyFrequencyCorrection()", r.error());
             }
         }
     }
 
     void applyDcOffsetMode() {
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             if (!_device.hasDCOffsetMode(SOAPY_SDR_TX, i)) {
                 continue;
             }
-            if (auto r = _device.setDCOffsetMode(SOAPY_SDR_TX, i, dc_offset_mode); !r) {
+            if (auto r = _device.setDCOffsetMode(SOAPY_SDR_TX, i, settings.dc_offset_mode); !r) {
                 this->emitErrorMessage("applyDcOffsetMode()", r.error());
             }
         }
     }
 
     void applyDcOffset() {
-        if (dc_offset->empty()) {
+        if (settings.dc_offset->empty()) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             if (!_device.hasDCOffset(SOAPY_SDR_TX, i)) {
                 continue;
             }
             auto idx = static_cast<std::size_t>(i) * 2UZ;
-            if (idx + 1UZ >= dc_offset->size()) {
+            if (idx + 1UZ >= settings.dc_offset->size()) {
                 break;
             }
-            if (auto r = _device.setDCOffset(SOAPY_SDR_TX, i, dc_offset->at(idx), dc_offset->at(idx + 1UZ)); !r) {
+            if (auto r = _device.setDCOffset(SOAPY_SDR_TX, i, settings.dc_offset->at(idx), settings.dc_offset->at(idx + 1UZ)); !r) {
                 this->emitErrorMessage("applyDcOffset()", r.error());
             }
         }
     }
 
     void applyIqBalance() {
-        if (iq_balance->empty()) {
+        if (settings.iq_balance->empty()) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             if (!_device.hasIQBalance(SOAPY_SDR_TX, i)) {
                 continue;
             }
             auto idx = static_cast<std::size_t>(i) * 2UZ;
-            if (idx + 1UZ >= iq_balance->size()) {
+            if (idx + 1UZ >= settings.iq_balance->size()) {
                 break;
             }
-            if (auto r = _device.setIQBalance(SOAPY_SDR_TX, i, iq_balance->at(idx), iq_balance->at(idx + 1UZ)); !r) {
+            if (auto r = _device.setIQBalance(SOAPY_SDR_TX, i, settings.iq_balance->at(idx), settings.iq_balance->at(idx + 1UZ)); !r) {
                 this->emitErrorMessage("applyIqBalance()", r.error());
             }
         }
     }
 
     void applyFrontendMapping() {
-        if (!frontend_mapping->empty()) {
-            _device.setFrontendMapping(SOAPY_SDR_TX, frontend_mapping.value);
+        if (!settings.frontend_mapping->empty()) {
+            _device.setFrontendMapping(SOAPY_SDR_TX, settings.frontend_mapping.value);
         }
     }
 
@@ -1298,14 +1282,14 @@ the block starts. The start fails when the taper refuses them.)">;
     // against the device's own list. That list is read only when the caller supplied settings: on some
     // drivers getSettingInfo() reopens the device.
     void applyDeviceSettings() {
-        if (device_settings->empty()) {
+        if (settings.device_settings->empty()) {
             return;
         }
         std::vector<std::string> known;
         for (const auto& info : _device.getSettingInfo()) {
             known.push_back(info.key);
         }
-        for (const auto& [key, value] : soapy::parseKwargsString(device_settings.value)) {
+        for (const auto& [key, value] : soapy::parseKwargsString(settings.device_settings.value)) {
             if (std::ranges::find(known, key) == known.end()) {
                 this->emitErrorMessage("applyDeviceSettings()", known.empty() ? std::format("the device has no settings, so '{}' cannot be written", key) : std::format("the device has no setting '{}' (it has: {})", key, gr::join(known, ", ")));
                 continue;
@@ -1316,40 +1300,23 @@ the block starts. The start fails when the taper refuses them.)">;
         }
     }
 
-    // The caller's keys are the writable members the settings' auto-update set no longer holds: that set
-    // starts as every writable member and a write removes a key from it whatever value the key carries, so
-    // a map that names every writable member, which is what a fully serialized block is loaded from, leaves
-    // it empty. Its emptiness therefore cannot stand for "nothing was written": settings that hold no
-    // parameters at all have an empty set for the other reason, and the count of stored parameter sets,
-    // which a written map and a constructed block both raise above zero, is what tells the two apart.
-    // A key a settings change carried while no device was open is the caller's as well.
-    [[nodiscard]] bool isSetByCaller(std::string_view key) {
-        if (_changedWhileStopped.contains(std::string(key))) {
-            return true;
-        }
-        if (this->settings().getNStoredParameters() == 0U) {
-            return false;
-        }
-        return !this->settings().autoUpdateParameters().contains(std::string(key));
-    }
-
     // A driver that reports a degenerate range gives nothing to check against.
     [[nodiscard]] static bool withinRange(const soapy::Range& range, double value) { return range.maximum <= range.minimum || (value >= range.minimum && value <= range.maximum); }
 
     void logDeviceState() {
-        if (!log_device_state) {
+        if (!settings.log_device_state) {
             return;
         }
-        for (gr::Size_t i = 0U; i < num_channels; i++) {
+        for (gr::Size_t i = 0U; i < settings.num_channels; i++) {
             std::string gains;
             for (const auto& name : _device.listAvailableGainElements(SOAPY_SDR_TX, i)) {
                 gains += std::format("{}{}={:g}", gains.empty() ? "" : " ", name, _device.getGain(SOAPY_SDR_TX, i, name));
             }
             std::string written;
-            for (const auto& [key, value] : device_settings->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(device_settings.value)) {
+            for (const auto& [key, value] : settings.device_settings->empty() ? soapy::Kwargs{} : soapy::parseKwargsString(settings.device_settings.value)) {
                 written += std::format("{}{}={}", written.empty() ? "" : " ", key, _device.readSetting(key));
             }
-            std::println(stderr, "[SoapySink] {} ch{}: rate={:g} freq={:g} bw={:g} antenna={} agc={} gain={:g} [{}] corr={:g} settings [{}]", device.value, i, _device.getSampleRate(SOAPY_SDR_TX, i), _device.getCenterFrequency(SOAPY_SDR_TX, i), _device.getBandwidth(SOAPY_SDR_TX, i), _device.getAntenna(SOAPY_SDR_TX, i), _device.isAutomaticGainControl(SOAPY_SDR_TX, i), _device.getGain(SOAPY_SDR_TX, i), gains, _device.getFrequencyCorrection(SOAPY_SDR_TX, i), written);
+            std::println(stderr, "[SoapySink] {} ch{}: rate={:g} freq={:g} bw={:g} antenna={} agc={} gain={:g} [{}] corr={:g} settings [{}]", settings.device.value, i, _device.getSampleRate(SOAPY_SDR_TX, i), _device.getCenterFrequency(SOAPY_SDR_TX, i), _device.getBandwidth(SOAPY_SDR_TX, i), _device.getAntenna(SOAPY_SDR_TX, i), _device.isAutomaticGainControl(SOAPY_SDR_TX, i), _device.getGain(SOAPY_SDR_TX, i), gains, _device.getFrequencyCorrection(SOAPY_SDR_TX, i), written);
         }
     }
 
@@ -1360,11 +1327,11 @@ the block starts. The start fails when the taper refuses them.)">;
         switch (ret) {
         case SOAPY_SDR_UNDERFLOW: {
             auto count = _underflowCount.fetch_add(1U, std::memory_order_relaxed) + 1U;
-            if (verbose_underflow) {
+            if (settings.verbose_underflow) {
                 std::println(stderr, "[SoapySink] UNDERFLOW #{}", count);
             }
-            if (max_underflow_count > 0 && count >= max_underflow_count) {
-                this->emitErrorMessage("ioWriteLoop()", std::format("UNDERFLOW: {} of max {}", count, max_underflow_count));
+            if (settings.max_underflow_count > 0 && count >= settings.max_underflow_count) {
+                this->emitErrorMessage("ioWriteLoop()", std::format("UNDERFLOW: {} of max {}", count, settings.max_underflow_count));
                 return false;
             }
             return true;
