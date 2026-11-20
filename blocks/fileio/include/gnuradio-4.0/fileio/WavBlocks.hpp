@@ -168,20 +168,34 @@ struct WavSource : gr::Block<WavSource<T>> {
     using Description = Doc<R""(Streams RIFF/WAVE audio from local paths or HTTP/HTTPS URLs.
 
 Supported WAV encodings: PCM 8/16/24/32-bit, IEEE float 32-bit, interleaved multi-channel.
-Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
+Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.
+
+Under mode overwrite or append, `uri` is a single file; under multi, every matching file is read in order. `repeat`
+restarts from the beginning when all files are exhausted. `offset` skips samples at the start of each file's data chunk,
+and `trigger_name` is emitted at the start of each file.
+)"">;
 
     gr::PortOut<T> out;
 
-    gr::Annotated<std::string, "uri", gr::Visible, gr::Doc<"Local file path or HTTP/HTTPS URL to a WAV file">>                                uri;
-    gr::Annotated<Mode, "mode", gr::Visible, gr::Doc<"overwrite/append: single file, multi: read all matching files in order">>               mode         = Mode::overwrite;
-    gr::Annotated<bool, "repeat", gr::Doc<"true: restart from beginning when all files are exhausted">>                                       repeat       = false;
-    gr::Annotated<gr::Size_t, "offset", gr::Visible, gr::Doc<"Skip this many samples at the start of each file's data chunk">>                offset       = 0U;
-    gr::Annotated<gr::Size_t, "length", gr::Visible, gr::Doc<"Max samples to read per file (0 = read entire file)">>                          length       = 0U;
-    gr::Annotated<std::string, "trigger_name", gr::Doc<"Trigger name tag emitted at the start of each file">>                                 trigger_name = std::string("WavSource::start");
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Decoded sample rate (read-only, updated from WAV header)">>     sample_rate  = 0.f;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Decoded interleaved channel count (read-only, updated from WAV header)">> num_channels = 0U;
+    struct Settings {
+        gr::Annotated<std::string, gr::Visible, gr::Doc<"file path or URL">>                 uri;
+        gr::Annotated<Mode, gr::Visible, gr::Doc<"file mode">>                               mode         = Mode::overwrite;
+        gr::Annotated<bool, gr::Doc<"repetition">>                                           repeat       = false;
+        gr::Annotated<gr::Size_t, gr::Unit<"samples">, gr::Visible, gr::Doc<"start offset">> offset       = 0U;
+        gr::Annotated<gr::Size_t, gr::Visible, gr::Doc<"samples per file (0 = all)">>        length       = 0U;
+        gr::Annotated<std::string, gr::Doc<"file start trigger name">>                       trigger_name = std::string("WavSource::start");
 
-    GR_MAKE_REFLECTABLE(WavSource, out, uri, mode, repeat, offset, length, trigger_name, sample_rate, num_channels);
+        GR_MAKE_REFLECTABLE(Settings, uri, mode, repeat, offset, length, trigger_name);
+    } settings;
+
+    struct Status {
+        gr::Annotated<float, gr::Visible, gr::Unit<"Hz">, gr::Doc<"decoded sample rate">> sample_rate  = 0.f;
+        gr::Annotated<gr::Size_t, gr::Visible, gr::Doc<"decoded channel count">>          num_channels = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, sample_rate, num_channels);
+    } status;
+
+    GR_MAKE_REFLECTABLE(WavSource, out, settings, status);
 
     static constexpr std::size_t kMaxHeaderBytes = 1024U * 1024U;
 
@@ -238,12 +252,11 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
     // reader meets later, any failure of an HTTP read and a header that is not valid WAV end the stream with ERROR
     // during the run.
     void start() {
-        sample_rate  = 0.f;
-        num_channels = 0U;
+        publishFormat(0.f, 0U);
         _filesToRead.clear();
 
-        std::filesystem::path filePath(uri.value);
-        if (mode.value == Mode::multi) {
+        std::filesystem::path filePath(settings.uri.value);
+        if (settings.mode.value == Mode::multi) {
             const auto        directory = detail::parentDirectory(filePath);
             const std::string baseName  = filePath.filename().string();
 
@@ -431,7 +444,7 @@ Compressed formats (ADPCM, mu-law, A-law, MP3-in-WAV) are not supported.)"">;
             return gr::work::Status::INSUFFICIENT_OUTPUT_ITEMS;
         }
 
-        const bool lengthExhausted = length.value != 0U && _totalSamplesRead >= static_cast<std::size_t>(length.value);
+        const bool lengthExhausted = settings.length.value != 0U && _totalSamplesRead >= static_cast<std::size_t>(settings.length.value);
         if (_headerParsed && (_dataBytesRemaining == 0U || lengthExhausted)) {
             return finishCurrentFile();
         }
@@ -508,7 +521,7 @@ private:
             openNextFile();
             return gr::work::Status::OK;
         }
-        if (repeat && !_filesToRead.empty()) {
+        if (settings.repeat && !_filesToRead.empty()) {
             _nextFile = _filesToRead.begin();
             openNextFile();
             return gr::work::Status::OK;
@@ -551,7 +564,7 @@ private:
                 _dataBytesRemaining = dataBytes;
 
                 // apply sample offset
-                const std::size_t offsetBytes = static_cast<std::size_t>(offset.value) * _format.bytesPerSample();
+                const std::size_t offsetBytes = static_cast<std::size_t>(settings.offset.value) * _format.bytesPerSample();
                 if (offsetBytes > 0U && offsetBytes < _dataBytesRemaining) {
                     _offsetBytesRemaining = offsetBytes;
                     _dataBytesRemaining -= offsetBytes;
@@ -560,8 +573,8 @@ private:
                 }
 
                 // apply length limit
-                if (length.value != 0U) {
-                    const std::size_t maxBytes = static_cast<std::size_t>(length.value) * _format.bytesPerSample();
+                if (settings.length.value != 0U) {
+                    const std::size_t maxBytes = static_cast<std::size_t>(settings.length.value) * _format.bytesPerSample();
                     _dataBytesRemaining        = std::min(_dataBytesRemaining, maxBytes);
                 }
 
@@ -585,10 +598,9 @@ private:
                 if (!fmtExp) {
                     return std::unexpected(fmtExp.error());
                 }
-                _format      = fmtExp.value();
-                sample_rate  = static_cast<float>(_format.sampleRate);
-                num_channels = static_cast<gr::Size_t>(_format.channels);
-                haveFmt      = true;
+                _format = fmtExp.value();
+                publishFormat(static_cast<float>(_format.sampleRate), static_cast<gr::Size_t>(_format.channels));
+                haveFmt = true;
             }
 
             pos += paddedSize;
@@ -660,13 +672,19 @@ private:
         return maxBytes;
     }
 
+    // the format of the header parsed last, 0 before the first
+    void publishFormat(float rate, gr::Size_t channels) {
+        status.sample_rate  = rate;
+        status.num_channels = channels;
+    }
+
     void publishFormatTag(gr::OutputSpanLike auto& outSpan, std::size_t tagOffset) {
         auto tagMap = property_map{};
-        gr::tag::put(tagMap, gr::tag::SAMPLE_RATE, sample_rate.value);
-        gr::tag::put(tagMap, gr::tag::NUM_CHANNELS, num_channels.value);
-        gr::tag::put(tagMap, gr::tag::SIGNAL_NAME, uri.value);
-        if (!trigger_name.value.empty()) {
-            gr::tag::put(tagMap, gr::tag::TRIGGER_NAME, trigger_name.value);
+        gr::tag::put(tagMap, gr::tag::SAMPLE_RATE, status.sample_rate.value);
+        gr::tag::put(tagMap, gr::tag::NUM_CHANNELS, status.num_channels.value);
+        gr::tag::put(tagMap, gr::tag::SIGNAL_NAME, settings.uri.value);
+        if (!settings.trigger_name.value.empty()) {
+            gr::tag::put(tagMap, gr::tag::TRIGGER_NAME, settings.trigger_name.value);
             gr::tag::put(tagMap, gr::tag::TRIGGER_TIME, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()));
             gr::tag::put(tagMap, gr::tag::TRIGGER_OFFSET, 0.f);
         }
@@ -684,18 +702,31 @@ struct WavSink : gr::Block<WavSink<T>> {
 
 `WavSink<float>` writes IEEE float32 (format tag 3). `WavSink<int16_t>` writes PCM 16-bit
 (format tag 1). Multi-channel interleaved audio is supported for any channel count.
-In multi mode, rotates to a new timestamped file when max_bytes_per_file is reached.)"">;
+In multi mode, rotates to a new timestamped file when max_bytes_per_file is reached.
+
+Under mode overwrite, the file is truncated; under multi, the block rotates to a new timestamped file at
+`max_bytes_per_file`.
+)"">;
 
     gr::PortIn<T> in;
 
-    gr::Annotated<std::string, "uri", gr::Visible, gr::Doc<"Output file path">>                                                               uri;
-    gr::Annotated<Mode, "mode", gr::Visible, gr::Doc<"overwrite: truncate, multi: rotate to new timestamped file on max_bytes_per_file">>     mode                  = Mode::overwrite;
-    gr::Annotated<gr::Size_t, "max_bytes_per_file", gr::Visible, gr::Doc<"Max bytes per file before rotating in multi mode (0 = unlimited)">> max_bytes_per_file    = 0U;
-    gr::Annotated<float, "sample_rate", gr::Visible, gr::Unit<"Hz">, gr::Doc<"Sample rate for the WAV header">>                               sample_rate           = 48000.f;
-    gr::Annotated<gr::Size_t, "num_channels", gr::Visible, gr::Doc<"Interleaved channel count for the WAV header">>                           num_channels          = 1U;
-    gr::Annotated<gr::Size_t, "total_samples_written", gr::Doc<"Read-only: total interleaved samples written across all files">>              total_samples_written = 0U;
+    struct Settings {
+        gr::Annotated<std::string, gr::Visible, gr::Doc<"output file path">>                                 uri;
+        gr::Annotated<Mode, gr::Visible, gr::Doc<"file mode">>                                               mode               = Mode::overwrite;
+        gr::Annotated<gr::Size_t, gr::Unit<"byte">, gr::Visible, gr::Doc<"file size limit (0 = unlimited)">> max_bytes_per_file = 0U;
+        gr::Annotated<float, gr::Visible, gr::Unit<"Hz">, gr::Doc<"sample rate">>                            sample_rate        = 48000.f;
+        gr::Annotated<gr::Size_t, gr::Visible, gr::Doc<"channel count">>                                     num_channels       = 1U;
 
-    GR_MAKE_REFLECTABLE(WavSink, in, uri, mode, max_bytes_per_file, sample_rate, num_channels, total_samples_written);
+        GR_MAKE_REFLECTABLE(Settings, uri, mode, max_bytes_per_file, sample_rate, num_channels);
+    } settings;
+
+    struct Status {
+        gr::Annotated<gr::Size_t, gr::Doc<"samples written">> total_samples_written = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, total_samples_written);
+    } status;
+
+    GR_MAKE_REFLECTABLE(WavSink, in, settings, status);
 
     static constexpr std::size_t   kHeaderSize  = 44U;
     static constexpr std::uint16_t kFormatTag   = std::same_as<T, float> ? std::uint16_t(3U) : std::uint16_t(1U);
@@ -715,8 +746,8 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
     // Throws when the uri is empty or the file does not open. In multi mode, a rotation that cannot open its next file
     // ends the stream with ERROR during the run.
     void start() {
-        total_samples_written = 0U;
-        _fileCounter          = 0U;
+        status.total_samples_written = 0U;
+        _fileCounter                 = 0U;
         if (auto opened = openNextFile(); !opened) {
             throw gr::exception(opened.error().message, opened.error().sourceLocation);
         }
@@ -760,7 +791,7 @@ In multi mode, rotates to a new timestamped file when max_bytes_per_file is reac
             return gr::work::Status::ERROR;
         }
         _fileSamplesWritten += n;
-        total_samples_written = total_samples_written.value + static_cast<gr::Size_t>(n);
+        status.total_samples_written = status.total_samples_written.value + static_cast<gr::Size_t>(n);
 
         _bytesSinceCheckpoint += n * sizeof(T);
         if (_bytesSinceCheckpoint >= kCheckpointBytes) {
@@ -777,10 +808,10 @@ private:
     // the cap counts the header, and a freshly opened file takes at least one sample, so a cap too
     // small for the header plus one sample still makes progress
     [[nodiscard]] std::size_t remainingSamplesInFile() const {
-        if (mode.value != Mode::multi || max_bytes_per_file.value == 0U) {
+        if (settings.mode.value != Mode::multi || settings.max_bytes_per_file.value == 0U) {
             return std::numeric_limits<std::size_t>::max();
         }
-        const std::size_t cap  = static_cast<std::size_t>(max_bytes_per_file.value);
+        const std::size_t cap  = static_cast<std::size_t>(settings.max_bytes_per_file.value);
         const std::size_t used = kHeaderSize + _fileSamplesWritten * sizeof(T);
         const std::size_t room = used >= cap ? 0UZ : (cap - used) / sizeof(T);
         return _fileSamplesWritten == 0UZ ? std::max(room, 1UZ) : room;
@@ -791,13 +822,13 @@ private:
         _fileSamplesWritten   = 0U;
         _bytesSinceCheckpoint = 0U;
 
-        if (uri.value.empty()) {
+        if (settings.uri.value.empty()) {
             return std::unexpected(gr::Error("uri is empty"));
         }
 
         std::string actualPath;
-        if (mode.value == Mode::multi) {
-            std::filesystem::path filePath(uri.value);
+        if (settings.mode.value == Mode::multi) {
+            std::filesystem::path filePath(settings.uri.value);
             const auto            now   = std::chrono::system_clock::now();
             const auto            timeT = std::chrono::system_clock::to_time_t(now);
             std::array<char, 32>  timeBuf{};
@@ -805,7 +836,7 @@ private:
             actualPath = (filePath.parent_path() / std::format("{}_{}_{}", std::string_view(timeBuf.data()), _fileCounter++, filePath.filename().string())).string();
             detail::ensureDirectoryExists(actualPath);
         } else {
-            actualPath = uri.value;
+            actualPath = settings.uri.value;
             detail::ensureDirectoryExists(actualPath);
         }
 
@@ -833,8 +864,8 @@ private:
     }
 
     void writeHeader() {
-        const auto ch         = static_cast<std::uint16_t>(std::max(1U, num_channels.value));
-        const auto rate       = static_cast<std::uint32_t>(std::max(1.f, sample_rate.value));
+        const auto ch         = static_cast<std::uint16_t>(std::max(1U, settings.num_channels.value));
+        const auto rate       = static_cast<std::uint32_t>(std::max(1.f, settings.sample_rate.value));
         const auto blockAlign = static_cast<std::uint16_t>(ch * (kBitsPerSamp / 8U));
         const auto byteRate   = static_cast<std::uint32_t>(rate) * static_cast<std::uint32_t>(blockAlign);
 

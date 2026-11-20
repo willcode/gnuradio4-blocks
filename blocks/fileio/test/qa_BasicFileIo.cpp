@@ -4,6 +4,7 @@
 
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/NullSources.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
 #include "FileOpenCounter.hpp"
@@ -11,6 +12,7 @@
 
 #include <cstdint>
 #include <format>
+#include <fstream>
 #include <optional>
 #include <string_view>
 
@@ -87,7 +89,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
             watchdogThread.join();
         }
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << testCaseName;
-        expect(eq(source.count, nSamples)) << testCaseName;
+        expect(eq(source.status.count.value, static_cast<std::uint64_t>(nSamples))) << testCaseName;
         expect(eq(fileSink._totalBytesWritten / sizeof(DataType), nSamples)) << testCaseName;
 
         std::vector<std::filesystem::path> files = gr::blocks::fileio::detail::getSortedFilesContaining(fileName);
@@ -128,7 +130,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
             watchdogThreadRead.join();
         }
         expect(!externalInterventionNeededRead->load(std::memory_order_relaxed)) << testCaseName;
-        expect(eq(sink.count, nSamples)) << testCaseName;
+        expect(eq(sink.status.count.value, static_cast<std::uint64_t>(nSamples))) << testCaseName;
         expect(eq(fileSource._totalBytesRead, nSamples * sizeof(DataType))) << testCaseName;
     };
 
@@ -156,7 +158,7 @@ void runTest(const gr::blocks::fileio::Mode mode) {
         expect(!externalInterventionNeededRead->load(std::memory_order_relaxed)) << testCaseName;
 
         auto nonEmptyFileCount = static_cast<gr::Size_t>(std::ranges::count_if(gr::blocks::fileio::detail::getSortedFilesContaining(fileName), [](const auto& file) { return std::filesystem::file_size(file) > 0; }));
-        expect(eq(sink.count, nonEmptyFileCount * lengthSamples)) << testCaseName;
+        expect(eq(sink.status.count.value, static_cast<std::uint64_t>(nonEmptyFileCount * lengthSamples))) << testCaseName;
         expect(eq(fileSource._totalBytesRead, nonEmptyFileCount * lengthSamples * sizeof(DataType))) << testCaseName;
     };
 
@@ -225,7 +227,7 @@ SourceRun runFloatSource(const std::string& fileName, const std::string& modeNam
         watchdogThread.join();
     }
     expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << fileName;
-    return {std::move(result), fileSource.unique_name.value(), fileSource.state(), sink.count.value};
+    return {std::move(result), fileSource.unique_name.value(), fileSource.state(), sink.status.count.value};
 }
 
 // returns the number of samples the source delivered
@@ -271,15 +273,77 @@ const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
 
     "BasicFileSink rejects a rotation cap outside multi mode"_test = [] {
         using namespace gr::blocks::fileio;
-        const auto applySettings = [](const char* modeName, gr::Size_t cap) {
-            BasicFileSink<float> sink({{"file_name", "/tmp/gr4_file_sink_test/cap.bin"}, {"mode", modeName}, {"max_bytes_per_file", cap}});
-            sink.settings().init();
-            std::ignore = sink.settings().applyStagedParameters();
-        };
-        expect(throws([&] { applySettings("overwrite", 256U); }));
-        expect(throws([&] { applySettings("append", 256U); }));
-        expect(nothrow([&] { applySettings("multi", 256U); }));
-        expect(nothrow([&] { applySettings("overwrite", 0U); }));
+        using gr::testing::initRefused;
+        const auto built = [](const char* modeName, gr::Size_t cap) { return gr::property_map{{"file_name", "/tmp/gr4_file_sink_test/cap.bin"}, {"mode", modeName}, {"max_bytes_per_file", cap}}; };
+        expect(initRefused<BasicFileSink<float>>(built("overwrite", 256U)));
+        expect(initRefused<BasicFileSink<float>>(built("append", 256U)));
+        expect(!initRefused<BasicFileSink<float>>(built("multi", 256U)));
+        expect(!initRefused<BasicFileSink<float>>(built("overwrite", 0U)));
+
+        BasicFileSink<float> sink(built("multi", 256U));
+        const auto           refused = sink.set({{"mode", "append"}});
+        expect(!refused.has_value()) << "a set that leaves the cap outside multi mode is refused at the call";
+        expect(sink.settings.mode.value == Mode::multi);
+    };
+
+    "the file blocks initialize at each setting"_test = [] {
+        using namespace gr::blocks::fileio;
+        using gr::testing::requiredInitFailures;
+        const auto report = [](const std::vector<std::string>& failures) { return std::format("{}", failures); };
+        // a file block has no file at its defaults; max_bytes_per_file is off its default only in multi mode, which the
+        // case above builds
+        auto failures = requiredInitFailures<BasicFileSink<float>>({{"file_name", std::string("tone.f32")}}, {{"mode", std::string("multi")}});
+        expect(failures.empty()) << report(failures);
+        failures = requiredInitFailures<BasicFileSource<float>>({{"file_name", std::string("tone.f32")}}, {{"mode", std::string("multi")}, {"repeat", true}, {"offset", gr::Size_t{4U}}, {"length", gr::Size_t{8U}}, {"trigger_name", std::string("next")}});
+        expect(failures.empty()) << report(failures);
+    };
+
+#ifndef __EMSCRIPTEN__
+    // the sink starts on the calling thread, and fileio refuses a file write from the main WASM thread
+    "a running BasicFileSink moves to a new file name, and keeps its file when the new one cannot be created"_test = [] {
+        using namespace gr::blocks::fileio;
+        using gr::lifecycle::State;
+        ScopedWorkingDirectory workingDirectory;
+        const std::string      first  = (workingDirectory.directory / "first.f32").string();
+        const std::string      second = (workingDirectory.directory / "second.f32").string();
+        std::ofstream(workingDirectory.directory / "plain", std::ios::binary) << "0123";
+        const std::string blocked = (workingDirectory.directory / "plain" / "third.f32").string(); // under a regular file
+
+        BasicFileSink<float> sink({{"file_name", first}});
+        expect(fatal(sink.check({}).has_value()));
+        expect(fatal(sink.changeStateTo(State::INITIALISED).has_value() && sink.changeStateTo(State::RUNNING).has_value()));
+        expect(eq(sink._actualFileName, first));
+
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(sink), {{"file_name", second}}).empty());
+        expect(eq(sink._actualFileName, second)) << "the running sink writes the new file";
+        expect(std::filesystem::exists(second));
+
+        const gr::settings::Rejected failed = gr::testing::setAndApply(gr::settings::detail::settingsOf(sink), {{"file_name", blocked}});
+        expect(eq(failed.size(), 1UZ));
+        expect(!failed.empty() && failed.front().key == "file_name" && failed.front().reason.contains("cannot open the next file")) << (failed.empty() ? std::string{} : failed.front().reason);
+        expect(eq(sink._actualFileName, second)) << "the sink keeps the file it had";
+        expect(eq(sink.get<std::string>("file_name").value_or(std::string{}), second)) << "the failed key takes back its value";
+
+        expect(sink.changeStateTo(State::REQUESTED_STOP).has_value() && sink.changeStateTo(State::STOPPED).has_value());
+    };
+#endif
+
+    // start() alone reads the file name and the mode, so a running source refuses a change to them rather than
+    // taking one that does nothing until the next start
+    "a running BasicFileSource refuses a change to its file name or mode"_test = [] {
+        using namespace gr::blocks::fileio;
+        using gr::lifecycle::State;
+        ScopedWorkingDirectory workingDirectory;
+        const std::string      first = (workingDirectory.directory / "first.f32").string();
+        std::ofstream(first, std::ios::binary) << "01234567";
+
+        BasicFileSource<float> source({{"file_name", first}});
+        expect(fatal(source.check({}).has_value()));
+        expect(fatal(source.changeStateTo(State::INITIALISED).has_value() && source.changeStateTo(State::RUNNING).has_value()));
+        expect(!source.set({{"file_name", (workingDirectory.directory / "second.f32").string()}}, gr::settings::noWait).has_value()) << "a live file name change was taken";
+        expect(!source.set({{"mode", std::string("multi")}}, gr::settings::noWait).has_value()) << "a live mode change was taken";
+        expect(eq(source.settings.file_name.value, first)) << "the running source keeps its file name";
+        expect(source.changeStateTo(State::REQUESTED_STOP).has_value() && source.changeStateTo(State::STOPPED).has_value());
     };
 
     "round-trip of a recording larger than one output span"_test = [] {
@@ -319,7 +383,7 @@ const boost::ut::suite<"basic file IO tests"> basicFileIOTests = [] {
             watchdogThread.join();
         }
         expect(!externalInterventionNeeded->load(std::memory_order_relaxed)) << "reading a multi-span recording must not stall";
-        expect(eq(sink.count, nSamples));
+        expect(eq(sink.status.count.value, static_cast<std::uint64_t>(nSamples)));
         expect(eq(fileSource._totalBytesRead, nSamples * sizeof(float)));
 
         expect(!gr::blocks::fileio::detail::deleteFilesContaining(fileName).empty());

@@ -10,8 +10,10 @@
 
 #include <chrono>
 #include <complex>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <span>
 #include <string_view>
@@ -78,35 +80,56 @@ struct BasicFileSink : Block<BasicFileSink<T>> {
 The file can be played back using a 'BasicFileSource' or read by any program that supports binary files (e.g. Python, C, C++, MATLAB).
 For complex types, the binary file contains [float, double]s in IQIQIQ order. No metadata is included with the binary data.)
 Important: this implementation assumes a host-order, CPU architecture specific byte order!)"">;
-    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
-    using A = gr::Annotated<U, description, Arguments...>; // optional shortening
+    template<typename U, typename... Arguments>
+    using A = gr::Annotated<U, Arguments...>; // optional shortening
 
     PortIn<T> in;
 
-    A<std::string, "file name", Doc<"base filename, prefixed if ">, Visible>              file_name;
-    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>           mode               = Mode::overwrite;
-    A<gr::Size_t, "max bytes per file", Doc<"max bytes per file, 0: infinite ">, Visible> max_bytes_per_file = 0U;
+    struct Settings {
+        A<std::string, Doc<"base file name">, Visible>                               file_name;
+        A<Mode, Doc<"file mode">, Visible>                                           mode               = Mode::overwrite;
+        A<gr::Size_t, Unit<"byte">, Doc<"file size limit (0 = unlimited)">, Visible> max_bytes_per_file = 0U;
 
-    GR_MAKE_REFLECTABLE(BasicFileSink, in, file_name, mode, max_bytes_per_file);
+        GR_MAKE_REFLECTABLE(Settings, file_name, mode, max_bytes_per_file);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(BasicFileSink, in, settings);
 
     std::size_t _totalBytesWritten{0UZ};
     std::size_t _totalBytesWrittenFile{0UZ};
     std::size_t _fileCounter{0UZ};
     std::string _actualFileName;
 
-    // only Mode::multi has a next file to rotate to: in overwrite mode the cap would truncate the
-    // recording in place and in append mode it would do nothing, so reject the combination outright
-    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (max_bytes_per_file.value != 0U && mode.value != Mode::multi) {
-            throw gr::exception(std::format("max_bytes_per_file ({}) requires mode 'multi', got '{}'", max_bytes_per_file.value, magic_enum::enum_name(mode.value)));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.file_name.value.empty()) {
+            return gr::Refused(s.file_name, "required");
         }
-        if (!lifecycle::isActive(this->state())) {
+        // only Mode::multi has a next file to rotate to: in overwrite mode the cap would truncate the
+        // recording in place and in append mode it would do nothing, so reject the combination outright
+        if (s.max_bytes_per_file != 0U && s.mode != Mode::multi) {
+            return gr::Refused(s.max_bytes_per_file, "a nonzero limit requires mode multi");
+        }
+        return {};
+    }
+
+    // A running sink starts the next file when its name or mode changes. When that file cannot be created, the sink
+    // keeps writing the file it had and fails the change.
+    void applySettings(const Settings& s) {
+        if (_actualFileName.empty()) {
+            return; // no file is open: start() opens one
+        }
+        const bool reopen = s.file_name.changed() || s.mode.changed();
+        if (!reopen) {
             return;
         }
-        const auto changed = [&oldSettings, &newSettings](const char* key) { return newSettings.contains(key) && (!oldSettings.contains(key) || oldSettings.at(key) != newSettings.at(key)); };
-        if (changed("file_name") || changed("mode")) {
-            closeFile();
+        const std::string previousFile         = _actualFileName;
+        const std::size_t previousBytesWritten = _totalBytesWrittenFile;
+        try {
             openNextFile();
+        } catch (const std::exception& error) {
+            _actualFileName        = previousFile;
+            _totalBytesWrittenFile = previousBytesWritten;
+            this->fail(s.file_name, std::format("cannot open the next file: {}", error.what()));
         }
     }
 
@@ -121,14 +144,14 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         if (dataIn.empty()) {
             return work::Status::INSUFFICIENT_INPUT_ITEMS;
         }
-        if (max_bytes_per_file.value != 0U && _totalBytesWrittenFile >= max_bytes_per_file.value) {
+        if (settings.max_bytes_per_file.value != 0U && _totalBytesWrittenFile >= settings.max_bytes_per_file.value) {
             closeFile();
             openNextFile();
         }
 
         std::size_t nBytesMax = dataIn.size() * sizeof(T);
-        if (max_bytes_per_file.value != 0U) {
-            nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(max_bytes_per_file.value) - _totalBytesWrittenFile);
+        if (settings.max_bytes_per_file.value != 0U) {
+            nBytesMax = std::min(nBytesMax, static_cast<std::size_t>(settings.max_bytes_per_file.value) - _totalBytesWrittenFile);
         }
         const auto bytes          = std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(dataIn.data()), nBytesMax);
         auto       writeResultExp = gr::algorithm::fileio::write(_actualFileName, bytes, gr::algorithm::fileio::WriterConfig{.mode = currentWriteMode()});
@@ -147,7 +170,7 @@ Important: this implementation assumes a host-order, CPU architecture specific b
     }
 
 private:
-    [[nodiscard]] gr::algorithm::fileio::WriteMode currentWriteMode() const { return _totalBytesWrittenFile == 0UZ && mode.value != Mode::append ? gr::algorithm::fileio::WriteMode::overwrite : gr::algorithm::fileio::WriteMode::append; }
+    [[nodiscard]] gr::algorithm::fileio::WriteMode currentWriteMode() const { return _totalBytesWrittenFile == 0UZ && settings.mode.value != Mode::append ? gr::algorithm::fileio::WriteMode::overwrite : gr::algorithm::fileio::WriteMode::append; }
 
     void closeFile() { _actualFileName.clear(); }
 
@@ -155,16 +178,16 @@ private:
         closeFile();
         _totalBytesWrittenFile = 0UZ;
 
-        detail::ensureDirectoryExists(file_name.value);
+        detail::ensureDirectoryExists(settings.file_name.value);
 
-        std::filesystem::path filePath(file_name.value);
+        std::filesystem::path filePath(settings.file_name.value);
         // Open file handle based on mode
-        switch (mode) {
+        switch (settings.mode) {
         case Mode::overwrite: {
-            _actualFileName = file_name.value;
+            _actualFileName = settings.file_name.value;
         } break;
         case Mode::append: {
-            _actualFileName = file_name.value;
+            _actualFileName = settings.file_name.value;
         } break;
         case Mode::multi: {
             // _fileCounter ensures that the filenames are unique and still sortable by date-time, with an additional counter to handle rapid successive file creation.
@@ -174,7 +197,7 @@ private:
         default: throw gr::exception("unsupported file mode.");
         }
 
-        auto createResultExp = gr::algorithm::fileio::write(_actualFileName, std::span<const std::uint8_t>{}, gr::algorithm::fileio::WriterConfig{.mode = mode.value == Mode::append ? gr::algorithm::fileio::WriteMode::append : gr::algorithm::fileio::WriteMode::overwrite});
+        auto createResultExp = gr::algorithm::fileio::write(_actualFileName, std::span<const std::uint8_t>{}, gr::algorithm::fileio::WriterConfig{.mode = settings.mode.value == Mode::append ? gr::algorithm::fileio::WriteMode::append : gr::algorithm::fileio::WriteMode::overwrite});
         if (!createResultExp.has_value()) {
             throw gr::exception(createResultExp.error().message, createResultExp.error().sourceLocation);
         }
@@ -188,21 +211,28 @@ struct BasicFileSource : Block<BasicFileSource<T>> {
     using Description = Doc<R""(A source block for reading a binary file and outputting the data.
 This source is the counterpart to 'BasicFileSink'.
 For complex types, the binary file contains [float, double]s in IQIQIQ order. No metadata is expected in the binary data.
-Important: this implementation assumes a host-order, CPU architecture specific byte order!)"">;
+Important: this implementation assumes a host-order, CPU architecture specific byte order!
 
-    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
-    using A = gr::Annotated<U, description, Arguments...>; // optional shortening
+With `repeat`, the files are read again back to back. `trigger name` is added to each file chunk.
+)"">;
+
+    template<typename U, typename... Arguments>
+    using A = gr::Annotated<U, Arguments...>; // optional shortening
 
     PortOut<T> out;
 
-    A<std::string, "file name", Doc<"Base filename, prefixed if necessary">, Visible>          file_name;
-    A<Mode, "mode", Doc<"mode: \"overwrite\", \"append\", \"multi\"">, Visible>                mode         = Mode::overwrite;
-    A<bool, "repeat", Doc<"true: repeat back-to-back">>                                        repeat       = false;
-    A<gr::Size_t, "offset", Doc<"file start offset in samples">, Visible>                      offset       = 0U;
-    A<gr::Size_t, "length", Doc<"max number of samples items to read (0: infinite)">, Visible> length       = 0U;
-    A<std::string, "trigger name", Doc<"name of trigger added to each file chunk">>            trigger_name = "BasicFileSource::start";
+    struct Settings {
+        A<std::string, Doc<"base file name">, Visible, StoppedOnly>  file_name;
+        A<Mode, Doc<"file mode">, Visible, StoppedOnly>              mode         = Mode::overwrite;
+        A<bool, Doc<"repetition">>                                   repeat       = false;
+        A<gr::Size_t, Unit<"samples">, Doc<"start offset">, Visible> offset       = 0U;
+        A<gr::Size_t, Doc<"sample limit (0 = unlimited)">, Visible>  length       = 0U;
+        A<std::string, Doc<"file chunk trigger name">>               trigger_name = "BasicFileSource::start";
 
-    GR_MAKE_REFLECTABLE(BasicFileSource, out, file_name, mode, repeat, offset, length, trigger_name);
+        GR_MAKE_REFLECTABLE(Settings, file_name, mode, repeat, offset, length, trigger_name);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(BasicFileSource, out, settings);
 
     gr::algorithm::fileio::Reader             _reader;
     std::set<std::filesystem::path>           _filesToRead; // sorted by path, so a multi-mode set plays in name order
@@ -221,6 +251,13 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         }
     }
 
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.file_name.value.empty()) {
+            return gr::Refused(s.file_name, "required");
+        }
+        return {};
+    }
+
     // Throws when there is nothing to read. That is when the reader cannot open the file, or, in multi mode, when the
     // directory cannot be listed or no file name in it holds the base name.
     void start() {
@@ -229,14 +266,14 @@ Important: this implementation assumes a host-order, CPU architecture specific b
         _reader       = {};
         _readerActive = false;
 
-        std::filesystem::path filePath(file_name.value);
-        switch (mode) {
+        std::filesystem::path filePath(settings.file_name.value);
+        switch (settings.mode) {
         case Mode::overwrite:
         case Mode::append: {
             _filesToRead.insert(filePath);
         } break;
         case Mode::multi: {
-            const auto matchingFiles = detail::getSortedFilesContaining(file_name.value);
+            const auto matchingFiles = detail::getSortedFilesContaining(settings.file_name.value);
             if (matchingFiles.empty()) {
                 throw gr::exception(std::format("no file in '{}' has a name containing '{}'", detail::parentDirectory(filePath).string(), filePath.filename().string()));
             }
@@ -263,8 +300,8 @@ Important: this implementation assumes a host-order, CPU architecture specific b
             return work::Status::DONE;
         }
         const std::size_t nOutAvailable = dataOut.size() * sizeof(T);
-        if (length.value != 0U) {
-            const std::size_t totalBytesToRead = static_cast<std::size_t>(length.value) * sizeof(T);
+        if (settings.length.value != 0U) {
+            const std::size_t totalBytesToRead = static_cast<std::size_t>(settings.length.value) * sizeof(T);
             if (_totalBytesReadFile >= totalBytesToRead) {
                 dataOut.publish(nSamplesToPublish);
                 return finishCurrentFile();
@@ -287,8 +324,8 @@ Important: this implementation assumes a host-order, CPU architecture specific b
                     }
 
                     std::size_t bytesToPublish = bytes.size();
-                    if (length.value != 0U) {
-                        const std::size_t totalBytesToRead = static_cast<std::size_t>(length.value) * sizeof(T);
+                    if (settings.length.value != 0U) {
+                        const std::size_t totalBytesToRead = static_cast<std::size_t>(settings.length.value) * sizeof(T);
                         bytesToPublish                     = std::min(bytesToPublish, totalBytesToRead - _totalBytesReadFile);
                     }
                     bytesToPublish -= bytesToPublish % sizeof(T);
@@ -316,19 +353,19 @@ Important: this implementation assumes a host-order, CPU architecture specific b
             throw gr::exception(error->message, error->sourceLocation);
         }
 
-        if (nSamplesToPublish > 0U && !_emittedStartTrigger && !trigger_name.value.empty()) {
+        if (nSamplesToPublish > 0U && !_emittedStartTrigger && !settings.trigger_name.value.empty()) {
             dataOut.publishTag(
                 property_map{
-                    {std::pmr::string(tag::TRIGGER_NAME.key()), trigger_name.value},                                                     //
-                    {std::pmr::string(tag::TRIGGER_TIME.key()), settings::convertTimePointToUint64Ns(std::chrono::system_clock::now())}, //
-                    {std::pmr::string(tag::TRIGGER_OFFSET.key()), 0.f}                                                                   //
+                    {std::pmr::string(tag::TRIGGER_NAME.key()), settings.trigger_name.value},                                                                                                                   //
+                    {std::pmr::string(tag::TRIGGER_TIME.key()), static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count())}, //
+                    {std::pmr::string(tag::TRIGGER_OFFSET.key()), 0.f}                                                                                                                                          //
                 },
                 0UZ);
             _emittedStartTrigger = true;
         }
         dataOut.publish(nSamplesToPublish);
 
-        if (finished || (length.value != 0U && _totalBytesReadFile >= static_cast<std::size_t>(length.value) * sizeof(T))) {
+        if (finished || (settings.length.value != 0U && _totalBytesReadFile >= static_cast<std::size_t>(settings.length.value) * sizeof(T))) {
             return finishCurrentFile();
         }
 
@@ -356,12 +393,12 @@ private:
         constexpr std::size_t               kMaxChunkSamples = 64UZ * 1024UZ / sizeof(T);
         gr::algorithm::fileio::ReaderConfig config;
         std::size_t                         chunkSamples = std::clamp(out.bufferSize(), 1UZ, kMaxChunkSamples);
-        if (length.value != 0U) {
-            chunkSamples = std::min(chunkSamples, static_cast<std::size_t>(length.value));
+        if (settings.length.value != 0U) {
+            chunkSamples = std::min(chunkSamples, static_cast<std::size_t>(settings.length.value));
         }
         const std::size_t chunkBytes = chunkSamples * sizeof(T);
 
-        config.offset              = static_cast<std::size_t>(offset.value) * sizeof(T);
+        config.offset              = static_cast<std::size_t>(settings.offset.value) * sizeof(T);
         config.chunkBytes          = chunkBytes;
         config.chunkAlignmentBytes = sizeof(T);
 
@@ -402,7 +439,7 @@ private:
             openNextFile();
             return work::Status::OK;
         }
-        if (repeat && !_filesToRead.empty()) {
+        if (settings.repeat && !_filesToRead.empty()) {
             _nextFile = _filesToRead.begin();
             openNextFile();
             return work::Status::OK;

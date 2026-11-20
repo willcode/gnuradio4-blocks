@@ -345,7 +345,7 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
             gr::scheduler::Simple<> sched;
             expect(sched.exchange(std::move(graph)).has_value()) << caseName;
             expect(sched.runAndWait().has_value()) << caseName;
-            expect(eq(sink.total_samples_written.value, static_cast<gr::Size_t>(reference.size()))) << caseName;
+            expect(eq(sink.status.total_samples_written.value, static_cast<gr::Size_t>(reference.size()))) << caseName;
         }
 
         // read back and verify
@@ -463,7 +463,7 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
             gr::scheduler::Simple<> sched;
             expect(sched.exchange(std::move(graph)).has_value()) << caseName;
             expect(sched.runAndWait().has_value()) << caseName;
-            expect(eq(sink.total_samples_written.value, static_cast<gr::Size_t>(nSamples))) << caseName;
+            expect(eq(sink.status.total_samples_written.value, static_cast<gr::Size_t>(nSamples))) << caseName;
         }
 
         {
@@ -522,7 +522,7 @@ const boost::ut::suite<"WAV file blocks"> _wavFileTests = [] {
         expect(sched.exchange(std::move(graph)).has_value()) << caseName;
         expect(runSchedulerUntilDone(sched, 2s).has_value()) << caseName;
 
-        expect(eq(sink.total_samples_written.value, static_cast<gr::Size_t>(reference.size()))) << "an odd cap must rotate rather than wedge the graph";
+        expect(eq(sink.status.total_samples_written.value, static_cast<gr::Size_t>(reference.size()))) << "an odd cap must rotate rather than wedge the graph";
 
         std::size_t rotatedFiles = 0UZ;
         for (const auto& entry : std::filesystem::directory_iterator(outputStem.parent_path())) {

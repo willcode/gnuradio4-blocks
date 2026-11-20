@@ -215,7 +215,7 @@ SourceRun runSource(int fd, const std::vector<T>& expected, bool closeOnStop = f
     exchangeOrThrow(sched, std::move(graph));
     std::atomic_bool timedOut{false};
     auto             result = runBounded(sched, timedOut);
-    return {std::move(result), timedOut.load(), source.n_samples.value, source.n_dropped_bytes.value, sink.received.value};
+    return {std::move(result), timedOut.load(), source.status.n_samples.value, source.status.n_dropped_bytes.value, sink.status.received.value};
 }
 
 // Runs a VectorSource of the samples into FdSink on the descriptor.
@@ -236,7 +236,7 @@ SinkRun runSink(int fd, const std::vector<T>& samples, bool closeOnStop = false)
     exchangeOrThrow(sched, std::move(graph));
     std::atomic_bool timedOut{false};
     auto             result = runBounded(sched, timedOut);
-    return {std::move(result), timedOut.load(), sink.n_samples.value};
+    return {std::move(result), timedOut.load(), sink.status.n_samples.value};
 }
 
 } // namespace
@@ -249,10 +249,10 @@ const boost::ut::suite<"FdSource and FdSink"> fdIoTests = [] {
     "the defaults read standard input, write standard output and close nothing"_test = [] {
         const FdSource<float> source;
         const FdSink<float>   sink;
-        expect(eq(source.fd.value, 0));
-        expect(eq(sink.fd.value, 1));
-        expect(!source.close_on_stop.value);
-        expect(!sink.close_on_stop.value);
+        expect(eq(source.settings.fd.value, 0));
+        expect(eq(sink.settings.fd.value, 1));
+        expect(!source.settings.close_on_stop.value);
+        expect(!sink.settings.close_on_stop.value);
     };
 
     "a pipe carries a known vector from FdSink to FdSource"_test = []<typename T>() {
@@ -443,7 +443,7 @@ const boost::ut::suite<"FdSource and FdSink"> fdIoTests = [] {
         runner.join();
         expect(stoppedInTime) << "the stop request ends the run";
         expect(result.has_value()) << errorMessage(result);
-        expect(eq(source.n_samples.value, 0U));
+        expect(eq(source.status.n_samples.value, 0U));
     };
 };
 

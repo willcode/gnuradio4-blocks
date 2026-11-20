@@ -171,41 +171,51 @@ End of file ends the stream. The block drops the bytes of an incomplete last sam
 The block closes the descriptor at stop when `close_on_stop` is true.
 The block needs a `poll` that returns when a worker thread calls it. Under node, Emscripten's `poll` from a
 worker thread waits until the main thread returns to its event loop.
+
+`n_samples` counts modulo 2^32; `n_dropped_bytes` counts the bytes of an incomplete last sample at the end of the file.
 )"">;
 
     PortOut<T> out;
 
-    Annotated<int, "fd", Doc<"open file descriptor to read">, Visible>                                 fd              = 0;
-    Annotated<bool, "close_on_stop", Doc<"close the descriptor at stop">, Visible>                     close_on_stop   = false;
-    Annotated<gr::Size_t, "n_samples", Doc<"samples read, modulo 2^32">>                               n_samples       = 0U;
-    Annotated<gr::Size_t, "n_dropped_bytes", Doc<"bytes of an incomplete last sample at end of file">> n_dropped_bytes = 0U;
+    struct Settings {
+        Annotated<int, Doc<"file descriptor">, Visible> fd            = 0;
+        Annotated<bool, Doc<"close at stop">, Visible>  close_on_stop = false;
 
-    GR_MAKE_REFLECTABLE(FdSource, out, fd, close_on_stop, n_samples, n_dropped_bytes);
+        GR_MAKE_REFLECTABLE(Settings, fd, close_on_stop);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"samples read">>           n_samples       = 0U;
+        Annotated<gr::Size_t, Doc<"dropped trailing bytes">> n_dropped_bytes = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, n_samples, n_dropped_bytes);
+    } status;
+
+    GR_MAKE_REFLECTABLE(FdSource, out, settings, status);
 
     int                              _fd = -1;
     std::array<std::byte, sizeof(T)> _partial{};
     std::size_t                      _nPartial = 0UZ;
 
     void start() {
-        _fd             = -1;
-        _nPartial       = 0UZ;
-        n_samples       = 0U;
-        n_dropped_bytes = 0U;
-        std::ignore     = this->updateActiveParameters({"n_samples", "n_dropped_bytes"});
+        _fd                    = -1;
+        _nPartial              = 0UZ;
+        status.n_samples       = 0U;
+        status.n_dropped_bytes = 0U;
 
-        const detail::DescriptorMode mode = detail::descriptorMode(fd.value);
+        const detail::DescriptorMode mode = detail::descriptorMode(settings.fd.value);
         if (mode.error != 0) {
-            throw gr::exception(std::format("descriptor {} is not open: {}", fd.value, detail::errnoText(mode.error)));
+            throw gr::exception(std::format("descriptor {} is not open: {}", settings.fd.value, detail::errnoText(mode.error)));
         }
         if (mode.accessMode == O_WRONLY) {
-            throw gr::exception(std::format("descriptor {} is open for writing only", fd.value));
+            throw gr::exception(std::format("descriptor {} is open for writing only", settings.fd.value));
         }
-        _fd = fd.value;
+        _fd = settings.fd.value;
     }
 
     void stop() {
         const int descriptor = std::exchange(_fd, -1);
-        if (close_on_stop.value && descriptor >= 0) {
+        if (settings.close_on_stop.value && descriptor >= 0) {
             detail::closeDescriptor(descriptor);
         }
     }
@@ -236,9 +246,8 @@ worker thread waits until the main thread returns to its event loop.
         }
         if (result.nBytes == 0UZ) {
             if (_nPartial > 0UZ) {
-                n_dropped_bytes = static_cast<gr::Size_t>(_nPartial);
-                _nPartial       = 0UZ;
-                std::ignore     = this->updateActiveParameters({"n_dropped_bytes"});
+                status.n_dropped_bytes = static_cast<gr::Size_t>(_nPartial);
+                _nPartial              = 0UZ;
             }
             dataOut.publish(0UZ);
             return work::Status::DONE;
@@ -250,8 +259,7 @@ worker thread waits until the main thread returns to its event loop.
         std::memcpy(_partial.data(), bytes + nSamples * sizeof(T), _nPartial);
         dataOut.publish(nSamples);
         if (nSamples > 0UZ) {
-            n_samples   = n_samples.value + static_cast<gr::Size_t>(nSamples);
-            std::ignore = this->updateActiveParameters({"n_samples"});
+            status.n_samples = status.n_samples.value + static_cast<gr::Size_t>(nSamples);
         }
         return work::Status::OK;
     }
@@ -278,42 +286,52 @@ a write raises. The process keeps running. On other systems the process's own `S
 The block closes the descriptor at stop when `close_on_stop` is true.
 The block needs a `poll` that returns when a worker thread calls it. Under node, Emscripten's `poll` from a
 worker thread waits until the main thread returns to its event loop.
+
+`n_samples` counts modulo 2^32.
 )"">;
 
     PortIn<T> in;
 
-    Annotated<int, "fd", Doc<"open file descriptor to write">, Visible>            fd            = 1;
-    Annotated<bool, "close_on_stop", Doc<"close the descriptor at stop">, Visible> close_on_stop = false;
-    Annotated<gr::Size_t, "n_samples", Doc<"samples written, modulo 2^32">>        n_samples     = 0U;
+    struct Settings {
+        Annotated<int, Doc<"file descriptor">, Visible> fd            = 1;
+        Annotated<bool, Doc<"close at stop">, Visible>  close_on_stop = false;
 
-    GR_MAKE_REFLECTABLE(FdSink, in, fd, close_on_stop, n_samples);
+        GR_MAKE_REFLECTABLE(Settings, fd, close_on_stop);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"samples written">> n_samples = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, n_samples);
+    } status;
+
+    GR_MAKE_REFLECTABLE(FdSink, in, settings, status);
 
     int         _fd          = -1;
     std::size_t _writeLimit  = std::numeric_limits<std::size_t>::max();
     std::size_t _nSampleHead = 0UZ; // bytes of the first input sample that an earlier call wrote
 
     void start() {
-        _fd          = -1;
-        _nSampleHead = 0UZ;
-        n_samples    = 0U;
-        std::ignore  = this->updateActiveParameters({"n_samples"});
+        _fd              = -1;
+        _nSampleHead     = 0UZ;
+        status.n_samples = 0U;
 
-        const detail::DescriptorMode mode = detail::descriptorMode(fd.value);
+        const detail::DescriptorMode mode = detail::descriptorMode(settings.fd.value);
         if (mode.error != 0) {
-            throw gr::exception(std::format("descriptor {} is not open: {}", fd.value, detail::errnoText(mode.error)));
+            throw gr::exception(std::format("descriptor {} is not open: {}", settings.fd.value, detail::errnoText(mode.error)));
         }
         if (mode.accessMode == O_RDONLY) {
-            throw gr::exception(std::format("descriptor {} is open for reading only", fd.value));
+            throw gr::exception(std::format("descriptor {} is open for reading only", settings.fd.value));
         }
-        struct ::stat status {};
-        const bool    regularFile = ::fstat(fd.value, &status) == 0 && S_ISREG(status.st_mode);
+        struct ::stat fileStatus {};
+        const bool    regularFile = ::fstat(settings.fd.value, &fileStatus) == 0 && S_ISREG(fileStatus.st_mode);
         _writeLimit               = regularFile ? std::numeric_limits<std::size_t>::max() : static_cast<std::size_t>(PIPE_BUF);
-        _fd                       = fd.value;
+        _fd                       = settings.fd.value;
     }
 
     void stop() {
         const int descriptor = std::exchange(_fd, -1);
-        if (close_on_stop.value && descriptor >= 0) {
+        if (settings.close_on_stop.value && descriptor >= 0) {
             detail::closeDescriptor(descriptor);
         }
     }
@@ -327,8 +345,7 @@ worker thread waits until the main thread returns to its event loop.
             throw gr::exception("could not consume input samples");
         }
         if (nSamples > 0UZ) {
-            n_samples   = n_samples.value + static_cast<gr::Size_t>(nSamples);
-            std::ignore = this->updateActiveParameters({"n_samples"});
+            status.n_samples = status.n_samples.value + static_cast<gr::Size_t>(nSamples);
         }
     }
 
