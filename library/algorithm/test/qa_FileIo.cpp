@@ -15,14 +15,18 @@
 struct FileIoSource : gr::Block<FileIoSource> {
     gr::PortOut<std::uint8_t> out;
 
-    gr::Annotated<std::string, "URI"> uri;
+    struct Settings {
+        gr::Annotated<std::string> uri;
+
+        GR_MAKE_REFLECTABLE(Settings, uri);
+    } settings;
 
     gr::algorithm::fileio::Reader _reader;
 
-    GR_MAKE_REFLECTABLE(FileIoSource, out, uri);
+    GR_MAKE_REFLECTABLE(FileIoSource, out, settings);
 
     void start() {
-        auto readerExp = gr::algorithm::fileio::readAsync(uri, {});
+        auto readerExp = gr::algorithm::fileio::readAsync(settings.uri, {});
         if (!readerExp.has_value()) {
             throw gr::exception(readerExp.error().message);
         }
@@ -58,17 +62,21 @@ struct FileIoSource : gr::Block<FileIoSource> {
 struct FileIoSink : gr::Block<FileIoSink> {
     gr::PortIn<std::uint8_t> in;
 
-    gr::Annotated<std::string, "URI">                       uri;
-    gr::Annotated<gr::algorithm::fileio::WriteMode, "Mode"> mode{gr::algorithm::fileio::WriteMode::append};
+    struct Settings {
+        gr::Annotated<std::string>                      uri;
+        gr::Annotated<gr::algorithm::fileio::WriteMode> mode{gr::algorithm::fileio::WriteMode::append};
+
+        GR_MAKE_REFLECTABLE(Settings, uri, mode);
+    } settings;
 
     gr::algorithm::fileio::Writer _writer;
 
-    GR_MAKE_REFLECTABLE(FileIoSink, in, uri, mode);
+    GR_MAKE_REFLECTABLE(FileIoSink, in, settings);
 
     [[nodiscard]] constexpr gr::work::Status processBulk(gr::InputSpanLike auto const& inSpan) noexcept {
         if (!inSpan.empty()) {
             auto spanBytes      = std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(inSpan.data()), inSpan.size());
-            auto writeResultExp = gr::algorithm::fileio::write(uri, spanBytes, gr::algorithm::fileio::WriterConfig{.mode = mode});
+            auto writeResultExp = gr::algorithm::fileio::write(settings.uri, spanBytes, gr::algorithm::fileio::WriterConfig{.mode = settings.mode});
             if (!writeResultExp.has_value()) {
                 throw gr::exception(writeResultExp.error().message, writeResultExp.error().sourceLocation);
             }

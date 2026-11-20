@@ -71,8 +71,8 @@ const boost::ut::suite<"index-keyed maps"> indexedMapsTests = [] {
     };
 
     "a malformed entry is an error that names its key"_test = [] {
-        expect(eq(readError(property_map{{"1x", property_map{}}}), std::string("tags key '1x' is not a sample index")));
-        expect(eq(readError(property_map{{"-1", property_map{}}}), std::string("tags key '-1' is not a sample index")));
+        expect(eq(readError(property_map{{"1x", property_map{}}}), std::string("tags key '1x' must be a sample index")));
+        expect(eq(readError(property_map{{"-1", property_map{}}}), std::string("tags key '-1' must be a sample index")));
         expect(eq(readError(property_map{{"1", 5}}), std::string("tags entry at 1 is 5, expected a map or a list of maps")));
         expect(eq(readError(property_map{{"2", listOf({property_map{{"a", 1}}})}, {"1", listOf({})}, {"4", gr::pmt::Value(gr::Tensor<gr::pmt::Value>(std::pmr::vector<gr::pmt::Value>{gr::pmt::Value(5)}))}}), std::string("tags entry at 4 holds 5, expected a map")));
         expect(eq(readError(property_map{{"1", property_map{}}, {"01", property_map{}}}), std::string("tags keys '01' and '1' both name 1")));

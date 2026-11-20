@@ -128,7 +128,7 @@ public:
     /// Checks that a sync word holds one value per bin. A sync word is a whole symbol.
     [[nodiscard]] std::expected<void, gr::Error> validateSyncWord(std::span<const std::complex<float>> word, std::size_t index = 0UZ, std::source_location loc = std::source_location::current()) const {
         if (word.size() != _fftLength) {
-            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: sync word {} holds {} carriers, not the {} a symbol has", index, word.size(), _fftLength), loc));
+            return std::unexpected(gr::Error(std::format("gr::ofdm::CarrierMap: sync word {} holds {} carriers and must hold {}", index, word.size(), _fftLength), loc));
         }
         return {};
     }
@@ -137,7 +137,7 @@ public:
     /// `pilotSymbolIndex` makes no check of its own.
     [[nodiscard]] std::expected<void, gr::Error> validatePilotCycle(std::span<const std::complex<float>> cycle, std::source_location loc = std::source_location::current()) const {
         if (!_pilot.empty() && cycle.empty()) {
-            return std::unexpected(gr::Error("gr::ofdm::CarrierMap: pilot_symbols is empty while the numerology has pilot carriers", loc));
+            return std::unexpected(gr::Error("gr::ofdm::CarrierMap: pilot carriers require pilot_symbols", loc));
         }
         for (std::size_t k = 0UZ; k < cycle.size(); ++k) {
             const std::complex<float> value = cycle[k];

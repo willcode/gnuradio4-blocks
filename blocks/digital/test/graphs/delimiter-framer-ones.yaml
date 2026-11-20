@@ -341,7 +341,7 @@ blocks:
     parameters:
       name: ones_framer
       end_delimiter: "0111111"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       abort_ones: !!uint32 0
       max_payload_items: !!uint32 4096
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -399,7 +399,7 @@ blocks:
     parameters:
       name: ones_extractor
       end_delimiter: "0111111"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       abort_ones: !!uint32 0
       max_payload_items: !!uint32 4096
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>

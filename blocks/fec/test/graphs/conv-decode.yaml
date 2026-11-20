@@ -147,7 +147,7 @@ blocks:
       name: open_decoder
       constraint_length: !!uint32 7
       polynomials: !!uint32 [121, 91]
-      termination: open
+      termination: Open
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: open_sink
@@ -186,7 +186,7 @@ blocks:
       name: open_soft_decoder
       constraint_length: !!uint32 7
       polynomials: !!uint32 [121, 91]
-      termination: open
+      termination: Open
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: open_soft_sink
@@ -210,7 +210,7 @@ blocks:
       name: open_step_decoder
       constraint_length: !!uint32 7
       polynomials: !!uint32 [121, 91]
-      termination: open
+      termination: Open
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: open_step_sink

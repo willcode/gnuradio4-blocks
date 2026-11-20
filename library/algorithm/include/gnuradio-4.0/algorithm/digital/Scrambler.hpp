@@ -6,10 +6,12 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/math/BitPacking.hpp>
@@ -57,7 +59,7 @@
  * `seed` the same way, leftmost into the most significant of the `degree` significant bits.
  *
  * An item is `BitPacking.hpp`'s item: a `std::uint8_t` carrying `bitsPerItem` significant bits in
- * its low positions, whose stream order inside the item is `MsbFirst` or `LsbFirst`. Bits above
+ * its low positions, whose stream order inside the item is `msb_first` or `lsb_first`. Bits above
  * `bitsPerItem` are masked away on input and left zero on output, so no stream value can fail.
  * `BitOrder` is that header's enumeration rather than a second one with the same two members.
  *
@@ -128,15 +130,14 @@ namespace detail {
 } // namespace detail
 
 /**
- * @brief The delays named in @p list, given as decimal integers separated by commas and optional spaces.
+ * @brief The delays named in @p list, given as decimal integers separated by commas and optional spaces, or why the
+ * list names none.
  *
- * Every delay is in `[1, 64]` and distinct, and at least one is required. Anything else throws
- * `std::invalid_argument` quoting @p list, which is the whole of the validation a tap set needs: a
- * delay list has no exponent to misread.
+ * Every delay is in `[1, 64]` and distinct, and at least one is required, which is the whole of the validation a tap
+ * set needs: a delay list has no exponent to misread. The reason is a short phrase about the list, such as
+ * `"must not repeat a delay"`.
  */
-[[nodiscard]] constexpr TapMask tapsFromDelayList(std::string_view list) {
-    const auto reject = [list](std::string_view reason) { return std::invalid_argument("gr::digital::tapsFromDelayList: " + std::string(reason) + ", got '" + std::string(list) + "'"); };
-
+[[nodiscard]] constexpr std::expected<TapMask, std::string_view> readDelayList(std::string_view list) noexcept {
     TapMask     taps  = 0ULL;
     std::size_t index = 0UZ;
     while (true) {
@@ -148,20 +149,20 @@ namespace detail {
         while (index < list.size() && list[index] >= '0' && list[index] <= '9') {
             delay = delay * 10U + static_cast<unsigned>(list[index] - '0');
             if (delay > 64U) {
-                throw reject("a delay above 64");
+                return std::unexpected(std::string_view("each delay must be >= 1 and <= 64"));
             }
             ++index;
         }
         if (index == start) {
-            throw reject("the list must name at least one decimal delay");
+            return std::unexpected(std::string_view("must be a comma-separated list of delays"));
         }
         if (delay == 0U) {
-            throw reject("a delay of zero");
+            return std::unexpected(std::string_view("each delay must be >= 1 and <= 64"));
         }
 
         const TapMask bit = 1ULL << (delay - 1U);
         if ((taps & bit) != 0ULL) {
-            throw reject("a repeated delay");
+            return std::unexpected(std::string_view("each delay must be unique"));
         }
         taps |= bit;
 
@@ -172,10 +173,23 @@ namespace detail {
             return taps;
         }
         if (list[index] != ',') {
-            throw reject("a character that is neither a digit, a comma nor a space");
+            return std::unexpected(std::string_view("must be a comma-separated list of delays"));
         }
         ++index;
     }
+}
+
+/**
+ * @brief The delays named in @p list, as `readDelayList` reads them.
+ *
+ * A list that names none throws `std::invalid_argument` quoting @p list.
+ */
+[[nodiscard]] constexpr TapMask tapsFromDelayList(std::string_view list) {
+    const std::expected<TapMask, std::string_view> taps = readDelayList(list);
+    if (!taps) {
+        throw std::invalid_argument("gr::digital::tapsFromDelayList: " + std::string(taps.error()) + ", got '" + std::string(list) + "'");
+    }
+    return *taps;
 }
 
 /// @brief The delays of @p taps in ascending order, in the spelling `tapsFromDelayList` reads.
@@ -191,25 +205,38 @@ namespace detail {
 }
 
 /**
- * @brief The `degree` bits of @p bits, leftmost into the most significant of the `degree` significant bits.
+ * @brief The `degree` bits of @p bits, leftmost into the most significant of the `degree` significant bits, or why
+ * @p bits is no seed.
  *
  * The reading is the same for every mode — a run of `degree` bits in time order — and only where
- * those bits sit differs. Exactly @p degree characters are required, each `'0'` or `'1'`; anything
- * else throws `std::invalid_argument` quoting @p bits.
+ * those bits sit differs. Exactly @p degree characters are required, each `'0'` or `'1'`.
  */
-[[nodiscard]] constexpr std::uint64_t seedFromBitString(std::string_view bits, std::uint8_t degree) {
+[[nodiscard]] constexpr std::expected<std::uint64_t, std::string_view> readSeed(std::string_view bits, std::uint8_t degree) noexcept {
     if (bits.size() != static_cast<std::size_t>(degree)) {
-        throw std::invalid_argument("gr::digital::seedFromBitString: the seed must be exactly " + detail::decimalText(degree) + " bits, got '" + std::string(bits) + "'");
+        return std::unexpected(std::string_view("must be as long as the largest tap"));
     }
 
     std::uint64_t seed = 0ULL;
     for (const char bit : bits) {
         if (bit != '0' && bit != '1') {
-            throw std::invalid_argument("gr::digital::seedFromBitString: the seed must be '0' and '1' characters, got '" + std::string(bits) + "'");
+            return std::unexpected(std::string_view("must be 0s and 1s"));
         }
         seed = (seed << 1U) | static_cast<std::uint64_t>(bit == '1' ? 1U : 0U);
     }
     return seed;
+}
+
+/**
+ * @brief The seed @p bits spells, as `readSeed` reads it.
+ *
+ * Anything else throws `std::invalid_argument` quoting @p bits.
+ */
+[[nodiscard]] constexpr std::uint64_t seedFromBitString(std::string_view bits, std::uint8_t degree) {
+    const std::expected<std::uint64_t, std::string_view> seed = readSeed(bits, degree);
+    if (!seed) {
+        throw std::invalid_argument("gr::digital::seedFromBitString: " + std::string(seed.error()) + ", got '" + std::string(bits) + "'");
+    }
+    return *seed;
 }
 
 /**
@@ -239,9 +266,9 @@ inline constexpr TapMask ccsds131 = tapsFromDelayList("1,3,5,8");
 inline constexpr TapMask ccsds131_17 = tapsFromDelayList("3,17");
 
 /// @brief The CC11xx / SX12xx data-whitening sequence, `x^9 + x^5 + 1` read as a characteristic polynomial. Seed
-/// `"111111111"`, period 511, eight bits per item taken `LsbFirst`, under which the sequence opens
+/// `"111111111"`, period 511, eight bits per item taken `lsb_first`, under which the sequence opens
 /// `FF E1 1D 9A ED 85 33 24 EA 7A D2 39 70 97 57 0A` — the sequence the vendor documentation describes, so taps, seed
-/// and bit order are confirmed together by one string rather than one at a time. `MsbFirst` on the same taps opens
+/// and bit order are confirmed together by one string rather than one at a time. `msb_first` on the same taps opens
 /// `FF 87 B8 59 B7 A1 CC 24`, and the reciprocal reading `"5,9"` opens `FF C1 FB E8 4C 90 72 8B` least significant bit
 /// first and `FF 83 DF 17 32 09 4E D1` most significant.
 inline constexpr TapMask pn9 = tapsFromDelayList("4,9");
@@ -541,16 +568,15 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
 }
 
 /**
- * @brief The bit sequence @p text spells, as hexadecimal byte pairs separated by optional spaces.
+ * @brief The bit sequence @p text spells, as hexadecimal byte pairs separated by optional spaces, or why @p text
+ * spells none.
  *
  * A whitening mask is bytes and is published as bytes, so it is spelled in hexadecimal rather than as the `'0'` and
  * `'1'` characters `taps` and `seed` use. The returned bytes hold the sequence most significant bit first, so bit `i`
  * of the sequence is bit `7 - (i mod 8)` of byte `i / 8`. Anything that is not a hexadecimal digit or a space, an odd
- * number of digits, and an empty sequence throw `std::invalid_argument` quoting @p text.
+ * number of digits, and an empty sequence are refused.
  */
-[[nodiscard]] inline std::vector<std::uint8_t> sequenceFromHex(std::string_view text) {
-    const auto reject = [text](std::string_view reason) { return std::invalid_argument("gr::digital::sequenceFromHex: " + std::string(reason) + ", got '" + std::string(text) + "'"); };
-
+[[nodiscard]] inline std::expected<std::vector<std::uint8_t>, std::string_view> readSequence(std::string_view text) {
     std::vector<std::uint8_t> bytes;
     unsigned                  pending = 0U;
     unsigned                  digits  = 0U;
@@ -566,7 +592,7 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
         } else if (c >= 'a' && c <= 'f') {
             value = static_cast<unsigned>(c - 'a') + 10U;
         } else {
-            throw reject("a character that is neither a hexadecimal digit nor a space");
+            return std::unexpected(std::string_view("must be hexadecimal"));
         }
 
         pending = (pending << 4U) | value;
@@ -577,12 +603,25 @@ inline void applyProfile(ScramblerConfig& cfg, std::string_view name, ScramblerM
         }
     }
     if (digits != 0U) {
-        throw reject("an odd number of hexadecimal digits");
+        return std::unexpected(std::string_view("must have an even number of digits"));
     }
     if (bytes.empty()) {
-        throw reject("the sequence must name at least one byte");
+        return std::unexpected(std::string_view("required"));
     }
     return bytes;
+}
+
+/**
+ * @brief The bit sequence @p text spells, as `readSequence` reads it.
+ *
+ * Anything else throws `std::invalid_argument` quoting @p text.
+ */
+[[nodiscard]] inline std::vector<std::uint8_t> sequenceFromHex(std::string_view text) {
+    std::expected<std::vector<std::uint8_t>, std::string_view> bytes = readSequence(text);
+    if (!bytes) {
+        throw std::invalid_argument("gr::digital::sequenceFromHex: " + std::string(bytes.error()) + ", got '" + std::string(text) + "'");
+    }
+    return std::move(*bytes);
 }
 
 /**
@@ -704,7 +743,7 @@ inline void configureMonitor(ScramblerConfig& cfg, bool invertOutput, std::uint3
 
 namespace detail {
 
-/// @brief Bit `i` of the index at bit `7-i`, which turns an `LsbFirst` item into a field and back again.
+/// @brief Bit `i` of the index at bit `7-i`, which turns an `lsb_first` item into a field and back again.
 inline constexpr std::array<std::uint8_t, 256> kReversedByte = [] {
     std::array<std::uint8_t, 256> reversed{};
     for (std::size_t value = 0UZ; value < reversed.size(); ++value) {

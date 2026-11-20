@@ -460,7 +460,7 @@ struct HandComputed {
     const auto lags    = static_cast<std::size_t>(metaNumber(record, "max_lag"));
     const auto hop     = static_cast<std::size_t>(metaNumber(record, "hop"));
     const auto windows = static_cast<std::size_t>(metaNumber(record, "n_averaged"));
-    const bool biased  = metaText(record, "normalization") == std::string("biased");
+    const bool biased  = metaText(record, "normalization") == std::string("Biased");
     const auto pFa     = metaNumber(record, "false_alarm_rate");
     const bool real    = metaNumber(record, "real_valued") > 0.5;
     boost::ut::expect(metaText(record, "window") == std::string("Rectangular")) << "the recomputation holds for a rectangular taper";
@@ -550,7 +550,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
     "a record states its lag axis, its rate and every metadata key"_test = [] {
         const std::vector<CF> input = complexNoise(40000UZ, 0x1111ULL);
         for (const float rate : {2.0e6f, 125000.f}) {
-            const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(4)}, {"sample_rate", rate}}, input);
+            const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(4)}, {"sample_rate", rate}}, input);
             expect(fatal(ge(run.records.size(), 1UZ))) << "the stream is long enough for at least one record";
             const gr::DataSet<float>& record = run.records[0UZ];
 
@@ -577,7 +577,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
             expect(eq(static_cast<std::size_t>(metaNumber(record, "n_averaged")), 4UZ));
             expect(eq(static_cast<std::size_t>(metaNumber(record, "n_samples")), 4096UZ + 3UZ * 2048UZ));
             expect(metaText(record, "kind") == std::string("complex"));
-            expect(metaText(record, "normalization") == std::string("unbiased"));
+            expect(metaText(record, "normalization") == std::string("Unbiased"));
             expect(metaText(record, "window") == std::string("Rectangular"));
             expect(eq(static_cast<std::size_t>(metaNumber(record, "sequence")), 0UZ));
             expect(record.signal_values[0UZ] == 1.f) << "lag zero reads exactly one";
@@ -593,7 +593,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         expect(throws([&] { refused({{"max_lag", gr::Size_t(4096)}, {"window_length", gr::Size_t(4096)}}); })) << "a lag of a whole window";
         expect(throws([&] { refused({{"max_lag", gr::Size_t(5000)}, {"window_length", gr::Size_t(4096)}}); })) << "a lag beyond a window";
         expect(throws([&] { refused({{"kind", std::string("envelop")}}); }));
-        expect(throws([&] { refused({{"normalization", std::string("none")}}); }));
+        expect(throws([&] { refused({{"normalization", std::string("None")}}); }));
         expect(throws([&] { refused({{"window", std::string("NotAWindow")}}); }));
         expect(throws([&] { refused({{"sample_rate", 0.f}}); })) << "a stopped block refuses a rate of zero";
         expect(throws([&] { refused({{"sample_rate", std::numeric_limits<float>::quiet_NaN()}}); })) << "and a NaN rate";
@@ -628,7 +628,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
     "the staged-restart keys are refused while the block runs and change once it stops"_test = [] {
         const gr::property_map base{{"window_length", gr::Size_t(1024)}, {"max_lag", gr::Size_t(64)}, {"sample_rate", 48000.f}};
 
-        const std::array<gr::property_map, 7> kStaged{gr::property_map{{"window_length", gr::Size_t(2048)}}, gr::property_map{{"max_lag", gr::Size_t(128)}}, gr::property_map{{"kind", std::string("complex")}}, gr::property_map{{"normalization", std::string("biased")}}, gr::property_map{{"overlap", 0.25}}, gr::property_map{{"window", std::string("Hann")}}, gr::property_map{{"remove_mean", false}}};
+        const std::array<gr::property_map, 7> kStaged{gr::property_map{{"window_length", gr::Size_t(2048)}}, gr::property_map{{"max_lag", gr::Size_t(128)}}, gr::property_map{{"kind", std::string("Complex")}}, gr::property_map{{"normalization", std::string("Biased")}}, gr::property_map{{"overlap", 0.25}}, gr::property_map{{"window", std::string("Hann")}}, gr::property_map{{"remove_mean", false}}};
         for (const gr::property_map& change : kStaged) {
             auto block = startedBlock(base);
             expect(throws([&] { applyByName(*block, change); })) << std::format("a running block refuses '{}'", change.begin()->first.c_str());
@@ -668,7 +668,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         const std::vector<CF>     input   = complexNoise(6UZ * length, 0x2D2DULL);
         const std::span<const CF> samples = std::span<const CF>(input);
         // sample_rate is coupled to gr:sample_rate. The rate tag below sets it.
-        const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(2)}, {"overlap", 0.0}};
+        const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(2)}, {"overlap", 0.0}};
         const gr::Tag          rateTag{0UZ, gr::property_map{{gr::tag::SAMPLE_RATE.key(), 96000.f}}};
 
         // the reference runs the same stream and changes without the refused application
@@ -740,7 +740,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
     "an out-of-range staged-restart value refused while running names its range, and the next start works"_test = [] {
         constexpr std::size_t                                              length = 1024UZ;
         const std::vector<CF>                                              input  = complexNoise(4UZ * length, 0x6262ULL);
-        const gr::property_map                                             settings{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"sample_rate", 48000.f}};
+        const gr::property_map                                             settings{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"sample_rate", 48000.f}};
         const std::array<std::pair<gr::property_map, std::string_view>, 2> kOutOfRange{{
             {gr::property_map{{"kind", std::string("bogus")}}, "'complex' or 'envelope'"},
             {gr::property_map{{"max_lag", gr::Size_t(2048)}}, "must be below window_length"},
@@ -767,7 +767,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         constexpr std::size_t     length  = 1024UZ;
         const std::vector<CF>     input   = complexNoise(4UZ * length, 0x3131ULL);
         const std::span<const CF> samples = std::span<const CF>(input);
-        auto                      block   = startedBlock({{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"emit_phase", true}, {"sample_rate", 48000.f}});
+        auto                      block   = startedBlock({{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"emit_phase", true}, {"sample_rate", 48000.f}});
 
         const Call opening = callBlock(*block, samples.first(2UZ * length), 0UZ, 4UZ, 4UZ);
         expect(opening.records.empty() && opening.phase.empty()) << "two windows of four complete no record";
@@ -793,7 +793,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
     "an end-of-stream record the outputs have no room for is counted"_test = [] {
         constexpr std::size_t  length = 1024UZ;
         const std::vector<CF>  input  = complexNoise(2UZ * length, 0x5151ULL);
-        const gr::property_map settings{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"emit_phase", true}, {"sample_rate", 48000.f}};
+        const gr::property_map settings{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}, {"emit_phase", true}, {"sample_rate", 48000.f}};
         for (const auto& [outRoom, phaseRoom] : {std::pair{0UZ, 0UZ}, std::pair{1UZ, 0UZ}, std::pair{1UZ, 1UZ}}) {
             auto block = startedBlock(settings);
             expect(callBlock(*block, std::span<const CF>(input), 0UZ, 4UZ, 4UZ).records.empty()) << "two windows of four complete no record";
@@ -819,7 +819,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
         // gr:sample_rate.
         const gr::property_map first{{gr::tag::SAMPLE_RATE.key(), 48000.f}};
         const gr::property_map second{{gr::tag::SAMPLE_RATE.key(), 96000.f}};
-        const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t(8)}, {"overlap", 0.0}};
+        const gr::property_map geometry{{"window_length", gr::Size_t(length)}, {"max_lag", gr::Size_t(64)}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t(8)}, {"overlap", 0.0}};
         for (const std::size_t burst : {512UZ, 4096UZ, 65536UZ}) {
             const Run<CF> run = collect<CF>(geometry, input, burst, false, {{0UZ, first}, {tagAt, second}});
 
@@ -899,7 +899,7 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
 
     "the phase port carries the complex kind's phase, and the envelope kind publishes none"_test = [] {
         const std::vector<CF> input     = complexNoise(40000UZ, 0x4444ULL);
-        const Run<CF>         withPhase = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("complex")}, {"emit_phase", true}, {"n_averages", gr::Size_t(4)}, {"sample_rate", 48000.f}}, input, 65536UZ, true);
+        const Run<CF>         withPhase = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("Complex")}, {"emit_phase", true}, {"n_averages", gr::Size_t(4)}, {"sample_rate", 48000.f}}, input, 65536UZ, true);
         expect(fatal(ge(withPhase.phase.size(), 1UZ))) << "the phase port is fed for the complex kind";
         expect(eq(withPhase.phase.size(), withPhase.records.size()));
         const gr::DataSet<float>& correlation = withPhase.records[0UZ];
@@ -914,21 +914,21 @@ const suite<"autocorrelation record and settings"> _acfRecord = [] {
             expect(std::abs(value) <= static_cast<float>(kPi) + 1e-5f);
         }
 
-        const Run<CF> envelope = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("envelope")}, {"emit_phase", true}, {"n_averages", gr::Size_t(4)}, {"sample_rate", 48000.f}}, input, 65536UZ, true);
+        const Run<CF> envelope = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(100)}, {"kind", std::string("Envelope")}, {"emit_phase", true}, {"n_averages", gr::Size_t(4)}, {"sample_rate", 48000.f}}, input, 65536UZ, true);
         expect(envelope.phase.empty()) << "the envelope kind publishes no phase";
         expect(eq(envelope.records.size(), withPhase.records.size())) << "and the correlation port keeps its record count";
     };
 
     "without remove_mean the envelope kind publishes an infinite threshold and margin, and the complex kind finite ones"_test = [] {
         const std::vector<CF> input = complexNoise(4UZ * 1024UZ, 0x5A5AULL);
-        for (const std::string_view kind : {"envelope", "complex"}) {
+        for (const std::string_view kind : {"Envelope", "Complex"}) {
             const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(1024)}, {"max_lag", gr::Size_t(16)}, {"kind", std::string(kind)}, {"remove_mean", false}, {"n_averages", gr::Size_t(4)}, {"overlap", 0.0}}, input);
             expect(fatal(eq(run.records.size(), 1UZ))) << std::format("{}: four windows make one record", kind);
             const gr::DataSet<float>& record    = run.records[0UZ];
             const double              threshold = metaNumber(record, "detection_threshold");
             const double              margin    = metaNumber(record, "peak_threshold_db");
             expect(metaNumber(record, "mean_removed") < 0.5) << std::format("{}: the record states the mean was kept", kind);
-            if (kind == "envelope") {
+            if (kind == "Envelope") {
                 expect(std::isinf(threshold) && threshold > 0.) << std::format("envelope: detection_threshold {} is infinite", threshold);
                 expect(std::isinf(margin) && margin > 0.) << std::format("envelope: peak_threshold_db {} is infinite", margin);
             } else {
@@ -952,8 +952,8 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         constexpr double      closed  = static_cast<double>(nCp) / static_cast<double>(nCp + nFft);
         const std::vector<CF> scene   = ofdmScene(nFft, nCp, symbols, 0x5555ULL);
 
-        for (const std::string& kind : {std::string("complex"), std::string("envelope")}) {
-            const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(window)}, {"max_lag", gr::Size_t(lags)}, {"kind", kind}, {"normalization", std::string("unbiased")}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, scene);
+        for (const std::string& kind : {std::string("Complex"), std::string("Envelope")}) {
+            const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(window)}, {"max_lag", gr::Size_t(lags)}, {"kind", kind}, {"normalization", std::string("Unbiased")}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, scene);
             expect(fatal(ge(run.records.size(), 1UZ))) << kind;
             const gr::DataSet<float>& record = run.records[0UZ];
             const auto [at, height]          = peakOver(record, first, last);
@@ -968,7 +968,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             expect(metaNumber(record, "zero_lag") > 0.) << "the record keeps R(0)";
         }
 
-        const Run<CF> biased = collect<CF>({{"window_length", gr::Size_t(window)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("complex")}, {"normalization", std::string("biased")}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, scene);
+        const Run<CF> biased = collect<CF>({{"window_length", gr::Size_t(window)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("Complex")}, {"normalization", std::string("Biased")}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, scene);
         expect(fatal(ge(biased.records.size(), 1UZ)));
         const auto [biasedAt, biasedHeight] = peakOver(biased.records[0UZ], first, last);
         const double biasedClosed           = closed * (1. - static_cast<double>(nFft) / static_cast<double>(window));
@@ -980,7 +980,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         // value of height `h` turns its phase by about `s / h` radians.
         constexpr double      offset      = 0.3 / static_cast<double>(nFft);
         const std::vector<CF> offsetScene = ofdmScene(nFft, nCp, symbols, 0x5555ULL, offset);
-        const Run<CF>         withOffset  = collect<CF>({{"window_length", gr::Size_t(window)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("complex")}, {"emit_phase", true}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, offsetScene, 65536UZ, true);
+        const Run<CF>         withOffset  = collect<CF>({{"window_length", gr::Size_t(window)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("Complex")}, {"emit_phase", true}, {"n_averages", gr::Size_t(200)}, {"sample_rate", 30.72e6f}}, offsetScene, 65536UZ, true);
         expect(fatal(ge(withOffset.records.size(), 1UZ)));
         const auto [offsetAt, offsetHeight] = peakOver(withOffset.records[0UZ], first, last);
         const double offsetScatter          = metaNumber(withOffset.records[0UZ], "scatter");
@@ -998,7 +998,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         constexpr std::size_t  sps     = 8UZ;
         constexpr std::size_t  symbols = (4096UZ + 7UZ * 2048UZ) / sps + 64UZ; // one record of eight windows
         const std::vector<CF>  flat    = linearModulation(symbols, sps, std::span<const float>{}, 0x6666ULL);
-        const gr::property_map settings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(256)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(8)}, {"sample_rate", static_cast<float>(sps * 1000UZ)}};
+        const gr::property_map settings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(256)}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t(8)}, {"sample_rate", static_cast<float>(sps * 1000UZ)}};
 
         const Run<CF> rectangular = collect<CF>(settings, flat);
         expect(rectangular.records.empty()) << "a constant-modulus envelope publishes nothing";
@@ -1034,7 +1034,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
                 closedAt = std::abs(rho[lag]) > std::abs(rho[closedAt]) ? lag : closedAt;
             }
 
-            const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(32)}, {"sample_rate", static_cast<float>(sps * 1000UZ)}}, scene);
+            const Run<CF> run = collect<CF>({{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t(32)}, {"sample_rate", static_cast<float>(sps * 1000UZ)}}, scene);
             expect(fatal(ge(run.records.size(), 1UZ))) << std::format("beta {}", beta);
             const gr::DataSet<float>& record = run.records[0UZ];
             const auto [at, height]          = peakOver(record, 4UZ, 12UZ);
@@ -1056,7 +1056,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         constexpr float        rate  = 96000.f;
         constexpr std::size_t  lags  = 128UZ;
         const std::vector<CF>  scene = c4fmScene(kOneRecord / sps + 64UZ, 0x8888ULL); // one record after the longest filter
-        const gr::property_map settings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(32)}, {"sample_rate", rate}};
+        const gr::property_map settings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t(32)}, {"sample_rate", rate}};
 
         const Run<CF> unfiltered = collect<CF>(settings, scene);
         expect(unfiltered.records.empty()) << "a constant-modulus waveform has no envelope to correlate";
@@ -1114,7 +1114,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             dataFields.insert(dataFields.end(), field.begin(), field.end());
         }
         expect(eq(dataFields.size(), frames * 224UZ));
-        const Run<CF> data = collect<CF>({{"window_length", gr::Size_t(224)}, {"max_lag", gr::Size_t(12)}, {"kind", std::string("envelope")}, {"overlap", 0.0}, {"n_averages", gr::Size_t(frames)}, {"sample_rate", 2.0e6f}}, dataFields);
+        const Run<CF> data = collect<CF>({{"window_length", gr::Size_t(224)}, {"max_lag", gr::Size_t(12)}, {"kind", std::string("Envelope")}, {"overlap", 0.0}, {"n_averages", gr::Size_t(frames)}, {"sample_rate", 2.0e6f}}, dataFields);
         expect(fatal(ge(data.records.size(), 1UZ)));
         const gr::DataSet<float>& dataRecord = data.records[0UZ];
         const double              scatter    = metaNumber(dataRecord, "scatter");
@@ -1135,7 +1135,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             const std::vector<CF> field = modeSFrame(rng, true, true);
             whole.insert(whole.end(), field.begin(), field.end());
         }
-        const Run<CF> wholeRun = collect<CF>({{"window_length", gr::Size_t(240)}, {"max_lag", gr::Size_t(16)}, {"kind", std::string("envelope")}, {"overlap", 0.0}, {"n_averages", gr::Size_t(frames)}, {"sample_rate", 2.0e6f}}, whole);
+        const Run<CF> wholeRun = collect<CF>({{"window_length", gr::Size_t(240)}, {"max_lag", gr::Size_t(16)}, {"kind", std::string("Envelope")}, {"overlap", 0.0}, {"n_averages", gr::Size_t(frames)}, {"sample_rate", 2.0e6f}}, whole);
         expect(fatal(ge(wholeRun.records.size(), 1UZ)));
         std::println("Mode S: the whole 240-sample frame reads |R(0.5 us)|/R(0) = {:.5f} and |R(1.0 us)|/R(0) = {:.5f}, scatter {:.5f}", wholeRun.records[0UZ].signal_values[1UZ], wholeRun.records[0UZ].signal_values[2UZ], metaNumber(wholeRun.records[0UZ], "scatter"));
     };
@@ -1148,7 +1148,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
         const std::vector<float> pulse = raisedCosine(sps, 0.35, 8UZ);
         const std::vector<CF>    scene = linearModulation(kOneRecord / sps + 64UZ, sps, std::span<const float>(pulse), 0xAAAAULL);
 
-        const gr::property_map shapedSettings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t(32)}, {"false_alarm_rate", pFa}, {"sample_rate", rate}};
+        const gr::property_map shapedSettings{{"window_length", gr::Size_t(4096)}, {"max_lag", gr::Size_t(lags)}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t(32)}, {"false_alarm_rate", pFa}, {"sample_rate", rate}};
 
         /// @brief Runs the estimate into a peak detector at @p thresholdDb over the median. Returns the detections.
         const auto detect = [](gr::property_map settings, std::vector<CF> samples, double thresholdDb) {
@@ -1268,7 +1268,7 @@ const suite<"autocorrelation scenes"> _acfScenes = [] {
             constexpr std::size_t noiseRecords = 2000UZ;
             constexpr std::size_t averages     = 4UZ;
             for (const std::size_t noiseLags : {noiseWindow / 8UZ, noiseWindow / 2UZ}) {
-                for (const std::string& kind : {std::string("complex"), std::string("envelope")}) {
+                for (const std::string& kind : {std::string("Complex"), std::string("Envelope")}) {
                     const gr::property_map settings{{"window_length", gr::Size_t(noiseWindow)}, {"max_lag", gr::Size_t(noiseLags)}, {"kind", kind}, {"n_averages", gr::Size_t(averages)}, {"overlap", 0.0}, {"false_alarm_rate", pFa}, {"sample_rate", 48000.f}};
                     const Run<CF>          probe = collect<CF>(settings, complexNoise(noiseWindow * averages * 8UZ + 16UZ, 0xDDDDULL));
                     expect(fatal(ge(probe.records.size(), 1UZ)));

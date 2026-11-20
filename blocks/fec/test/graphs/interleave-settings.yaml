@@ -11,7 +11,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_block
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -25,7 +25,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_back_block
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -39,7 +39,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: conv_block
-      kind: convolutional
+      kind: Convolutional
       branches: !!uint32 4
       unit_delay: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -53,7 +53,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: conv_back_block
-      kind: convolutional
+      kind: Convolutional
       branches: !!uint32 4
       unit_delay: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -67,7 +67,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_block
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [2, 0, 1]
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -80,7 +80,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_back_block
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [2, 0, 1]
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -93,7 +93,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<float32>
     parameters:
       name: float_block
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<float32>
@@ -107,7 +107,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<float32>
     parameters:
       name: float_back_block
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<float32>
@@ -121,7 +121,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<float32>
     parameters:
       name: float_table_block
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [2, 0, 1]
   - id: gr::blocks::testing::ExpectDataSetSink<float32>
     parameters:

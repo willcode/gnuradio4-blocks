@@ -18,13 +18,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_1x16_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 1
       cols: !!uint32 16
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_1x16_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 1
       cols: !!uint32 16
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -50,12 +50,12 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_1x16_interleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_1x16_deinterleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -80,13 +80,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_16x1_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 16
       cols: !!uint32 1
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_16x1_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 16
       cols: !!uint32 1
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -112,12 +112,12 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_16x1_interleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_16x1_deinterleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -142,13 +142,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_4x4_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 4
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_4x4_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 4
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -174,12 +174,12 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_4x4_interleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15]
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_4x4_deinterleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15]
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -208,13 +208,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_3x17_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 3
       cols: !!uint32 17
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_3x17_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 3
       cols: !!uint32 17
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -248,7 +248,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_3x17_interleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [
         0, 17, 34, 1, 18, 35, 2, 19, 36, 3, 20, 37, 4, 21, 38, 5, 22, 39, 6, 23, 40, 7, 24, 41, 8, 25, 42, 9, 26,
         43, 10, 27, 44, 11, 28, 45, 12, 29, 46, 13, 30, 47, 14, 31, 48, 15, 32, 49, 16, 33, 50
@@ -256,7 +256,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_3x17_deinterleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [
         0, 17, 34, 1, 18, 35, 2, 19, 36, 3, 20, 37, 4, 21, 38, 5, 22, 39, 6, 23, 40, 7, 24, 41, 8, 25, 42, 9, 26,
         43, 10, 27, 44, 11, 28, 45, 12, 29, 46, 13, 30, 47, 14, 31, 48, 15, 32, 49, 16, 33, 50
@@ -292,13 +292,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_17x3_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 17
       cols: !!uint32 3
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_17x3_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 17
       cols: !!uint32 3
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -332,7 +332,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_17x3_interleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [
         0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34,
         37, 40, 43, 46, 49, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50
@@ -340,7 +340,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_17x3_deinterleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [
         0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34,
         37, 40, 43, 46, 49, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50
@@ -373,13 +373,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: block_4x6_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 6
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: block_4x6_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 6
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -407,14 +407,14 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: table_4x6_interleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [
         0, 6, 12, 18, 1, 7, 13, 19, 2, 8, 14, 20, 3, 9, 15, 21, 4, 10, 16, 22, 5, 11, 17, 23
       ]
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: table_4x6_deinterleave
-      kind: permutation
+      kind: Permutation
       table: !!uint32 [
         0, 6, 12, 18, 1, 7, 13, 19, 2, 8, 14, 20, 3, 9, 15, 21, 4, 10, 16, 22, 5, 11, 17, 23
       ]
@@ -441,13 +441,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<float32>
     parameters:
       name: float_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::fec::Deinterleave<float32>
     parameters:
       name: float_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<float32>

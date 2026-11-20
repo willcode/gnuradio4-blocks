@@ -59,7 +59,7 @@
  * exactly, which is the second reason the convention is not guessed.
  *
  * An item is `BitPacking.hpp`'s item: a `std::uint8_t` carrying `bitsPerItem` significant bits in its
- * low positions, whose stream order inside the item is `MsbFirst` or `LsbFirst`. Bits above
+ * low positions, whose stream order inside the item is `msb_first` or `lsb_first`. Bits above
  * `bitsPerItem` are masked away on input and left zero on output, so no stream value can fail.
  * `BitOrder` is that header's enumeration rather than a second one with the same two members. One
  * input item of `bitsPerItem` bits becomes exactly two output items of `bitsPerItem` chips for every
@@ -85,22 +85,9 @@
  */
 namespace gr::digital {
 
-/// @brief Which chip pair a data bit becomes, which is the whole of the difference between the two.
-enum class ManchesterConvention : std::uint8_t { Ieee8023, GeThomas };
-
-/// @brief The name a block exposes for @p convention.
-[[nodiscard]] constexpr std::string_view conventionName(ManchesterConvention convention) noexcept { return convention == ManchesterConvention::GeThomas ? std::string_view{"ge_thomas"} : std::string_view{"ieee802_3"}; }
-
-/// @brief The convention @p name selects; throws `std::invalid_argument`, quoting @p name, for anything but the two names.
-[[nodiscard]] constexpr ManchesterConvention conventionFromName(std::string_view name) {
-    if (name == conventionName(ManchesterConvention::Ieee8023)) {
-        return ManchesterConvention::Ieee8023;
-    }
-    if (name == conventionName(ManchesterConvention::GeThomas)) {
-        return ManchesterConvention::GeThomas;
-    }
-    throw std::invalid_argument("gr::digital::conventionFromName: convention must be 'ieee802_3' or 'ge_thomas', got '" + std::string(name) + "'");
-}
+/// @brief The chip pair each data bit becomes; the two conventions differ only there. A setting starts at `unset`
+/// and codes nothing until one is chosen: neither is a default.
+enum class ManchesterConvention : std::uint8_t { Unset, Ieee8023, GeThomas };
 
 /// @brief The `k` of `chipPair(b) = (b XOR k, b XOR k XOR 1)`, and the only thing the two conventions disagree about.
 [[nodiscard]] constexpr std::uint8_t conventionXor(ManchesterConvention convention) noexcept { return static_cast<std::uint8_t>(convention == ManchesterConvention::Ieee8023 ? 1 : 0); }
@@ -210,6 +197,9 @@ namespace detail {
  * is built once here and never resized.
  */
 inline void configureManchester(ManchesterConfig& cfg, ManchesterConvention convention, unsigned bitsPerItem, gr::math::BitOrder order, unsigned chipPhase = 0U) {
+    if (convention == ManchesterConvention::Unset) {
+        throw std::invalid_argument("gr::digital::configureManchester: convention is required");
+    }
     if (bitsPerItem < 1U || bitsPerItem > 8U) {
         throw std::invalid_argument("gr::digital::configureManchester: bitsPerItem must be in [1, 8], got " + std::to_string(bitsPerItem));
     }
@@ -291,7 +281,7 @@ inline void decodeAligned(const ManchesterConfig& cfg, std::span<const std::uint
         const unsigned early = static_cast<unsigned>(in[2UZ * i]) & mask;
         const unsigned late  = static_cast<unsigned>(in[2UZ * i + 1UZ]) & mask;
 
-        // chip j at bit 2*width-1-j under MsbFirst and at bit j under LsbFirst, so the first chip of a
+        // chip j at bit 2*width-1-j under msb_first and at bit j under lsb_first, so the first chip of a
         // pair takes odd bit positions in the first layout and even ones in the second
         const std::uint16_t chips = static_cast<std::uint16_t>(msbFirst ? (early << width) | late : early | (late << width));
         const unsigned      heads = msbFirst ? compactOddBits(chips) : compactEvenBits(chips);

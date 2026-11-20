@@ -20,8 +20,6 @@
 namespace {
 
 using gr::digital::configureManchester;
-using gr::digital::conventionFromName;
-using gr::digital::conventionName;
 using gr::digital::conventionXor;
 using gr::digital::decodeManchester;
 using gr::digital::encodeManchester;
@@ -232,10 +230,6 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         }
         expect(eq(agreeing, 256UZ)) << "every ge_thomas entry is the bitwise complement of its ieee802_3 neighbor";
 
-        expect(eq(conventionName(ManchesterConvention::Ieee8023), std::string_view{"ieee802_3"}));
-        expect(eq(conventionName(ManchesterConvention::GeThomas), std::string_view{"ge_thomas"}));
-        expect(that % (conventionFromName("ieee802_3") == ManchesterConvention::Ieee8023));
-        expect(that % (conventionFromName("ge_thomas") == ManchesterConvention::GeThomas));
         expect(that % (gr::digital::standard::ethernet == ManchesterConvention::Ieee8023)) << "IEEE 802.3 and IEC 62386 are on one side";
         expect(that % (gr::digital::standard::dali == ManchesterConvention::Ieee8023));
         expect(that % (gr::digital::standard::mil1553 == ManchesterConvention::GeThomas)) << "and MIL-STD-1553 is on the other, which is the whole point of the setting";
@@ -310,7 +304,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
             const ManchesterConfig cfg    = configured(convention, 1U);
             const auto             source = randomItems(4096UZ, 1U, 0x852835481D8E5A15ULL);
             const auto             chips  = streamOf(encoded(cfg, source), 1U, BitOrder::MsbFirst);
-            const std::string      name{conventionName(convention)};
+            const std::string      name{magic_enum::enum_name(convention)};
 
             expect(eq(chips.size(), 8192UZ)) << "the chip rate is exactly twice the bit rate";
             expect(eq(countOnes(chips), 4096UZ)) << std::format("{}: exactly half the chips are ones, and never merely close", name);
@@ -410,7 +404,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
 
                 const auto stream        = streamOf(chips, 8U, order);
                 const auto reconstructed = chipsFrom(streamOf(result.items, 8U, order), streamOf(result.flags, 8U, order), k);
-                expect(eq(firstDifference(reconstructed, stream), stream.size())) << std::format("{} at {}: the chip stream is recoverable from the two outputs", conventionName(convention), magic_enum::enum_name(order));
+                expect(eq(firstDifference(reconstructed, stream), stream.size())) << std::format("{} at {}: the chip stream is recoverable from the two outputs", magic_enum::enum_name(convention), magic_enum::enum_name(order));
 
                 const std::size_t violations = countOnes(streamOf(result.flags, 8U, order));
                 expect(that % (violations > stream.size() / 8UZ)) << "arbitrary chips must actually contain violations, or the criterion is vacuous";
@@ -454,7 +448,7 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
                 pairUnchanged += result.items[j] == data[j] ? 1UZ : 0UZ;
             }
 
-            const std::string name{conventionName(convention)};
+            const std::string name{magic_enum::enum_name(convention)};
             expect(eq(unflagged, 0UZ)) << std::format("{}: every single-chip error makes its pair invalid, and the detection is unconditional", name);
             expect(eq(headCorrect, data.size())) << std::format("{}: flipping the second chip flags the pair and leaves the bit correct", name);
             expect(eq(tailCorrupted, data.size())) << std::format("{}: flipping the first chip flags the pair and inverts the bit", name);
@@ -785,17 +779,8 @@ const boost::ut::suite<"manchester"> manchesterTests = [] {
         const std::uint8_t item = 0x1FU;
         expect(eq(hexOf(encoded(cfg, std::span{&item, 1UZ})), std::string{"15 0A"})) << "and it still codes";
 
-        // the names the blocks expose, and the empty string that stands for "not set"
-        for (const std::string_view bad : {"", "ieee802.3", "IEEE802_3", "thomas", "manchester"}) {
-            expect(throws<std::invalid_argument>([bad] { [[maybe_unused]] const ManchesterConvention ignored = conventionFromName(bad); })) << std::format("convention '{}'", bad);
-        }
-        bool quoted = false;
-        try {
-            [[maybe_unused]] const ManchesterConvention ignored = conventionFromName("differential");
-        } catch (const std::invalid_argument& error) {
-            quoted = std::string_view{error.what()}.find("differential") != std::string_view::npos;
-        }
-        expect(quoted) << "the offending value is quoted back in the message";
+        expect(throws<std::invalid_argument>([&cfg] { configureManchester(cfg, ManchesterConvention::Unset, 8U, BitOrder::MsbFirst); })) << "a convention left unset";
+        expect(that % (cfg.convention == ManchesterConvention::GeThomas)) << "and the previous configuration stands";
 
         expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::Ieee8023, 1U, BitOrder::MsbFirst, 1U); })) << "the edges of both ranges are accepted";
         expect(nothrow([] { [[maybe_unused]] const ManchesterConfig ok = configured(ManchesterConvention::GeThomas, 8U, BitOrder::LsbFirst, 0U); }));

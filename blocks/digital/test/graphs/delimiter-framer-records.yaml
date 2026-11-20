@@ -40,7 +40,7 @@ blocks:
       name: drops_framer
       end_delimiter: "11000000"
       bits_per_item: !!uint32 8
-      transparency: byte_escape
+      transparency: ByteEscape
       escape_item: !!uint32 219
       escape_map: !!uint32 [220, 192, 221, 219]
       max_payload_items: !!uint32 8
@@ -129,7 +129,7 @@ blocks:
       name: metadata_framer
       end_delimiter: "11000000"
       bits_per_item: !!uint32 8
-      transparency: byte_escape
+      transparency: ByteEscape
       escape_item: !!uint32 219
       escape_map: !!uint32 [220, 192, 221, 219]
       max_payload_items: !!uint32 64

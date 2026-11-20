@@ -12,8 +12,10 @@
 namespace gr::fec {
 
 /// Which permutation family an `Interleaver` carries. The three differ in how the map is stated, not in what
-/// they do with it, and only one of them is stream-shaped.
+/// they do with it, and only one of them is stream-shaped. A setting starts at `unset`, which no interleaver carries:
+/// the family is required, with no default.
 enum class InterleaverKind : std::uint8_t {
+    Unset,         ///< no family named yet
     Block,         ///< rows x cols, written row-major and read column-major
     Convolutional, ///< Forney/Ramsey type II: `branches` delay lines and a commutator, state across calls
     Permutation    ///< an explicit table, whatever a standard publishes

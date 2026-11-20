@@ -55,6 +55,7 @@ using Clock = std::chrono::steady_clock;
     const std::uint64_t product = static_cast<std::uint64_t>(unit) * length;
     std::uint64_t       items   = product;
     switch (covers) {
+    case CountCovers::Unset: return std::nullopt;
     case CountCovers::Payload: items = product + check; break;
     case CountCovers::PayloadAndCheck: break;
     case CountCovers::WholeFrame:
@@ -307,7 +308,7 @@ const boost::ut::suite<"header formats"> headerFormatTests = [] {
             std::uint32_t    field;
         };
         constexpr Row kRows[] = {{"payload", CountCovers::Payload, 16UZ, 0UZ, 32U}, //
-            {"payload_and_check", CountCovers::PayloadAndCheck, 0UZ, 0UZ, 34U},     //
+            {"payload_and_check", CountCovers::PayloadAndCheck, 0UZ, 0UZ, 34U},   //
             {"whole_frame", CountCovers::WholeFrame, 0UZ, 16UZ, 36U}};
 
         std::array<std::uint8_t, 16> wire{};

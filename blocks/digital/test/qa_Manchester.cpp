@@ -232,7 +232,7 @@ struct SeenPair {
     return seen;
 }
 
-constexpr std::array<std::string_view, 2> kConventions{"ieee802_3", "ge_thomas"};
+constexpr std::array<std::string_view, 2> kConventions{"Ieee8023", "GeThomas"};
 constexpr std::array<std::string_view, 2> kOrders{"MsbFirst", "LsbFirst"};
 
 } // namespace
@@ -247,7 +247,7 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         constexpr std::array<std::array<std::uint8_t, 3UZ>, 7UZ> kTable{{{0x00U, 0xAAU, 0xAAU}, {0xFFU, 0x55U, 0x55U}, {0x0FU, 0xAAU, 0x55U}, {0x55U, 0x99U, 0x99U}, {0xAAU, 0x66U, 0x66U}, {0xA5U, 0x66U, 0x99U}, {0x47U, 0x9AU, 0x95U}}};
         for (const auto& row : kTable) {
             const std::array<std::uint8_t, 1UZ> data{row[0UZ]};
-            const auto                          chips = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(data));
+            const auto                          chips = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(data));
             expect(eq(chips.size(), 2UZ));
             expect(eq(chips[0UZ], row[1UZ])) << std::format("0x{:02X} encodes to 0x{:02X} 0x{:02X}", row[0UZ], row[1UZ], row[2UZ]);
             expect(eq(chips[1UZ], row[2UZ])) << std::format("0x{:02X} encodes to 0x{:02X} 0x{:02X}", row[0UZ], row[1UZ], row[2UZ]);
@@ -257,16 +257,16 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         // which is the bit sequence 1 0 1 0 1 0 1 0 and 1 0 1 0 1 0 1 1
         const std::array<std::uint8_t, 1UZ> lsbPreamble{0x55U};
         const std::array<std::uint8_t, 1UZ> lsbDelimiter{0xD5U};
-        const auto                          preambleLsb  = encoded(encoderSettings("ieee802_3", 8U, "LsbFirst"), std::span<const std::uint8_t>(lsbPreamble));
-        const auto                          delimiterLsb = encoded(encoderSettings("ieee802_3", 8U, "LsbFirst"), std::span<const std::uint8_t>(lsbDelimiter));
+        const auto                          preambleLsb  = encoded(encoderSettings("Ieee8023", 8U, "LsbFirst"), std::span<const std::uint8_t>(lsbPreamble));
+        const auto                          delimiterLsb = encoded(encoderSettings("Ieee8023", 8U, "LsbFirst"), std::span<const std::uint8_t>(lsbDelimiter));
         expect(that % (preambleLsb == std::vector<std::uint8_t>{0x66U, 0x66U}));
         expect(that % (delimiterLsb == std::vector<std::uint8_t>{0x66U, 0xA6U}));
 
         // the same two bit sequences carried most-significant-bit first are the items 0xAA and 0xAB
         const std::array<std::uint8_t, 1UZ> msbPreamble{0xAAU};
         const std::array<std::uint8_t, 1UZ> msbDelimiter{0xABU};
-        const auto                          preambleMsb  = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(msbPreamble));
-        const auto                          delimiterMsb = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(msbDelimiter));
+        const auto                          preambleMsb  = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(msbPreamble));
+        const auto                          delimiterMsb = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(msbDelimiter));
         expect(that % (preambleMsb == std::vector<std::uint8_t>{0x66U, 0x66U}));
         expect(that % (delimiterMsb == std::vector<std::uint8_t>{0x66U, 0x65U}));
 
@@ -287,7 +287,7 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         constexpr std::array<std::array<std::uint8_t, 3UZ>, 7UZ> kTable{{{0x00U, 0x55U, 0x55U}, {0xFFU, 0xAAU, 0xAAU}, {0x0FU, 0x55U, 0xAAU}, {0x55U, 0x66U, 0x66U}, {0xAAU, 0x99U, 0x99U}, {0xA5U, 0x99U, 0x66U}, {0x47U, 0x65U, 0x6AU}}};
         for (const auto& row : kTable) {
             const std::array<std::uint8_t, 1UZ> data{row[0UZ]};
-            const auto                          chips = encoded(encoderSettings("ge_thomas"), std::span<const std::uint8_t>(data));
+            const auto                          chips = encoded(encoderSettings("GeThomas"), std::span<const std::uint8_t>(data));
             expect(eq(chips.size(), 2UZ));
             expect(eq(chips[0UZ], row[1UZ]));
             expect(eq(chips[1UZ], row[2UZ]));
@@ -295,7 +295,7 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
 
         // anchor C, MIL-STD-1553's own statement: a logic one is 1/0 and a logic zero is 0/1
         const std::array<std::uint8_t, 2UZ> oneThenZero{1U, 0U};
-        const auto                          pairs = encoded(encoderSettings("ge_thomas", 1U), std::span<const std::uint8_t>(oneThenZero));
+        const auto                          pairs = encoded(encoderSettings("GeThomas", 1U), std::span<const std::uint8_t>(oneThenZero));
         expect(that % (pairs == std::vector<std::uint8_t>{1U, 0U, 0U, 1U})) << "chipPair(1) == (1,0) and chipPair(0) == (0,1)";
 
         // the identity that makes the table cheap to check: the two columns are bitwise complements, over all 256 items
@@ -303,8 +303,8 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         for (std::size_t value = 0UZ; value < all.size(); ++value) {
             all[value] = static_cast<std::uint8_t>(value);
         }
-        const auto  ieee    = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(all));
-        const auto  thomas  = encoded(encoderSettings("ge_thomas"), std::span<const std::uint8_t>(all));
+        const auto  ieee    = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(all));
+        const auto  thomas  = encoded(encoderSettings("GeThomas"), std::span<const std::uint8_t>(all));
         std::size_t matched = 0UZ;
         for (std::size_t i = 0UZ; i < ieee.size(); ++i) {
             matched += static_cast<std::uint8_t>(~ieee[i]) == thomas[i] ? 1UZ : 0UZ;
@@ -359,7 +359,7 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         const auto data = rng.items(2048UZ, 8U);
 
         // anchor K: 1 input item to 2 output items, and no state carried between runs
-        auto       block = make<ManchesterEncoder>(encoderSettings("ieee802_3"));
+        auto       block = make<ManchesterEncoder>(encoderSettings("Ieee8023"));
         const auto first = gr::blocks::testing::span::run<std::uint8_t>(block, std::span<const std::uint8_t>(data), 0UZ, 2UZ);
         expect(eq(first.samples.size(), 2UZ * data.size()));
         expect(eq(first.consumed, data.size()));
@@ -369,19 +369,19 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         // The encoder half: a tag at input item t arrives at output item 2t
         for (const std::size_t t : {0UZ, 1UZ, 7UZ, 8UZ, 1000UZ}) {
             const std::array<gr::Tag, 1UZ> planted{gr::Tag{t, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("mark")}}}};
-            const auto                     seen = throughGraph<ManchesterEncoder>(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(planted));
+            const auto                     seen = throughGraph<ManchesterEncoder>(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(planted));
             expect(that % (offsetsOf(seen.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{2UZ * t})) << std::format("a tag at input item {} belongs at output item {}", t, 2UZ * t);
             expect(eq(seen.samples.size(), 2UZ * data.size()));
         }
 
         // two tags at one input item stay two tags, in order, rather than merging
         const std::array<gr::Tag, 2UZ> pair{gr::Tag{4UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("first")}}}, gr::Tag{5UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("second")}}}};
-        const auto                     both = throughGraph<ManchesterEncoder>(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(pair));
+        const auto                     both = throughGraph<ManchesterEncoder>(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(pair));
         expect(that % (offsetsOf(both.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{8UZ, 10UZ}));
 
         // the core doubles a forwarded sample_rate, and the block owns no such setting
         const std::array<gr::Tag, 1UZ> rated{gr::Tag{0UZ, {{gr::property_map::key_type(gr::tag::SAMPLE_RATE.key()), 1.0e6F}}}};
-        const auto                     scaled  = throughGraph<ManchesterEncoder>(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(rated));
+        const auto                     scaled  = throughGraph<ManchesterEncoder>(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(rated));
         bool                           sawRate = false;
         for (const gr::Tag& seenTag : scaled.tags) {
             if (sampleRateOf(seenTag) > 0.0F) {
@@ -418,8 +418,8 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         }
 
         // and the negative half: the two orders are not interchangeable
-        const auto  msb       = encoded(encoderSettings("ieee802_3", 8U, "MsbFirst"), std::span<const std::uint8_t>(data));
-        const auto  lsb       = encoded(encoderSettings("ieee802_3", 8U, "LsbFirst"), std::span<const std::uint8_t>(data));
+        const auto  msb       = encoded(encoderSettings("Ieee8023", 8U, "MsbFirst"), std::span<const std::uint8_t>(data));
+        const auto  lsb       = encoded(encoderSettings("Ieee8023", 8U, "LsbFirst"), std::span<const std::uint8_t>(data));
         std::size_t differing = 0UZ;
         for (std::size_t i = 0UZ; i < msb.size(); ++i) {
             differing += msb[i] != lsb[i] ? 1UZ : 0UZ;
@@ -436,7 +436,7 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         Rng                            rng;
         const auto                     data = rng.items(64UZ, 8U);
         const std::array<gr::Tag, 1UZ> mixed{gr::Tag{8UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("kept")}, {gr::property_map::key_type(kCustomKey), std::string("kept")}}}};
-        const auto                     seen = throughGraph<ManchesterEncoder>(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(mixed));
+        const auto                     seen = throughGraph<ManchesterEncoder>(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(data), std::span<const gr::Tag>(mixed));
         expect(that % (offsetsOf(seen.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{16UZ}));
         expect(that % (offsetsOf(seen.tags, kCustomKey) == std::vector<std::size_t>{16UZ})) << "a custom key crosses a rate changer beside the reserved one";
     };
@@ -445,8 +445,8 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         constexpr std::size_t           kItems = 100000UZ;
         const std::vector<std::uint8_t> ones(kItems, 0xFFU);
         const std::vector<std::uint8_t> low(kItems, 0x07U);
-        const auto                      fromOnes = encoded(encoderSettings("ieee802_3", 3U), std::span<const std::uint8_t>(ones));
-        const auto                      fromLow  = encoded(encoderSettings("ieee802_3", 3U), std::span<const std::uint8_t>(low));
+        const auto                      fromOnes = encoded(encoderSettings("Ieee8023", 3U), std::span<const std::uint8_t>(ones));
+        const auto                      fromLow  = encoded(encoderSettings("Ieee8023", 3U), std::span<const std::uint8_t>(low));
         expect(that % (fromOnes == fromLow)) << "only the low bits_per_item bits are read";
         expect(eq(fromOnes.size(), 2UZ * kItems));
         expect(std::ranges::all_of(fromOnes, [](std::uint8_t item) { return item < 8U; })) << "no output item carries a bit above bits_per_item";
@@ -456,9 +456,9 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
         Rng rng;
         for (const gr::Size_t width : {gr::Size_t{1}, gr::Size_t{8}}) {
             const auto data  = rng.items(4096UZ, static_cast<unsigned>(width));
-            const auto whole = encoded(encoderSettings("ieee802_3", width), std::span<const std::uint8_t>(data));
+            const auto whole = encoded(encoderSettings("Ieee8023", width), std::span<const std::uint8_t>(data));
             for (const std::size_t chunk : {2UZ, 4UZ, 18UZ, 4096UZ}) {
-                const auto chunked = encoded(encoderSettings("ieee802_3", width), std::span<const std::uint8_t>(data), chunk);
+                const auto chunked = encoded(encoderSettings("Ieee8023", width), std::span<const std::uint8_t>(data), chunk);
                 expect(that % (chunked == whole)) << std::format("bits_per_item {}, chunk {}", width, chunk);
             }
         }
@@ -470,13 +470,13 @@ const boost::ut::suite<"Manchester encoder"> manchesterEncoderTests = [] {
             block.start();
         })) << "there is no default convention";
         expect(throws([] { std::ignore = make<ManchesterEncoder>({{"convention", std::string("ieee802.3")}}); })) << "a typo must not silently become a convention";
-        expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("ieee802_3", 0U)); }));
-        expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("ieee802_3", 9U)); }));
-        expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("ieee802_3", 8U, "big_endian")); }));
-        expect(nothrow([] { std::ignore = make<ManchesterEncoder>(encoderSettings("ge_thomas", 1U, "LsbFirst")); }));
+        expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("Ieee8023", 0U)); }));
+        expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("Ieee8023", 9U)); }));
+        expect(throws([] { std::ignore = make<ManchesterEncoder>(encoderSettings("Ieee8023", 8U, "big_endian")); }));
+        expect(nothrow([] { std::ignore = make<ManchesterEncoder>(encoderSettings("GeThomas", 1U, "LsbFirst")); }));
 
         const std::array<std::uint8_t, 1UZ> data{0x47U};
-        auto                                block  = make<ManchesterEncoder>(encoderSettings("ieee802_3"));
+        auto                                block  = make<ManchesterEncoder>(encoderSettings("Ieee8023"));
         const auto                          before = gr::blocks::testing::span::run<std::uint8_t>(block, std::span<const std::uint8_t>(data), 0UZ, 2UZ);
         expect(throws([&block] { restage(block, {{"bits_per_item", gr::Size_t{9}}}); }));
         const auto after = gr::blocks::testing::span::run<std::uint8_t>(block, std::span<const std::uint8_t>(data), 0UZ, 2UZ);
@@ -505,8 +505,8 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         constexpr std::array<std::array<std::uint8_t, 4UZ>, 4UZ> kTable{{{0x47U, 0x9AU, 0x95U, 0xB8U}, {0x00U, 0xAAU, 0xAAU, 0xFFU}, {0xAAU, 0x66U, 0x66U, 0x55U}, {0xA5U, 0x66U, 0x99U, 0x5AU}}};
         for (const auto& row : kTable) {
             const std::array<std::uint8_t, 2UZ> chips{row[1UZ], row[2UZ]};
-            const auto                          right = decoded(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips));
-            const auto                          wrong = decoded(decoderSettings("ge_thomas"), std::span<const std::uint8_t>(chips));
+            const auto                          right = decoded(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips));
+            const auto                          wrong = decoded(decoderSettings("GeThomas"), std::span<const std::uint8_t>(chips));
 
             expect(that % (right.bits == std::vector<std::uint8_t>{row[0UZ]}));
             expect(that % (wrong.bits == std::vector<std::uint8_t>{row[3UZ]})) << std::format("0x{:02X} read under the other convention is 0x{:02X}", row[0UZ], row[3UZ]);
@@ -542,7 +542,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         // the MIL-STD-1553 command sync's shape -- three bit times, positive for the first one and a half and
         // negative for the following one and a half -- planted between legal pairs, one chip an item
         const std::vector<std::uint8_t> chips{0U, 1U, 1U, 0U, 1U, 1U, 1U, 0U, 0U, 0U, 0U, 1U, 1U, 0U};
-        auto                            block = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U));
+        auto                            block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
         const auto                      seen  = decodedBy(block, std::span<const std::uint8_t>(chips));
 
         expect(that % (seen.flags == std::vector<std::uint8_t>{0U, 0U, 1U, 0U, 1U, 0U, 0U})) << "flagged at exactly the invalid pairs and nowhere else";
@@ -569,14 +569,14 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
     "single-chip errors"_test = [] {
         // anchor F, all four clauses
         const std::array<std::uint8_t, 1UZ> data{0xA5U};
-        const auto                          clean = encoded(encoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(data)); // 16 chips, one an item
-        const auto                          truth = decoded(decoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(clean));
+        const auto                          clean = encoded(encoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(data)); // 16 chips, one an item
+        const auto                          truth = decoded(decoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(clean));
 
         std::size_t flagged = 0UZ;
         for (std::size_t j = 0UZ; j < clean.size(); ++j) {
             auto broken = clean;
             broken[j] ^= 1U;
-            const auto seen = decoded(decoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(broken));
+            const auto seen = decoded(decoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(broken));
             flagged += seen.flags[j / 2UZ] != 0U ? 1UZ : 0UZ;
             if (j % 2UZ == 0UZ) {
                 expect(neq(seen.bits[j / 2UZ], truth.bits[j / 2UZ])) << "flipping the first chip inverts the decoded bit";
@@ -591,7 +591,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
             auto broken = clean;
             broken[2UZ * m] ^= 1U;
             broken[2UZ * m + 1UZ] ^= 1U;
-            const auto seen = decoded(decoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(broken));
+            const auto seen = decoded(decoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(broken));
             expect(eq(seen.flags[m], std::uint8_t{0U})) << "a both-chip flip stays a legal pair and is not detected";
             expect(neq(seen.bits[m], truth.bits[m])) << "and it inverts the bit silently";
         }
@@ -602,7 +602,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         constexpr std::array<std::array<std::uint8_t, 5UZ>, 3UZ> kTable{{{0x47U, 0x9AU, 0x95U, 0x5CU, 0xE4U}, {0x00U, 0xAAU, 0xAAU, 0x7FU, 0x80U}, {0xAAU, 0x66U, 0x66U, 0xAAU, 0xFFU}}};
         for (const auto& row : kTable) {
             const std::array<std::uint8_t, 2UZ> chips{row[1UZ], row[2UZ]};
-            const auto                          seen = decoded(decoderSettings("ieee802_3", 8U, "MsbFirst", 1U), std::span<const std::uint8_t>(chips));
+            const auto                          seen = decoded(decoderSettings("Ieee8023", 8U, "MsbFirst", 1U), std::span<const std::uint8_t>(chips));
             expect(that % (seen.bits == std::vector<std::uint8_t>{row[3UZ]})) << std::format("0x{:02X} misaligned decodes to 0x{:02X}", row[0UZ], row[3UZ]);
             expect(that % (seen.flags == std::vector<std::uint8_t>{row[4UZ]})) << std::format("0x{:02X} misaligned flags 0x{:02X}", row[0UZ], row[4UZ]);
         }
@@ -610,8 +610,8 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         // the general rule as a property, one chip an item so that a bit index is an item index
         Rng        rng;
         const auto bits  = rng.items(4096UZ, 1U);
-        const auto chips = encoded(encoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(bits));
-        const auto seen  = decoded(decoderSettings("ieee802_3", 1U, "MsbFirst", 1U), std::span<const std::uint8_t>(chips));
+        const auto chips = encoded(encoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(bits));
+        const auto seen  = decoded(decoderSettings("Ieee8023", 1U, "MsbFirst", 1U), std::span<const std::uint8_t>(chips));
         expect(eq(seen.bits.size(), bits.size()));
 
         std::size_t agreed = 0UZ;
@@ -627,9 +627,9 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
         // the negative half: a constant stream is silent apart from the orphan, and reads as the wrong convention would
         const std::vector<std::uint8_t> constant(1024UZ, 0U);
-        const auto                      flat    = encoded(encoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(constant));
-        const auto                      skewed  = decoded(decoderSettings("ieee802_3", 1U, "MsbFirst", 1U), std::span<const std::uint8_t>(flat));
-        const auto                      swapped = decoded(decoderSettings("ge_thomas", 1U), std::span<const std::uint8_t>(flat));
+        const auto                      flat    = encoded(encoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(constant));
+        const auto                      skewed  = decoded(decoderSettings("Ieee8023", 1U, "MsbFirst", 1U), std::span<const std::uint8_t>(flat));
+        const auto                      swapped = decoded(decoderSettings("GeThomas", 1U), std::span<const std::uint8_t>(flat));
         expect(eq(skewed.flags[0UZ], std::uint8_t{1U})) << "the orphan is flagged";
         expect(std::ranges::all_of(std::span<const std::uint8_t>(skewed.flags).subspan(1UZ), [](std::uint8_t flag) { return flag == 0U; })) << "and nothing else is";
         expect(std::ranges::equal(std::span<const std::uint8_t>(skewed.bits).subspan(1UZ), std::span<const std::uint8_t>(swapped.bits).subspan(1UZ))) << "on a constant stream misalignment and the wrong convention are the same output";
@@ -637,10 +637,10 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
     "rate, tag placement and sample_rate"_test = [] {
         Rng        rng;
-        const auto chips = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(rng.items(1024UZ, 8U)));
+        const auto chips = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(rng.items(1024UZ, 8U)));
 
         // anchor K: two input items to one output item and one violation item, one chip of carried state
-        auto       block = make<ManchesterDecoder>(decoderSettings("ieee802_3"));
+        auto       block = make<ManchesterDecoder>(decoderSettings("Ieee8023"));
         const auto seen  = decodedBy(block, std::span<const std::uint8_t>(chips));
         expect(eq(seen.bits.size(), chips.size() / 2UZ));
         expect(eq(seen.flags.size(), chips.size() / 2UZ));
@@ -650,19 +650,19 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         // At bits_per_item = 8 the request a tag can make is parity 0, which is the grid already in force.
         for (const std::size_t t : {0UZ, 1UZ, 6UZ, 7UZ, 1000UZ}) {
             const std::array<gr::Tag, 1UZ> planted{gr::Tag{t, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("mark")}}}};
-            const auto                     graphed = decoderGraph(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(planted));
+            const auto                     graphed = decoderGraph(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(planted));
             expect(that % (offsetsOf(graphed.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{t / 2UZ})) << std::format("a tag at input item {} belongs at output item {}", t, t / 2UZ);
         }
 
         // the two input items of one chunk map to one output item, and neither of their tags is dropped on the way
         const std::array<gr::Tag, 2UZ> pair{gr::Tag{4UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("first")}}}, gr::Tag{5UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_OFFSET.key()), 3.0F}}}};
-        const auto                     both = decoderGraph(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(pair));
+        const auto                     both = decoderGraph(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(pair));
         expect(that % (offsetsOf(both.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{2UZ}));
         expect(that % (offsetsOf(both.tags, gr::tag::TRIGGER_OFFSET.key()) == std::vector<std::size_t>{2UZ})) << "the second tag lands on the same output item rather than being dropped";
 
         // the core halves a forwarded sample_rate, and the block owns no such setting
         const std::array<gr::Tag, 1UZ> rated{gr::Tag{0UZ, {{gr::property_map::key_type(gr::tag::SAMPLE_RATE.key()), 2.0e6F}}}};
-        const auto                     scaled  = decoderGraph(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(rated));
+        const auto                     scaled  = decoderGraph(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(rated));
         bool                           sawRate = false;
         for (const gr::Tag& seenTag : scaled.tags) {
             if (sampleRateOf(seenTag) > 0.0F) {
@@ -676,16 +676,16 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
     "alignment contract"_test = [] {
         Rng        rng;
         const auto bits  = rng.items(4096UZ, 1U);
-        const auto chips = encoded(encoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(bits));
+        const auto chips = encoded(encoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(bits));
 
         { // (a) a chip_phase = 1 run begins with exactly one flagged orphan and nothing else is ever spent
-            auto       skewed  = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U, "MsbFirst", 1U));
+            auto       skewed  = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U, "MsbFirst", 1U));
             const auto shifted = decodedBy(skewed, std::span<const std::uint8_t>(chips));
             expect(eq(shifted.flags[0UZ], std::uint8_t{1U})) << "the first output item is the orphan";
             expect(eq(skewed.nOrphanItems(), 1ULL)) << "exactly one, at item 0";
             expect(eq(skewed.nDroppedChips(), 0ULL)) << "steady phase 1 costs one chip of state and no items at all";
 
-            const auto aligned = decoded(decoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(chips).subspan(1UZ, chips.size() - 2UZ));
+            const auto aligned = decoded(decoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(chips).subspan(1UZ, chips.size() - 2UZ));
             expect(std::ranges::equal(std::span<const std::uint8_t>(shifted.bits).subspan(1UZ), aligned.bits)) << "from item 1 it is an aligned decode of the same chips shifted by one";
             expect(std::ranges::equal(std::span<const std::uint8_t>(shifted.flags).subspan(1UZ), aligned.flags));
         }
@@ -693,10 +693,10 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         { // (b) a tag re-grids to the parity of its own chip index, effective at the next chunk boundary
             for (const std::size_t t : {8UZ, 9UZ}) {
                 const std::array<gr::Tag, 1UZ> planted{gr::Tag{t, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
-                auto                           tagged = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U));
+                auto                           tagged = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
                 const auto                     seen   = decodedBy(tagged, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(planted));
                 const std::size_t              at     = ((t + 1UZ) / 2UZ) * 2UZ; // the chunk boundary the change lands on
-                const auto                     fresh  = decoded(decoderSettings("ieee802_3", 1U, "MsbFirst", static_cast<gr::Size_t>(t % 2UZ)), std::span<const std::uint8_t>(chips).subspan(at));
+                const auto                     fresh  = decoded(decoderSettings("Ieee8023", 1U, "MsbFirst", static_cast<gr::Size_t>(t % 2UZ)), std::span<const std::uint8_t>(chips).subspan(at));
                 expect(std::ranges::equal(std::span<const std::uint8_t>(seen.bits).subspan(at / 2UZ), fresh.bits)) << std::format("t = {}: the output from the boundary is a freshly gridded decode", t);
                 expect(std::ranges::equal(std::span<const std::uint8_t>(seen.flags).subspan(at / 2UZ), fresh.flags));
                 expect(eq(tagged._coder.gridParity, static_cast<std::uint8_t>(t % 2UZ)));
@@ -704,7 +704,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
             // at an even bits_per_item the product t * bits_per_item is always even, so a tag can only ask for parity 0
             const std::array<gr::Tag, 1UZ> odd{gr::Tag{7UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
-            auto                           wide = make<ManchesterDecoder>(decoderSettings("ieee802_3", 8U, "MsbFirst", 1U));
+            auto                           wide = make<ManchesterDecoder>(decoderSettings("Ieee8023", 8U, "MsbFirst", 1U));
             std::ignore                         = decodedBy(wide, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(odd));
             expect(eq(wide._coder.gridParity, std::uint8_t{0U})) << "the request was parity 0 and it was taken";
         }
@@ -714,22 +714,22 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
             const std::array<gr::Tag, 1UZ> number{gr::Tag{9UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), gr::Size_t{7}}}}};
             const std::array<gr::Tag, 1UZ> right{gr::Tag{9UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
 
-            gr::property_map filtered   = decoderSettings("ieee802_3", 1U);
+            gr::property_map filtered   = decoderSettings("Ieee8023", 1U);
             filtered["align_tag_value"] = std::string("sync");
-            const auto plain            = decoded(decoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(chips), 2UZ);
+            const auto plain            = decoded(decoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(chips), 2UZ);
 
             expect(that % (decoded(filtered, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(other)).bits == plain.bits)) << "a different value at the key does not re-grid";
             expect(that % (decoded(filtered, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(number)).bits == plain.bits)) << "a non-string value at the key does not re-grid";
             expect(that % (decoded(filtered, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(right)).bits != plain.bits)) << "the value it was told to wait for does";
 
-            gr::property_map disabled = decoderSettings("ieee802_3", 1U);
+            gr::property_map disabled = decoderSettings("Ieee8023", 1U);
             disabled["align_tag_key"] = std::string("");
             expect(that % (decoded(disabled, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(right)).bits == plain.bits)) << "an empty key ignores every tag";
         }
 
         { // (d) the tag is read and forwarded, never consumed
             const std::array<gr::Tag, 1UZ> planted{gr::Tag{8UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
-            const auto                     graphed = decoderGraph(decoderSettings("ieee802_3", 1U), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(planted));
+            const auto                     graphed = decoderGraph(decoderSettings("Ieee8023", 1U), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(planted));
             expect(that % (offsetsOf(graphed.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{4UZ})) << "a downstream extractor still needs it";
         }
 
@@ -737,19 +737,19 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
             const std::array<gr::Tag, 1UZ> toOne{gr::Tag{9UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
             const std::array<gr::Tag, 1UZ> toZero{gr::Tag{8UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
 
-            auto       rising = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U));
+            auto       rising = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
             const auto up     = decodedBy(rising, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(toOne));
             expect(eq(up.bits.size(), chips.size() / 2UZ)) << "every call still publishes one item per two input items";
             expect(eq(rising.nOrphanItems(), 1ULL)) << "0 -> 1 fabricates exactly one flagged orphan";
             expect(eq(rising.nDroppedChips(), 0ULL)) << "and loses no chip";
 
-            auto       falling = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U, "MsbFirst", 1U));
+            auto       falling = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U, "MsbFirst", 1U));
             const auto down    = decodedBy(falling, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(toZero));
             expect(eq(down.bits.size(), chips.size() / 2UZ));
             expect(eq(falling.nDroppedChips(), 1ULL)) << "1 -> 0 drops exactly the held chip";
             expect(eq(falling.nOrphanItems(), 1ULL)) << "and fabricates nothing beyond the run's own opening orphan";
 
-            auto       steady = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U));
+            auto       steady = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
             const auto same   = decodedBy(steady, std::span<const std::uint8_t>(chips), 2UZ, std::span<const gr::Tag>(toZero));
             expect(eq(same.bits.size(), chips.size() / 2UZ));
             expect(eq(steady.nOrphanItems(), 0ULL)) << "requesting the parity already in force costs nothing";
@@ -758,7 +758,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
         {                                                    // (f) violations never realign the decoder, however many of them arrive
             std::vector<std::uint8_t> violating(4096UZ, 1U); // every pair is 11
-            auto                      block = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U));
+            auto                      block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
             const auto                seen  = decodedBy(block, std::span<const std::uint8_t>(violating));
             expect(std::ranges::all_of(seen.flags, [](std::uint8_t flag) { return flag == 1U; })) << "every pair is reported";
             expect(eq(block.chip_phase.value, gr::Size_t{0})) << "and the setting is untouched";
@@ -773,9 +773,9 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         expect(!ManchesterDecoder::keepsTagOffsets());
 
         Rng                            rng;
-        const auto                     chips = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(rng.items(64UZ, 8U)));
+        const auto                     chips = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(rng.items(64UZ, 8U)));
         const std::array<gr::Tag, 1UZ> mixed{gr::Tag{8UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("kept")}, {gr::property_map::key_type(kCustomKey), std::string("kept")}}}};
-        const auto                     seen = decoderGraph(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(mixed));
+        const auto                     seen = decoderGraph(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips), std::span<const gr::Tag>(mixed));
         expect(that % (offsetsOf(seen.tags, gr::tag::TRIGGER_NAME.key()) == std::vector<std::size_t>{4UZ}));
         expect(that % (offsetsOf(seen.tags, kCustomKey) == std::vector<std::size_t>{4UZ})) << "a custom key crosses a rate changer beside the reserved one";
     };
@@ -784,8 +784,8 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         constexpr std::size_t           kItems = 100000UZ;
         const std::vector<std::uint8_t> ones(kItems, 0xFFU);
         const std::vector<std::uint8_t> low(kItems, 0x07U);
-        const auto                      fromOnes = decoded(decoderSettings("ieee802_3", 3U), std::span<const std::uint8_t>(ones));
-        const auto                      fromLow  = decoded(decoderSettings("ieee802_3", 3U), std::span<const std::uint8_t>(low));
+        const auto                      fromOnes = decoded(decoderSettings("Ieee8023", 3U), std::span<const std::uint8_t>(ones));
+        const auto                      fromLow  = decoded(decoderSettings("Ieee8023", 3U), std::span<const std::uint8_t>(low));
         expect(that % (fromOnes.bits == fromLow.bits)) << "only the low bits_per_item bits are read";
         expect(that % (fromOnes.flags == fromLow.flags));
         expect(eq(fromOnes.bits.size(), kItems / 2UZ));
@@ -797,11 +797,11 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         Rng rng;
         for (const gr::Size_t width : {gr::Size_t{1}, gr::Size_t{8}}) {
             const auto                     data  = rng.items(4096UZ, static_cast<unsigned>(width));
-            const auto                     chips = encoded(encoderSettings("ieee802_3", width), std::span<const std::uint8_t>(data));
+            const auto                     chips = encoded(encoderSettings("Ieee8023", width), std::span<const std::uint8_t>(data));
             const std::array<gr::Tag, 1UZ> planted{gr::Tag{101UZ, {{gr::property_map::key_type(gr::tag::TRIGGER_NAME.key()), std::string("sync")}}}};
-            const auto                     whole = decoded(decoderSettings("ieee802_3", width), std::span<const std::uint8_t>(chips), 0UZ, std::span<const gr::Tag>(planted));
+            const auto                     whole = decoded(decoderSettings("Ieee8023", width), std::span<const std::uint8_t>(chips), 0UZ, std::span<const gr::Tag>(planted));
             for (const std::size_t chunk : {2UZ, 4UZ, 18UZ, 4096UZ}) {
-                const auto chunked = decoded(decoderSettings("ieee802_3", width), std::span<const std::uint8_t>(chips), chunk, std::span<const gr::Tag>(planted));
+                const auto chunked = decoded(decoderSettings("Ieee8023", width), std::span<const std::uint8_t>(chips), chunk, std::span<const gr::Tag>(planted));
                 expect(that % (chunked.bits == whole.bits)) << std::format("bits_per_item {}, chunk {}", width, chunk);
                 expect(that % (chunked.flags == whole.flags)) << std::format("bits_per_item {}, chunk {}, violations", width, chunk);
             }
@@ -814,14 +814,14 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
             block.start();
         })) << "there is no default convention";
         expect(throws([] { std::ignore = make<ManchesterDecoder>({{"convention", std::string("thomas")}}); }));
-        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("ieee802_3", 0U)); }));
-        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("ieee802_3", 9U)); }));
-        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("ieee802_3", 8U, "little_endian")); }));
-        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("ieee802_3", 8U, "MsbFirst", 2U)); })) << "a chip phase is 0 or 1";
-        expect(nothrow([] { std::ignore = make<ManchesterDecoder>(decoderSettings("ge_thomas", 1U, "LsbFirst", 1U)); }));
+        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("Ieee8023", 0U)); }));
+        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("Ieee8023", 9U)); }));
+        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("Ieee8023", 8U, "little_endian")); }));
+        expect(throws([] { std::ignore = make<ManchesterDecoder>(decoderSettings("Ieee8023", 8U, "MsbFirst", 2U)); })) << "a chip phase is 0 or 1";
+        expect(nothrow([] { std::ignore = make<ManchesterDecoder>(decoderSettings("GeThomas", 1U, "LsbFirst", 1U)); }));
 
         const std::array<std::uint8_t, 2UZ> chips{0x9AU, 0x95U};
-        auto                                block  = make<ManchesterDecoder>(decoderSettings("ieee802_3"));
+        auto                                block  = make<ManchesterDecoder>(decoderSettings("Ieee8023"));
         const auto                          before = decodedBy(block, std::span<const std::uint8_t>(chips));
         expect(throws([&block] { restage(block, {{"chip_phase", gr::Size_t{2}}}); }));
         const auto after = decodedBy(block, std::span<const std::uint8_t>(chips));
@@ -831,7 +831,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
     "a settings change re-grids only when it moves the grid"_test = [] {
         const std::array<std::uint8_t, 2UZ> chips{0x9AU, 0x95U};
-        auto                                block = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U, "MsbFirst", 1U));
+        auto                                block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U, "MsbFirst", 1U));
         std::ignore                               = decodedBy(block, std::span<const std::uint8_t>(chips));
         expect(block._coder.hasCarry) << "phase 1 holds a chip between calls";
 
@@ -844,7 +844,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
     "end of stream"_test = [] {
         { // width 8, phase 0: four pairs fill the first four positions and the rest is pad
-            auto                                block = make<ManchesterDecoder>(decoderSettings("ieee802_3"));
+            auto                                block = make<ManchesterDecoder>(decoderSettings("Ieee8023"));
             const std::array<std::uint8_t, 1UZ> trailing{0x9AU};
             const auto                          tail = epilogueOf(block, std::span<const std::uint8_t>(trailing), 1UZ);
             expect(that % (tail.bits == std::vector<std::uint8_t>{0x40U}));
@@ -853,7 +853,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         }
 
         { // width 8, phase 1: the held chip pairs with the first trailing chip and the last one is a flagged orphan
-            auto                                block = make<ManchesterDecoder>(decoderSettings("ieee802_3", 8U, "MsbFirst", 1U));
+            auto                                block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 8U, "MsbFirst", 1U));
             const std::array<std::uint8_t, 2UZ> body{0x9AU, 0x95U};
             std::ignore = decodedBy(block, std::span<const std::uint8_t>(body));
             expect(block._coder.hasCarry);
@@ -867,7 +867,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         }
 
         { // width 1, phase 0: a lone trailing chip leaves as a flagged orphan
-            auto                                block = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U));
+            auto                                block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U));
             const std::array<std::uint8_t, 1UZ> trailing{1U};
             const auto                          tail = epilogueOf(block, std::span<const std::uint8_t>(trailing), 1UZ);
             expect(that % (tail.bits == std::vector<std::uint8_t>{0U}));
@@ -876,7 +876,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         }
 
         { // width 1, phase 1: the held chip and the trailing chip are a pair, so nothing is fabricated
-            auto                                block = make<ManchesterDecoder>(decoderSettings("ieee802_3", 1U, "MsbFirst", 1U));
+            auto                                block = make<ManchesterDecoder>(decoderSettings("Ieee8023", 1U, "MsbFirst", 1U));
             const std::array<std::uint8_t, 2UZ> body{1U, 0U};
             std::ignore = decodedBy(block, std::span<const std::uint8_t>(body));
             expect(block._coder.hasCarry);
@@ -889,7 +889,7 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
         { // flush_partial = false drops the tail, counts the chips and emits nothing
             for (const gr::Size_t width : {gr::Size_t{1}, gr::Size_t{8}}) {
-                gr::property_map settings                 = decoderSettings("ieee802_3", width);
+                gr::property_map settings                 = decoderSettings("Ieee8023", width);
                 settings["flush_partial"]                 = false;
                 auto                                block = make<ManchesterDecoder>(std::move(settings));
                 const std::array<std::uint8_t, 1UZ> trailing{0x9AU};
@@ -903,14 +903,14 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
         // and the framework half: an odd input item count leaves one trailing item, the epilogue runs once, and what
         // it explicitly published reaches the sink
         Rng        rng;
-        const auto chips   = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(rng.items(65UZ, 8U))); // 130 chip items
+        const auto chips   = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(rng.items(65UZ, 8U))); // 130 chip items
         const auto odd     = std::span<const std::uint8_t>(chips).subspan(0UZ, 129UZ);
-        const auto flushed = decoderGraph(decoderSettings("ieee802_3"), odd);
+        const auto flushed = decoderGraph(decoderSettings("Ieee8023"), odd);
         expect(eq(flushed.bits.size(), 65UZ)) << "64 paired items and one flushed tail";
         expect(eq(flushed.flags.size(), 65UZ));
         expect(eq(flushed.flags[64UZ], std::uint8_t{0x0FU})) << "the tail's pad positions are flagged";
 
-        gr::property_map dropping = decoderSettings("ieee802_3");
+        gr::property_map dropping = decoderSettings("Ieee8023");
         dropping["flush_partial"] = false;
         const auto truncated      = decoderGraph(std::move(dropping), odd);
         expect(eq(truncated.bits.size(), 64UZ)) << "with no flush the trailing item never becomes one";
@@ -918,22 +918,22 @@ const boost::ut::suite<"Manchester decoder"> manchesterDecoderTests = [] {
 
     "an unconnected violation port"_test = [] {
         Rng        rng;
-        const auto chips = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(rng.items(2048UZ, 8U)));
+        const auto chips = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(rng.items(2048UZ, 8U)));
 
-        const auto connected = decoded(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips));
-        const auto open      = decoded(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips), 0UZ, {}, false);
+        const auto connected = decoded(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips));
+        const auto open      = decoded(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips), 0UZ, {}, false);
         expect(that % (open.bits == connected.bits)) << "a chain that does not care about violations decodes the same";
         expect(open.flags.empty()) << "and nothing is published on the port it left open";
 
-        const auto graphed = decoderGraph(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(chips), {}, false);
+        const auto graphed = decoderGraph(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(chips), {}, false);
         expect(that % (graphed.bits == connected.bits)) << "and the graph runs rather than stalling on a port nobody terminated";
         expect(graphed.flags.empty());
 
         // an open port keeps the default buffer the graph never resized, so past a few thousand items its reserved
         // span comes back short of what the connected port was given. Leaving it out of the count is what keeps that
         // from throttling the block to nothing.
-        const auto wide  = encoded(encoderSettings("ieee802_3"), std::span<const std::uint8_t>(rng.items(20000UZ, 8U)));
-        const auto large = decoderGraph(decoderSettings("ieee802_3"), std::span<const std::uint8_t>(wide), {}, false);
+        const auto wide  = encoded(encoderSettings("Ieee8023"), std::span<const std::uint8_t>(rng.items(20000UZ, 8U)));
+        const auto large = decoderGraph(decoderSettings("Ieee8023"), std::span<const std::uint8_t>(wide), {}, false);
         expect(eq(large.bits.size(), wide.size() / 2UZ)) << "a chunk wider than the open port's own buffer still decodes in full";
     };
 };

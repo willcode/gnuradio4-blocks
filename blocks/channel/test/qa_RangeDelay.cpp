@@ -712,7 +712,7 @@ int main() {
         const std::vector<double>       delays{1.0e-4, 1.5e-4};
         const double                    slopePerSecond = (delays[1] - delays[0]) / 1.0;
 
-        auto forward = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", delays}, {"direction", std::string("apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
+        auto forward = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", delays}, {"direction", std::string("Apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
 
         // The two lines' latencies are fractional. A whole-sample comparison needs a bias that makes the total lag
         // integral. The causal rule needs a bias at or above the table's maximum. This bias meets both.
@@ -721,8 +721,8 @@ int main() {
         const auto   lag         = static_cast<std::size_t>(std::llround(2. * latency + biasSamples));
 
         const auto pair = [&](const std::vector<double>& table, std::span<const C> signal) {
-            auto       first     = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
-            auto       second    = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("correct")}, {"bias_s", biasSamples / fs}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
+            auto       first     = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("Apply")}, {"bias_s", 0.}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
+            auto       second    = configured<RangeDelay<C>>({{"schedule_times_ns", times}, {"schedule_delays_s", table}, {"direction", std::string("Correct")}, {"bias_s", biasSamples / fs}, {"sample_rate", static_cast<float>(fs)}, {"order", 3}, {"bank_size", gr::Size_t{128U}}});
             const auto delayed   = runWhole<RangeDelay<C>, C>(*first, signal);
             const auto recovered = runWhole<RangeDelay<C>, C>(*second, std::span<const C>(delayed));
 
@@ -1266,7 +1266,7 @@ int main() {
         auto block = configured<RangeDelay<float>>(settings);
         expect(refusedLive(*block, {{"sample_rate", 500.f}, {"direction", std::string("undo")}}));
         expect(that % (block->sample_rate.value == 1'000.f)) << "the accepted rate is written back to its member";
-        expect(!refusedLive(*block, {{"sample_rate", 500.f}, {"direction", std::string("apply")}})) << "the same rate beside a valid direction is taken";
+        expect(!refusedLive(*block, {{"sample_rate", 500.f}, {"direction", std::string("Apply")}})) << "the same rate beside a valid direction is taken";
         expect(that % (block->sample_rate.value == 500.f));
         std::vector<float> out(impulse.size());
         std::ignore = block->processBulk(std::span<const float>(impulse), std::span<float>(out));

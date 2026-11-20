@@ -16,7 +16,7 @@ blocks:
     parameters:
       name: two_frames_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -54,7 +54,7 @@ blocks:
     parameters:
       name: soft_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<float32>
     parameters:
@@ -74,7 +74,7 @@ blocks:
     parameters:
       name: pack_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst

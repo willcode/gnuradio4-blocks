@@ -20,9 +20,9 @@ namespace gr::digital {
 
 /// The frequency-pulse families continuous-phase modulation is built from.
 enum class CpmPulseShape {
-    Rect,         ///< uniform over the pulse's whole span; one symbol long it is CPFSK, and on two levels classic FSK
+    Rect,          ///< uniform over the pulse's whole span; one symbol long it is CPFSK, and on two levels classic FSK
     RaisedCosine, ///< a raised cosine spanning the whole pulse, the partial-response form
-    Gaussian      ///< a Gaussian of bandwidth-symbol-time product bt convolved with one symbol of rectangle: GFSK
+    Gaussian       ///< a Gaussian of bandwidth-symbol-time product bt convolved with one symbol of rectangle: GFSK
 };
 
 [[nodiscard]] inline CpmPulseShape cpmPulseShapeFrom(std::string_view name) {

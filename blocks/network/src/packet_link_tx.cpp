@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
     auto& crc = graph.emplaceBlock<digital::CrcAppend>({
         {"name", std::string("record crc")},
         {"width", 32U},
-        {"crc_byte_order", std::string("big")},
+        {"crc_byte_order", std::string("Big")},
     });
 
     auto& packets = graph.emplaceBlock<basic::DataSetToPacket<std::uint8_t>>({

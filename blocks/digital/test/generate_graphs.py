@@ -747,7 +747,7 @@ def byte_framing(bound, floor=None):
 def hdlc_framing(bound, **more):
     return {
         "end_delimiter": FLAG,
-        "transparency": "bit_stuffing",
+        "transparency": "BitStuffing",
         "max_payload_items": U32(bound),
         **more,
     }
@@ -906,7 +906,7 @@ frame the second '$' opened. Each block's line at stop counts the aborts and res
     settings = {
         "end_delimiter": "00001010",
         "start_delimiter": "00100100",
-        "frame_open": "start",
+        "frame_open": "Start",
         "bits_per_item": U32(8),
         "max_payload_items": U32(64),
     }
@@ -1152,7 +1152,7 @@ def framer_slip(bound):
     return {
         "end_delimiter": "11000000",
         "bits_per_item": U32(8),
-        "transparency": "byte_escape",
+        "transparency": "ByteEscape",
         "escape_item": U32(0xDB),
         "escape_map": U32s([0xDC, 0xC0, 0xDD, 0xDB]),
         "max_payload_items": U32(bound),
@@ -1166,7 +1166,7 @@ def framer_ppp(bound):
     return {
         "end_delimiter": FLAG,
         "bits_per_item": U32(8),
-        "transparency": "byte_escape",
+        "transparency": "ByteEscape",
         "escape_item": U32(0x7D),
         "escape_map": U32s(flat),
         "max_payload_items": U32(bound),
@@ -1177,7 +1177,7 @@ def framer_nmea(bound):
     return {
         "end_delimiter": "0000110100001010",
         "start_delimiter": "00100100",
-        "frame_open": "start",
+        "frame_open": "Start",
         "bits_per_item": U32(8),
         "max_payload_items": U32(bound),
     }
@@ -1389,7 +1389,7 @@ into the last frame, after its last item.
     )
     settings = {
         "end_delimiter": "0111111",
-        "transparency": "bit_stuffing",
+        "transparency": "BitStuffing",
         "abort_ones": U32(0),
         "max_payload_items": U32(4096),
     }

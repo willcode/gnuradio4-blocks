@@ -18,7 +18,7 @@ blocks:
     parameters:
       name: fcs_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst
@@ -32,7 +32,7 @@ blocks:
       final_xor: !!uint64 65535
       input_reflected: true
       result_reflected: true
-      crc_byte_order: little
+      crc_byte_order: Little
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: fcs_ok

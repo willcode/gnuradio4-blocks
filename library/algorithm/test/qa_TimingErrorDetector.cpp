@@ -177,16 +177,16 @@ struct GainRow {
 };
 
 constexpr GainRow kGainTable[] = {
-    {TimingDetector::MuellerMuller, Modulation::Bpsk, 1.89141, 1.76397, 1.55758},         //
-    {TimingDetector::MuellerMuller, Modulation::Qpsk, 1.90283, 1.77355, 1.56435},         //
+    {TimingDetector::MuellerMuller, Modulation::Bpsk, 1.89141, 1.76397, 1.55758},          //
+    {TimingDetector::MuellerMuller, Modulation::Qpsk, 1.90283, 1.77355, 1.56435},          //
     {TimingDetector::ModifiedMuellerMuller, Modulation::Bpsk, 3.78285, 3.52798, 3.11518}, //
     {TimingDetector::ModifiedMuellerMuller, Modulation::Qpsk, 3.80566, 3.54714, 3.12875}, //
-    {TimingDetector::ZeroCrossing, Modulation::Bpsk, 2.53867, 2.57977, 2.64744},          //
-    {TimingDetector::ZeroCrossing, Modulation::Qpsk, 2.56109, 2.60278, 2.67137},          //
-    {TimingDetector::Gardner, Modulation::Bpsk, 0.67408, 1.05626, 1.47926},               //
-    {TimingDetector::Gardner, Modulation::Qpsk, 0.68004, 1.06739, 1.49611},               //
-    {TimingDetector::EarlyLate, Modulation::Bpsk, 0.67397, 1.05616, 1.47918},             //
-    {TimingDetector::EarlyLate, Modulation::Qpsk, 0.68008, 1.06743, 1.49614},             //
+    {TimingDetector::ZeroCrossing, Modulation::Bpsk, 2.53867, 2.57977, 2.64744},           //
+    {TimingDetector::ZeroCrossing, Modulation::Qpsk, 2.56109, 2.60278, 2.67137},           //
+    {TimingDetector::Gardner, Modulation::Bpsk, 0.67408, 1.05626, 1.47926},                 //
+    {TimingDetector::Gardner, Modulation::Qpsk, 0.68004, 1.06739, 1.49611},                 //
+    {TimingDetector::EarlyLate, Modulation::Bpsk, 0.67397, 1.05616, 1.47918},              //
+    {TimingDetector::EarlyLate, Modulation::Qpsk, 0.68008, 1.06743, 1.49614},              //
 };
 
 constexpr double kRolloffs[] = {0.22, 0.35, 0.50};
@@ -197,7 +197,7 @@ constexpr double kChord      = 0.02; /// the symmetric offset the S-curve slope 
     case TimingDetector::MuellerMuller: return "M&M";
     case TimingDetector::ModifiedMuellerMuller: return "modified M&M";
     case TimingDetector::ZeroCrossing: return "zero crossing";
-    case TimingDetector::Gardner: return "Gardner";
+    case TimingDetector::Gardner: return "gardner";
     case TimingDetector::EarlyLate: return "early-late";
     case TimingDetector::SignalTimesSlopeMl: return "signal x slope";
     case TimingDetector::SignumTimesSlopeMl: return "signum x slope";

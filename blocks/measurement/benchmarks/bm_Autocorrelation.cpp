@@ -99,12 +99,12 @@ int main() {
     gr::analysis::Autocorrelation<CF> floorKernel;
     floorKernel.prepare(floorConfig);
 
-    Autocorrelation<CF>    envelope8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
-    Autocorrelation<CF>    complex8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
-    Autocorrelation<CF>    disjoint8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});
-    Autocorrelation<CF>    envelope4096({{"window_length", gr::Size_t{4096U}}, {"max_lag", gr::Size_t{1024U}}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
-    Autocorrelation<CF>    everyWindow({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("envelope")}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
-    Autocorrelation<float> real8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("complex")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
+    Autocorrelation<CF>    envelope8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
+    Autocorrelation<CF>    complex8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
+    Autocorrelation<CF>    disjoint8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.0}, {"sample_rate", kSampleRate}});
+    Autocorrelation<CF>    envelope4096({{"window_length", gr::Size_t{4096U}}, {"max_lag", gr::Size_t{1024U}}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
+    Autocorrelation<CF>    everyWindow({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("Envelope")}, {"n_averages", gr::Size_t{1U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
+    Autocorrelation<float> real8192({{"window_length", gr::Size_t{8192U}}, {"max_lag", gr::Size_t{2048U}}, {"kind", std::string("Complex")}, {"n_averages", gr::Size_t{16U}}, {"overlap", 0.5}, {"sample_rate", kSampleRate}});
     init(envelope8192);
     init(complex8192);
     init(disjoint8192);

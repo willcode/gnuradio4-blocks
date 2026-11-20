@@ -44,12 +44,12 @@ template<typename TBlock>
 
 /// The HDLC profile: the flag, bit stuffing, and each payload byte unpacked least significant bit first.
 [[nodiscard]] gr::property_map hdlcFraming(gr::Size_t bound) {
-    return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"max_payload_items", bound}, //
+    return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("BitStuffing")}, {"max_payload_items", bound}, //
         {"payload_pack_bits", gr::Size_t{8}}, {"payload_bit_order", std::string("LsbFirst")}};
 }
 
 [[nodiscard]] gr::property_map slipFraming(gr::Size_t bound) {
-    return {{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("byte_escape")}, //
+    return {{"end_delimiter", std::string("11000000")}, {"bits_per_item", gr::Size_t{8}}, {"transparency", std::string("ByteEscape")}, //
         {"escape_item", gr::Size_t{0xDB}}, {"escape_map", std::vector<gr::Size_t>{0xDCU, 0xC0U, 0xDDU, 0xDBU}}, {"max_payload_items", bound}};
 }
 

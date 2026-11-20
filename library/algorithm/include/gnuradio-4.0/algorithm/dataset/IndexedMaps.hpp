@@ -48,7 +48,7 @@ struct IndexedMap {
 
 /// Reads an index-keyed map. Returns its maps sorted by index, the maps of one list in list order. A key that is not
 /// an `Index`, two keys naming one index, an entry that is neither a map nor a list, and a list element that is not a
-/// map are errors. `name` and `indexName` word the error: "<name> key '<key>' is not <indexName>".
+/// map are errors. `name` and `indexName` word the error: "<name> key '<key>' must be <indexName>".
 template<std::integral Index>
 [[nodiscard]] std::expected<std::vector<IndexedMap<Index>>, std::string> readIndexedMaps(const property_map& entries, std::string_view name, std::string_view indexName) {
     struct Entry {
@@ -61,7 +61,7 @@ template<std::integral Index>
     for (const auto& [key, entry] : entries) {
         const std::optional<Index> index = parseIndex<Index>(std::string_view(key));
         if (!index.has_value()) {
-            return std::unexpected(std::format("{} key '{}' is not {}", name, std::string_view(key), indexName));
+            return std::unexpected(std::format("{} key '{}' must be {}", name, std::string_view(key), indexName));
         }
         keyed.push_back(Entry{.index = *index, .spelling = std::string_view(key), .value = &entry});
     }

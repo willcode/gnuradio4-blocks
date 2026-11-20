@@ -42,12 +42,12 @@ blocks:
       final_xor: !!uint64 65535
       input_reflected: true
       result_reflected: true
-      crc_byte_order: little
+      crc_byte_order: Little
   - id: gr::blocks::digital::DelimiterFramer
     parameters:
       name: clean_framer
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 8192
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst
@@ -99,7 +99,7 @@ blocks:
     parameters:
       name: clean_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 8192
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst
@@ -112,7 +112,7 @@ blocks:
       final_xor: !!uint64 65535
       input_reflected: true
       result_reflected: true
-      crc_byte_order: little
+      crc_byte_order: Little
       discard_crc: true
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -168,7 +168,7 @@ blocks:
     parameters:
       name: flipped_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 8192
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst
@@ -181,7 +181,7 @@ blocks:
       final_xor: !!uint64 65535
       input_reflected: true
       result_reflected: true
-      crc_byte_order: little
+      crc_byte_order: Little
       discard_crc: true
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:

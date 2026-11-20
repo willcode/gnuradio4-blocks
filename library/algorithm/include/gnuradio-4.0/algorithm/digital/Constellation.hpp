@@ -46,9 +46,9 @@
  * convention exists for 8PSK, so its rotation and label offset are parameters, and a receiver talking
  * to particular equipment states that equipment's own.
  *
- * Normalization scales the points once, at construction: `Power`, the default, by `sqrt(mean |c|^2)`,
- * `Amplitude` by `mean |c|`, `None` not at all. The two agree for any constant-modulus constellation
- * and differ for QAM. `Power` is the default because every noise figure, every `Es/N0`, every detector
+ * Normalization scales the points once, at construction: `power`, the default, by `sqrt(mean |c|^2)`,
+ * `amplitude` by `mean |c|`, `none` not at all. The two agree for any constant-modulus constellation
+ * and differ for QAM. `power` is the default because every noise figure, every `Es/N0`, every detector
  * gain in the synchronization family and every SNR estimate is a power. Normalization fixes the
  * transmitter's reference and is not an AGC: `hardDecision` is scale-invariant for PSK but not for
  * QAM, and every soft decision compares a distance against `N0`, so an AGC holding the input at the
@@ -57,7 +57,7 @@
  * `Nearest` is the definition of the hard decision and resolves a tie to the lowest symbol; a closed
  * form sends a sample exactly on a boundary to one of its nearest symbols.
  *
- * Soft decisions. `MaxLog` is the default and is what the closed forms compute:
+ * Soft decisions. `max_log` is the default, computed by the closed forms:
  *
  * ```
  *   L_k(z) ~= ( min_{s: bit_k(s)=0} |z - c[s]|^2 - min_{s: bit_k(s)=1} |z - c[s]|^2 ) / N0
@@ -65,9 +65,9 @@
  *
  * It is exact for BPSK and QPSK, where each bit's two candidate subsets each hold exactly one nearest
  * point, and its error is about `ln 2` elsewhere, the worst case being a tie between the two nearest
- * points of one subset. `Exact` computes the true LLR from the full `M`-point sums, which do not
- * shorten the way the max-log minima do. Under `MaxLog`, `sign(L_k)` is bit `k` of
- * `hardDecision`; that does not hold for `Exact`, where a distant cluster of same-bit points can
+ * points of one subset. `exact` computes the true LLR from the full `M`-point sums, which do not
+ * shorten the way the max-log minima do. Under `max_log`, `sign(L_k)` is bit `k` of
+ * `hardDecision`; that does not hold for `exact`, where a distant cluster of same-bit points can
  * outweigh a nearer single one.
  *
  * Rotation order. Gray labeling minimizes bit errors per symbol error; rotation-ordered labeling,
@@ -78,13 +78,13 @@
  */
 namespace gr::digital {
 
-/// @brief Which reference scale the stored points carry. `Power` is the default; see the file comment.
+/// @brief Which reference scale the stored points carry. `power` is the default; see the file comment.
 enum class Normalization { Power, Amplitude, None };
 
 /// @brief Which decision the geometry admits, resolved once at construction and never per symbol.
 enum class DecisionStrategy { Psk, SquareQam, Nearest };
 
-/// @brief `MaxLog` needs no transcendental and is exact for BPSK and QPSK; `Exact` is the true LLR.
+/// @brief `max_log` needs no transcendental and is exact for BPSK and QPSK; `exact` is the true LLR.
 enum class SoftAlgorithm { MaxLog, Exact };
 
 [[nodiscard]] inline constexpr std::uint32_t grayEncode(std::uint32_t index) noexcept { return index ^ (index >> 1U); }
@@ -242,7 +242,7 @@ public:
     /**
      * @brief The full `M`-point definition, which the closed forms are checked against.
      *
-     * Also the only route for `Exact`, whose sums do not shorten the way the max-log minima do.
+     * Also the only route for `exact`, whose sums do not shorten the way the max-log minima do.
      */
     void softDecisionsExhaustive(std::complex<F> z, F noisePower, std::span<F> out, SoftAlgorithm algorithm = SoftAlgorithm::MaxLog) const {
         checkSoftArguments(noisePower, out.size());
@@ -689,43 +689,34 @@ private:
     std::array<F, 16>            axisLevel_{};
 };
 
+/// @brief The family a constellation is built from, spelled as a caller that carries it as a setting names it.
+enum class ConstellationFamily : std::uint8_t { bpsk, qpsk, psk8, psk, qam, custom };
+
 /**
  * @brief Builds a constellation from the plain values that name one: the family, its size, and its options.
  *
  * The parameters a caller carries as settings, resolved in one place, so that every consumer of a named constellation
- * agrees on what a name means. `arity` is read by `psk` and `qam` only, `phaseOffset` and `labelXor` by `psk` only,
+ * agrees on what a family means. `arity` is read by `psk` and `qam` only, `phaseOffset` and `labelXor` by `psk` only,
  * and `interleavedPoints` by `custom` only.
  */
 template<std::floating_point F>
-[[nodiscard]] Constellation<F> constellationFromName(std::string_view name, std::size_t arity, F phaseOffset, std::uint8_t labelXor, std::span<const F> interleavedPoints, std::string_view normalizationName) {
-    const Normalization mode = normalizationName == "power" ? Normalization::Power : normalizationName == "amplitude" ? Normalization::Amplitude : normalizationName == "none" ? Normalization::None : throw std::invalid_argument("gr::digital::constellationFromName: normalization must be 'power', 'amplitude' or 'none', got '" + std::string(normalizationName) + "'");
-
-    if (name == "bpsk") {
-        return Constellation<F>::bpsk(mode);
+[[nodiscard]] Constellation<F> constellationOfFamily(ConstellationFamily family, std::size_t arity, F phaseOffset, std::uint8_t labelXor, std::span<const F> interleavedPoints, Normalization mode) {
+    switch (family) {
+    case ConstellationFamily::bpsk: return Constellation<F>::bpsk(mode);
+    case ConstellationFamily::qpsk: return Constellation<F>::qpsk(mode);
+    case ConstellationFamily::psk8: return Constellation<F>::psk8(mode);
+    case ConstellationFamily::psk: return Constellation<F>::psk(arity, phaseOffset, labelXor, mode);
+    case ConstellationFamily::qam: return Constellation<F>::qam(arity, mode);
+    case ConstellationFamily::custom: break;
     }
-    if (name == "qpsk") {
-        return Constellation<F>::qpsk(mode);
+    if (interleavedPoints.empty() || interleavedPoints.size() % 2UZ != 0UZ) {
+        throw std::invalid_argument("gr::digital::constellationOfFamily: 'custom' needs points as interleaved re,im pairs, got " + std::to_string(interleavedPoints.size()) + " values");
     }
-    if (name == "psk8") {
-        return Constellation<F>::psk8(mode);
+    std::vector<std::complex<F>> list(interleavedPoints.size() / 2UZ);
+    for (std::size_t i = 0UZ; i < list.size(); ++i) {
+        list[i] = std::complex<F>(interleavedPoints[2UZ * i], interleavedPoints[2UZ * i + 1UZ]);
     }
-    if (name == "psk") {
-        return Constellation<F>::psk(arity, phaseOffset, labelXor, mode);
-    }
-    if (name == "qam") {
-        return Constellation<F>::qam(arity, mode);
-    }
-    if (name == "custom") {
-        if (interleavedPoints.empty() || interleavedPoints.size() % 2UZ != 0UZ) {
-            throw std::invalid_argument("gr::digital::constellationFromName: 'custom' needs points as interleaved re,im pairs, got " + std::to_string(interleavedPoints.size()) + " values");
-        }
-        std::vector<std::complex<F>> list(interleavedPoints.size() / 2UZ);
-        for (std::size_t i = 0UZ; i < list.size(); ++i) {
-            list[i] = std::complex<F>(interleavedPoints[2UZ * i], interleavedPoints[2UZ * i + 1UZ]);
-        }
-        return Constellation<F>::custom(std::span<const std::complex<F>>(list), mode);
-    }
-    throw std::invalid_argument("gr::digital::constellationFromName: name must be 'bpsk', 'qpsk', 'psk8', 'psk', 'qam' or 'custom', got '" + std::string(name) + "'");
+    return Constellation<F>::custom(std::span<const std::complex<F>>(list), mode);
 }
 
 } // namespace gr::digital

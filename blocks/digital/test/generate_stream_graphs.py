@@ -436,7 +436,7 @@ complement of the input. Each sink expects its bits or symbols.
 """,
     )
     bits = symbols(64, 2, 0xBE5466CF34E90C6C)
-    nrzi = {"coding": "nrzi"}
+    nrzi = {"coding": "Nrzi"}
     coded = encode(bits, coding="nrzi")
     xored = encode(bits)
     assert all(coded[i] == xored[i] ^ (1 - i % 2) for i in range(len(bits)))
@@ -468,7 +468,7 @@ complement of the input. Each sink expects its bits or symbols.
             g.chain(src, blk, g.expect_sink(f"{name}_{label}_sink", "uint8", expected))
 
     data = symbols(64, 2, 0x9E3779B97F4A7C15)
-    differential = {"modulus": u32(2), "coding": "differential"}
+    differential = {"modulus": u32(2), "coding": "Differential"}
     coded = encode(data)
     inverted = [v ^ 1 for v in coded]
     flipped = decode(inverted)

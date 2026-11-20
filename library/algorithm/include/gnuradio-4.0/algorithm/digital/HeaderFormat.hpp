@@ -217,8 +217,9 @@ private:
 };
 
 /// @brief What a length field's number counts. Required, with no default: the three give different answers for the
-/// same wire bits and a silent choice is a silent interoperability assumption.
-enum class CountCovers : std::uint8_t { Payload, PayloadAndCheck, WholeFrame };
+/// same wire bits and a silent choice is a silent interoperability assumption, so a setting starts at `unset`, which
+/// counts nothing.
+enum class CountCovers : std::uint8_t { Unset, Payload, PayloadAndCheck, WholeFrame };
 
 /// @brief Whether a length field's bytes run most or least significant first. The bits inside a byte are MSB first
 /// either way, which is the whole of the difference.
@@ -251,12 +252,15 @@ enum class FlagsPosition : std::uint8_t { High, Low };
 struct LengthCount {
     CountCovers covers           = CountCovers::PayloadAndCheck;
     std::size_t unitItems        = 8UZ; ///< `u`, items per counted unit, in `[1, 64]`
-    std::size_t checkItems       = 0UZ; ///< `c`, trailing check items the field does not count; only under `Payload`
+    std::size_t checkItems       = 0UZ; ///< `c`, trailing check items the field does not count; only under `payload`
     std::size_t framePrefixItems = 0UZ; ///< `p`, frame items ahead of the payload the field does count; zero means `headerItems()`
 };
 
 /// @brief Refuse a count whose parameters do not describe the convention they are given with, naming the setting.
 inline void validateLengthCount(const LengthCount& count) {
+    if (count.covers == CountCovers::Unset) {
+        throw std::invalid_argument("gr::digital::LengthCount: count_covers is required");
+    }
     if (count.unitItems < 1UZ || count.unitItems > 64UZ) {
         throw std::invalid_argument("gr::digital::LengthCount: count_unit_items must be in [1, 64], got " + std::to_string(count.unitItems));
     }
@@ -286,6 +290,7 @@ inline void validateLengthCount(const LengthCount& count) {
 
     std::size_t items = unit * value;
     switch (count.covers) {
+    case CountCovers::Unset: return std::nullopt;
     case CountCovers::Payload: items += check; break;
     case CountCovers::PayloadAndCheck: break;
     case CountCovers::WholeFrame:
@@ -312,6 +317,7 @@ inline void validateLengthCount(const LengthCount& count) {
 
     std::size_t counted = payloadItems;
     switch (count.covers) {
+    case CountCovers::Unset: return std::nullopt;
     case CountCovers::Payload:
         if (payloadItems < check) {
             return std::nullopt;

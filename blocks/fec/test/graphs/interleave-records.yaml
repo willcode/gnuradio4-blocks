@@ -22,7 +22,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: carried_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -57,7 +57,7 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: refused_interleave_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -85,7 +85,7 @@ blocks:
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: refused_deinterleave_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
       output_offset: !!uint32 2
@@ -110,13 +110,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: window_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: window_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
       output_offset: !!uint32 7
@@ -139,13 +139,13 @@ blocks:
   - id: gr::blocks::fec::Interleave<uint8>
     parameters:
       name: tail_interleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
   - id: gr::blocks::fec::Deinterleave<uint8>
     parameters:
       name: tail_deinterleave
-      kind: block
+      kind: Block
       rows: !!uint32 4
       cols: !!uint32 5
       output_offset: !!uint32 15

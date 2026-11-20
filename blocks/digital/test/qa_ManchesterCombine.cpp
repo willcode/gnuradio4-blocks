@@ -236,7 +236,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
 
         // inside a bit the detector multiplies two antipodal chips, so the recovered bit carries an overall minus
         const auto pinnedAt = [&data](std::string_view label, const std::vector<float>& soft, std::int32_t pinned, std::size_t from, std::size_t offset) {
-            const Combined run = through({{"input", std::string("differential")}, {"phase", pinned}}, std::span<const float>(soft));
+            const Combined run = through({{"input", std::string("Differential")}, {"phase", pinned}}, std::span<const float>(soft));
             expect(eq(run.bits.size(), soft.size() / 2UZ)) << label << ": one bit for two chips";
             expect(eq(disagreements(std::span<const float>(run.bits), std::span<const int>(data), from, offset, -1), 0UZ)) << label << ": every transmitted bit comes back";
             expect(gt(meanOverRms(std::span<const float>(run.bits).subspan(from)), 0.9999)) << label << ": the decisions are antipodal, so the mean magnitude is the root mean square";
@@ -254,7 +254,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         const std::vector<float> odd(even.begin() + 1, even.end());
 
         const auto estimatesAt = [&data](std::string_view label, const std::vector<float>& soft, float expected, std::size_t offset) {
-            const Combined run = through({{"input", std::string("differential")}}, std::span<const float>(soft));
+            const Combined run = through({{"input", std::string("Differential")}}, std::span<const float>(soft));
             expect(eq(run.phase.size(), run.bits.size())) << label;
 
             // The two means start equal and separate as the constant accumulates, so the estimate is right within a
@@ -276,7 +276,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         const std::vector<int>   chips = manchesterChips(std::span<const int>(data));
         const std::vector<float> soft  = detected(std::span<const int>(chips));
 
-        const Combined selected  = through({{"input", std::string("differential")}, {"phase", std::int32_t{0}}}, std::span<const float>(soft));
+        const Combined selected  = through({{"input", std::string("Differential")}, {"phase", std::int32_t{0}}}, std::span<const float>(soft));
         const double   antipodal = meanOverRms(std::span<const float>(selected.bits).subspan(1UZ));
         expect(gt(antipodal, 0.9999)) << "the selected parity is antipodal";
 
@@ -303,7 +303,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         std::vector<float> stepped(whole.begin(), whole.begin() + static_cast<std::ptrdiff_t>(2UZ * kStep));
         stepped.insert(stepped.end(), whole.begin() + static_cast<std::ptrdiff_t>(2UZ * kStep + 1UZ), whole.end());
 
-        const Combined run = through({{"input", std::string("differential")}}, std::span<const float>(stepped));
+        const Combined run = through({{"input", std::string("Differential")}}, std::span<const float>(stepped));
         expect(eq(disagreements(std::span<const float>(run.bits).first(kStep), std::span<const int>(data), 1UZ, 0UZ, -1), 0UZ)) << "every bit before the step";
 
         std::size_t moved = kStep;
@@ -330,7 +330,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         const std::vector<float> shifted(chips.begin() + 1, chips.end());
 
         const auto combinesAt = [&data](std::string_view label, const std::vector<float>& soft, float expected) {
-            const Combined    run     = through({{"input", std::string("chips")}}, std::span<const float>(soft));
+            const Combined    run     = through({{"input", std::string("Chips")}}, std::span<const float>(soft));
             const std::size_t settled = settlesAt(std::span<const float>(run.phase), expected);
             std::println("[combine] chips {}: settles at symbol {}, mean confidence {:.3f}", label, settled, mean(std::span<const float>(run.confidence)));
             expect(le(settled, kHoldSymbols + 8UZ)) << std::format("{}: the products separate after {} symbols, against a hold of {}", label, settled, kHoldSymbols);
@@ -348,7 +348,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         const std::vector<float>       soft  = detected(std::span<const int>(chips));
         const std::array<gr::Tag, 1UZ> rated{gr::Tag{0UZ, {{gr::property_map::key_type(gr::tag::SAMPLE_RATE.key()), 800.0F}}}};
 
-        const Combined run = through({{"input", std::string("differential")}}, std::span<const float>(soft), std::span<const gr::Tag>(rated));
+        const Combined run = through({{"input", std::string("Differential")}}, std::span<const float>(soft), std::span<const gr::Tag>(rated));
         expect(eq(run.bits.size(), soft.size() / 2UZ)) << "two chips in, one bit out";
 
         bool sawRate = false;
@@ -371,7 +371,7 @@ const boost::ut::suite<"ManchesterCombine"> manchesterCombineTests = [] {
         expect(throws([&build] { build({{"input", std::string("soft")}}); })) << "a stream this block cannot read is named, not guessed at";
         expect(throws([&build] { build({{"phase", std::int32_t{2}}}); })) << "a pairing grid has two parities";
         expect(throws([&build] { build({{"averaging_symbols", gr::Size_t{0}}}); })) << "a mean over no symbols is not a mean";
-        expect(nothrow([&build] { build({{"input", std::string("chips")}, {"phase", std::int32_t{1}}}); }));
+        expect(nothrow([&build] { build({{"input", std::string("Chips")}, {"phase", std::int32_t{1}}}); }));
     };
 };
 

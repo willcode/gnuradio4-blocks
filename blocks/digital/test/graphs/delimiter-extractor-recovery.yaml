@@ -16,7 +16,7 @@ blocks:
     parameters:
       name: abort_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
@@ -39,7 +39,7 @@ blocks:
     parameters:
       name: patient_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
       abort_ones: !!uint32 0
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
@@ -61,7 +61,7 @@ blocks:
       name: restart_extractor
       end_delimiter: "00001010"
       start_delimiter: "00100100"
-      frame_open: start
+      frame_open: Start
       bits_per_item: !!uint32 8
       max_payload_items: !!uint32 64
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>

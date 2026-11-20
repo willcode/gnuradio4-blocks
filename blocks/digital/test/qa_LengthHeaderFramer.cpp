@@ -164,7 +164,7 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         // the worked example the other end reads: a 34-byte record whose last two bytes are a CRC-16, under a 16-bit
         // field that counts the payload alone, writes 32 and puts 272 items on the wire
         Rng                       rng{};
-        const gr::property_map    settings = with(layout("length_plain", "payload", 16U, 8U, 16U, 0U, 4096U), {{"sync_word", codeString(kSyncWord, kSyncBits)}, {"payload_pack_bits", static_cast<gr::Size_t>(8)}});
+        const gr::property_map    settings = with(layout("length_plain", "Payload", 16U, 8U, 16U, 0U, 4096U), {{"sync_word", codeString(kSyncWord, kSyncBits)}, {"payload_pack_bits", static_cast<gr::Size_t>(8)}});
         LengthHeaderFramer        framer   = make<LengthHeaderFramer>(settings);
         const std::vector<Record> sent{recordOf(randomBytes(34UZ, rng))};
 
@@ -193,12 +193,12 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
             const char* byteOrder;
             const char* flagsAt;
         };
-        const Row kRows[]{{"length_plain", "payload", 16U, 8U, 16U, 0U, "big", "high"}, //
-            {"length_plain", "payload_and_check", 16U, 8U, 0U, 0U, "big", "high"},      //
-            {"length_plain", "whole_frame", 16U, 8U, 0U, 0U, "big", "high"},            //
-            {"length_plain", "payload_and_check", 16U, 8U, 0U, 0U, "little", "high"},   //
-            {"length_golay24", "payload_and_check", 8U, 8U, 0U, 0U, "big", "high"},     //
-            {"length_golay24", "payload", 8U, 8U, 16U, 0U, "big", "low"}};
+        const Row kRows[]{{"length_plain", "Payload", 16U, 8U, 16U, 0U, "Big", "High"}, //
+            {"length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, "Big", "High"},      //
+            {"length_plain", "WholeFrame", 16U, 8U, 0U, 0U, "Big", "High"},            //
+            {"length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, "Little", "High"},   //
+            {"length_golay24", "PayloadAndCheck", 8U, 8U, 0U, 0U, "Big", "High"},     //
+            {"length_golay24", "Payload", 8U, 8U, 16U, 0U, "Big", "Low"}};
 
         for (const Row& row : kRows) {
             const bool             golay    = std::string_view(row.name) == "length_golay24";
@@ -258,7 +258,7 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         Rng rng{};
 
         { // empty, and above the bound
-            LengthHeaderFramer        framer = make<LengthHeaderFramer>(with(layout("length_plain", "payload_and_check", 16U, 8U, 0U, 0U, 64U), {{"payload_pack_bits", static_cast<gr::Size_t>(8)}}));
+            LengthHeaderFramer        framer = make<LengthHeaderFramer>(with(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 64U), {{"payload_pack_bits", static_cast<gr::Size_t>(8)}}));
             const std::vector<Record> sent{recordOf({}), recordOf(randomBytes(16UZ, rng)), recordOf(randomBytes(4UZ, rng))};
             const std::vector<Record> framed = frameAll(framer, std::span<const Record>(sent));
             expect(eq(framed.size(), 1UZ)) << "only the record that fits is framed";
@@ -267,7 +267,7 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         }
 
         { // an item count that is not a whole number of counted units cannot be framed by a length field at all
-            LengthHeaderFramer        framer = make<LengthHeaderFramer>(layout("length_plain", "payload_and_check", 16U, 8U, 0U, 0U, 4096U));
+            LengthHeaderFramer        framer = make<LengthHeaderFramer>(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 4096U));
             const std::vector<Record> sent{recordOf(std::vector<std::uint8_t>(12UZ, std::uint8_t{1})), recordOf(std::vector<std::uint8_t>(16UZ, std::uint8_t{1}))};
             const std::vector<Record> framed = frameAll(framer, std::span<const Record>(sent));
             expect(eq(framed.size(), 1UZ));
@@ -276,7 +276,7 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
         }
 
         { // a flag value too wide for the field the layout leaves for it
-            const gr::property_map    settings = with(layout("length_golay24", "payload_and_check", 8U, 8U, 0U, 0U, 4096U), {{"payload_pack_bits", static_cast<gr::Size_t>(8)}});
+            const gr::property_map    settings = with(layout("length_golay24", "PayloadAndCheck", 8U, 8U, 0U, 0U, 4096U), {{"payload_pack_bits", static_cast<gr::Size_t>(8)}});
             LengthHeaderFramer        framer   = make<LengthHeaderFramer>(settings);
             const std::vector<Record> sent{recordOf(randomBytes(8UZ, rng), {{"header_flags", std::uint64_t{99}}}), recordOf(randomBytes(8UZ, rng), {{"header_flags", std::uint64_t{9}}})};
             const std::vector<Record> framed = frameAll(framer, std::span<const Record>(sent));
@@ -288,15 +288,15 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
 
     "an empty sync word emits none, and a malformed one is refused"_test = [] {
         Rng                       rng{};
-        LengthHeaderFramer        framer = make<LengthHeaderFramer>(with(layout("length_plain", "payload_and_check", 16U, 8U, 0U, 0U, 4096U), {{"payload_pack_bits", static_cast<gr::Size_t>(8)}}));
+        LengthHeaderFramer        framer = make<LengthHeaderFramer>(with(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 4096U), {{"payload_pack_bits", static_cast<gr::Size_t>(8)}}));
         const std::vector<Record> sent{recordOf(randomBytes(8UZ, rng))};
         const std::vector<Record> framed = frameAll(framer, std::span<const Record>(sent));
         expect(eq(framed.size(), 1UZ));
         expect(eq(framed[0UZ].signal_values.size(), 16UZ + 64UZ)) << "the header and the payload alone, for a chain whose preamble is generated upstream";
 
-        const std::string tooLong = complaint([] { std::ignore = make<LengthHeaderFramer>(with(layout("length_plain", "payload_and_check", 16U, 8U, 0U, 0U, 4096U), {{"sync_word", std::string(65UZ, '1')}})); });
+        const std::string tooLong = complaint([] { std::ignore = make<LengthHeaderFramer>(with(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 4096U), {{"sync_word", std::string(65UZ, '1')}})); });
         expect(tooLong.contains("65")) << tooLong;
-        const std::string notBinary = complaint([] { std::ignore = make<LengthHeaderFramer>(with(layout("length_plain", "payload_and_check", 16U, 8U, 0U, 0U, 4096U), {{"sync_word", std::string("0101x101")}})); });
+        const std::string notBinary = complaint([] { std::ignore = make<LengthHeaderFramer>(with(layout("length_plain", "PayloadAndCheck", 16U, 8U, 0U, 0U, 4096U), {{"sync_word", std::string("0101x101")}})); });
         expect(notBinary.contains("0101x101")) << notBinary;
     };
 
@@ -325,8 +325,8 @@ const boost::ut::suite<"length header framer"> lengthHeaderFramerTests = [] {
 
         refuses({{"max_payload_items", 256U}, {"length_bits", 16U}}, "length_bits", "a width belongs to the length formats");
         refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}}, "count_covers", "and count_covers has no default");
-        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("payload")}}, "13", "a Golay header carries twelve information bits");
-        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("payload")}, {"payload_pack_bits", 9U}}, "9", "an item unpacks into at most eight bits");
+        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_golay24")}, {"length_bits", 13U}, {"count_covers", std::string("Payload")}}, "13", "a Golay header carries twelve information bits");
+        refuses({{"max_payload_items", 256U}, {"header_format", std::string("length_plain")}, {"length_bits", 16U}, {"count_covers", std::string("Payload")}, {"payload_pack_bits", 9U}}, "9", "an item unpacks into at most eight bits");
 
         expect(nothrow([] { std::ignore = make<LengthHeaderFramer>({{"max_payload_items", 256U}}); })) << "and the realizations in use need none of them";
     };

@@ -129,7 +129,7 @@ struct Design {
 };
 
 /// The three families, each at a full-response and a partial-response length.
-constexpr Design kDesigns[] = {{"rect", 1UZ, 0.5, 8UZ, 2UZ}, {"rect", 3UZ, 0.7, 5UZ, 4UZ}, {"raised_cosine", 2UZ, 0.5, 8UZ, 4UZ}, {"raised_cosine", 4UZ, 0.25, 6UZ, 2UZ}, {"gaussian", 3UZ, 0.5, 8UZ, 2UZ}, {"gaussian", 5UZ, 0.32, 4UZ, 4UZ}};
+constexpr Design kDesigns[] = {{"Rect", 1UZ, 0.5, 8UZ, 2UZ}, {"Rect", 3UZ, 0.7, 5UZ, 4UZ}, {"RaisedCosine", 2UZ, 0.5, 8UZ, 4UZ}, {"RaisedCosine", 4UZ, 0.25, 6UZ, 2UZ}, {"Gaussian", 3UZ, 0.5, 8UZ, 2UZ}, {"Gaussian", 5UZ, 0.32, 4UZ, 4UZ}};
 
 [[nodiscard]] gr::property_map settingsOf(const Design& design) { return {{"modulation_index", design.modulationIndex}, {"samples_per_symbol", static_cast<gr::Size_t>(design.samplesPerSymbol)}, {"pulse", std::string(design.pulse)}, {"pulse_length", static_cast<gr::Size_t>(design.symbolSpan)}, {"bt", 0.3}}; }
 
@@ -144,7 +144,7 @@ constexpr Design kDesigns[] = {{"rect", 1UZ, 0.5, 8UZ, 2UZ}, {"rect", 3UZ, 0.7, 
     const auto values = gr::Tensor<float>(symbols.begin(), symbols.end());
     auto&      source = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(symbols.size())}, {"values", values}, {"sample_rate", 1.0f}});
 
-    auto& modulator = graph.emplaceBlock<CpmModulate<float>>({{"samples_per_symbol", static_cast<gr::Size_t>(sps)}, {"modulation_index", h}, {"pulse", std::string("rect")}, {"pulse_length", gr::Size_t(1)}});
+    auto& modulator = graph.emplaceBlock<CpmModulate<float>>({{"samples_per_symbol", static_cast<gr::Size_t>(sps)}, {"modulation_index", h}, {"pulse", std::string("Rect")}, {"pulse_length", gr::Size_t(1)}});
     auto& channel   = graph.emplaceBlock<AwgnChannel<CF>>({{"noise_power", static_cast<double>(gr::channel::noisePowerFor(static_cast<float>(esN0_db), 1.0f, static_cast<float>(sps)))}, {"seed", seed}});
     auto& demod     = graph.emplaceBlock<QuadratureDemod<float>>({{"gain", static_cast<float>(static_cast<double>(sps) / (kPi * h))}});
     auto& lowpass   = graph.emplaceBlock<DesignedFilter<float, float>>({{"profile", std::string("lowpass")}, {"sample_rate", static_cast<float>(sps)}, {"cutoff", 0.5}, {"transition_width", 0.5}});
@@ -240,7 +240,7 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
         constexpr double kTolerance = 1e-7;
 
         for (const double amplitude : {1.0, 0.5}) {
-            for (const char* shape : {"rect", "raised_cosine", "gaussian"}) {
+            for (const char* shape : {"Rect", "RaisedCosine", "Gaussian"}) {
                 const std::vector<float> symbols = pamStream(20000UZ, 4UZ, 0x2545F4914F6CDD1DULL);
 
                 CpmModulate<float>    block  = make<CpmModulate<float>>({{"modulation_index", 0.7}, {"samples_per_symbol", gr::Size_t(8)}, {"pulse", std::string(shape)}, {"pulse_length", gr::Size_t(3)}, {"amplitude", static_cast<float>(amplitude)}});
@@ -264,7 +264,7 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
             for (const double h : {0.5, 0.7}) {
                 const std::vector<float> symbols = pamStream(2000UZ, levels, 0x123456789abcdefULL);
 
-                CpmModulate<float>    modulator = make<CpmModulate<float>>({{"modulation_index", h}, {"samples_per_symbol", static_cast<gr::Size_t>(kSps)}, {"pulse", std::string("rect")}, {"pulse_length", gr::Size_t(1)}});
+                CpmModulate<float>    modulator = make<CpmModulate<float>>({{"modulation_index", h}, {"samples_per_symbol", static_cast<gr::Size_t>(kSps)}, {"pulse", std::string("Rect")}, {"pulse_length", gr::Size_t(1)}});
                 const std::vector<CF> modulated = modulate(modulator, symbols, kSps);
 
                 QuadratureDemod<float> demod = make<QuadratureDemod<float>>({{"gain", static_cast<float>(static_cast<double>(kSps) / (kPi * h))}});
@@ -300,7 +300,7 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
         constexpr std::size_t kFirst[]  = {1UZ, 7UZ, 3UZ, 64UZ, 2UZ};
         constexpr std::size_t kSecond[] = {997UZ, 5UZ, 1UZ, 13UZ};
 
-        for (const char* shape : {"rect", "raised_cosine", "gaussian"}) {
+        for (const char* shape : {"Rect", "RaisedCosine", "Gaussian"}) {
             const std::vector<float> symbols = pamStream(3000UZ, 4UZ, 0xdeadbeefULL);
             const gr::property_map   settings{{"modulation_index", 0.6}, {"samples_per_symbol", gr::Size_t(6)}, {"pulse", std::string(shape)}, {"pulse_length", gr::Size_t(4)}, {"bt", 0.5}};
 
@@ -327,7 +327,7 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
             source._tags.emplace_back(at, gr::property_map{{gr::tag::TRIGGER_NAME.key(), std::string("symbol")}});
         }
 
-        auto& modulator = graph.emplaceBlock<CpmModulate<float>>({{"samples_per_symbol", static_cast<gr::Size_t>(kSps)}, {"modulation_index", 0.5}, {"pulse", std::string("rect")}});
+        auto& modulator = graph.emplaceBlock<CpmModulate<float>>({{"samples_per_symbol", static_cast<gr::Size_t>(kSps)}, {"modulation_index", 0.5}, {"pulse", std::string("Rect")}});
         auto& sink      = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
         expect(graph.connect<"out", "in">(source, modulator).has_value());
@@ -366,7 +366,7 @@ const boost::ut::suite<"CpmModulate"> cpmModulateTests = [] {
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"modulation_index", 0.0}}); })) << "a zero index turns the carrier nowhere";
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"modulation_index", 5.0}}); })) << "four rotations per symbol is the ceiling";
         expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse", std::string("gmsk")}}); })) << "the pulse names three families";
-        expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse", std::string("gaussian")}, {"bt", 0.0}}); })) << "the gaussian pulse reads bt and needs it positive";
+        expect(throws([] { std::ignore = make<CpmModulate<float>>({{"pulse", std::string("Gaussian")}, {"bt", 0.0}}); })) << "the gaussian pulse reads bt and needs it positive";
 
         // The refusals leave nothing behind: a block built afterwards runs.
         CpmModulate<float>    block  = make<CpmModulate<float>>({{"samples_per_symbol", gr::Size_t(4)}, {"modulation_index", 0.5}});

@@ -100,6 +100,20 @@ inline constexpr std::uint64_t kArbitraryMask = kArbitraryOne - 1ULL;
     return h * h / 8.0;
 }
 
+/// @brief The form of a value between two arms of a polyphase bank: the nearest arm, a straight line between two,
+/// or a cubic Lagrange through four. A setting names the form; the kernels take its polynomial order.
+enum class ArmInterpolation : std::uint8_t { nearest, linear, cubic };
+
+/// @brief The polynomial order the kernels take for @p interpolation: 0, 1 or 3.
+[[nodiscard]] constexpr int interpolationOrder(ArmInterpolation interpolation) noexcept {
+    switch (interpolation) {
+    case ArmInterpolation::nearest: return 0;
+    case ArmInterpolation::linear: return 1;
+    case ArmInterpolation::cubic: break;
+    }
+    return 3;
+}
+
 /**
  * @brief The smallest power-of-two bank whose interpolation spur sits at or below @p attenuationDb.
  *

@@ -16,6 +16,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1042,6 +1043,32 @@ const boost::ut::suite<"constellation"> constellationTests = [] {
         };
         check(float{}, "float ");
         check(double{}, "double");
+    };
+
+    "a family builds what its factory builds"_test = [] {
+        using gr::digital::ConstellationFamily;
+        using gr::digital::constellationOfFamily;
+        const std::array<double, 4> custom{1.0, 0.0, -3.0, 0.0};
+        const std::array<CD, 2>     customPoints{CD{1.0, 0.0}, CD{-3.0, 0.0}};
+        for (const Normalization mode : {Normalization::Power, Normalization::Amplitude, Normalization::None}) {
+            const std::array<std::pair<ConstellationFamily, C>, 6> families{{
+                {ConstellationFamily::bpsk, C::bpsk(mode)},
+                {ConstellationFamily::qpsk, C::qpsk(mode)},
+                {ConstellationFamily::psk8, C::psk8(mode)},
+                {ConstellationFamily::psk, C::psk(16UZ, 0.25, 1U, mode)},
+                {ConstellationFamily::qam, C::qam(16UZ, mode)},
+                {ConstellationFamily::custom, C::custom(std::span<const CD>(customPoints), mode)},
+            }};
+            for (const auto& [family, expected] : families) {
+                const C built = constellationOfFamily<double>(family, 16UZ, 0.25, 1U, custom, mode);
+                expect(eq(built.size(), expected.size())) << std::format("family {}", static_cast<int>(family));
+                for (std::size_t s = 0UZ; s < std::min(built.size(), expected.size()); ++s) {
+                    expect(eq(std::abs(built.points()[s] - expected.points()[s]), 0.0)) << std::format("family {}, point {}", static_cast<int>(family), s);
+                }
+            }
+        }
+        expect(eq(constellationOfFamily<double>(ConstellationFamily::qam, 16UZ, 0.0, 0U, {}, Normalization::None).normalizationScale(), 1.0)) << "none leaves the points as the family defines them";
+        expect(throws([] { [[maybe_unused]] const C ignored = constellationOfFamily<double>(ConstellationFamily::custom, 0UZ, 0.0, 0U, {}, Normalization::Power); })) << "custom without points";
     };
 
     "the span form is the per-symbol form, and float is registered"_test = [] {

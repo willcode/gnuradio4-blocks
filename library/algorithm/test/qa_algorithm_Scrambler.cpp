@@ -5,6 +5,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <print>
 #include <random>
@@ -12,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gnuradio-4.0/algorithm/digital/Scrambler.hpp>
@@ -29,6 +31,9 @@ using gr::digital::kProfiles;
 using gr::digital::minDelayOf;
 using gr::digital::profileByName;
 using gr::digital::ProfileFamily;
+using gr::digital::readDelayList;
+using gr::digital::readSeed;
+using gr::digital::readSequence;
 using gr::digital::resetScrambler;
 using gr::digital::scramble;
 using gr::digital::ScramblerConfig;
@@ -778,6 +783,24 @@ const boost::ut::suite<"scrambler"> scramblerTests = [] {
                 configureScrambler(zero, ccsds, 0ULL, mode, 8U, BitOrder::MsbFirst);
             }));
         }
+    };
+
+    "the readers return the reason a value is refused"_test = [] {
+        const std::vector<std::pair<std::string_view, std::string_view>> badTaps{{"", "must be a comma-separated list of delays"}, {"0,3", "each delay must be >= 1 and <= 64"}, {"1,65", "each delay must be >= 1 and <= 64"}, {"3,3", "each delay must be unique"}, {"1,3;5", "must be a comma-separated list of delays"}, {"1,,3", "must be a comma-separated list of delays"}};
+        for (const auto& [bad, reason] : badTaps) {
+            const std::expected<TapMask, std::string_view> taps = readDelayList(bad);
+            expect(!taps.has_value() && taps.error() == reason) << std::format("taps '{}' give '{}'", bad, reason);
+        }
+        static_assert(readDelayList(" 8 , 5 ,3, 1 ") == tapsFromDelayList("1,3,5,8"), "the reader is a constant expression and agrees with the throwing form");
+
+        expect(readSeed("1111", 8U) == std::unexpected(std::string_view("must be as long as the largest tap"))) << "a seed shorter than the degree";
+        expect(readSeed("1111211", 7U) == std::unexpected(std::string_view("must be 0s and 1s"))) << "a seed that is not bits";
+        expect(readSeed("10000000", 8U) == std::uint64_t{0x80}) << "the reader packs a seed as the throwing form does";
+
+        expect(readSequence("FF E") == std::unexpected(std::string_view("must have an even number of digits"))) << "an odd number of digits";
+        expect(readSequence("FF ZZ") == std::unexpected(std::string_view("must be hexadecimal"))) << "a character that is not a hexadecimal digit";
+        expect(readSequence("   ") == std::unexpected(std::string_view("required"))) << "an empty sequence";
+        expect(readSequence("FF e1") == std::vector<std::uint8_t>{0xFF, 0xE1}) << "either case of a hexadecimal digit";
     };
 
     // A scrambler is a bijection on the bit stream: there is no value an item can carry that it rejects.

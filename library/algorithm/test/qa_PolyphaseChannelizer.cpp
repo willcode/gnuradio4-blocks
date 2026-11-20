@@ -30,6 +30,7 @@
 
 namespace {
 
+using gr::filter::ChannelizerPrototype;
 using gr::filter::designChannelizerPrototype;
 using gr::filter::measureChannelizerPrototype;
 using gr::filter::PolyphaseChannelizer;
@@ -816,7 +817,7 @@ const boost::ut::suite<"PolyphaseChannelizer prototype design"> polyphaseChannel
     using namespace boost::ut;
 
     "a boxcar design is one channel long and needs no search"_test = [] {
-        const auto design = designChannelizerPrototype(8UZ, "boxcar", 60., 0.2);
+        const auto design = designChannelizerPrototype(8UZ, ChannelizerPrototype::boxcar, 60., 0.2);
         expect(fatal(design.has_value())) << "a boxcar of eight channels is a valid design";
         expect(eq(design->taps.size(), 8UZ));
         expect(eq(design->span, 1UZ));
@@ -824,38 +825,34 @@ const boost::ut::suite<"PolyphaseChannelizer prototype design"> polyphaseChannel
     };
 
     "a design refuses parameters outside their range"_test = [] {
-        const auto oneChannel = designChannelizerPrototype(1UZ, "boxcar", 60., 0.2);
+        const auto oneChannel = designChannelizerPrototype(1UZ, ChannelizerPrototype::boxcar, 60., 0.2);
         expect(fatal(!oneChannel.has_value())) << "one channel";
         expect(oneChannel.error().message.contains("at least two")) << oneChannel.error().message;
 
-        const auto wideTransition = designChannelizerPrototype(8UZ, "boxcar", 60., 1.);
+        const auto wideTransition = designChannelizerPrototype(8UZ, ChannelizerPrototype::boxcar, 60., 1.);
         expect(fatal(!wideTransition.has_value())) << "a transition of a whole spacing";
         expect(wideTransition.error().message.contains("(0, 1)")) << wideTransition.error().message;
 
-        const auto noAttenuation = designChannelizerPrototype(8UZ, "lowpass", 0., 0.2);
+        const auto noAttenuation = designChannelizerPrototype(8UZ, ChannelizerPrototype::lowpass, 0., 0.2);
         expect(fatal(!noAttenuation.has_value())) << "zero attenuation";
         expect(noAttenuation.error().message.contains("attenuation_db")) << noAttenuation.error().message;
 
-        const auto shortSpan = designChannelizerPrototype(8UZ, "root_nyquist", 60., 0.2, 1UZ);
+        const auto shortSpan = designChannelizerPrototype(8UZ, ChannelizerPrototype::root_nyquist, 60., 0.2, 1UZ);
         expect(fatal(!shortSpan.has_value())) << "a span of one";
         expect(shortSpan.error().message.contains("span is 1")) << shortSpan.error().message;
-
-        const auto unknown = designChannelizerPrototype(8UZ, "elliptic", 60., 0.2);
-        expect(fatal(!unknown.has_value())) << "an unknown family";
-        expect(unknown.error().message.contains("'elliptic'")) << unknown.error().message;
     };
 
     "the span bound belongs to the root-Nyquist family alone"_test = [] {
-        const auto longLowpass = designChannelizerPrototype(8UZ, "lowpass", 60., 0.2, 100UZ);
+        const auto longLowpass = designChannelizerPrototype(8UZ, ChannelizerPrototype::lowpass, 60., 0.2, 100UZ);
         expect(longLowpass.has_value()) << "a lowpass design does not read the span";
 
-        const auto overCap = designChannelizerPrototype(8UZ, "root_nyquist", 60., 0.2, 65UZ);
+        const auto overCap = designChannelizerPrototype(8UZ, ChannelizerPrototype::root_nyquist, 60., 0.2, 65UZ);
         expect(fatal(!overCap.has_value())) << "a root-Nyquist span one past the cap";
         expect(overCap.error().message.contains("span is 65")) << overCap.error().message;
 
-        const auto belowOwnCap = designChannelizerPrototype(8UZ, "root_nyquist", 60., 0.2, 32UZ, 1UZ, 0.1, 64UZ);
+        const auto belowOwnCap = designChannelizerPrototype(8UZ, ChannelizerPrototype::root_nyquist, 60., 0.2, 32UZ, 1UZ, 0.1, 64UZ);
         expect(belowOwnCap.has_value());
-        const auto pastOwnCap = designChannelizerPrototype(8UZ, "root_nyquist", 60., 0.2, 32UZ, 1UZ, 0.1, 16UZ);
+        const auto pastOwnCap = designChannelizerPrototype(8UZ, ChannelizerPrototype::root_nyquist, 60., 0.2, 32UZ, 1UZ, 0.1, 16UZ);
         expect(!pastOwnCap.has_value()) << "the same span is refused under a lower cap";
     };
 
@@ -863,7 +860,7 @@ const boost::ut::suite<"PolyphaseChannelizer prototype design"> polyphaseChannel
         // Every odd length below the returned one misses the target or the ripple limit. The search bisects on the
         // assumption that the two limits hold from some length on, and this sweep checks that at each setting.
         for (const auto& [channels, transition, attenuationDb] : {std::tuple{4UZ, 0.2, 60.}, std::tuple{4UZ, 0.2, 80.}, std::tuple{8UZ, 0.3, 60.}}) {
-            const auto design = designChannelizerPrototype(channels, "lowpass", attenuationDb, transition);
+            const auto design = designChannelizerPrototype(channels, ChannelizerPrototype::lowpass, attenuationDb, transition);
             expect(fatal(design.has_value() && design->ok));
 
             const double spacing        = 1. / static_cast<double>(channels);
@@ -881,7 +878,7 @@ const boost::ut::suite<"PolyphaseChannelizer prototype design"> polyphaseChannel
     };
 
     "a measurement reads the prototype the bank runs, at unit gain and without its padding"_test = [] {
-        const auto design = designChannelizerPrototype(8UZ, "lowpass", 60., 0.2);
+        const auto design = designChannelizerPrototype(8UZ, ChannelizerPrototype::lowpass, 60., 0.2);
         expect(fatal(design.has_value()));
 
         std::vector<float> padded = design->taps;

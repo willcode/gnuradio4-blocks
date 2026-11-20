@@ -18,7 +18,7 @@
  * An item is a `std::uint8_t` carrying `w` significant bits in its low `w` positions, `1 <= w <= 8`;
  * positions `w..7` are ignored on input and zero on output. The bit stream of a port is the
  * concatenation, over items in order, of each item's `w` bits taken in that port's bit order:
- * `MsbFirst` emits position `w-1` first and counts down, `LsbFirst` emits position `0` first and
+ * `msb_first` emits position `w-1` first and counts down, `lsb_first` emits position `0` first and
  * counts up. The conversion is then one sentence — the output stream's bit sequence is the input
  * stream's bit sequence. No bit is created, dropped, or moved relative to another bit, and
  * everything below is a consequence of that.
@@ -55,7 +55,7 @@
  * The one place a partial output item can exist is the end of a stream, where fewer than `inChunk`
  * items remain. `repackTail()` covers exactly that: it emits the output items the stranded bits fill
  * and, on request, one more carrying the remainder, with the positions the later bits would have
- * occupied left zero — the low ones under `MsbFirst` output, the high ones under `LsbFirst`.
+ * occupied left zero — the low ones under `msb_first` output, the high ones under `lsb_first`.
  *
  * Widths above 8 are not offered. A field wider than a byte needs an item type wider than a byte and
  * brings the order of the bytes inside that item with it, which is machine endianness and is exactly
@@ -88,9 +88,9 @@ namespace detail {
     for (unsigned b = 0U; b < period; ++b) {
         const unsigned sourcePosition      = b % bitsIn;
         const unsigned destinationPosition = b % bitsOut;
-        moves[b]                           = BitMove{static_cast<std::uint8_t>(b / bitsIn),                                                     //
+        moves[b]                           = BitMove{static_cast<std::uint8_t>(b / bitsIn),                                                      //
             static_cast<std::uint8_t>(orderIn == BitOrder::MsbFirst ? bitsIn - 1U - sourcePosition : sourcePosition), //
-            static_cast<std::uint8_t>(b / bitsOut),                                                                   //
+            static_cast<std::uint8_t>(b / bitsOut),                                                                    //
             static_cast<std::uint8_t>(orderOut == BitOrder::MsbFirst ? bitsOut - 1U - destinationPosition : destinationPosition)};
     }
     return moves;
@@ -170,7 +170,7 @@ inline void storeItemWord(std::uint8_t* items, std::uint64_t word) noexcept {
     std::memcpy(items, &word, sizeof(word));
 }
 
-/// @brief Eight one-bit items to one byte. The gathered byte holds item 0 at bit 7 under `MsbFirst`, and reversing the items moves it to bit 0.
+/// @brief Eight one-bit items to one byte. The gathered byte holds item 0 at bit 7 under `msb_first`, and reversing the items moves it to bit 0.
 inline void packEightBits(std::span<const std::uint8_t> in, std::span<std::uint8_t> out, BitOrder orderOut) noexcept {
     const std::size_t count = std::min(in.size() / 8UZ, out.size());
     if (orderOut == BitOrder::MsbFirst) {
@@ -186,7 +186,7 @@ inline void packEightBits(std::span<const std::uint8_t> in, std::span<std::uint8
     }
 }
 
-/// @brief One byte to eight one-bit items, the same constant read the other way round: output item `i` carries bit `7-i` under `MsbFirst`.
+/// @brief One byte to eight one-bit items, the same constant read the other way round: output item `i` carries bit `7-i` under `msb_first`.
 inline void unpackEightBits(std::span<const std::uint8_t> in, std::span<std::uint8_t> out, BitOrder orderIn) noexcept {
     const std::size_t count = std::min(in.size(), out.size() / 8UZ);
     if (orderIn == BitOrder::MsbFirst) {
@@ -248,7 +248,7 @@ inline void repack(const BitRepack& cfg, std::span<const std::uint8_t> in, std::
  * For `n` trailing items the stranded bits are `b = n * cfg.bitsIn`. `b / cfg.bitsOut` whole output
  * items are always written. When @p pad is set and `b % cfg.bitsOut` is not zero, one further item
  * carries the remainder, with the positions the later bits would have occupied left zero — the low
- * `cfg.bitsOut - b % cfg.bitsOut` under `MsbFirst` output, the high ones under `LsbFirst`. When
+ * `cfg.bitsOut - b % cfg.bitsOut` under `msb_first` output, the high ones under `lsb_first`. When
  * @p pad is clear those remaining bits are dropped.
  *
  * @return the items written, at most `out.size()`.

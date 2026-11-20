@@ -6,6 +6,7 @@
 #include <complex>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <format>
 #include <numbers>
@@ -38,6 +39,9 @@ namespace detail {
 
 } // namespace detail
 
+/// @brief The family a channelizer prototype is designed in: a root-Nyquist pulse, a Kaiser lowpass, or a boxcar.
+enum class ChannelizerPrototype : std::uint8_t { root_nyquist, lowpass, boxcar };
+
 /// @brief A designed channelizer prototype and what it was measured to deliver, at unit DC gain.
 struct ChannelizerDesign {
     std::vector<float> taps;                 ///< as designed or as supplied; the bank pads them to a whole number of branches
@@ -51,14 +55,14 @@ struct ChannelizerDesign {
 namespace detail {
 
 struct ChannelizerDesignKey {
-    std::size_t channels = 0UZ;
-    std::string family;
-    double      attenuationDb = 0.;
-    double      transition    = 0.;
-    double      maxRippleDb   = 0.;
-    std::size_t span          = 0UZ;
-    std::size_t oversample    = 0UZ;
-    std::size_t maxSpan       = 0UZ;
+    std::size_t          channels      = 0UZ;
+    ChannelizerPrototype family        = ChannelizerPrototype::root_nyquist;
+    double               attenuationDb = 0.;
+    double               transition    = 0.;
+    double               maxRippleDb   = 0.;
+    std::size_t          span          = 0UZ;
+    std::size_t          oversample    = 0UZ;
+    std::size_t          maxSpan       = 0UZ;
 
     [[nodiscard]] bool operator==(const ChannelizerDesignKey&) const = default;
 };
@@ -79,7 +83,7 @@ struct ChannelizerDesignKey {
  * spacing. `boxcar` is M taps of 1/M.
  *
  * @param channels       M
- * @param family         `root_nyquist`, `lowpass` or `boxcar`
+ * @param family         the prototype family
  * @param attenuationDb  the stopband target of the lowpass search
  * @param transition     excess bandwidth in channel spacings: the lowpass transition width or the root-Nyquist rolloff
  * @param maxRippleDb    the passband ripple limit of the lowpass search
@@ -89,9 +93,9 @@ struct ChannelizerDesignKey {
  *
  * The design is memoized by its parameters; the memo holds the last eight designs.
  *
- * A parameter outside its range or an unknown family is an error.
+ * A parameter outside its range is an error.
  */
-[[nodiscard]] inline std::expected<ChannelizerDesign, gr::Error> designChannelizerPrototype(std::size_t channels, std::string_view family, double attenuationDb, double transition, std::size_t span = 16UZ, std::size_t oversample = 1UZ, double maxRippleDb = 0.1, std::size_t maxSpan = 64UZ, std::source_location location = std::source_location::current()) {
+[[nodiscard]] inline std::expected<ChannelizerDesign, gr::Error> designChannelizerPrototype(std::size_t channels, ChannelizerPrototype family, double attenuationDb, double transition, std::size_t span = 16UZ, std::size_t oversample = 1UZ, double maxRippleDb = 0.1, std::size_t maxSpan = 64UZ, std::source_location location = std::source_location::current()) {
     if (channels < 2UZ) {
         return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: {} channels; at least two", channels), location));
     }
@@ -101,11 +105,11 @@ struct ChannelizerDesignKey {
     if (!(attenuationDb > 0.)) {
         return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: attenuation_db must be positive, got {}", attenuationDb), location));
     }
-    if (family == "root_nyquist" && (span < 2UZ || span > maxSpan)) {
+    if (family == ChannelizerPrototype::root_nyquist && (span < 2UZ || span > maxSpan)) {
         return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: span is {}; the range is 2 to {}", span, maxSpan), location));
     }
 
-    const detail::ChannelizerDesignKey key{channels, std::string(family), attenuationDb, transition, maxRippleDb, span, oversample, maxSpan};
+    const detail::ChannelizerDesignKey key{channels, family, attenuationDb, transition, maxRippleDb, span, oversample, maxSpan};
 
     static std::mutex                                                              mutex;
     static std::vector<std::pair<detail::ChannelizerDesignKey, ChannelizerDesign>> cache;
@@ -126,14 +130,17 @@ struct ChannelizerDesignKey {
     const double stopEdge = std::min(0.5, static_cast<double>(oversample) * spacing - passEdge);
 
     ChannelizerDesign out;
-    if (family == "boxcar") {
+    switch (family) {
+    case ChannelizerPrototype::boxcar:
         out.taps = std::vector<float>(channels, 1.f / static_cast<float>(channels));
         out.span = 1UZ;
-    } else if (family == "root_nyquist") {
+        break;
+    case ChannelizerPrototype::root_nyquist:
         // The root-Nyquist length is `span` spacings; `stopbandDb` reports what it achieves.
         out.span = span;
         out.taps = gr::filter::fir::design::rootRaisedCosine(span * channels - 1UZ, static_cast<double>(channels), transition, 1.);
-    } else if (family == "lowpass") {
+        break;
+    case ChannelizerPrototype::lowpass: {
         const auto build    = [&](std::size_t n) { return gr::filter::fir::design::kaiserLowpass(n, 0.5 * spacing, attenuationDb); };
         const auto delivers = [&](std::size_t n) {
             const auto [stopbandDb, rippleDb] = detail::channelizerEdgeScan(build(n), passEdge, stopEdge);
@@ -159,14 +166,14 @@ struct ChannelizerDesignKey {
         }
         out.taps = build(use);
         out.span = (out.taps.size() + channels - 1UZ) / channels;
-    } else {
-        return std::unexpected(gr::Error(std::format("gr::filter::designChannelizerPrototype: prototype must be 'root_nyquist', 'lowpass' or 'boxcar', got '{}'", family), location));
+        break;
+    }
     }
 
     out.designLength                       = static_cast<int>(out.taps.size());
     std::tie(out.stopbandDb, out.rippleDb) = detail::channelizerEdgeScan(out.taps, passEdge, stopEdge);
     // Only the lowpass family has a target. `ok` is false only for a lowpass that misses it.
-    out.ok = family != "lowpass" || (out.stopbandDb <= -attenuationDb && out.rippleDb <= maxRippleDb);
+    out.ok = family != ChannelizerPrototype::lowpass || (out.stopbandDb <= -attenuationDb && out.rippleDb <= maxRippleDb);
 
     return fir::design::detail::keepDesign<fir::design::detail::kDesignMemoEntries>(mutex, cache, key, std::move(out));
 }

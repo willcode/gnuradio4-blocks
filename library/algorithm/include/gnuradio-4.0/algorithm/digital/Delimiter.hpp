@@ -153,7 +153,7 @@ template<std::floating_point T>
     return item >= T{0};
 }
 
-/// @brief The low @p width bits of @p value, in place under `MsbFirst` and reversed under `LsbFirst`.
+/// @brief The low @p width bits of @p value, in place under `msb_first` and reversed under `lsb_first`.
 [[nodiscard]] inline constexpr std::uint8_t orderedLowBits(unsigned value, unsigned width, gr::math::BitOrder order) noexcept {
     const unsigned low = value & ((1U << width) - 1U);
     if (order == gr::math::BitOrder::MsbFirst) {
@@ -202,16 +202,16 @@ struct DelimiterConfig {
     std::string                                        endDelimiter{};   ///< the closing delimiter, `'0'`/`'1'` characters, MSB first in wire order
     std::string                                        startDelimiter{}; ///< the opening delimiter, required and non-empty iff `frameOpen == Start`
     FrameOpen                                          frameOpen      = FrameOpen::Delimiter;
-    unsigned                                           bitsPerItem    = 1U;                           ///< bits each input item carries, `[1, 8]`
+    unsigned                                           bitsPerItem    = 1U;                            ///< bits each input item carries, `[1, 8]`
     gr::math::BitOrder                                 bitOrder       = gr::math::BitOrder::MsbFirst; ///< order of an item's bits on the wire, meaningful only above one bit per item
     Transparency                                       transparency   = Transparency::None;
-    unsigned                                           stuffAfterOnes = 5U;                            ///< bit stuffing: a `0` arriving at exactly this consecutive-ones count is removed
-    unsigned                                           abortOnes      = 7U;                            ///< bit stuffing: this many consecutive `1`s abandons the frame; exceeds `stuffAfterOnes` and the delimiters' longest run of ones; `0` disables
-    std::uint8_t                                       escapeItem     = 0U;                            ///< byte escaping: the introducer's item value
-    std::vector<std::pair<std::uint8_t, std::uint8_t>> escapeMap{};                                    ///< byte escaping: `(escaped, original)` pairs
-    std::size_t                                        maxPayloadItems = 0UZ;                          ///< the largest payload a frame may carry, in decoded items; `0` is unset
-    std::size_t                                        minPayloadItems = 1UZ;                          ///< a closed region shorter than this is refused as undersize
-    unsigned                                           packBits        = 0U;                           ///< `0` emits decoded items unchanged; `1..8` repacks the decoded bits into items of that width
+    unsigned                                           stuffAfterOnes = 5U;                             ///< bit stuffing: a `0` arriving at exactly this consecutive-ones count is removed
+    unsigned                                           abortOnes      = 7U;                             ///< bit stuffing: this many consecutive `1`s abandons the frame; exceeds `stuffAfterOnes` and the delimiters' longest run of ones; `0` disables
+    std::uint8_t                                       escapeItem     = 0U;                             ///< byte escaping: the introducer's item value
+    std::vector<std::pair<std::uint8_t, std::uint8_t>> escapeMap{};                                     ///< byte escaping: `(escaped, original)` pairs
+    std::size_t                                        maxPayloadItems = 0UZ;                           ///< the largest payload a frame may carry, in decoded items; `0` is unset
+    std::size_t                                        minPayloadItems = 1UZ;                           ///< a closed region shorter than this is refused as undersize
+    unsigned                                           packBits        = 0U;                            ///< `0` emits decoded items unchanged; `1..8` repacks the decoded bits into items of that width
     gr::math::BitOrder                                 packOrder       = gr::math::BitOrder::MsbFirst; ///< the order the pack stage assembles bits in
 
     std::uint64_t                 endBits       = 0ULL;  ///< the closing delimiter's bits, right-aligned
@@ -464,14 +464,14 @@ inline void framerConfigure(DelimiterConfig& cfg) {
 struct EncodeResult {
     std::size_t emitted  = 0UZ; ///< items written, both delimiters included
     std::size_t inserted = 0UZ; ///< items the transparency encoder added: stuffed zeros, or escape introducers
-    std::size_t forged   = 0UZ; ///< payload items at which the match register held the closing delimiter, under `None` only
+    std::size_t forged   = 0UZ; ///< payload items at which the match register held the closing delimiter, under `none` only
 };
 
 /**
  * @brief The largest framed size a payload of @p payloadItems wire items can reach, delimiters included.
  *
  * Bit stuffing's worst case is one insertion every `stuffAfterOnes` items, which an all-ones payload reaches exactly;
- * byte escaping's is one insertion per item, so twice the payload; `None` expands by nothing. The bound sizes a
+ * byte escaping's is one insertion per item, so twice the payload; `none` expands by nothing. The bound sizes a
  * buffer once and never sizes it from anything a payload said.
  */
 [[nodiscard]] inline std::size_t framedItemsBound(const DelimiterConfig& cfg, std::size_t payloadItems) noexcept {
@@ -501,7 +501,7 @@ struct EncodeResult {
  * it a payload ending in exactly `stuffAfterOnes` ones would have the delimiter's leading zero removed as a stuffed
  * bit, and one payload item would be discarded with the delimiter's body.
  *
- * Under `None` nothing is coded and nothing can be, so the encoder instead runs the receiver's own match register over
+ * Under `none` nothing is coded and nothing can be, so the encoder instead runs the receiver's own match register over
  * the payload items it emits and counts every match. Each one is a delimiter the receiver will honor inside what was
  * meant to be one frame.
  *
@@ -560,7 +560,7 @@ struct DelimiterEncoder {
         out.reserve(framedItemsBound(config, payload.size()));
         out.insert(out.end(), _opening.begin(), _opening.end());
 
-        // under `None` the receiver's own register runs here, seeded by the opening delimiter exactly as the receiver seeds it
+        // under `none` the receiver's own register runs here, seeded by the opening delimiter exactly as the receiver seeds it
         std::uint64_t match   = 0ULL;
         std::size_t   shifted = 0UZ;
         if (config.transparency == Transparency::None) {

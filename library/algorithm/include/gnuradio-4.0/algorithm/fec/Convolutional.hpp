@@ -145,8 +145,8 @@ struct ConvolutionalCode {
 /**
  * @brief How a decoded record's ends are treated.
  *
- * `Terminated` is a frame: the encoder appended `K-1` zero tail bits, the trellis starts and ends
- * in the zero state, and the tail is removed from the information. `Open` is a record cut out of a
+ * `terminated` is a frame: the encoder appended `K-1` zero tail bits, the trellis starts and ends
+ * in the zero state, and the tail is removed from the information. `open` is a record cut out of a
  * continuous convolutional stream: no state is known at either end unless a caller supplies the
  * initial one, the traceback starts from the best-metric final state, and every step carries an
  * information bit. The last `K-1` information bits of an open decode are decided without the
@@ -214,8 +214,8 @@ struct ViterbiResult {
  * a chain that settles on a frame length stops allocating after its first record.
  *
  * The trellis is walked forward over every step of the frame, each state keeping the better of
- * its two incoming branches. Under `Terminated` the traceback starts from the zero state because
- * termination guarantees the transmitted path ended there; under `Open` it starts from the
+ * its two incoming branches. Under `terminated` the traceback starts from the zero state because
+ * termination guarantees the transmitted path ended there; under `open` it starts from the
  * best-metric final state, the ends being unknown for a record cut out of a continuous stream.
  * No survivor window is applied and no truncation depth is chosen: the whole frame is in hand,
  * so the path traced back is the maximum-likelihood path over it rather than an approximation
@@ -235,7 +235,7 @@ public:
 
     /// Take @p code, sizing the branch table and the metrics for it. An unconfigured code, or an
     /// `initialState` naming a state the code does not have, leaves the decoder unconfigured and
-    /// every decode then answers a zero result. `initialState` is meaningful under `Open` only:
+    /// every decode then answers a zero result. `initialState` is meaningful under `open` only:
     /// a terminated frame's initial state is the zero state by construction.
     bool configure(const ConvolutionalCode& code, ConvTermination termination = ConvTermination::Terminated, std::optional<std::uint32_t> initialState = std::nullopt) {
         _code         = {};

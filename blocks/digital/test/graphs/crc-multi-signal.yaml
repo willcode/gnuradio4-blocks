@@ -19,7 +19,7 @@ blocks:
       final_xor: !!uint64 4294967295
       input_reflected: true
       result_reflected: true
-      crc_byte_order: big
+      crc_byte_order: Big
   - id: gr::blocks::testing::ExpectDataSetSink<uint8>
     parameters:
       name: multi_sink

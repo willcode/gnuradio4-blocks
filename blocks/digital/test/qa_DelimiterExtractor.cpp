@@ -129,7 +129,7 @@ template<typename T>
 }
 
 /// The HDLC framing of anchor A over bit items.
-[[nodiscard]] gr::property_map hdlcFraming(gr::Size_t bound) { return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("bit_stuffing")}, {"max_payload_items", bound}}; }
+[[nodiscard]] gr::property_map hdlcFraming(gr::Size_t bound) { return {{"end_delimiter", std::string("01111110")}, {"transparency", std::string("BitStuffing")}, {"max_payload_items", bound}}; }
 
 /// `feed` for the boundary sweep, which produces tens of thousands of records and needs none of them kept.
 template<typename T>
@@ -248,7 +248,7 @@ const boost::ut::suite<"delimiter extractor"> delimiterExtractorTests = [] {
             }
             return tail;
         }();
-        const Mode kModes[]{{"none", 1U, "1", "01111110"}, {"bit_stuffing", 1U, "01111110", kLongStuffed.c_str()}, {"none", 8U, "11000000", "1100000011000000"}};
+        const Mode kModes[]{{"None", 1U, "1", "01111110"}, {"BitStuffing", 1U, "01111110", kLongStuffed.c_str()}, {"None", 8U, "11000000", "1100000011000000"}};
 
         Rng rng{};
         for (const Mode& mode : kModes) {

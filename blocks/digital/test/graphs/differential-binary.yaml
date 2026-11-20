@@ -15,11 +15,11 @@ blocks:
   - id: gr::blocks::digital::DifferentialEncoder<uint8>
     parameters:
       name: nrzi_encoder
-      coding: nrzi
+      coding: Nrzi
   - id: gr::blocks::digital::DifferentialDecoder<uint8>
     parameters:
       name: nrzi_decoder
-      coding: nrzi
+      coding: Nrzi
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: nrzi_sink
@@ -184,12 +184,12 @@ blocks:
     parameters:
       name: polarity_encoder
       modulus: !!uint32 2
-      coding: differential
+      coding: Differential
   - id: gr::blocks::digital::DifferentialDecoder<uint8>
     parameters:
       name: polarity_decoder
       modulus: !!uint32 2
-      coding: differential
+      coding: Differential
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: polarity_sink
@@ -200,7 +200,7 @@ blocks:
   - id: gr::blocks::digital::DifferentialDecoder<uint8>
     parameters:
       name: complement_decoder
-      coding: nrzi
+      coding: Nrzi
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: complement_sink
@@ -219,7 +219,7 @@ blocks:
     parameters:
       name: inverted_decoder
       modulus: !!uint32 2
-      coding: differential
+      coding: Differential
   - id: gr::blocks::testing::ExpectSink<uint8>
     parameters:
       name: inverted_sink

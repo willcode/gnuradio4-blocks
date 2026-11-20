@@ -18,7 +18,7 @@ blocks:
     parameters:
       name: hdlc_framer
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst
@@ -41,7 +41,7 @@ blocks:
     parameters:
       name: hdlc_extractor
       end_delimiter: "01111110"
-      transparency: bit_stuffing
+      transparency: BitStuffing
       max_payload_items: !!uint32 1024
       payload_pack_bits: !!uint32 8
       payload_bit_order: LsbFirst
