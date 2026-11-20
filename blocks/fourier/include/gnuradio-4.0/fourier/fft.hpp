@@ -115,55 +115,63 @@ On the choice of window (mathematically aka. apodisation) functions
     PortOut<U, RequiredSamples<1, 1>> out{};
 
     FourierAlgorithm<T, std::complex<typename U::value_type>> _fftImpl{};
-    gr::algorithm::window::Type                               _windowType = gr::algorithm::window::Type::Hann;
-    std::vector<value_type>                                   _window     = gr::algorithm::window::create<value_type>(_windowType, 1024U);
+    std::vector<value_type>                                   _window = gr::algorithm::window::create<value_type>(gr::algorithm::window::Type::Hann, 1024U);
 
     // settings
-    const std::string                                                                algorithm = gr::meta::type_name<decltype(_fftImpl)>();
-    Annotated<gr::Size_t, "FFT size", Doc<"FFT size">>                               fftSize{1024U};
-    Annotated<std::string, "window type", Doc<gr::algorithm::window::TypeNames>>     window = std::string(magic_enum::enum_name(_windowType));
-    Annotated<bool, "output in dB", Doc<"calculate output in decibels">>             outputInDb{false};
-    Annotated<bool, "output in deg", Doc<"calculate phase in degrees">>              outputInDeg{false};
-    Annotated<bool, "unwrap phase", Doc<"calculate unwrapped phase">>                unwrapPhase{false};
-    Annotated<bool, "output phase", Doc<"phase spectrum in the output DataSet">>     outputPhase{true};
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                   signal_name = "unknown signal";
-    Annotated<std::string, "signal unit", Visible, Doc<"signal's physical SI unit">> signal_unit = "a.u.";
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>     signal_min  = -std::numeric_limits<float>::max();
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>     signal_max  = +std::numeric_limits<float>::max();
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"FFT size">>                                        fftSize{1024U};
+        Annotated<gr::algorithm::window::Type, Doc<gr::algorithm::window::TypeNames>> window = gr::algorithm::window::Type::Hann;
+        Annotated<bool, Doc<"decibel output">>                                        outputInDb{false};
+        Annotated<bool, Doc<"phase in degrees">>                                      outputInDeg{false};
+        Annotated<bool, Doc<"phase unwrapping">>                                      unwrapPhase{false};
+        Annotated<bool, Doc<"phase output">>                                          outputPhase{true};
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">>                              sample_rate = 1.f;
+        Annotated<std::string, Visible>                                               signal_name = "unknown signal";
+        Annotated<std::string, Visible, Doc<"signal unit">>                           signal_unit = "a.u.";
+        Annotated<float, Doc<"physical minimum">>                                     signal_min  = -std::numeric_limits<float>::max();
+        Annotated<float, Doc<"physical maximum">>                                     signal_max  = +std::numeric_limits<float>::max();
 
-    GR_MAKE_REFLECTABLE(FFT, in, out, algorithm, fftSize, window, outputInDb, outputInDeg, unwrapPhase, outputPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+        GR_MAKE_REFLECTABLE(Settings, fftSize, window, outputInDb, outputInDeg, unwrapPhase, outputPhase, sample_rate, signal_name, signal_unit, signal_min, signal_max);
+    } settings;
+
+    struct Status {
+        std::string algorithm = gr::meta::type_name<FourierAlgorithm<T, std::complex<typename U::value_type>>>();
+
+        GR_MAKE_REFLECTABLE(Status, algorithm);
+    } status;
+
+    GR_MAKE_REFLECTABLE(FFT, in, out, settings, status);
 
     // semi-private caching vectors (need to be public for unit-test) -> TODO: move to FFT implementations, casting from T -> U::value_type should be done there
-    std::vector<InDataType>  _inData             = std::vector<InDataType>(fftSize, 0);
-    std::vector<OutDataType> _outData            = std::vector<OutDataType>(fftSize, 0);
-    std::vector<value_type>  _magnitudeSpectrum  = std::vector<value_type>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
-    std::vector<value_type>  _phaseSpectrum      = std::vector<value_type>(gr::meta::complex_like<T> ? fftSize.value : (1U + fftSize.value / 2U), 0);
+    std::vector<InDataType>  _inData             = std::vector<InDataType>(settings.fftSize, 0);
+    std::vector<OutDataType> _outData            = std::vector<OutDataType>(settings.fftSize, 0);
+    std::vector<value_type>  _magnitudeSpectrum  = std::vector<value_type>(gr::meta::complex_like<T> ? settings.fftSize.value : (1U + settings.fftSize.value / 2U), 0);
+    std::vector<value_type>  _phaseSpectrum      = std::vector<value_type>(gr::meta::complex_like<T> ? settings.fftSize.value : (1U + settings.fftSize.value / 2U), 0);
     constexpr static bool    computeFullSpectrum = gr::meta::complex_like<T>;
 
     // settings-invariant part of the output DataSet, rebuilt only when settings change
     U    _dataSetSkeleton{};
     bool _dataSetSkeletonDirty{true};
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& newSettings) noexcept {
+    void applySettings(const Settings& s) noexcept {
         _dataSetSkeletonDirty = true;
 
-        if (!newSettings.contains("fftSize") && !newSettings.contains("window")) {
+        const bool resize = s.fftSize.changed() || s.window.changed();
+        if (!resize) {
             // do need to only handle interdependent settings -> can early return
             return;
         }
 
-        const std::size_t newSize = fftSize;
+        const std::size_t newSize = s.fftSize;
         in.max_samples            = newSize;
         in.min_samples            = newSize;
         this->input_chunk_size    = newSize;
         _window.resize(newSize, 0);
 
-        _windowType = magic_enum::enum_cast<gr::algorithm::window::Type>(window, magic_enum::case_insensitive).value_or(_windowType);
-        gr::algorithm::window::create(_window, _windowType);
+        gr::algorithm::window::create(_window, s.window);
 
         // N.B. this should become part of the Fourier transform implementation
-        _inData.resize(fftSize, 0);
+        _inData.resize(s.fftSize, 0);
         _outData.resize(newSize, 0);
         _magnitudeSpectrum.resize(computeFullSpectrum ? newSize : (newSize / 2), 0);
         _phaseSpectrum.resize(computeFullSpectrum ? newSize : (newSize / 2), 0);
@@ -171,13 +179,13 @@ On the choice of window (mathematically aka. apodisation) functions
 
     [[nodiscard]] constexpr work::Status processBulk(std::span<const T> input, std::span<U> output) {
         if constexpr (std::is_same_v<T, InDataType>) {
-            std::copy_n(input.begin(), fftSize, _inData.begin());
+            std::copy_n(input.begin(), settings.fftSize, _inData.begin());
         } else {
             std::ranges::transform(input.begin(), input.end(), _inData.begin(), [](const T c) { return static_cast<InDataType>(c); });
         }
 
         // apply window function
-        for (std::size_t i = 0U; i < fftSize; i++) {
+        for (std::size_t i = 0U; i < settings.fftSize; i++) {
             if constexpr (gr::meta::complex_like<T>) {
                 _inData[i].real(_inData[i].real() * _window[i]);
                 _inData[i].imag(_inData[i].imag() * _window[i]);
@@ -188,9 +196,9 @@ On the choice of window (mathematically aka. apodisation) functions
 
         _fftImpl.compute(_inData, std::span<OutDataType>(_outData));
 
-        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, std::move(_magnitudeSpectrum), algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = outputInDb, .shiftSpectrum = true});
-        if (outputPhase) {
-            _phaseSpectrum = gr::algorithm::fft::computePhaseSpectrum(_outData, std::move(_phaseSpectrum), algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = outputInDeg, .unwrapPhase = unwrapPhase, .shiftSpectrum = true});
+        _magnitudeSpectrum = gr::algorithm::fft::computeMagnitudeSpectrum(_outData, std::move(_magnitudeSpectrum), algorithm::fft::ConfigMagnitude{.computeHalfSpectrum = !computeFullSpectrum, .outputInDb = settings.outputInDb, .shiftSpectrum = true});
+        if (settings.outputPhase) {
+            _phaseSpectrum = gr::algorithm::fft::computePhaseSpectrum(_outData, std::move(_phaseSpectrum), algorithm::fft::ConfigPhase{.computeHalfSpectrum = !computeFullSpectrum, .outputInDeg = settings.outputInDeg, .unwrapPhase = settings.unwrapPhase, .shiftSpectrum = true});
         }
 
         createDataset(output[0]);
@@ -201,7 +209,7 @@ On the choice of window (mathematically aka. apodisation) functions
     // (re-)creates the DataSet skeleton: everything but the per-frame values, ranges and timestamp
     void rebuildDataSetSkeleton() {
         const std::size_t N{_magnitudeSpectrum.size()};
-        const std::size_t nSignals = outputPhase ? 4UZ : 3UZ;
+        const std::size_t nSignals = settings.outputPhase ? 4UZ : 3UZ;
 
         U& ds        = _dataSetSkeleton;
         ds           = U{};
@@ -216,7 +224,7 @@ On the choice of window (mathematically aka. apodisation) functions
         ds.axis_values.resize(ds.nDimensions());
         ds.axis_values[0UZ].resize(N);
 
-        auto const freqWidth = static_cast<value_type>(sample_rate) / static_cast<value_type>(fftSize);
+        auto const freqWidth = static_cast<value_type>(settings.sample_rate) / static_cast<value_type>(settings.fftSize);
         if constexpr (gr::meta::complex_like<T>) { // complex-valued FFT output: symmetric spectrum [-fs/2, +fs/2]
             auto const freqOffset = static_cast<value_type>(N / 2) * freqWidth;
             std::ranges::transform(std::views::iota(0UZ, N), std::ranges::begin(ds.axisValues(0UZ)), [freqWidth, freqOffset](const auto i) { return static_cast<value_type>(i) * freqWidth - freqOffset; });
@@ -225,10 +233,10 @@ On the choice of window (mathematically aka. apodisation) functions
         }
 
         // define nSignals and allocate the required storage space
-        ds.signal_names      = {std::format("Magnitude({})", signal_name), std::format("Phase({})", signal_name), std::format("Re(FFT({}))", signal_name), std::format("Im(FFT({}))", signal_name)};
+        ds.signal_names      = {std::format("Magnitude({})", settings.signal_name), std::format("Phase({})", settings.signal_name), std::format("Re(FFT({}))", settings.signal_name), std::format("Im(FFT({}))", settings.signal_name)};
         ds.signal_quantities = {"Magnitude(FFT)", "Phase(FFT)", "Re(FFT)", "Im(FFT)"};
-        ds.signal_units      = {std::format("{}/√Hz", signal_unit), "rad", std::format("Re{}", signal_unit) /* real part */, std::format("Im{}", signal_unit) /* imaginary part */};
-        if (!outputPhase) {
+        ds.signal_units      = {std::format("{}/√Hz", settings.signal_unit), "rad", std::format("Re{}", settings.signal_unit) /* real part */, std::format("Im{}", settings.signal_unit) /* imaginary part */};
+        if (!settings.outputPhase) {
             ds.signal_names.erase(std::next(ds.signal_names.begin()));
             ds.signal_quantities.erase(std::next(ds.signal_quantities.begin()));
             ds.signal_units.erase(std::next(ds.signal_units.begin()));
@@ -241,15 +249,15 @@ On the choice of window (mathematically aka. apodisation) functions
         ds.signal_ranges.resize(nSignals);
 
         // setup storage and populate timing events and basic additional meta-information that is not already stored for each signal
-        const auto& meta_info = property_map{                                                 //
-            {std::pmr::string("sample_rate"), pmt::Value(sample_rate)},                       //
-            {std::pmr::string("window"), pmt::Value(window.value)},                           //
-            {std::pmr::string("output_in_db"), pmt::Value(outputInDb)},                       //
-            {std::pmr::string("output_in_deg"), pmt::Value(outputInDeg)},                     //
-            {std::pmr::string("unwrap_phase"), pmt::Value(unwrapPhase)},                      //
-            {std::pmr::string("output_phase"), pmt::Value(outputPhase)},                      //
-            {std::pmr::string("input_chunk_size"), pmt::Value(this->input_chunk_size)},       //
-            {std::pmr::string("output_chunk_size"), gr::pmt::Value(this->output_chunk_size)}, //
+        const auto& meta_info = property_map{                                                                    //
+            {std::pmr::string("sample_rate"), pmt::Value(settings.sample_rate)},                                 //
+            {std::pmr::string("window"), pmt::Value(std::string(magic_enum::enum_name(settings.window.value)))}, //
+            {std::pmr::string("output_in_db"), pmt::Value(settings.outputInDb)},                                 //
+            {std::pmr::string("output_in_deg"), pmt::Value(settings.outputInDeg)},                               //
+            {std::pmr::string("unwrap_phase"), pmt::Value(settings.unwrapPhase)},                                //
+            {std::pmr::string("output_phase"), pmt::Value(settings.outputPhase)},                                //
+            {std::pmr::string("input_chunk_size"), pmt::Value(this->input_chunk_size)},                          //
+            {std::pmr::string("output_chunk_size"), gr::pmt::Value(this->output_chunk_size)},                    //
             {std::pmr::string("stride"), gr::pmt::Value(this->stride)}};
 
         ds.meta_information.resize(nSignals);
@@ -263,7 +271,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
     constexpr void createDataset(U& ds) {
         const std::size_t N{_magnitudeSpectrum.size()};
-        const std::size_t nSignals = outputPhase ? 4UZ : 3UZ;
+        const std::size_t nSignals = settings.outputPhase ? 4UZ : 3UZ;
         const std::size_t reIndex  = nSignals - 2UZ;
         const std::size_t imIndex  = nSignals - 1UZ;
 
@@ -277,7 +285,7 @@ On the choice of window (mathematically aka. apodisation) functions
 
         assert(_magnitudeSpectrum.size() == ds.signalValues(0UZ).size());
         std::copy_n(_magnitudeSpectrum.begin(), N, ds.signalValues(0UZ).begin());
-        if (outputPhase) {
+        if (settings.outputPhase) {
             assert(_phaseSpectrum.size() == ds.signalValues(1UZ).size());
             std::copy_n(_phaseSpectrum.begin(), N, ds.signalValues(1UZ).begin());
         }

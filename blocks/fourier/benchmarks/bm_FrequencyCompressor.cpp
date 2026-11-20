@@ -43,8 +43,7 @@ struct Compression {
     std::vector<CF>                      output;
 
     explicit Compression(gr::Size_t divisor) : block(std::make_unique<FrequencyCompressor>(gr::property_map{{"divisor", divisor}, {"frame", kFrame}})), output(kInputSamples, CF{}) {
-        block->settings().init();
-        std::ignore = block->settings().applyStagedParameters();
+        std::ignore = block->check({});
         block->start();
     }
 

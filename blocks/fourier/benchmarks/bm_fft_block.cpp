@@ -87,7 +87,7 @@ void testFFT() {
 
     {
         gr::blocks::fourier::FFT<T, DataSet<PrecisionType>, FFT> fft1({{"fftSize", N}});
-        std::ignore = fft1.settings().applyStagedParameters();
+        std::ignore = fft1.check({});
 
         std::vector<DataSet<PrecisionType>> resultingDataSets(1);
         ::benchmark::benchmark<nRepetitions>(std::format("{} - fft", type_name<T>())) = [&fft1, &signal, &resultingDataSets] { expect(gr::work::Status::OK == fft1.processBulk(signal, resultingDataSets)); };

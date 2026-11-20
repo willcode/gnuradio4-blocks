@@ -14,6 +14,7 @@
 #include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/fourier/FrequencyCompressor.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
@@ -103,14 +104,10 @@ struct Call {
     return last;
 }
 
-/// @brief Stages a live settings change and applies it, as work() does. Returns the refusal, empty when none.
+/// @brief Sets a live settings change and applies it, as work() does. Returns the refusals, empty when none.
 [[nodiscard]] std::string applyLive(gr::blocks::fourier::FrequencyCompressor& block, gr::property_map changes) {
-    try {
-        std::ignore = block.settings().setStaged(std::move(changes));
-        return block.settings().applyStagedParameters().refusal;
-    } catch (const gr::exception& error) {
-        return error.message;
-    }
+    const gr::settings::Rejected refused = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(changes));
+    return refused.empty() ? std::string{} : gr::settings::describeRejected(refused);
 }
 
 /// The rates the `gr:sample_rate` tags in @p tags state.
@@ -128,8 +125,9 @@ struct Call {
 
 /// A block brought up with @p settings, started, outside a graph.
 void bringUp(gr::blocks::fourier::FrequencyCompressor& block) {
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    if (const auto first = block.check({}); !first.has_value()) {
+        throw gr::exception(std::format("the block refused its initialization: {}", gr::settings::describeRejected(first.error())));
+    }
     block.start();
 }
 
@@ -233,8 +231,8 @@ const boost::ut::suite<"FrequencyCompressor"> frequencyCompressorTests = [] {
         expect(fatal(gt(driveToOutput(block, input, output).made, 0UZ)));
 
         const auto onAccepted = [&block](std::string_view refused) {
-            expect(eq(block.divisor.value, gr::Size_t(4))) << refused;
-            expect(eq(block.frame.value, gr::Size_t(1024))) << refused;
+            expect(eq(block.settings.divisor.value, gr::Size_t(4))) << refused;
+            expect(eq(block.settings.frame.value, gr::Size_t(1024))) << refused;
         };
 
         expect(!applyLive(block, {{"divisor", gr::Size_t(0)}}).empty());
@@ -276,7 +274,7 @@ const boost::ut::suite<"FrequencyCompressor"> frequencyCompressorTests = [] {
         expect(scheduler.runAndWait().has_value());
 
         expect(gt(sink._samples.size(), 0UZ));
-        expect(eq(comp.sample_rate.value, kRate)) << "an upstream rate tag does not set sample_rate";
+        expect(eq(comp.settings.sample_rate.value, kRate)) << "an upstream rate tag does not set sample_rate";
         const auto rates = ratesIn(sink._tags);
         expect(eq(rates.size(), 1UZ)) << "one rate reaches the output";
         if (rates.size() == 1UZ) {
@@ -322,7 +320,7 @@ const boost::ut::suite<"FrequencyCompressor"> frequencyCompressorTests = [] {
         }
 
         expect(applyLive(block, {{"divisor", gr::Size_t(8)}}).empty());
-        expect(eq(block.divisor.value, gr::Size_t(8))) << "the change is accepted rather than refused";
+        expect(eq(block.settings.divisor.value, gr::Size_t(8))) << "the change is accepted rather than refused";
 
         const Call after = driveToOutput(block, input, output);
         expect(after.made > 0UZ) << "and the block keeps producing under the new divisor";
@@ -380,7 +378,7 @@ const boost::ut::suite<"FrequencyCompressor"> frequencyCompressorTests = [] {
         }
 
         expect(applyLive(block, {{"frame", gr::Size_t(2048)}}).empty());
-        expect(eq(block.frame.value, gr::Size_t(2048))) << "a new analysis frame is accepted while running";
+        expect(eq(block.settings.frame.value, gr::Size_t(2048))) << "a new analysis frame is accepted while running";
 
         const Call next = driveToOutput(block, input, output);
         expect(next.made > 0UZ) << "the block re-plans and keeps producing";
