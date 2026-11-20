@@ -25,21 +25,26 @@ namespace {
 template<typename T>
 struct TagAtSource : gr::Block<TagAtSource<T>> {
     gr::PortOut<T> out;
-    gr::Size_t     n  = 4U;
-    gr::Size_t     at = 4U;
-    std::string    key{"mark"};
 
-    GR_MAKE_REFLECTABLE(TagAtSource, out, n, at, key);
+    struct Settings {
+        gr::Size_t  n  = 4U;
+        gr::Size_t  at = 4U;
+        std::string key{"mark"};
+
+        GR_MAKE_REFLECTABLE(Settings, n, at, key);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TagAtSource, out, settings);
 
     [[nodiscard]] gr::work::Status processBulk(gr::OutputSpanLike auto& outSpan) {
-        const std::size_t count = std::min(outSpan.size(), static_cast<std::size_t>(n));
+        const std::size_t count = std::min(outSpan.size(), static_cast<std::size_t>(settings.n));
         for (std::size_t i = 0UZ; i < count; ++i) {
             outSpan[i] = static_cast<T>(i + 1UZ);
         }
-        if (!key.empty()) {
+        if (!settings.key.empty()) {
             gr::property_map map;
-            map.insert_or_assign(std::pmr::string(key.begin(), key.end()), gr::pmt::Value(std::string("x")));
-            outSpan.publishTag(map, static_cast<std::size_t>(at));
+            map.insert_or_assign(std::pmr::string(settings.key.begin(), settings.key.end()), gr::pmt::Value(std::string("x")));
+            outSpan.publishTag(map, static_cast<std::size_t>(settings.at));
         }
         outSpan.publish(count);
         return gr::work::Status::DONE;
@@ -215,7 +220,7 @@ const boost::ut::suite<"ExpectSink expected_tags"> expectedTagsTests = [] {
     "an expected_tags key that is not a sample index fails"_test = [&] {
         const std::string error = runIntoSink<float, VectorSource>(source, //
             property_map{{"expected", oneToFour}, {"expected_tags", property_map{{"one", frameTag}}}});
-        expect(error.contains("expected_tags key 'one' is not a sample index")) << error;
+        expect(error.contains("expected_tags key 'one' must be a sample index")) << error;
     };
 
     "a list tells two tags at one index from one tag with both keys"_test = [&] {

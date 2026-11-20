@@ -20,15 +20,19 @@ template<typename T, std::size_t min = 0UZ, std::size_t count = N_MAX, bool use_
 struct source : public gr::Block<source<T, min, count>> {
     gr::PortOut<T> out;
 
-    gr::Size_t n_samples_max = 0U;
+    struct Settings {
+        gr::Size_t n_samples_max = 0U;
 
-    GR_MAKE_REFLECTABLE(source, out, n_samples_max);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(source, out, settings);
 
     void reset() { n_samples_produced = 0UZ; }
 
     [[nodiscard]] constexpr T processOne() noexcept {
         n_samples_produced++;
-        if (n_samples_max > 0 && n_samples_produced >= n_samples_max) {
+        if (settings.n_samples_max > 0 && n_samples_produced >= settings.n_samples_max) {
             this->requestStop();
         }
         T x{};
@@ -42,20 +46,33 @@ inline static std::size_t n_samples_consumed = 0UZ;
 template<typename T, std::size_t N_MIN = 1UZ, std::size_t N_MAX = N_MAX>
 struct sink : public gr::Block<sink<T, N_MIN, N_MAX>> {
     gr::PortIn<T, gr::RequiredSamples<N_MIN, N_MAX>> in;
-    uint64_t                                         should_receive_n_samples = 0;
-    std::optional<std::size_t>                       _last_tag_position;
 
-    GR_MAKE_REFLECTABLE(sink, in, should_receive_n_samples);
+    struct Settings {
+        gr::Annotated<uint64_t> should_receive_n_samples = 0U;
+
+        GR_MAKE_REFLECTABLE(Settings, should_receive_n_samples);
+    } settings;
+
+    struct Status {
+        gr::Annotated<uint64_t> current_should_receive_n_samples = 0U; // an `N_SAMPLES_MAX` tag moves it
+
+        GR_MAKE_REFLECTABLE(Status, current_should_receive_n_samples);
+    } status;
+
+    GR_MAKE_REFLECTABLE(sink, in, settings, status);
+
+    std::optional<std::size_t> _last_tag_position;
 
     void reset() { n_samples_consumed = 0UZ; }
 
-    [[nodiscard]] constexpr auto processOne(T a) noexcept {
+    // a declared return type: a deduced one makes the mergedInputTag() constraint depend on this body
+    constexpr void processOne(T a) noexcept {
         if (this->inputTagsPresent()) {
             const auto& tag = this->mergedInputTag();
             if (auto it = tag.map.find("N_SAMPLES_MAX"); it != tag.map.end()) {
                 if (auto ptr = it->second.template get_if<std::uint64_t>()) {
-                    should_receive_n_samples = *ptr;
-                    _last_tag_position       = in.streamReader().position();
+                    status.current_should_receive_n_samples = *ptr;
+                    _last_tag_position                      = in.streamReader().position();
                 }
             }
         }

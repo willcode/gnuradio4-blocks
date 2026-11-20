@@ -1,5 +1,6 @@
 #include <boost/ut.hpp>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 
@@ -9,6 +10,19 @@
 
 #include <gnuradio-4.0/basic/NullSources.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
+#include <gnuradio-4.0/testing/TestSpans.hpp>
+
+namespace {
+// emits one sample of `source`, with the test's thread marked as the block's own thread
+template<typename TSource, typename T>
+[[nodiscard]] T emitOne(TSource& source) {
+    std::array<T, 1UZ>                       out{};
+    gr::blocks::testing::span::OutputSpan<T> outSpan{std::span<T>(out)};
+    const gr::settings::detail::OwnThread    ownThread(gr::settings::detail::settingsOf(source));
+    std::ignore = source.processBulk(outSpan);
+    return out[0UZ];
+}
+} // namespace
 
 const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
     using namespace boost::ut;
@@ -35,7 +49,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N));
+        expect(eq(sink.status.count.value, N));
     } | kTestTypes;
 
     "CountingSource->NullSink"_test = []<typename T>(const T&) {
@@ -85,7 +99,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N));
+        expect(eq(sink.status.count.value, N));
     } | kTestTypes;
 
     // the count starts six below 2^32 and ten samples arrive; a 32-bit count reads 4
@@ -95,8 +109,9 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
     "CountingSink count continues past 2^32"_test = [] {
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<float>>(property_map{{"n_samples_max", kFed}});
-        auto& sink = g.emplaceBlock<CountingSink<float>>(property_map{{"count", kStart}});
+        auto& src         = g.emplaceBlock<ConstantSource<float>>(property_map{{"n_samples_max", kFed}});
+        auto& sink        = g.emplaceBlock<CountingSink<float>>();
+        sink.status.count = kStart; // no thread runs the block yet
 
         expect(g.connect<"out", "in">(src, sink).has_value());
 
@@ -105,14 +120,15 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count.value, kStart + kFed));
+        expect(eq(sink.status.count.value, kStart + kFed));
     };
 
     "HeadBlock count continues past 2^32"_test = [] {
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<float>>(property_map{{"n_samples_max", kFed}});
-        auto& head = g.emplaceBlock<HeadBlock<float>>(property_map{{"count", kStart}});
-        auto& sink = g.emplaceBlock<CountingSink<float>>();
+        auto& src         = g.emplaceBlock<ConstantSource<float>>(property_map{{"n_samples_max", kFed}});
+        auto& head        = g.emplaceBlock<HeadBlock<float>>();
+        head.status.count = kStart; // no thread runs the block yet
+        auto& sink        = g.emplaceBlock<CountingSink<float>>();
 
         expect(g.connect<"out", "in">(src, head).has_value());
         expect(g.connect<"out", "in">(head, sink).has_value());
@@ -122,8 +138,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(head.count.value, kStart + kFed));
-        expect(eq(sink.count.value, kFed));
+        expect(eq(head.status.count.value, kStart + kFed));
+        expect(eq(sink.status.count.value, kFed));
     };
 
     "HeadBlock honors an n_samples_max above 2^32"_test = [] {
@@ -132,11 +148,12 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         constexpr std::uint64_t kOffer = 2U * kFed;
 
         Graph g;
-        auto& src  = g.emplaceBlock<ConstantSource<float>>(property_map{{"n_samples_max", kOffer}});
-        auto& head = g.emplaceBlock<HeadBlock<float>>(property_map{{"n_samples_max", kLimit}, {"count", kStart}});
-        auto& sink = g.emplaceBlock<CountingSink<float>>();
+        auto& src         = g.emplaceBlock<ConstantSource<float>>(property_map{{"n_samples_max", kOffer}});
+        auto& head        = g.emplaceBlock<HeadBlock<float>>(property_map{{"n_samples_max", kLimit}});
+        head.status.count = kStart; // no thread runs the block yet
+        auto& sink        = g.emplaceBlock<CountingSink<float>>();
 
-        expect(eq(head.n_samples_max.value, kLimit));
+        expect(eq(head.settings.n_samples_max.value, kLimit));
 
         expect(g.connect<"out", "in">(src, head).has_value());
         expect(g.connect<"out", "in">(head, sink).has_value());
@@ -146,8 +163,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(head.count.value, kLimit));
-        expect(eq(sink.count.value, kLimit - kStart)) << "the head must pass exactly the samples left below its limit";
+        expect(eq(head.status.count.value, kLimit));
+        expect(eq(sink.status.count.value, kLimit - kStart)) << "the head must pass exactly the samples left below its limit";
     };
 
     "HeadBlock takes n_samples_max from a plain integer"_test = []<typename TInt>(const TInt&) {
@@ -159,7 +176,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         auto& head = g.emplaceBlock<HeadBlock<float>>(property_map{{"n_samples_max", kHead}});
         auto& sink = g.emplaceBlock<CountingSink<float>>();
 
-        expect(eq(head.n_samples_max.value, static_cast<std::uint64_t>(kHead)));
+        expect(eq(head.settings.n_samples_max.value, static_cast<std::uint64_t>(kHead)));
 
         expect(g.connect<"out", "in">(src, head).has_value());
         expect(g.connect<"out", "in">(head, sink).has_value());
@@ -169,7 +186,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count.value, static_cast<std::uint64_t>(kHead)));
+        expect(eq(sink.status.count.value, static_cast<std::uint64_t>(kHead)));
     } | std::tuple<int, std::int64_t, gr::Size_t>();
 
     "double header type smoke test"_test = [] {
@@ -178,8 +195,8 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
 
         ConstantSource<double> source;
         NullSink<double>       sink;
-        source.default_value = 1.5;
-        expect(eq(source.processOne(), 1.5));
+        expect(source.set({{"default_value", 1.5}}).has_value());
+        expect(eq(emitOne<ConstantSource<double>, double>(source), 1.5));
         sink.processOne(1.5);
     };
 
@@ -192,7 +209,7 @@ const boost::ut::suite<"Null[..] and Testing Blocks"> nullSourcesTests = [] {
         ConstantSource<T> source(property_map{{"default_value", 1.5F}});
         NullSink<T>       sink;
         source.init(source.progress);
-        expect(eq(source.processOne(), T{1.5F, 0.F}));
+        expect(eq(emitOne<ConstantSource<T>, T>(source), T{1.5F, 0.F}));
         sink.processOne(T{1.5F, -2.F});
     };
 };

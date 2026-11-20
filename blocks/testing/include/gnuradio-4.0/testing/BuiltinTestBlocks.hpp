@@ -8,12 +8,16 @@ namespace gr::blocks::testing {
 
 template<typename T>
 struct builtin_multiply : gr::Block<builtin_multiply<T>> {
-    T factor = static_cast<T>(1.0f);
+    struct Settings {
+        T factor = static_cast<T>(1.0f);
+
+        GR_MAKE_REFLECTABLE(Settings, factor);
+    } settings;
 
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    GR_MAKE_REFLECTABLE(builtin_multiply, in, out, factor);
+    GR_MAKE_REFLECTABLE(builtin_multiply, in, out, settings);
 
     builtin_multiply() = delete;
 
@@ -22,12 +26,12 @@ struct builtin_multiply : gr::Block<builtin_multiply<T>> {
         if (it != properties.cend()) {
             auto ptr = gr::checked_access_ptr{it->second.get_if<T>()};
             if (ptr != nullptr) {
-                factor = *ptr;
+                settings.factor = *ptr;
             }
         }
     }
 
-    [[nodiscard]] constexpr auto processOne(T value) const noexcept { return value * factor; }
+    [[nodiscard]] constexpr auto processOne(T value) const noexcept { return value * settings.factor; }
 };
 
 template<typename T>

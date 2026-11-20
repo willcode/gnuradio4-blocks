@@ -11,8 +11,11 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/basic/NullSources.hpp>
 #include <gnuradio-4.0/testing/Delay.hpp>
+#include <gnuradio-4.0/testing/ImChartMonitor.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 #include <gnuradio-4.0/testing/PerformanceMonitor.hpp>
+#include <gnuradio-4.0/testing/SettingsChangeRecorder.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
@@ -41,7 +44,7 @@ const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N));
+        expect(eq(sink.status.count.value, N));
     } | kTestTypes;
 
     "CountingSource->HeadBlock->CountingSink"_test = []<typename T>(const T&) {
@@ -62,7 +65,7 @@ const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N_head));
+        expect(eq(sink.status.count.value, N_head));
     } | kTestTypes;
 
     "TagSource mark_tag publishes only 0 and 1"_test = []<typename T>(const T&) {
@@ -202,6 +205,53 @@ const boost::ut::suite<"testing flow blocks"> testingFlowBlocks = [] {
 
         const auto nCarrying = std::ranges::count_if(sink._tags, [](const Tag& tag) { return tag.map.contains("record_id"); });
         expect(eq(nCarrying, 1)) << "the monitor declares no tag policy and forwards a key outside the gr: domain";
+    };
+
+    "the blocks with a settings hook initialize at their defaults and with each setting off its default"_test = [] {
+        using gr::testing::initFailures;
+        using gr::testing::OffDefault;
+        const std::vector<std::string> recorder = initFailures<SettingsChangeRecorder<float>>({
+            {"scaling_factor", 2.f},
+            {"context", std::string("ctx")},
+            {"n_samples_max", gr::Size_t{10U}},
+            {"sample_rate", 2.f},
+            {"string_vector_setting", std::vector<std::string>{"a", "b"}},
+            {"test_enum_setting", std::string("TEST_STATE2")},
+            {"annotated_test_enum_setting", std::string("TEST_STATE3")},
+        });
+        expect(recorder.empty()) << std::format("{}", recorder);
+        const std::vector<std::string> source = initFailures<TagSource<float>>({
+            {"repeat_tags", true},
+            {"n_samples_max", gr::Size_t{10U}},
+            {"sample_rate", 2.f},
+            {"signal_name", std::string("name")},
+            {"signal_unit", std::string("V")},
+            {"signal_quantity", std::string("voltage")},
+            {"signal_min", -1.f},
+            {"signal_max", 1.f},
+            {"mark_tag", false},
+        });
+        expect(source.empty()) << std::format("{}", source);
+        const std::vector<std::string> monitor = initFailures<ImChartMonitor<float, false>>({
+            {"sample_rate", 2.f},
+            {"signal_name", std::string("name")},
+            {"n_history", gr::Size_t{10U}},
+            {"n_tag_history", gr::Size_t{5U}},
+            {"timeout_ms", std::uint64_t{80U}},
+            {"chart_width", gr::Size_t{80U}},
+        });
+        expect(monitor.empty()) << std::format("{}", monitor);
+    };
+
+    "SettingsChangeRecorder counts the settings call at initialization and one per set"_test = [] {
+        SettingsChangeRecorder<float> recorder({{"scaling_factor", 2.f}});
+        recorder._debug = false;
+        expect(recorder.check({}).has_value());
+        expect(eq(recorder._updateCount, 1)) << "initialization calls the hook once";
+        expect(eq(recorder.settings.scaling_factor.value, 2.f));
+        expect(recorder.set({{"scaling_factor", 3.f}}).has_value());
+        expect(eq(recorder._updateCount, 2)) << "a set on a block no graph holds applies at the call";
+        expect(eq(recorder.settings.scaling_factor.value, 3.f));
     };
 };
 

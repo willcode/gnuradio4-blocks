@@ -29,19 +29,6 @@ inline std::string format_variant(const auto& value) noexcept {
     return result;
 }
 
-inline void printChanges(const property_map& oldMap, const property_map& newMap) noexcept {
-    for (const auto& [key, newValue] : newMap) {
-        if (!oldMap.contains(key)) {
-            std::print("    key added '{}` = {}\n", std::string_view(key), format_variant(newValue));
-        } else {
-            const auto& oldValue = oldMap.at(key);
-            const bool  areEqual = oldValue == newValue;
-            if (!areEqual) {
-                std::print("    key value changed: '{}` = {} -> {}\n", std::string_view(key), format_variant(oldValue), format_variant(newValue));
-            }
-        }
-    }
-}
 } // namespace utils
 
 GR_REGISTER_BLOCK(gr::blocks::testing::SettingsChangeRecorder, [T], [ int32_t, float ])
@@ -54,35 +41,34 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
     PortIn<T>  in{};
     PortOut<T> out{};
 
-    // settings
-    Annotated<T, "scaling factor", Visible, Doc<"y = a * x">, Unit<"As">>                    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
-    Annotated<std::string, "context information", Visible>                                   context{};
-    gr::Size_t                                                                               n_samples_max = 0;
-    Annotated<float, "sample rate", Limits<int64_t(0), std::numeric_limits<int64_t>::max()>> sample_rate   = 1.0f;
-    Tensor<T>                                                                                vector_setting{gr::data_from, {T(3), T(2), T(1)}};
-    Annotated<std::vector<std::string>, "string vector">                                     string_vector_setting{};
-    std::array<T, 3UZ>                                                                       array_setting{T(3), T(2), T(1)};
-    std::array<std::string, 3UZ>                                                             string_array_setting{"", "", ""};
-    TestEnum                                                                                 test_enum_setting           = TestEnum::TEST_STATE1;
-    Annotated<TestEnum, "annotated enum">                                                    annotated_test_enum_setting = TestEnum::TEST_STATE1;
+    struct Settings {
+        Annotated<T, Visible, Doc<"scaling factor">, Unit<"As">>    scaling_factor = static_cast<T>(1); // N.B. unit 'As' = 'Coulomb'
+        Annotated<std::string, Doc<"context information">, Visible> context{};
+        gr::Size_t                                                  n_samples_max = 0;
+        Annotated<float, Limits<Min<int64_t(0)>>>                   sample_rate   = 1.0f;
+        Tensor<T>                                                   vector_setting{gr::data_from, {T(3), T(2), T(1)}};
+        Annotated<std::vector<std::string>, Doc<"string vector">>   string_vector_setting{};
+        std::array<T, 3UZ>                                          array_setting{T(3), T(2), T(1)};
+        std::array<std::string, 3UZ>                                string_array_setting{"", "", ""};
+        TestEnum                                                    test_enum_setting           = TestEnum::TEST_STATE1;
+        Annotated<TestEnum, Doc<"annotated enum">>                  annotated_test_enum_setting = TestEnum::TEST_STATE1;
 
-    GR_MAKE_REFLECTABLE(SettingsChangeRecorder, in, out, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting, array_setting, string_array_setting, test_enum_setting, annotated_test_enum_setting);
+        GR_MAKE_REFLECTABLE(Settings, scaling_factor, context, n_samples_max, sample_rate, vector_setting, string_vector_setting, array_setting, string_array_setting, test_enum_setting, annotated_test_enum_setting);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SettingsChangeRecorder, in, out, settings);
 
     bool          _debug            = true;
     int           _updateCount      = 0;
     bool          _resetCalled      = false;
     std::uint64_t _nSamplesConsumed = 0;
 
-    void settingsChanged(const property_map& oldSettings, property_map& newSettings, property_map& fwdSettings) noexcept {
+    void applySettings([[maybe_unused]] const Settings& s) noexcept {
         // optional function that is called whenever settings change
         _updateCount++;
 
         if (_debug) {
             std::println("block '{}' settings changed - update_count: {}", this->name, _updateCount);
-            utils::printChanges(oldSettings, newSettings);
-            for (const auto& [key, value] : fwdSettings) {
-                std::println(" -- forward: '{}':{}", std::string_view(key), value);
-            }
         }
     }
 
@@ -94,7 +80,7 @@ struct SettingsChangeRecorder : Block<SettingsChangeRecorder<T>> {
 
     [[nodiscard]] constexpr T processOne(const T& a) noexcept {
         _nSamplesConsumed++;
-        return a * scaling_factor;
+        return a * settings.scaling_factor;
     }
 };
 

@@ -25,7 +25,7 @@ const boost::ut::suite<"SimCompute"> simComputeTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N));
+        expect(eq(sink.status.count.value, N));
     } | kTestTypes;
 
     "linear complexity"_test = []<typename T>(const T&) {
@@ -41,7 +41,7 @@ const boost::ut::suite<"SimCompute"> simComputeTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N));
+        expect(eq(sink.status.count.value, N));
     } | kTestTypes;
 
     "quadratic complexity"_test = []<typename T>(const T&) {
@@ -57,14 +57,12 @@ const boost::ut::suite<"SimCompute"> simComputeTests = [] {
             throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
         }
         expect(sch.runAndWait().has_value());
-        expect(eq(sink.count, N));
+        expect(eq(sink.status.count.value, N));
     } | kTestTypes;
 
     "compute_delay_seconds"_test = [] {
         SimCompute<float> sim;
-        sim.target_throughput   = 1e6f;
-        sim.reference_work_size = 1000U;
-        sim.complexity_order    = 2.0f;
+        expect(sim.set({{"target_throughput", 1e6f}, {"reference_work_size", 1000U}, {"complexity_order", 2.0f}}).has_value());
 
         constexpr std::size_t N            = 2000;
         const auto            delay        = sim.compute_delay_seconds(N);

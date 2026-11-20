@@ -128,45 +128,56 @@ template<typename T, ProcessFunction UseProcessVariant = ProcessFunction::USE_PR
 struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     PortOut<T> out;
 
-    // settings
-    bool        repeat_tags = false; // if true tags are repeated from the beginning. Example: Given the tag indices {1, 3, 5}, the output tag indices would be: 1, 3, 5, 6, 8, 10, ...
-    Tensor<T>   values{};            // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
-    gr::Size_t  n_samples_max{1024}; // if 0 -> infinite samples
-    float       sample_rate     = 1000.0f;
-    std::string signal_name     = "unknown signal";
-    std::string signal_unit     = "unknown unit";
-    std::string signal_quantity = "unknown quantity";
-    float       signal_min      = std::numeric_limits<float>::lowest();
-    float       signal_max      = std::numeric_limits<float>::max();
-    bool        verbose_console = false;
-    bool        mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
+    struct Settings {
+        bool                   repeat_tags = false; // if true tags are repeated from the beginning. Example: Given the tag indices {1, 3, 5}, the output tag indices would be: 1, 3, 5, 6, 8, 10, ...
+        Tensor<T>              values{};            // if values are set it works like repeated source. Example: values = { 1, 2, 3 }; output: 1,2,3,1,2,3... `mark_tag` is ignored in this case.
+        gr::Size_t             n_samples_max{1024}; // if 0 -> infinite samples
+        Annotated<float>       sample_rate     = 1000.0f;
+        Annotated<std::string> signal_name     = "unknown signal";
+        Annotated<std::string> signal_unit     = "unknown unit";
+        Annotated<std::string> signal_quantity = "unknown quantity";
+        Annotated<float>       signal_min      = std::numeric_limits<float>::lowest();
+        Annotated<float>       signal_max      = std::numeric_limits<float>::max();
+        bool                   verbose_console = false;
+        bool                   mark_tag        = true; // true: mark tagged samples with '1' or '0' otherwise. false: [0, 1, 2, ..., ], if values is not empty mark_tag is ignored
 
-    GR_MAKE_REFLECTABLE(TagSource, out, n_samples_max, sample_rate, signal_name, signal_unit, signal_quantity, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max, sample_rate, signal_name, signal_unit, signal_quantity, signal_min, signal_max, verbose_console, mark_tag, values, repeat_tags);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TagSource, out, settings);
 
     std::vector<Tag> _tags{};                 // It is expected that Tag.index is in ascending order
     std::size_t      _tagIndex{0};            // current index in tags array
     std::size_t      _valueIndex{0};          // current index in values array
     std::uint64_t    _nSamplesProduced{0ULL}; // for infinite samples the counter wraps around back to 0, _tagIndex = 0, _valueIndex = 0
 
-    std::function<void(const Tag&)> _tagCallback{};  // optional tag callback
-    bool                            _rateOwed{true}; // the next sample carries a `gr:sample_rate` tag
+    std::function<void(const Tag&)> _tagCallback{};     // optional tag callback
+    bool                            _rateOwed{true};    // the next sample carries a `gr:sample_rate` tag
+    property_map                    givenDescription{}; // the description settings given at construction, which the first sample carries
+    bool                            setUp{false};       // the first apply, the block's setup, has run
 
-    /// @brief Writes each changed signal description setting on the output under its `gr:` key. The rate is written
-    /// on the first sample after a start or a change.
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings, property_map& forward) {
-        const auto state = [&newSettings, &forward](std::string_view name, std::string_view key) {
-            if (const auto it = newSettings.find(name); it != newSettings.end()) {
-                forward.insert_or_assign(std::pmr::string(key), it->second);
+    /// @brief Writes each changed signal description setting on the output under its `gr:` key. The first sample
+    /// carries the ones given at construction, as no tag leaves at the initialization. The rate is written on the
+    /// first sample after a start or a change.
+    void applySettings(const Settings& s) {
+        const auto describe = [this](const auto& member, std::string_view key) {
+            if (!setUp) {
+                if (this->isGiven(member)) {
+                    givenDescription.insert_or_assign(std::pmr::string(key), member.value);
+                }
+            } else if (member.changed()) {
+                this->forwardTag(key, member.value);
             }
         };
-        if (newSettings.contains(tag::SAMPLE_RATE.name())) {
+        if (s.sample_rate.changed()) {
             _rateOwed = true;
         }
-        state(tag::SIGNAL_NAME.name(), tag::SIGNAL_NAME.key());
-        state(tag::SIGNAL_UNIT.name(), tag::SIGNAL_UNIT.key());
-        state(tag::SIGNAL_QUANTITY.name(), tag::SIGNAL_QUANTITY.key());
-        state(tag::SIGNAL_MIN.name(), tag::SIGNAL_MIN.key());
-        state(tag::SIGNAL_MAX.name(), tag::SIGNAL_MAX.key());
+        describe(s.signal_name, tag::SIGNAL_NAME.key());
+        describe(s.signal_unit, tag::SIGNAL_UNIT.key());
+        describe(s.signal_quantity, tag::SIGNAL_QUANTITY.key());
+        describe(s.signal_min, tag::SIGNAL_MIN.key());
+        describe(s.signal_max, tag::SIGNAL_MAX.key());
+        setUp = true;
     }
 
     void start() {
@@ -186,8 +197,11 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
     T processOne() noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_ONE)
     {
+        if (!givenDescription.empty()) {
+            this->publishTag(std::exchange(givenDescription, {}), 0UZ);
+        }
         if (_rateOwed) {
-            this->publishTag(property_map{{std::pmr::string(tag::SAMPLE_RATE.key()), sample_rate}}, 0UZ);
+            this->publishTag(property_map{{std::pmr::string(tag::SAMPLE_RATE.key()), settings.sample_rate.value}}, 0UZ);
             _rateOwed = false;
         }
         const auto [nGeneratedTags, tagRepeatStarted] = generateTag(                              //
@@ -195,7 +209,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             "processOne(...)");
 
         _nSamplesProduced++;
-        if (!isInfinite() && _nSamplesProduced >= n_samples_max) {
+        if (!isInfinite() && _nSamplesProduced >= settings.n_samples_max) {
             this->requestStop();
         }
 
@@ -203,22 +217,25 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             _nSamplesProduced = 0U;
         }
 
-        if (!values.empty()) {
-            if (_valueIndex == values.size()) {
+        if (!settings.values.empty()) {
+            if (_valueIndex == settings.values.size()) {
                 _valueIndex = 0;
             }
-            T currentValue = values[_valueIndex];
+            T currentValue = settings.values[_valueIndex];
             _valueIndex++;
             return currentValue;
         }
-        return mark_tag ? (nGeneratedTags > 0 ? detail::make_sample_value<T>(std::size_t{1}) : detail::make_sample_value<T>(std::size_t{0})) : detail::make_sample_value<T>(_nSamplesProduced);
+        return settings.mark_tag ? (nGeneratedTags > 0 ? detail::make_sample_value<T>(std::size_t{1}) : detail::make_sample_value<T>(std::size_t{0})) : detail::make_sample_value<T>(_nSamplesProduced);
     }
 
     work::Status processBulk(OutputSpanLike auto& outSpan) noexcept
     requires(UseProcessVariant == ProcessFunction::USE_PROCESS_BULK)
     {
+        if (!givenDescription.empty() && outSpan.size() > 0UZ) {
+            outSpan.publishTag(std::exchange(givenDescription, {}), 0UZ);
+        }
         if (_rateOwed && outSpan.size() > 0UZ) {
-            outSpan.publishTag(property_map{{std::pmr::string(tag::SAMPLE_RATE.key()), sample_rate}}, 0UZ);
+            outSpan.publishTag(property_map{{std::pmr::string(tag::SAMPLE_RATE.key()), settings.sample_rate.value}}, 0UZ);
             _rateOwed = false;
         }
         const auto [nGeneratedTags, tagRepeatStarted] = generateTag(                              //
@@ -234,25 +251,25 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             if (_tagIndex < _tags.size()) {
                 if (_tags[_tagIndex].index > nSamplesRemainder) {
                     nextTagIn = _tags[_tagIndex].index - nSamplesRemainder;
-                    nextTagIn = std::min(nextTagIn, n_samples_max - _nSamplesProduced);
+                    nextTagIn = std::min(nextTagIn, settings.n_samples_max - _nSamplesProduced);
                 }
             } else {
-                nextTagIn = isInfinite() ? outSpan.size() : n_samples_max - _nSamplesProduced;
+                nextTagIn = isInfinite() ? outSpan.size() : settings.n_samples_max - _nSamplesProduced;
             }
         }
 
-        const std::size_t nSamples = isInfinite() || _nSamplesProduced < n_samples_max ? std::min(static_cast<std::size_t>(std::max(std::uint64_t{1}, nextTagIn)), outSpan.size()) : 0UZ; // '0UZ' -> DONE, produced enough samples
+        const std::size_t nSamples = isInfinite() || _nSamplesProduced < settings.n_samples_max ? std::min(static_cast<std::size_t>(std::max(std::uint64_t{1}, nextTagIn)), outSpan.size()) : 0UZ; // '0UZ' -> DONE, produced enough samples
 
-        if (!values.empty()) {
+        if (!settings.values.empty()) {
             for (std::size_t i = 0; i < nSamples; ++i) {
-                if (_valueIndex == values.size()) {
+                if (_valueIndex == settings.values.size()) {
                     _valueIndex = 0;
                 }
-                outSpan[i] = values[_valueIndex];
+                outSpan[i] = settings.values[_valueIndex];
                 _valueIndex++;
             }
         } else {
-            if (mark_tag) {
+            if (settings.mark_tag) {
                 std::fill_n(outSpan.begin(), nSamples, detail::make_sample_value<T>(std::size_t{0}));
                 if (nGeneratedTags > 0 && nSamples > 0UZ) {
                     outSpan[0] = detail::make_sample_value<T>(std::size_t{1});
@@ -270,7 +287,7 @@ struct TagSource : Block<TagSource<T, UseProcessVariant>> {
             _nSamplesProduced += nSamples;
         }
         outSpan.publish(nSamples);
-        return !isInfinite() && _nSamplesProduced >= n_samples_max ? work::Status::DONE : work::Status::OK;
+        return !isInfinite() && _nSamplesProduced >= settings.n_samples_max ? work::Status::DONE : work::Status::OK;
     }
 
 private:
@@ -292,7 +309,7 @@ private:
         }
 
         do {
-            if (verbose_console) {
+            if (settings.verbose_console) {
                 print_tag(_tags[_tagIndex], std::format("{}::{}\t publish tag at  {:6}", this->name.value, processFunctionName, _nSamplesProduced));
             }
             publishTagFn(_tags[_tagIndex].map, 0UZ);
@@ -303,7 +320,7 @@ private:
             result.nGeneratedTags++;
         } while (_tagIndex < _tags.size() && _tags[_tagIndex].index == targetIndex);
 
-        if (repeat_tags && _tagIndex == _tags.size()) {
+        if (settings.repeat_tags && _tagIndex == _tags.size()) {
             _tagIndex               = 0;
             result.tagRepeatStarted = true;
         }
@@ -312,10 +329,10 @@ private:
     }
 
     [[nodiscard]] std::uint64_t getNProducedSamplesRemainder() const { //
-        return repeat_tags && !_tags.empty() && !isInfinite() ? _nSamplesProduced % (_tags.back().index + 1) : _nSamplesProduced;
+        return settings.repeat_tags && !_tags.empty() && !isInfinite() ? _nSamplesProduced % (_tags.back().index + 1) : _nSamplesProduced;
     }
 
-    [[nodiscard]] bool isInfinite() const { return n_samples_max == 0U; }
+    [[nodiscard]] bool isInfinite() const { return settings.n_samples_max == 0U; }
 };
 
 // the registered form of each monitor: the parameter picks which of the block's process
@@ -330,13 +347,16 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     PortIn<T>  in;
     PortOut<T> out;
 
-    // settings
-    gr::Size_t n_samples_expected{0};
-    bool       log_tags        = true;
-    bool       log_samples     = true;
-    bool       verbose_console = false;
+    struct Settings {
+        gr::Size_t n_samples_expected{0};
+        bool       log_tags        = true;
+        bool       log_samples     = true;
+        bool       verbose_console = false;
 
-    GR_MAKE_REFLECTABLE(TagMonitor, in, out, n_samples_expected, log_tags, log_samples, verbose_console);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_expected, log_tags, log_samples, verbose_console);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TagMonitor, in, out, settings);
 
     Tensor<T>        _samples;
     std::vector<Tag> _tags;
@@ -345,12 +365,12 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     std::function<void(const Tag&)> _tagCallback{}; // optional tag callback
 
     void start() {
-        if (verbose_console) {
+        if (settings.verbose_console) {
             std::println("started TagMonitor {} aka. '{}'", this->unique_name, this->name);
         }
         _samples.clear();
-        if (log_samples) {
-            _samples.reserve(std::max(0UZ, static_cast<std::size_t>(n_samples_expected)));
+        if (settings.log_samples) {
+            _samples.reserve(std::max(0UZ, static_cast<std::size_t>(settings.n_samples_expected)));
         }
         _tags.clear();
     }
@@ -360,17 +380,17 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     {
         if (this->inputTagsPresent()) {
             const auto& tag = this->mergedInputTag();
-            if (verbose_console) {
+            if (settings.verbose_console) {
                 print_tag(tag, std::format("{}::processOne(...)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
-            if (log_tags) {
+            if (settings.log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
                 if (_tagCallback) {
                     _tagCallback(newTag);
                 }
             }
         }
-        if (log_samples) {
+        if (settings.log_samples) {
             _samples.push_back(input);
         }
         _nSamplesProduced++;
@@ -382,10 +402,10 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
     {
         for (const auto& [relIndex, tagMapRef] : input.tags()) {
             const Tag tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()};
-            if (verbose_console) {
+            if (settings.verbose_console) {
                 print_tag(tag, std::format("{}::processBulk(...{}, ...{})\t received tag at {:6}", this->name, input.size(), output.size(), _nSamplesProduced));
             }
-            if (log_tags) {
+            if (settings.log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced + tag.index, tag.map);
                 if (_tagCallback) {
                     _tagCallback(newTag);
@@ -393,7 +413,7 @@ struct TagMonitor : public Block<TagMonitor<T, UseProcessVariant>> {
             }
         }
 
-        if (log_samples) {
+        if (settings.log_samples) {
             for (const auto& value : input) {
                 _samples.emplace_back(value);
             }
@@ -416,15 +436,18 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     using ClockSourceType = std::chrono::system_clock;
     PortIn<T> in;
 
-    // settings
-    gr::Size_t  n_samples_expected{0};
-    float       sample_rate = 1000.0f;
-    std::string signal_name;
-    bool        log_tags        = true;
-    bool        log_samples     = true;
-    bool        verbose_console = false;
+    struct Settings {
+        gr::Size_t  n_samples_expected{0};
+        float       sample_rate = 1000.0f;
+        std::string signal_name;
+        bool        log_tags        = true;
+        bool        log_samples     = true;
+        bool        verbose_console = false;
 
-    GR_MAKE_REFLECTABLE(TagSink, in, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_expected, sample_rate, signal_name, log_tags, log_samples, verbose_console);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(TagSink, in, settings);
 
     Tensor<T>        _samples{};
     std::vector<Tag> _tags{};
@@ -433,18 +456,18 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     std::function<void(const Tag&)> _tagCallback{};
 
     void start() {
-        if (verbose_console) {
+        if (settings.verbose_console) {
             std::println("started sink {} aka. '{}'", this->unique_name, this->name);
         }
         _samples.clear();
-        if (log_samples) {
-            _samples.reserve(std::max(0UZ, static_cast<std::size_t>(n_samples_expected)));
+        if (settings.log_samples) {
+            _samples.reserve(std::max(0UZ, static_cast<std::size_t>(settings.n_samples_expected)));
         }
         _tags.clear();
     }
 
     void stop() {
-        if (verbose_console) {
+        if (settings.verbose_console) {
             std::println("stopped sink {} aka. '{}'", this->unique_name, this->name);
         }
     }
@@ -454,21 +477,21 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     {
         if (this->inputTagsPresent()) {
             const auto& tag = this->mergedInputTag();
-            if (verbose_console) {
+            if (settings.verbose_console) {
                 print_tag(tag, std::format("{}::processOne(...1)\t received tag at {:6}", this->name, _nSamplesProduced));
             }
-            if (log_tags) {
+            if (settings.log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced, tag.map);
                 if (_tagCallback) {
                     _tagCallback(newTag);
                 }
             }
         }
-        if (log_samples) {
+        if (settings.log_samples) {
             _samples.push_back(input);
         }
         _nSamplesProduced++;
-        if (n_samples_expected > 0 && _nSamplesProduced >= n_samples_expected) {
+        if (settings.n_samples_expected > 0 && _nSamplesProduced >= settings.n_samples_expected) {
             this->requestStop();
         }
     }
@@ -478,23 +501,23 @@ struct TagSink : public Block<TagSink<T, UseProcessVariant>> {
     {
         for (const auto& [relIndex, tagMapRef] : input.tags()) {
             const Tag tag{relIndex < 0 ? 0UZ : static_cast<std::size_t>(relIndex), tagMapRef.get()};
-            if (verbose_console) {
+            if (settings.verbose_console) {
                 print_tag(tag, std::format("{}::processBulk(...{})\t received tag at {:6}", this->name, input.size(), _nSamplesProduced));
             }
-            if (log_tags) {
+            if (settings.log_tags) {
                 const auto& newTag = _tags.emplace_back(_nSamplesProduced + tag.index, tag.map);
                 if (_tagCallback) {
                     _tagCallback(newTag);
                 }
             }
         }
-        if (log_samples) {
+        if (settings.log_samples) {
             for (const auto& value : input) {
                 _samples.push_back(value);
             }
         }
         _nSamplesProduced += input.size();
-        return n_samples_expected > 0 && _nSamplesProduced >= n_samples_expected ? work::Status::DONE : work::Status::OK;
+        return settings.n_samples_expected > 0 && _nSamplesProduced >= settings.n_samples_expected ? work::Status::DONE : work::Status::OK;
     }
 };
 

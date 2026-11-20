@@ -10,6 +10,7 @@
 #include "gnuradio-4.0/basic/FunctionGenerator.hpp"
 #include "gnuradio-4.0/meta/UnitTestHelper.hpp"
 #include "gnuradio-4.0/testing/ImChartMonitor.hpp"
+#include "gnuradio-4.0/testing/InitChecks.hpp"
 #include "gnuradio-4.0/testing/TagMonitors.hpp"
 
 const boost::ut::suite TagTests = [] {
@@ -19,9 +20,11 @@ const boost::ut::suite TagTests = [] {
     using namespace gr::blocks::testing;
 
     constexpr static auto initClockSource = [](auto& clockSrc) {
-        auto addTimeTagEntry = []<typename T>(gr::blocks::basic::ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
-            clockSource.tag_times.value.push_back(timeInNanoseconds);
-            clockSource.tag_values.value.push_back(value);
+        std::vector<std::uint64_t> tagTimes;
+        std::vector<std::string>   tagValues;
+        auto                       addTimeTagEntry = [&tagTimes, &tagValues](auto&, std::uint64_t timeInNanoseconds, const std::string& value) {
+            tagTimes.push_back(timeInNanoseconds);
+            tagValues.push_back(value);
         };
 
         // all times are in nanoseconds
@@ -34,22 +37,18 @@ const boost::ut::suite TagTests = [] {
         addTimeTagEntry(clockSrc, 650 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6");
         addTimeTagEntry(clockSrc, 800 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7");
         addTimeTagEntry(clockSrc, 850 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8");
-        clockSrc.repeat_period      = 1000 * ms;
-        clockSrc.do_zero_order_hold = true;
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(clockSrc), {{"tag_times", tagTimes}, {"tag_values", tagValues}, {"repeat_period", 1000 * ms}, {"do_zero_order_hold", true}}).empty());
     };
 
     constexpr static auto initFunctionGenerator = [](auto& funcGen) {
         using namespace function_generator;
 
-        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
+        const property_map segments{{"FAIR.SELECTOR.C=1:S=1:P=1", createConstPropertyMap(5.f)}, {"FAIR.SELECTOR.C=1:S=1:P=2", createLinearRampPropertyMap(5.f, 30.f, .2f)}, //
+            {"FAIR.SELECTOR.C=1:S=1:P=3", createConstPropertyMap(30.f)}, {"FAIR.SELECTOR.C=1:S=1:P=4", createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f)},             //
+            {"FAIR.SELECTOR.C=1:S=1:P=5", createConstPropertyMap(20.f)}, {"FAIR.SELECTOR.C=1:S=1:P=6", createCubicSplinePropertyMap(20.f, 10.f, .1f)},                      //
+            {"FAIR.SELECTOR.C=1:S=1:P=7", createConstPropertyMap(10.f)}, {"FAIR.SELECTOR.C=1:S=1:P=8", createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f)}};
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", segments}}).empty());
+        expect(funcGen.setTagCouplings({{"segment", std::string(gr::tag::CONTEXT.key())}}).has_value());
     };
 
     "FunctionGenerator + ClockSource FAIR test"_test = [] {

@@ -23,12 +23,7 @@ gr_add_graph_test(
   graphs/vector-expect-mismatch.yaml
   PASS_REGULAR_EXPRESSION
   "sample 2 is 3, expected 3\\.5")
-# the graph expects the smallest subnormal double, which a worker that flushes subnormals reads as zero
-gr_add_graph_test(
-  graph_testing_vector_expect_tolerance
-  graphs/vector-expect-tolerance.yaml
-  SET
-  "flush_subnormals=false")
+gr_add_graph_test(graph_testing_vector_expect_tolerance graphs/vector-expect-tolerance.yaml)
 gr_add_graph_test(
   graph_testing_vector_expect_tolerance_mismatch
   graphs/vector-expect-tolerance-mismatch.yaml
@@ -254,7 +249,7 @@ gr_add_failing_graph_test(graph_testing_vector_tags_past graphs/vector-tags-inva
 gr_add_failing_graph_test(
   graph_testing_vector_tags_key
   graphs/vector-tags-invalid.yaml
-  "tags key 'x' is not a sample index"
+  "tags key 'x' must be a sample index"
   SET
   "source.tags={x: {mark: a}}")
 gr_add_failing_graph_test(

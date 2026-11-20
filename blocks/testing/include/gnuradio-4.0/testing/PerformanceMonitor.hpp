@@ -71,13 +71,17 @@ Additionally, the block provides three optional output ports for real-time strea
     PortOut<double, Optional> outRes;  // Resident Set Size: number of bytes the process has in real memory, estimated and smoothed
     PortOut<double, Optional> outRate; // Effective sample rate in Hz
 
-    gr::Annotated<gr::Size_t, "in samples", Doc<"evaluate performance every `N` samples">, Visible> evaluate_perf_rate{1'000'000};
-    // Note: `publish_rate` is approximate and depends on `evaluate_perf_rate`.
-    // If it takes more time to collect `evaluate_perf_rate` samples than the actual update rate can be much higher than `publish_rate`.
-    gr::Annotated<float, "in sec", Doc<"write output approx. every `N` seconds">, Visible>                   publish_rate{1.f};
-    gr::Annotated<std::string, "file path", Doc<"path to output csv file, `` -> print to console">, Visible> output_csv_file_path = "";
+    struct Settings {
+        gr::Annotated<gr::Size_t, Unit<"samples">, Doc<"evaluation interval">, Visible> evaluate_perf_rate{1'000'000};
+        // Note: `publish_rate` is approximate and depends on `evaluate_perf_rate`.
+        // If it takes more time to collect `evaluate_perf_rate` samples than the actual update rate can be much higher than `publish_rate`.
+        gr::Annotated<float, Unit<"s">, Doc<"output interval">, Visible>            publish_rate{1.f};
+        gr::Annotated<std::string, Doc<"CSV file path (empty = console)">, Visible> output_csv_file_path = "";
 
-    GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outRate, publish_rate, evaluate_perf_rate, output_csv_file_path);
+        GR_MAKE_REFLECTABLE(Settings, publish_rate, evaluate_perf_rate, output_csv_file_path);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PerformanceMonitor, in, outRes, outRate, settings);
 
     // statistics of updates
     gr::Size_t n_writes{0U};
@@ -102,11 +106,11 @@ Additionally, the block provides three optional output ports for real-time strea
     void stop() { closeFile(); }
 
     gr::work::Status processBulk(gr::InputSpanLike auto& inSpan, gr::OutputSpanLike auto& outResSpan, gr::OutputSpanLike auto& outRateSpan) {
-        const std::size_t nSamples = std::min(inSpan.size(), static_cast<std::size_t>(evaluate_perf_rate - _nSamplesCounter));
+        const std::size_t nSamples = std::min(inSpan.size(), static_cast<std::size_t>(settings.evaluate_perf_rate - _nSamplesCounter));
         std::ignore                = inSpan.consume(nSamples);
         _nSamplesCounter += static_cast<gr::Size_t>(nSamples);
 
-        if (_nSamplesCounter >= evaluate_perf_rate) {
+        if (_nSamplesCounter >= settings.evaluate_perf_rate) {
             addNewMetrics(outResSpan, outRateSpan);
         } else {
             if (outResSpan.size() > 0) {
@@ -128,11 +132,11 @@ private:
     }
 
     void openFile() {
-        if (output_csv_file_path != "") {
-            _file.open(output_csv_file_path, std::ios::out);
+        if (settings.output_csv_file_path != "") {
+            _file.open(settings.output_csv_file_path, std::ios::out);
             _addCsvHeader = true;
             if (!_file) {
-                throw gr::exception(std::format("failed to open file '{}'.", output_csv_file_path));
+                throw gr::exception(std::format("failed to open file '{}'.", settings.output_csv_file_path));
             }
         }
     }
@@ -159,8 +163,8 @@ private:
             n_updates_rate++;
         }
 
-        if (_timeFromLastUpdate >= publish_rate) {
-            if (output_csv_file_path == "") {
+        if (_timeFromLastUpdate >= settings.publish_rate) {
+            if (settings.output_csv_file_path == "") {
                 std::println("Performance at {}, #{} dT:{} s, rate:{}, memory_resident:{}", //
                     gr::time::getIsoTime(), n_writes, _timeFromLastUpdate, details::to_si_prefix(rate, "S/s"), details::to_si_prefix(residentSize, "b"));
             } else {

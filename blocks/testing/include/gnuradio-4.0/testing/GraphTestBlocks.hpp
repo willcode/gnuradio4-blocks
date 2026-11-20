@@ -269,16 +269,25 @@ Two keys that name one index end the run with an error that names both spellings
 
     PortIn<T> in;
 
-    Annotated<std::vector<T>, "expected", Doc<"samples the input must carry, in order">>                  expected{};
-    Annotated<double, "tolerance", Doc<"absolute deviation accepted per sample">>                         tolerance          = 0.0;
-    Annotated<double, "relative_tolerance", Doc<"deviation accepted per sample, relative to |expected|">> relative_tolerance = 0.0;
-    Annotated<gr::Size_t, "received", Doc<"samples received and matched">>                                received           = 0U;
-    Annotated<std::string, "tag_key", Doc<"tag key whose indices are checked">>                           tag_key{};
-    Annotated<std::vector<gr::Size_t>, "tag_indices", Doc<"sample indices of the tags carrying tag_key">> tag_indices{};
-    Annotated<property_map, "expected_tags", Doc<"tags or tag keys expected at each sample index">>       expected_tags{};
-    Annotated<bool, "tags_exact", Doc<"refuse tag keys unlisted at their sample index">>                  tags_exact = false;
+    struct Settings {
+        Annotated<std::vector<T>, Doc<"expected samples">>            expected{};
+        Annotated<double, Doc<"absolute tolerance">>                  tolerance          = 0.0;
+        Annotated<double, Doc<"relative tolerance">>                  relative_tolerance = 0.0;
+        Annotated<std::string, Doc<"checked tag key">>                tag_key{};
+        Annotated<std::vector<gr::Size_t>, Doc<"tag indices">>        tag_indices{};
+        Annotated<property_map, Doc<"expected tags by sample index">> expected_tags{};
+        Annotated<bool, Doc<"exact tags">>                            tags_exact = false;
 
-    GR_MAKE_REFLECTABLE(ExpectSink, in, expected, tolerance, relative_tolerance, received, tag_key, tag_indices, expected_tags, tags_exact);
+        GR_MAKE_REFLECTABLE(Settings, expected, tolerance, relative_tolerance, tag_key, tag_indices, expected_tags, tags_exact);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"samples matched">> received = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, received);
+    } status;
+
+    GR_MAKE_REFLECTABLE(ExpectSink, in, settings, status);
 
     struct ExpectedTag {
         std::size_t index = 0UZ;
@@ -300,26 +309,26 @@ Two keys that name one index end the run with an error that names both spellings
     std::vector<ExpectedList> _expectedLists{};
 
     void start() {
-        received = 0U;
-        _failed  = false;
+        status.received = 0U;
+        _failed         = false;
         _tagged.clear();
         _expectedTags.clear();
         _expectedLists.clear();
         std::vector<std::pair<std::size_t, std::string_view>> spellings;
-        for (const auto& [indexKey, entry] : expected_tags.value) {
+        for (const auto& [indexKey, entry] : settings.expected_tags.value) {
             const std::optional<std::size_t> index = gr::dataset::parseIndex<std::size_t>(std::string_view(indexKey));
             if (!index.has_value()) {
-                failAtStart(std::format("expected_tags key '{}' is not a sample index", indexKey));
+                failAtStart(std::format("expected_tags key '{}' must be a sample index", indexKey));
                 return;
             }
             spellings.emplace_back(*index, std::string_view(indexKey));
-            if (const property_map* tagMap = entry.get_if<property_map>(); tagMap != nullptr) {
+            if (const property_map* tagMap = entry.template get_if<property_map>(); tagMap != nullptr) {
                 for (const auto& [key, value] : *tagMap) {
                     _expectedTags.push_back(ExpectedTag{.index = *index, .key = std::string(key), .value = value});
                 }
                 continue;
             }
-            const Tensor<pmt::Value>* list = entry.get_if<Tensor<pmt::Value>>();
+            const Tensor<pmt::Value>* list = entry.template get_if<Tensor<pmt::Value>>();
             if (list == nullptr) {
                 failAtStart(std::format("expected_tags entry at sample {} is {}, expected a map of tag keys and values or a list of such maps", *index, entry));
                 return;
@@ -345,21 +354,21 @@ Two keys that name one index end the run with an error that names both spellings
     }
 
     void stop() {
-        if (!_failed && static_cast<std::size_t>(received.value) != expected->size()) {
+        if (!_failed && static_cast<std::size_t>(status.received.value) != settings.expected->size()) {
             _failed = true;
-            this->emitErrorMessage("stop", std::format("the stream ended after {} samples, expected {}", received.value, expected->size()));
+            this->emitErrorMessage("stop", std::format("the stream ended after {} samples, expected {}", status.received.value, settings.expected->size()));
         }
-        if (!_failed && !tag_key->empty()) {
-            std::vector<std::size_t> wanted(tag_indices->begin(), tag_indices->end());
+        if (!_failed && !settings.tag_key->empty()) {
+            std::vector<std::size_t> wanted(settings.tag_indices->begin(), settings.tag_indices->end());
             std::ranges::sort(wanted);
             wanted.erase(std::ranges::unique(wanted).begin(), wanted.end());
             std::ranges::sort(_tagged);
             if (wanted != _tagged) {
                 _failed = true;
-                this->emitErrorMessage("stop", std::format("tags with key '{}' at {}, expected at {}", tag_key.value, _tagged, wanted));
+                this->emitErrorMessage("stop", std::format("tags with key '{}' at {}, expected at {}", settings.tag_key.value, _tagged, wanted));
             }
         }
-        if (!_failed && static_cast<std::size_t>(received.value) == expected->size()) {
+        if (!_failed && static_cast<std::size_t>(status.received.value) == settings.expected->size()) {
             if (std::optional<std::string> error = missingTag()) {
                 _failed = true;
                 this->emitErrorMessage("stop", *error);
@@ -367,27 +376,37 @@ Two keys that name one index end the run with an error that names both spellings
         }
     }
 
+    /// Matches the samples, then assigns `received` once when samples matched.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& input) {
+        std::size_t        nMatched = 0UZ;
+        const work::Status result   = matchSamples(input, nMatched);
+        if (nMatched > 0UZ) {
+            status.received = static_cast<gr::Size_t>(status.received.value + nMatched);
+        }
+        return result;
+    }
+
+    [[nodiscard]] work::Status matchSamples(InputSpanLike auto& input, std::size_t& nMatched) {
         if (_failed) {
             return work::Status::ERROR;
         }
-        if (!tag_key->empty() || checksTags()) {
+        if (!settings.tag_key->empty() || checksTags()) {
             if (std::optional<std::string> error = readTags(input)) {
                 return fail("processBulk", *error);
             }
         }
         for (std::size_t i = 0UZ; i < input.size(); ++i) {
-            const std::size_t index = static_cast<std::size_t>(received.value) + i;
-            if (index >= expected->size()) {
-                received = static_cast<gr::Size_t>(index);
-                return fail("processBulk", std::format("sample {} is {}, beyond the {} expected samples", index, input[i], expected->size()));
+            const std::size_t index = static_cast<std::size_t>(status.received.value) + i;
+            if (index >= settings.expected->size()) {
+                nMatched = i;
+                return fail("processBulk", std::format("sample {} is {}, beyond the {} expected samples", index, input[i], settings.expected->size()));
             }
-            if (!detail::withinTolerance(input[i], expected.value[index], tolerance.value, relative_tolerance.value)) {
-                received = static_cast<gr::Size_t>(index);
-                return fail("processBulk", std::format("sample {} is {}, expected {}", index, input[i], expected.value[index]));
+            if (!detail::withinTolerance(input[i], settings.expected.value[index], settings.tolerance.value, settings.relative_tolerance.value)) {
+                nMatched = i;
+                return fail("processBulk", std::format("sample {} is {}, expected {}", index, input[i], settings.expected.value[index]));
             }
         }
-        received = static_cast<gr::Size_t>(received.value + input.size());
+        nMatched = input.size();
         return work::Status::OK;
     }
 
@@ -395,26 +414,26 @@ Two keys that name one index end the run with an error that names both spellings
     /// A listed tag still missing then fails the run. A wrong sample count fails the run in `stop()` instead.
     /// `stop()` repeats the missing-tag check for a stream that ends without the epilogue.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& input) {
-        const work::Status status = processBulk(input);
-        if (status != work::Status::OK || (tag_key->empty() && !checksTags())) {
-            return status;
+        const work::Status result = processBulk(input);
+        if (result != work::Status::OK || (settings.tag_key->empty() && !checksTags())) {
+            return result;
         }
         const std::size_t end = input.streamIndex + input.size();
         for (const gr::Tag& tag : in.tagReader().get()) {
             if (tag.index < end) {
                 continue;
             }
-            if (std::optional<std::string> error = readTag(static_cast<std::size_t>(received.value) + (tag.index - end), tag.map)) {
+            if (std::optional<std::string> error = readTag(static_cast<std::size_t>(status.received.value) + (tag.index - end), tag.map)) {
                 return fail("processEpilogue", *error);
             }
         }
-        if (static_cast<std::size_t>(received.value) != expected->size()) {
-            return status;
+        if (static_cast<std::size_t>(status.received.value) != settings.expected->size()) {
+            return result;
         }
         if (std::optional<std::string> error = missingTag()) {
             return fail("processEpilogue", *error);
         }
-        return status;
+        return result;
     }
 
     /// Returns the error for the lowest index with a listed key that has not arrived or a list with tags missing.
@@ -430,7 +449,7 @@ Two keys that name one index end the run with an error that names both spellings
         return std::nullopt;
     }
 
-    [[nodiscard]] bool checksTags() const { return !_expectedTags.empty() || !_expectedLists.empty() || tags_exact.value; }
+    [[nodiscard]] bool checksTags() const { return !_expectedTags.empty() || !_expectedLists.empty() || settings.tags_exact.value; }
 
     /// A tag at a negative relative index belongs to an earlier call and is skipped.
     [[nodiscard]] std::optional<std::string> readTags(InputSpanLike auto& input) {
@@ -438,7 +457,7 @@ Two keys that name one index end the run with an error that names both spellings
             if (relIndex < 0 || static_cast<std::size_t>(relIndex) >= input.size()) {
                 continue;
             }
-            if (std::optional<std::string> error = readTag(static_cast<std::size_t>(received.value) + static_cast<std::size_t>(relIndex), tagMap.get())) {
+            if (std::optional<std::string> error = readTag(static_cast<std::size_t>(status.received.value) + static_cast<std::size_t>(relIndex), tagMap.get())) {
                 return error;
             }
         }
@@ -447,7 +466,7 @@ Two keys that name one index end the run with an error that names both spellings
 
     /// Records the index of a tag carrying `tag_key` and checks each key of the tag against `expected_tags`.
     [[nodiscard]] std::optional<std::string> readTag(std::size_t index, const property_map& map) {
-        if (!tag_key->empty() && map.contains(tag_key.value) && !std::ranges::contains(_tagged, index)) {
+        if (!settings.tag_key->empty() && map.contains(settings.tag_key.value) && !std::ranges::contains(_tagged, index)) {
             _tagged.push_back(index);
         }
         if (!checksTags()) {
@@ -460,7 +479,7 @@ Two keys that name one index end the run with an error that names both spellings
             const std::string_view key(mapKey);
             const auto             listed = std::ranges::find_if(_expectedTags, [index, key](const ExpectedTag& tag) { return tag.index == index && key == tag.key; });
             if (listed == _expectedTags.end()) {
-                if (tags_exact.value && key != tag::END_OF_STREAM.key()) {
+                if (settings.tags_exact.value && key != tag::END_OF_STREAM.key()) {
                     return std::format("tag '{}' at sample {} is {}, expected no such tag", key, index, detail::describe(value));
                 }
                 continue;
@@ -493,7 +512,7 @@ Two keys that name one index end the run with an error that names both spellings
                 return std::format("tag {} at sample {} key '{}' is {}", position, list.index, std::string_view(wantedKey), detail::describeMismatch(found->second, wantedValue));
             }
         }
-        if (tags_exact.value) {
+        if (settings.tags_exact.value) {
             for (const auto& [mapKey, value] : map) {
                 const std::string_view key(mapKey);
                 if (!wanted.contains(mapKey) && key != tag::END_OF_STREAM.key()) {
@@ -545,22 +564,31 @@ that ends with fewer DataSets than `records` lists ends with an error that names
 
     PortIn<DataSet<T>, Async> in;
 
-    Annotated<property_map, "records", Doc<"expected DataSets, keyed by record index">>                  records{};
-    Annotated<double, "tolerance", Doc<"absolute deviation accepted per value">>                         tolerance          = 0.0;
-    Annotated<double, "relative_tolerance", Doc<"deviation accepted per value, relative to |expected|">> relative_tolerance = 0.0;
-    Annotated<bool, "meta_exact", Doc<"refuse meta and event keys unlisted in the record">>              meta_exact         = false;
-    Annotated<gr::Size_t, "received", Doc<"DataSets received and matched">>                              received           = 0U;
+    struct Settings {
+        Annotated<property_map, Doc<"expected DataSets by record index">> records{};
+        Annotated<double, Doc<"absolute tolerance">>                      tolerance          = 0.0;
+        Annotated<double, Doc<"relative tolerance">>                      relative_tolerance = 0.0;
+        Annotated<bool, Doc<"exact metadata">>                            meta_exact         = false;
 
-    GR_MAKE_REFLECTABLE(ExpectDataSetSink, in, records, tolerance, relative_tolerance, meta_exact, received);
+        GR_MAKE_REFLECTABLE(Settings, records, tolerance, relative_tolerance, meta_exact);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"DataSets matched">> received = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, received);
+    } status;
+
+    GR_MAKE_REFLECTABLE(ExpectDataSetSink, in, settings, status);
 
     std::vector<detail::ExpectedRecord<T>> _expected{};
     bool                                   _failed = false;
 
     void start() {
-        received = 0U;
-        _failed  = false;
+        status.received = 0U;
+        _failed         = false;
         _expected.clear();
-        std::expected<std::vector<property_map>, std::string> maps = gr::dataset::readRecordMaps(records.value);
+        std::expected<std::vector<property_map>, std::string> maps = gr::dataset::readRecordMaps(settings.records.value);
         if (!maps.has_value()) {
             failAtStart(maps.error());
             return;
@@ -577,25 +605,35 @@ that ends with fewer DataSets than `records` lists ends with an error that names
     }
 
     void stop() {
-        if (!_failed && static_cast<std::size_t>(received.value) != _expected.size()) {
+        if (!_failed && static_cast<std::size_t>(status.received.value) != _expected.size()) {
             _failed = true;
-            this->emitErrorMessage("stop", std::format("the stream ended after {} DataSets, expected {}", received.value, _expected.size()));
+            this->emitErrorMessage("stop", std::format("the stream ended after {} DataSets, expected {}", status.received.value, _expected.size()));
         }
     }
 
+    /// Matches the records, then assigns `received` once when records matched.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& input) {
+        std::size_t        nMatched = 0UZ;
+        const work::Status result   = matchRecords(input, nMatched);
+        if (nMatched > 0UZ) {
+            status.received = static_cast<gr::Size_t>(status.received.value + nMatched);
+        }
+        return result;
+    }
+
+    [[nodiscard]] work::Status matchRecords(InputSpanLike auto& input, std::size_t& nMatched) {
         if (_failed) {
             return work::Status::ERROR;
         }
         for (std::size_t i = 0UZ; i < input.size(); ++i) {
-            const std::size_t index = static_cast<std::size_t>(received.value);
+            const std::size_t index = static_cast<std::size_t>(status.received.value) + i;
             if (index >= _expected.size()) {
                 return fail(std::format("record {} is beyond the {} expected records", index, _expected.size()));
             }
             if (std::optional<std::string> error = mismatch(index, input[i], _expected[index])) {
                 return fail(*error);
             }
-            received = static_cast<gr::Size_t>(index + 1UZ);
+            nMatched = i + 1UZ;
         }
         std::ignore = input.consume(input.size());
         return work::Status::OK;
@@ -616,7 +654,7 @@ that ends with fewer DataSets than `records` lists ends with an error that names
                 return std::format("record {} field 'signal_values' holds {} values, expected {}", index, value.signal_values.size(), reference.signal_values.size());
             }
             for (std::size_t v = 0UZ; v < value.signal_values.size(); ++v) {
-                if (!detail::withinTolerance(value.signal_values[v], reference.signal_values[v], tolerance.value, relative_tolerance.value)) {
+                if (!detail::withinTolerance(value.signal_values[v], reference.signal_values[v], settings.tolerance.value, settings.relative_tolerance.value)) {
                     return std::format("record {} field 'signal_values' value {} is {}, expected {}", index, v, value.signal_values[v], reference.signal_values[v]);
                 }
             }
@@ -644,7 +682,7 @@ that ends with fewer DataSets than `records` lists ends with an error that names
                 return std::format("record {} field 'meta_information' holds {} maps, expected {}", index, value.meta_information.size(), reference.meta_information.size());
             }
             for (std::size_t m = 0UZ; m < value.meta_information.size(); ++m) {
-                if (std::optional<std::string> error = detail::mapMismatch(value.meta_information[m], reference.meta_information[m], meta_exact.value)) {
+                if (std::optional<std::string> error = detail::mapMismatch(value.meta_information[m], reference.meta_information[m], settings.meta_exact.value)) {
                     const std::string position = value.meta_information.size() > 1UZ ? std::format("map {} ", m) : std::string{};
                     return std::format("record {} field 'meta_information' {}{}", index, position, *error);
                 }
@@ -667,7 +705,7 @@ that ends with fewer DataSets than `records` lists ends with an error that names
                 }
             }
         }
-        if (record.lists("timing_events") && !detail::eventsMatch(value.timing_events, reference.timing_events, meta_exact.value)) {
+        if (record.lists("timing_events") && !detail::eventsMatch(value.timing_events, reference.timing_events, settings.meta_exact.value)) {
             return std::format("record {} field 'timing_events' is {}, expected {}", index, value.timing_events, reference.timing_events);
         }
         return std::nullopt;

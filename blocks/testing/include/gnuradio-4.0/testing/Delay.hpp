@@ -24,9 +24,14 @@ struct Delay : Block<Delay<T>, NoTagPropagation> {
 
     PortIn<T>  in;
     PortOut<T> out;
-    uint32_t   delay_ms = 0;
 
-    GR_MAKE_REFLECTABLE(Delay, in, out, delay_ms);
+    struct Settings {
+        uint32_t delay_ms = 0;
+
+        GR_MAKE_REFLECTABLE(Settings, delay_ms);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Delay, in, out, settings);
 
     bool              _waiting = true;
     clock::time_point _start_time;
@@ -35,7 +40,7 @@ struct Delay : Block<Delay<T>, NoTagPropagation> {
 
     gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         if (_waiting) {
-            const clock::time_point end = _start_time + std::chrono::milliseconds(delay_ms);
+            const clock::time_point end = _start_time + std::chrono::milliseconds(settings.delay_ms);
             for (clock::time_point now = clock::now(); now < end; now = clock::now()) {
                 if (lifecycle::isShuttingDown(this->state())) {
                     std::ignore = input.consume(0UZ);

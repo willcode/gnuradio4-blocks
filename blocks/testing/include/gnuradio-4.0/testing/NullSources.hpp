@@ -1,7 +1,9 @@
 #ifndef GNURADIO_NULLSOURCES_HPP
 #define GNURADIO_NULLSOURCES_HPP
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -18,19 +20,24 @@ struct SlowSource : Block<SlowSource<T>> {
     using value_t     = std::conditional_t<std::is_same_v<T, std::string>, std::string, meta::fundamental_base_value_type_t<T>>; // use base-type for types not supported by settings
     using Description = Doc<R""(A source block that emits a constant default value every n miliseconds)"">;
 
-    gr::PortOut<T>                                                                              out;
-    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">>          default_value{};
-    Annotated<gr::Size_t, "delay", Unit<"ms">, Doc<"how many milliseconds between each value">> delay = 100U;
+    gr::PortOut<T> out;
 
-    GR_MAKE_REFLECTABLE(SlowSource, out, default_value, delay);
+    struct Settings {
+        Annotated<value_t, Visible, Doc<"sample value">>               default_value{};
+        Annotated<gr::Size_t, Unit<"ms">, Doc<"delay between values">> delay = 100U;
+
+        GR_MAKE_REFLECTABLE(Settings, default_value, delay);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SlowSource, out, settings);
 
     std::optional<std::chrono::time_point<std::chrono::system_clock>> lastEventAt;
 
     [[nodiscard]] gr::work::Status processBulk(OutputSpanLike auto& output) {
-        if (!output.empty() && (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(delay))) {
+        if (!output.empty() && (!lastEventAt || std::chrono::system_clock::now() - *lastEventAt > std::chrono::milliseconds(settings.delay))) {
             lastEventAt = std::chrono::system_clock::now();
 
-            output[0] = T(default_value.value);
+            output[0] = T(settings.default_value.value);
             output.publish(1UZ);
         } else {
             output.publish(0UZ);
@@ -46,42 +53,48 @@ template<typename T>
 struct CountingSource : Block<CountingSource<T>> {
     using Description = Doc<R""(A source block that emits an increasing sequence starting from a specified default value.
 This block counts the number of samples emitted and optionally halts after reaching a specified maximum.
-Commonly used for testing and simulations where consistent output and finite execution are required.)"">;
+Commonly used for testing and simulations where consistent output and finite execution are required.
+The block reports `count` once per work call that emits samples.)"">;
 
     gr::PortOut<T> out;
 
-    Annotated<T, "default value", Visible, Doc<"default value for each sample">>                     default_value{};
-    Annotated<std::uint64_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0UZ;
-    Annotated<std::uint64_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0UZ;
+    struct Settings {
+        Annotated<T, Visible, Doc<"sample value">>                    default_value{};
+        Annotated<std::uint64_t, Doc<"sample limit (0 = unlimited)">> n_samples_max = 0UZ;
 
-    GR_MAKE_REFLECTABLE(CountingSource, out, default_value, n_samples_max, count);
+        GR_MAKE_REFLECTABLE(Settings, default_value, n_samples_max);
+    } settings;
 
-    void reset() { count = 0U; }
+    struct Status {
+        Annotated<std::uint64_t, Doc<"sample count">> count = 0UZ;
 
-    [[nodiscard]] constexpr T processOne() noexcept {
-        count++;
-        if (n_samples_max > 0 && count >= n_samples_max) {
-            this->requestStop();
-        }
+        GR_MAKE_REFLECTABLE(Status, count);
+    } status;
+
+    GR_MAKE_REFLECTABLE(CountingSource, out, settings, status);
+
+    void reset() { status.count = 0U; }
+
+    // `count` is assigned once per work call
+    [[nodiscard]] gr::work::Status processBulk(OutputSpanLike auto& output) {
+        const std::uint64_t nMax      = settings.n_samples_max.value;
+        const std::uint64_t count     = status.count.value;
+        const bool          limited   = nMax > 0U;
+        const std::uint64_t remaining = !limited ? std::numeric_limits<std::uint64_t>::max() : (count < nMax ? nMax - count : 1U); // past the limit, one more sample before the stop
+        const std::size_t   nSamples  = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), remaining));
+        const T             base      = static_cast<T>(settings.default_value.value);
+        for (std::size_t i = 0UZ; i < nSamples; ++i) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
-        return static_cast<T>(default_value.value) + static_cast<T>(count);
+            output[i] = base + static_cast<T>(count + 1U + i);
 #pragma GCC diagnostic pop
-    }
-
-    [[nodiscard]] constexpr auto processOne(meta::constexpr_value auto N) noexcept
-    requires std::is_arithmetic_v<T>
-    {
-        meta::simdize<T, N> result;
-        const auto          base = static_cast<T>(default_value.value);
-        for (std::size_t i = 0; i < result.size(); ++i) {
-            result[i] = base + static_cast<T>(count + 1 + i);
         }
-        count += result.size();
-        if (n_samples_max > 0 && count >= n_samples_max) {
-            this->requestStop();
+        output.publish(nSamples);
+        if (nSamples == 0UZ) {
+            return gr::work::Status::OK;
         }
-        return result;
+        status.count = count + nSamples;
+        return limited && status.count.value >= nMax ? gr::work::Status::DONE : gr::work::Status::OK;
     }
 };
 
@@ -113,22 +126,34 @@ Commonly used for testing scenarios and signal termination where output is unnec
 
     gr::PortIn<T> in;
 
-    Annotated<std::uint64_t, "max samples", Doc<"count>n_samples_max -> signal DONE (0: infinite)">> n_samples_max = 0UZ;
-    Annotated<std::uint64_t, "count", Doc<"sample count (diagnostics only)">>                        count         = 0UZ;
+    struct Settings {
+        Annotated<std::uint64_t, Doc<"sample limit (0 = unlimited)">> n_samples_max = 0UZ;
 
-    GR_MAKE_REFLECTABLE(CountingSink, in, n_samples_max, count);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max);
+    } settings;
 
-    void reset() { count = 0U; }
+    struct Status {
+        Annotated<std::uint64_t, Doc<"sample count">> count = 0UZ;
 
-    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input) noexcept {
+        GR_MAKE_REFLECTABLE(Status, count);
+    } status;
+
+    GR_MAKE_REFLECTABLE(CountingSink, in, settings, status);
+
+    void reset() { status.count = 0U; }
+
+    [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input) {
         const std::uint64_t nAvailable = input.size();
-        if (n_samples_max > 0 && count + nAvailable >= n_samples_max) {
-            const std::uint64_t nRemaining = n_samples_max - count; // at most nAvailable
+        const std::uint64_t nMax       = settings.n_samples_max.value;
+        if (nMax > 0 && status.count.value + nAvailable >= nMax) {
+            const std::uint64_t nRemaining = nMax - status.count.value; // at most nAvailable
             std::ignore                    = input.consume(static_cast<std::size_t>(nRemaining));
-            count                          = n_samples_max;
+            status.count                   = nMax;
             return gr::work::Status::DONE;
         }
-        count += nAvailable;
+        if (nAvailable > 0U) {
+            status.count += nAvailable;
+        }
         return gr::work::Status::OK;
     }
 };
@@ -146,12 +171,16 @@ Default: linear O(N) delay that limits the block processing to 100 MS/s)"">;
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    Annotated<float, "target_throughput", Unit<"S/s">, Doc<"Target throughput in samples per second at reference_work_size.">>               target_throughput   = 100e6f;
-    Annotated<gr::Size_t, "reference_work_size", Unit<"[N]">, Doc<"Reference work size N_r (samples) for which target_throughput applies.">> reference_work_size = 1024U;
-    Annotated<float, "complexity_order", Doc<"compute complexity: 1.0 = linear, 2.0 = quadratic, 3.0 = cubic.">>                             complexity_order    = 1.0f;
-    Annotated<bool, "busy_wait", Doc<"true: busy loop (CPU burn), False: sleep loop (lower power, less accurate).">>                         busy_wait           = true;
+    struct Settings {
+        Annotated<float, Unit<"S/s">, Doc<"target throughput">>        target_throughput   = 100e6f;
+        Annotated<gr::Size_t, Unit<"[N]">, Doc<"reference work size">> reference_work_size = 1024U;
+        Annotated<float, Doc<"complexity order (1 = linear)">>         complexity_order    = 1.0f;
+        Annotated<bool, Doc<"busy wait">>                              busy_wait           = true;
 
-    GR_MAKE_REFLECTABLE(SimCompute, in, out, target_throughput, reference_work_size, complexity_order, busy_wait);
+        GR_MAKE_REFLECTABLE(Settings, target_throughput, reference_work_size, complexity_order, busy_wait);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SimCompute, in, out, settings);
 
     [[nodiscard]] gr::work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
         using Clock_t    = std::chrono::high_resolution_clock;
@@ -162,7 +191,7 @@ Default: linear O(N) delay that limits the block processing to 100 MS/s)"">;
         const std::chrono::duration<double> delay_seconds = compute_delay_seconds(input.size());
         const std::chrono::nanoseconds      delay_ns      = std::chrono::duration_cast<std::chrono::nanoseconds>(delay_seconds);
         while (Clock_t::now() - start < delay_ns) {
-            if (!busy_wait) {
+            if (!settings.busy_wait) {
                 std::this_thread::sleep_for(std::chrono::microseconds(10)); // avoid hard spin
             }
         }
@@ -170,9 +199,9 @@ Default: linear O(N) delay that limits the block processing to 100 MS/s)"">;
     }
 
     [[nodiscard]] constexpr std::chrono::duration<double> compute_delay_seconds(std::size_t N) const noexcept {
-        const auto N_r        = static_cast<double>(reference_work_size);
-        const auto throughput = static_cast<double>(target_throughput);
-        const auto k          = static_cast<double>(complexity_order);
+        const auto N_r        = static_cast<double>(settings.reference_work_size);
+        const auto throughput = static_cast<double>(settings.target_throughput);
+        const auto k          = static_cast<double>(settings.complexity_order);
 
         const double delay_s = std::pow(static_cast<double>(N) / N_r, k) * (N_r / throughput);
 
