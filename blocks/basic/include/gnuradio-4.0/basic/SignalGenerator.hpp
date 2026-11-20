@@ -39,21 +39,28 @@ Signal types (A = amplitude, f = tone_frequency, P = phase, O = offset):
   UniformNoise:     uniform random in [-A, +A) + O
   TriangularNoise:  triangular random in [-A, +A) + O
   GaussianNoise:    Gaussian N(0, A²) + O
+
+`chunk_size` is the samples per update in free-running mode. `tone_frequency` is the waveform's own frequency, apart
+from the stream's.
 )"">;
 
     PortIn<std::uint8_t, Optional> clk_in;
     PortOut<T>                     out;
 
-    Annotated<float, "sample_rate", Visible, Doc<"sample rate">>                                                               sample_rate    = 1000.f;
-    Annotated<gr::Size_t, "chunk_size", Visible, Doc<"samples per update in free-running mode">>                               chunk_size     = 100;
-    Annotated<signal_generator::Type, "signal_type", Visible, Doc<"see signal_generator::Type">>                               signal_type    = signal_generator::Type::Sin;
-    Annotated<float, "tone_frequency", Visible, Unit<"Hz">, Doc<"frequency of the generated waveform, not a stream property">> tone_frequency = 1.f;
-    Annotated<float, "amplitude", Visible>                                                                                     amplitude      = 1.f;
-    Annotated<float, "offset", Visible>                                                                                        offset         = 0.f;
-    Annotated<float, "phase", Visible, Doc<"in rad">>                                                                          phase          = 0.f;
-    Annotated<std::uint64_t, "seed", Visible, Doc<"PRNG seed for noise types (0 = fixed default for reproducibility)">>        seed           = 0ULL;
+    struct Settings {
+        Annotated<float, Unit<"Hz">, Visible, Doc<"sample rate">, Limits<Over<0.f>>> sample_rate    = 1000.f;
+        Annotated<gr::Size_t, Visible, Doc<"samples per update">>                    chunk_size     = 100;
+        Annotated<signal_generator::Type, Visible, Doc<"signal type">>               signal_type    = signal_generator::Type::Sin;
+        Annotated<float, Visible, Unit<"Hz">, Doc<"tone frequency">>                 tone_frequency = 1.f;
+        Annotated<float, Visible>                                                    amplitude      = 1.f;
+        Annotated<float, Visible>                                                    offset         = 0.f;
+        Annotated<float, Unit<"rad">, Visible, Doc<"phase">>                         phase          = 0.f;
+        Annotated<std::uint64_t, Visible, Doc<"noise seed (0 = fixed default)">>     seed           = 0ULL;
 
-    GR_MAKE_REFLECTABLE(SignalGenerator, clk_in, out, sample_rate, chunk_size, signal_type, tone_frequency, amplitude, offset, phase, seed);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, chunk_size, signal_type, tone_frequency, amplitude, offset, phase, seed);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SignalGenerator, clk_in, out, settings);
 
     gr::signal::SignalGeneratorCore<T> _core;
     bool                               _rateOwed{true}; // true until a published sample states the current rate
@@ -68,7 +75,7 @@ Signal types (A = amplitude, f = tone_frequency, P = phase, O = offset):
     }
 
     void start() {
-        _core.configure(signal_type.value, tone_frequency, sample_rate, phase, amplitude, offset, seed);
+        _core.configure(settings.signal_type.value, settings.tone_frequency, settings.sample_rate, settings.phase, settings.amplitude, settings.offset, settings.seed);
         _core.reset();
         _rateOwed = true;
         this->blockingSyncStart();
@@ -76,9 +83,9 @@ Signal types (A = amplitude, f = tone_frequency, P = phase, O = offset):
 
     void stop() { this->blockingSyncStop(); }
 
-    void settingsChanged(const property_map& /*old_settings*/, const property_map& newSettings) {
-        _core.configure(signal_type.value, tone_frequency, sample_rate, phase, amplitude, offset, seed);
-        if (newSettings.contains("sample_rate")) {
+    void applySettings(const Settings& s) {
+        _core.configure(s.signal_type, s.tone_frequency, s.sample_rate, s.phase, s.amplitude, s.offset, s.seed);
+        if (s.sample_rate.changed()) {
             _rateOwed = true;
         }
     }
@@ -95,7 +102,7 @@ Signal types (A = amplitude, f = tone_frequency, P = phase, O = offset):
             output[i] = _core.generateSample();
         }
         if (_rateOwed) {
-            output.publishTag(property_map{{std::pmr::string(tag::SAMPLE_RATE.key()), sample_rate.value}}, 0UZ);
+            output.publishTag(property_map{{std::pmr::string(tag::SAMPLE_RATE.key()), settings.sample_rate.value}}, 0UZ);
             _rateOwed = false;
         }
 

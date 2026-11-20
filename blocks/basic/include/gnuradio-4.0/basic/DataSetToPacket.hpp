@@ -63,19 +63,28 @@ one that was lost.
 One instance emits one signal. A four-signal record is read by four instances at `signal_index` 0 to 3 on the same
 record port; they see the same records and admit them on the same predicate, so packet k of every stream comes from
 record k.
+
+`signal_index` picks the signal of a multi-signal record that becomes the payload; an index out of range rejects the
+record. `protocol_label`, `source_label` and a nonzero `frequency_hz` are written under the vocabulary keys protocol,
+source_id and frequency when the record states none of its own. `axis_rate_tolerance` is the relative tolerance of the
+test that the time axis is uniform.
 )"">;
 
     PortIn<DataSet<T>>                   in;
     PortOut<Packet<T>, Async>            out;
     PortOut<DataSet<T>, Async, Optional> reject;
 
-    Annotated<gr::Size_t, "signal_index", Visible, Doc<"which signal of a multi-signal record becomes the payload; out of range rejects the record">>     signal_index{0U};
-    Annotated<std::string, "protocol_label", Doc<"written under the vocabulary key protocol when non-empty and the record does not already state one">>   protocol_label{""};
-    Annotated<std::string, "source_label", Doc<"written under the vocabulary key source_id when non-empty and the record does not already state one">>    source_label{""};
-    Annotated<double, "frequency_hz", Doc<"written in hertz under the vocabulary key frequency when non-zero and the record does not already state one">> frequency_hz{0.0};
-    Annotated<float, "axis_rate_tolerance", Doc<"relative tolerance of the time axis uniformity test; must be finite and greater than zero">>             axis_rate_tolerance{1e-6f};
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"payload signal index">>     signal_index{0U};
+        Annotated<std::string, Doc<"protocol label">>                   protocol_label{""};
+        Annotated<std::string, Doc<"source label">>                     source_label{""};
+        Annotated<double, Unit<"Hz">, Doc<"frequency (0 = unstated)">>  frequency_hz{0.0};
+        Annotated<float, Doc<"axis rate tolerance">, Limits<Over<0.f>>> axis_rate_tolerance{1e-6f};
 
-    GR_MAKE_REFLECTABLE(DataSetToPacket, in, out, reject, signal_index, protocol_label, source_label, frequency_hz, axis_rate_tolerance);
+        GR_MAKE_REFLECTABLE(Settings, signal_index, protocol_label, source_label, frequency_hz, axis_rate_tolerance);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DataSetToPacket, in, out, reject, settings);
 
     // Counted, stated drops. Plain members, read by the owning thread and reported once at stop(). The far side of
     // this boundary is another process, so the one drop a peer cannot infer travels in band as `dropped_events` too.
@@ -86,21 +95,9 @@ record k.
     std::uint64_t nMetaKeysOverridden  = 0ULL; ///< copied keys a derived key displaced with a different value
     std::uint64_t nStampsDeclined      = 0ULL; ///< labels suppressed because the record already stated that key
 
-    float                _tolerance = 1e-6f; ///< the validated axis_rate_tolerance in force
-    std::optional<float> _tagRate{};         ///< the most recent sample_rate seen on the input port, which is rate route 2
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() { rebuild(); }
+    std::optional<float> _tagRate{}; ///< the most recent sample_rate seen on the input port, which is rate route 2
 
     void reset() { _tagRate.reset(); }
-
-    void rebuild() {
-        if (!std::isfinite(axis_rate_tolerance.value) || axis_rate_tolerance.value <= 0.f) {
-            throw gr::exception(std::format("axis_rate_tolerance is {}; it must be finite and greater than zero", axis_rate_tolerance.value));
-        }
-        _tolerance = axis_rate_tolerance.value;
-    }
 
     void stop() {
         std::string report;
@@ -123,7 +120,7 @@ record k.
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan, OutputSpanLike auto& rejectSpan) {
         const bool outConnected    = outSpan.isConnected; // read once, so the room test and the store cannot disagree
         const bool rejectConnected = rejectSpan.isConnected;
-        const auto signalIndex     = static_cast<std::size_t>(signal_index.value);
+        const auto signalIndex     = static_cast<std::size_t>(settings.signal_index.value);
 
         std::size_t consumed = 0UZ;
         std::size_t onOut    = 0UZ;
@@ -272,7 +269,7 @@ private:
             }
         }
         if (!statedRate) { // routes 2 and 3, in that order; an absent rate is a stated absence and is not counted
-            const std::optional<float> derived = _tagRate.has_value() ? _tagRate : detail::axisRate(ds, valuesPerSignal, static_cast<double>(_tolerance));
+            const std::optional<float> derived = _tagRate.has_value() ? _tagRate : detail::axisRate(ds, valuesPerSignal, static_cast<double>(settings.axis_rate_tolerance.value));
             if (derived.has_value()) {
                 detail::putDerived(map, tag::SAMPLE_RATE.name(), pmt::Value(*derived), nMetaKeysOverridden);
             }
@@ -290,14 +287,14 @@ private:
         // An unset setting states nothing at all, so it neither writes a key nor declines one. Zero is the unset
         // frequency: a receiver at 0 Hz is not a tuning any transport carries, and the alternative — an optional —
         // is not a reflectable setting type.
-        if (!protocol_label.value.empty()) {
-            stamp(map, ds, signalIndex, "protocol", pmt::Value(protocol_label.value));
+        if (!settings.protocol_label.value.empty()) {
+            stamp(map, ds, signalIndex, "protocol", pmt::Value(settings.protocol_label.value));
         }
-        if (!source_label.value.empty()) {
-            stamp(map, ds, signalIndex, "source_id", pmt::Value(source_label.value));
+        if (!settings.source_label.value.empty()) {
+            stamp(map, ds, signalIndex, "source_id", pmt::Value(settings.source_label.value));
         }
-        if (frequency_hz.value != 0.0) {
-            stamp(map, ds, signalIndex, tag::FREQUENCY.name(), pmt::Value(frequency_hz.value));
+        if (settings.frequency_hz.value != 0.0) {
+            stamp(map, ds, signalIndex, tag::FREQUENCY.name(), pmt::Value(settings.frequency_hz.value));
         }
         return packet;
     }

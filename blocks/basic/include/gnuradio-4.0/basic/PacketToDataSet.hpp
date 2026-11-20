@@ -65,16 +65,23 @@ Three admission clauses, each a fact the block indexes on: exactly one metadata 
 that sizes the vector and `[0]` would otherwise be a guess; a non-empty payload unless `allow_empty_payload` says
 otherwise; and a payload short enough to state in `extents`, which is a `std::int32_t`. A packet failing one leaves
 by the `reject` port, unchanged, with `discard_reason` on a tag beside it.
+
+`signal_label` names the record's signal when the packet states no signal_name: a record needs a signal name, so one is
+always written. With `allow_empty_payload`, a packet with no items produces a record whose extent is zero.
 )"">;
 
     PortIn<Packet<T>>                   in;
     PortOut<DataSet<T>, Async>          out;
     PortOut<Packet<T>, Async, Optional> reject;
 
-    Annotated<std::string, "signal_label", Visible, Doc<"the record's signal name when the packet states no signal_name; a record with no signal name is unusable, so one is always written">> signal_label{"packet"};
-    Annotated<bool, "allow_empty_payload", Doc<"admit a packet with no items, producing a record whose extent is zero">>                                                                       allow_empty_payload{false};
+    struct Settings {
+        Annotated<std::string, Visible, Doc<"default signal name">> signal_label{"packet"};
+        Annotated<bool, Doc<"empty payload acceptance">>            allow_empty_payload{false};
 
-    GR_MAKE_REFLECTABLE(PacketToDataSet, in, out, reject, signal_label, allow_empty_payload);
+        GR_MAKE_REFLECTABLE(Settings, signal_label, allow_empty_payload);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PacketToDataSet, in, out, reject, settings);
 
     // Counted, stated drops. Plain members, read by the owning thread and reported once at stop(). There is no
     // counter for a key a derived value displaced, because this block derives none.
@@ -165,7 +172,7 @@ private:
         if (packet.meta_information.size() != 1UZ) { // the declaration sizes this vector nowhere, so [0] would be a guess
             return "not_one_metadata_map";
         }
-        if (packet.signal_values.empty() && !allow_empty_payload.value) {
+        if (packet.signal_values.empty() && !settings.allow_empty_payload.value) {
             return "empty_payload";
         }
         if (packet.signal_values.size() > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
@@ -266,7 +273,7 @@ private:
         if (const std::optional<std::string> name = readString(map, tag::SIGNAL_NAME.name()); name.has_value()) {
             record.signal_names.push_back(*name);
         } else {
-            record.signal_names.push_back(signal_label.value); // a record with no signal name is unusable downstream
+            record.signal_names.push_back(settings.signal_label.value); // a record with no signal name is unusable downstream
             ++nSignalNamesSynthesized;
         }
         if (const std::optional<std::string> quantity = readString(map, tag::SIGNAL_QUANTITY.name()); quantity.has_value()) {

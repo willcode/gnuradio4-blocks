@@ -22,13 +22,6 @@ namespace gr::blocks::basic {
 
 GR_REGISTER_BLOCK(gr::blocks::basic::RealToComplex, [T], [float])
 
-namespace detail {
-
-/// @brief The validator of `transition`: true above 0 and below 0.5.
-inline constexpr auto kRealToComplexTransition = [](float value) { return value > 0.f && value < 0.5f; };
-
-} // namespace detail
-
 template<typename T>
 requires std::same_as<T, float>
 struct RealToComplex : Block<RealToComplex<T>, NoTagPropagation> {
@@ -63,43 +56,42 @@ at the accepted `transition`.
 
 A NaN or infinite input sample makes the outputs that read it non-finite, at most `(N+1)/2` of them. The outputs after
 them are finite again.
+
+`transition` is the filter's transition width as a fraction of the input rate.
 )"">;
 
     PortIn<T>                in;
     PortOut<std::complex<T>> out;
 
-    Annotated<float, "transition", Doc<"filter transition width as a fraction of the input rate">, Limits<0.f, 0.5f, detail::kRealToComplexTransition>, Visible> transition = 0.02f;
+    struct Settings {
+        Annotated<float, Doc<"transition width">, Visible, Limits<Over<0.f>, Under<0.5f>>> transition = 0.02f;
 
-    GR_MAKE_REFLECTABLE(RealToComplex, in, out, transition);
+        GR_MAKE_REFLECTABLE(Settings, transition);
+    } settings;
 
-    float                                             _transition = transition.value; ///< the accepted `transition`
+    GR_MAKE_REFLECTABLE(RealToComplex, in, out, settings);
+
     std::optional<gr::filter::RealToComplex>          _conversion{};
     std::vector<std::pair<std::size_t, property_map>> _held{};           ///< tags and their input indices, in input order
     std::size_t                                       _inOrigin  = 0UZ;  ///< the input index the conversion started at
     std::size_t                                       _outOrigin = 0UZ;  ///< the output index of its first output
     bool                                              _reorigin  = true; ///< the next call starts the conversion's count
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (!newSettings.contains("transition") || transition.value == _transition) {
-            return;
+    void applySettings(const Settings& s) {
+        if (s.transition.changed()) {
+            _conversion = gr::filter::RealToComplex::make(1.0, static_cast<double>(s.transition)).value();
+            _reorigin   = true;
         }
-        std::expected<gr::filter::RealToComplex, gr::Error> rebuilt = gr::filter::RealToComplex::make(1.0, static_cast<double>(transition.value));
-        if (!rebuilt) {
-            throw gr::exception(rebuilt.error().message);
-        }
-        _conversion = std::move(*rebuilt);
-        _reorigin   = true;
-        _transition = transition.value;
     }
 
     void start() {
         _held.clear();
-        conversion().reset();
+        _conversion->reset();
         _reorigin = true;
     }
 
     void reset() {
-        conversion().reset();
+        _conversion->reset();
         _reorigin = true;
     }
 
@@ -145,17 +137,10 @@ them are finite again.
     }
 
 private:
-    [[nodiscard]] gr::filter::RealToComplex& conversion() {
-        if (!_conversion) {
-            _conversion = gr::filter::RealToComplex::make(1.0, static_cast<double>(_transition)).value(); // an accepted transition always designs
-        }
-        return *_conversion;
-    }
-
     /// Converts what the output has room for, holds the tags of the converted input and publishes the held tags whose
     /// outputs this call makes. Returns the input consumed and the outputs made.
     [[nodiscard]] std::pair<std::size_t, std::size_t> convert(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        gr::filter::RealToComplex& filter = conversion();
+        gr::filter::RealToComplex& filter = *_conversion;
         if (_reorigin) {
             _inOrigin  = inSpan.streamIndex;
             _outOrigin = outSpan.streamIndex;

@@ -44,8 +44,8 @@ A tag changes the map only on a block built without it.
 A map that does not fit the signature, holds another key or holds a value without a Python form puts the block in its
 error state at init.
 At run time the block keeps the previous map and reports the refusal on its message port.
-A script change at run time resets the script's state. When the new 'process_bulk' refuses the map in force, the block
-reports the refusal at the change, and each later call fails until the map or the script changes.
+A script change at run time resets the script's state. A script that does not load, or whose 'process_bulk' does not
+take the map in force, is refused, and the block keeps running the script it had.
 An empty map calls 'process_bulk(ins, outs)'.
 
 Usage Example:
@@ -97,22 +97,29 @@ myBlock.processBulk(ins, outs);
 // check values of outs
 }
 @endcode
+
+Each change replaces `script_parameters` whole.
 )"">;
     // optional shortening
-    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
-    using A                = Annotated<U, description, Arguments...>;
+    template<typename U, typename... Arguments>
+    using A                = Annotated<U, Arguments...>;
     using poc_property_map = std::map<std::string, std::string, std::less<>>; // TODO: needs to be replaced with 'property_map` aka. 'pmt::Value::Map'
     using tag_type         = std::string;
 
-    std::vector<PortIn<T>>                                                        inputs{};
-    std::vector<PortOut<T>>                                                       outputs{};
-    A<gr::Size_t, "n_inputs", Visible, Doc<"number of inputs">, Limits<0U, 32U>>  n_inputs     = 0U;
-    A<gr::Size_t, "n_outputs", Visible, Doc<"number of inputs">, Limits<0U, 32U>> n_outputs    = 0U;
-    std::string                                                                   pythonScript = "";
+    std::vector<PortIn<T>>  inputs{};
+    std::vector<PortOut<T>> outputs{};
 
-    A<property_map, "script_parameters", Doc<"keyword arguments of process_bulk, replaced whole by each change">> script_parameters{};
+    struct Settings {
+        A<gr::Size_t, Visible, Doc<"input count">, Limits<Max<32U>>, PortCountFor<"inputs">>   n_inputs     = 0U;
+        A<gr::Size_t, Visible, Doc<"output count">, Limits<Max<32U>>, PortCountFor<"outputs">> n_outputs    = 0U;
+        A<std::string>                                                                         pythonScript = "";
 
-    GR_MAKE_REFLECTABLE(PythonBlock, inputs, outputs, n_inputs, n_outputs, pythonScript, script_parameters);
+        A<property_map, Doc<"process_bulk keyword arguments">> script_parameters{};
+
+        GR_MAKE_REFLECTABLE(Settings, n_inputs, n_outputs, pythonScript, script_parameters);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(PythonBlock, inputs, outputs, settings);
 
     /// the name under which the block's module holds the keyword arguments of 'process_bulk'
     static constexpr const char* kScriptParametersName = "__script_parameters__";
@@ -153,83 +160,107 @@ this_block = PythonBlockWrapper(capsule))p",
     bool                _tagAvailable = false;
     tag_type            _tag          = "Simulated Tag";
 
-    void settingsChanged(const gr::property_map& old_settings, const gr::property_map& new_settings) {
-        if (new_settings.contains("n_inputs") || new_settings.contains("n_outputs")) {
-
-            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, old_settings.at("n_inputs"), new_settings.contains("n_inputs") ? new_settings.at("n_inputs") : pmt::Value("same"), old_settings.at("n_outputs"), new_settings.contains("n_outputs") ? new_settings.at("n_outputs").value_or("same"s) : "same"s);
-            if (std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); })) {
-                throw gr::exception("Number of input ports cannot be changed after Graph initialization.");
+    // The port counts depend on the graph's connections, and the script and its parameters on what the interpreter
+    // makes of them: neither is a rule over the settings alone, so the hook fails the setting it cannot take. Loading
+    // a script runs it, which a check must not do.
+    void applySettings(const Settings& s) {
+        const bool portsChange = s.n_inputs.changed() || s.n_outputs.changed();
+        if (portsChange) {
+            std::print("{}: configuration changed: n_inputs {}, n_outputs {}\n", this->name, s.n_inputs, s.n_outputs);
+            const auto connected = [](const auto& ports) { return std::ranges::any_of(ports, [](const auto& port) { return port.isConnected(); }); };
+            if (connected(inputs) || connected(outputs)) {
+                if (s.n_inputs.changed()) {
+                    this->fail(s.n_inputs, "requires unconnected ports");
+                }
+                if (s.n_outputs.changed()) {
+                    this->fail(s.n_outputs, "requires unconnected ports");
+                }
+                return; // the batch fails as a whole, and a script loaded beside the refused count would stay in force
             }
-            if (std::any_of(outputs.begin(), outputs.end(), [](const auto& port) { return port.isConnected(); })) {
-                throw gr::exception("Number of output ports cannot be changed after Graph initialization.");
-            }
-            inputs.resize(n_inputs);
-            outputs.resize(n_outputs);
+            inputs.resize(s.n_inputs);
+            outputs.resize(s.n_outputs);
         }
 
-        if (new_settings.contains("pythonScript")) {
+        const bool scripted = !s.pythonScript->empty(); // a block constructed without a script has none to load
+        if (scripted && s.pythonScript.changed()) {
+            std::string refusal;
+            if (const std::string failure = loadScript(s, refusal); !failure.empty()) {
+                this->fail(s.pythonScript, failure);
+            } else if (!refusal.empty() && s.script_parameters.changed()) {
+                this->fail(s.script_parameters, refusal);
+            } else if (!refusal.empty()) {
+                this->fail(s.pythonScript, refusal);
+            }
+            return;
+        }
+
+        if (scripted && s.script_parameters.changed()) {
+            std::string refusal;
+            _interpreter.invoke([this, &s, &refusal] { refusal = bindScriptParameters(_interpreter.getModule(), s.script_parameters.value); }, s.pythonScript);
+            if (!refusal.empty()) {
+                this->fail(s.script_parameters, refusal);
+            }
+        }
+    }
+
+    // Loads the script into a new module and binds the map to its 'process_bulk' there. The new module replaces the
+    // one in force only when both succeed. Returns the interpreter's message when the script does not load, and sets
+    // 'refusal' when the map does not fit.
+    std::string loadScript(const Settings& s, std::string& refusal) {
+        try {
             _interpreter.invoke(
-                [this] {
-                    if (python::PyObjectGuard testImport(PyRun_StringFlags(_prePythonDefinition.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !testImport) {
-                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - testImport", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                [this, &s, &refusal] {
+                    python::PyObjectGuard module(_interpreter.newModule());
+                    PyObject*             dictionary = PyModule_GetDict(module); // borrowed reference
+                    if (python::PyObjectGuard testImport(PyRun_StringFlags(_prePythonDefinition.data(), Py_file_input, dictionary, dictionary, nullptr)); !testImport) {
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::applySettings(...) - testImport", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     // Retrieve the PythonBlockWrapper class object
-                    PyObject* pPythonBlockWrapperClass = PyDict_GetItemString(_interpreter.getDictionary(), "PythonBlockWrapper"); // borrowed reference
+                    PyObject* pPythonBlockWrapperClass = PyDict_GetItemString(dictionary, "PythonBlockWrapper"); // borrowed reference
                     if (!pPythonBlockWrapperClass) {
-                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - failed to retrieve PythonBlockWrapper class", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::applySettings(...) - failed to retrieve PythonBlockWrapper class", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     // Retrieve the this_block
-                    PyObject* pInstance = PyDict_GetItemString(_interpreter.getDictionary(), "this_block"); // borrowed reference
+                    PyObject* pInstance = PyDict_GetItemString(dictionary, "this_block"); // borrowed reference
                     if (!pInstance) {
-                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - failed to retrieve 'this_block'", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::applySettings(...) - failed to retrieve 'this_block'", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
                     // Check if pInstance is an instance of PythonBlockWrapper
                     if (PyObject_IsInstance(pInstance, pPythonBlockWrapperClass) != 1) {
-                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::applySettings(...) - 'this_block' is not an instance of PythonBlockWrapper", this->unique_name, this->name), std::source_location::current(), _prePythonDefinition);
                     }
 
-                    if (const python::PyObjectGuard result(PyRun_StringFlags(pythonScript.data(), Py_file_input, _interpreter.getDictionary(), _interpreter.getDictionary(), nullptr)); !result) {
-                        python::throwCurrentPythonError(std::format("{}(aka. '{}')::settingsChanged(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                    if (const python::PyObjectGuard result(PyRun_StringFlags(s.pythonScript->data(), Py_file_input, dictionary, dictionary, nullptr)); !result) {
+                        python::throwCurrentPythonError(std::format("{}(aka. '{}')::applySettings(...) - script parsing error", this->unique_name, this->name), std::source_location::current(), s.pythonScript);
                     }
 
-                    python::PyObjectGuard pyFunc(PyObject_GetAttrString(_interpreter.getModule(), "process_bulk"));
+                    python::PyObjectGuard pyFunc(PyObject_GetAttrString(module, "process_bulk"));
                     if (!pyFunc.get() || !PyCallable_Check(pyFunc.get())) {
-                        python::throwCurrentPythonError(std::format("{}(aka. {})::settingsChanged(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), pythonScript);
+                        python::throwCurrentPythonError(std::format("{}(aka. {})::applySettings(...) Python function process_bulk not found or is not callable", this->unique_name, this->name), std::source_location::current(), s.pythonScript);
+                    }
+
+                    refusal = bindScriptParameters(module, s.script_parameters.value);
+                    if (refusal.empty()) {
+                        _interpreter.replaceModule(module.release());
                     }
                 },
-                pythonScript);
+                s.pythonScript);
+        } catch (const std::exception& e) {
+            return e.what();
         }
-
-        if (new_settings.contains("pythonScript") || new_settings.contains("script_parameters")) {
-            std::string refusal;
-            _interpreter.invoke([this, &refusal] { refusal = bindScriptParameters(); }, pythonScript);
-            if (refusal.empty()) {
-                return;
-            }
-            const std::string message = std::format("{}(aka. {})::settingsChanged(...) - script_parameters refused: {}", this->unique_name, this->name, refusal);
-            if (this->state() == lifecycle::State::IDLE) {
-                throw gr::exception(message);
-            }
-            // at run time the block keeps the previous map, and the settings and a saved graph report the map in force
-            if (const auto previous = old_settings.find("script_parameters"); previous != old_settings.end()) {
-                if (const auto* map = previous->second.get_if<property_map>(); map != nullptr) {
-                    script_parameters = *map;
-                }
-            }
-            this->emitErrorMessage("settingsChanged(...)", message);
-        }
+        return {};
     }
 
     const poc_property_map& getSettings() const {
-        // TODO: replace with this->settings().get() once the property_map is Python wrapped
+        // TODO: replace with this->get() once the property_map is Python wrapped
         return _settingsMap;
     }
 
     bool setSettings(const poc_property_map& newSettings) {
-        // TODO: replace with this->settings().set(newSettings) once the property_map is Python wrapped
+        // TODO: replace with this->set(newSettings) once the property_map is Python wrapped
         if (newSettings.empty()) {
             return false;
         }
@@ -248,7 +279,7 @@ this_block = PythonBlockWrapper(capsule))p",
 
     template<typename TInputSpan, typename TOutputSpan>
     work::Status processBulk(std::span<TInputSpan> ins, std::span<TOutputSpan> outs) {
-        _interpreter.invoke([this, ins, outs] { callPythonFunction(ins, outs); }, pythonScript);
+        _interpreter.invoke([this, ins, outs] { callPythonFunction(ins, outs); }, settings.pythonScript);
         return work::Status::OK;
     }
 
@@ -262,16 +293,16 @@ this_block = PythonBlockWrapper(capsule))p",
     // clang-format on
 
 private:
-    /// Converts 'script_parameters' to keyword arguments, binds them to the signature of 'process_bulk' and stores them in
-    /// the module for later calls. Returns the reason for a refusal and leaves the stored arguments as they were. Returns
-    /// an empty string on success, and when no script is loaded yet. The caller holds the interpreter lock.
-    std::string bindScriptParameters() {
-        python::PyObjectGuard function(PyObject_GetAttrString(_interpreter.getModule(), "process_bulk"));
+    /// Converts 'map' to keyword arguments, binds them to the signature of the module's 'process_bulk' and stores
+    /// them in the module for later calls. Returns the reason for a refusal and leaves the stored arguments as they were.
+    /// Returns an empty string on success, and when the module holds no script yet. The caller holds the interpreter lock.
+    std::string bindScriptParameters(PyObject* module, const property_map& map) {
+        python::PyObjectGuard function(PyObject_GetAttrString(module, "process_bulk"));
         if (!function) {
             PyErr_Clear();
             return {};
         }
-        auto converted = python::toPyObject(script_parameters.value, "script_parameters");
+        auto converted = python::toPyObject(map, "script_parameters");
         if (!converted) {
             return converted.error();
         }
@@ -287,9 +318,9 @@ private:
             python::PyObjectGuard parameters(signature ? PyObject_Str(signature) : nullptr);
             const char*           text = parameters ? PyUnicode_AsUTF8(parameters) : nullptr;
             PyErr_Clear();
-            return std::format("{} does not fit process_bulk{}: {}", pmt::Value(script_parameters.value), text != nullptr ? text : "(...)", error);
+            return std::format("{} does not fit process_bulk{}: {}", pmt::Value(map), text != nullptr ? text : "(...)", error);
         }
-        if (PyDict_SetItemString(_interpreter.getDictionary(), kScriptParametersName, keywords) != 0) {
+        if (PyDict_SetItemString(PyModule_GetDict(module), kScriptParametersName, keywords) != 0) {
             return python::takeCurrentPythonError();
         }
         return {};
@@ -306,7 +337,7 @@ private:
         python::PyObjectGuard deepcopy(copyModule ? PyObject_GetAttrString(copyModule, "deepcopy") : nullptr);
         PyObject*             copy = deepcopy ? PyObject_CallOneArg(deepcopy, stored) : nullptr;
         if (copy == nullptr) {
-            python::throwCurrentPythonError(std::format("{}(aka. {}) - failed to copy script_parameters", this->unique_name, this->name), std::source_location::current(), pythonScript);
+            python::throwCurrentPythonError(std::format("{}(aka. {}) - failed to copy script_parameters", this->unique_name, this->name), std::source_location::current(), settings.pythonScript);
         }
         return copy;
     }
@@ -335,7 +366,7 @@ private:
 
         python::PyObjectGuard keywords(copyScriptParameters());
         if (python::PyObjectGuard pyValue = _interpreter.invokeFunction("process_bulk", pyArgs, keywords); !pyValue) {
-            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), pythonScript);
+            python::throwCurrentPythonError(std::format("{}(aka. {})::callPythonFunction(..) Python function call failed", this->unique_name, this->name), std::source_location::current(), settings.pythonScript);
         }
     }
 };

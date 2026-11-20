@@ -17,6 +17,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/SampleDelay.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace {
@@ -31,15 +32,13 @@ using CF = std::complex<float>;
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
 template<typename T>
 void setDelay(SampleDelay<T>& block, gr::Size_t delay) {
-    std::ignore = block.settings().setStaged({{"delay", delay}});
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"delay", delay}});
 }
 
 /// The pair `ReaderSpan::tags()` yields: a signed offset against the span's own base, and a reference to the map.
@@ -393,8 +392,7 @@ const boost::ut::suite<"SampleDelay"> sampleDelayTests = [] {
         SampleDelay<float>       keep = make<SampleDelay<float>>({{"delay", 8U}});
         const std::vector<float> ones(32UZ, 1.f);
         std::ignore = run<float>(keep, ones, 32UZ);
-        std::ignore = keep.settings().setStaged({{"delay", gr::Size_t{8}}});
-        std::ignore = keep.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(keep), {{"delay", gr::Size_t{8}}});
 
         const std::vector<float> after = run<float>(keep, ones, 32UZ);
         expect(eq(std::ranges::count(after, 0.f), 0)) << "a settings map that does not change delay does not reset the line";

@@ -130,7 +130,7 @@ std::vector<R> runGraph(const std::vector<T>& inputs, const gr::property_map& se
     gr::scheduler::Simple<> scheduler;
     boost::ut::expect(boost::ut::fatal(scheduler.exchange(std::move(flow)).has_value()));
     boost::ut::expect(scheduler.runAndWait().has_value());
-    return sink.data.value;
+    return sink.status.data.value;
 }
 } // namespace unittest
 
@@ -193,8 +193,8 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
             TConvert converter;
             RetType  result = converter.processOne(/*input*/ static_cast<V>(42));
             if constexpr (kIsScalingBlock) {
-                converter.scale = 0.5;
-                result          = converter.processOne(/*input*/ static_cast<V>(42));
+                expect(converter.set({{"scale", 0.5}}).has_value());
+                result = converter.processOne(/*input*/ static_cast<V>(42));
             } else {
                 result = converter.processOne(/*input*/ static_cast<V>(21));
             }
@@ -212,7 +212,7 @@ const boost::ut::suite<"basic Conversion tests"> basicConversion = [] {
             using TConvert = std::conditional_t<kIsScalingBlock, ScalingConvert<T, R>, Convert<T, R>>;
             TConvert converter;
             if constexpr (kIsScalingBlock) {
-                converter.scale = 1.0;
+                expect(converter.set({{"scale", 1.0}}).has_value());
             }
             RetType result = converter.processOne(/*input*/ static_cast<V>(42));
 
@@ -504,14 +504,14 @@ const boost::ut::suite<"conversion range and rounding"> conversionRange = [] {
     "ScalingConvert<float, int16_t> rounds and saturates the product"_test = [] {
         using Limits = std::numeric_limits<std::int16_t>;
         ScalingConvert<float, std::int16_t> converter;
-        converter.scale = 32767;
+        expect(converter.set({{"scale", 32767.0}}).has_value());
         // 0.5 * 32767 is 16383.5, a tie that rounds to the even 16384
         expectBothPaths(converter, std::array{0.5f, 1.f, -1.f, 1.5f, -1.5f, kNaN, kInf}, std::array<std::int16_t, 7UZ>{16384, Limits::max(), -Limits::max(), Limits::max(), Limits::min(), 0, Limits::max()});
     };
 
     "ScalingConvert<float, int32_t> forms the product in float"_test = [] {
         ScalingConvert<float, std::int32_t> converter;
-        converter.scale = 3;
+        expect(converter.set({{"scale", 3.0}}).has_value());
         // 16777215 x 3 is not a float; the product rounds to the nearest float before it converts
         constexpr std::array<float, 2UZ> kInputs{16777215.f, -16777215.f};
         std::array<std::int32_t, 2UZ>    expected{};
@@ -524,7 +524,7 @@ const boost::ut::suite<"conversion range and rounding"> conversionRange = [] {
 
     "ScalingConvert with an integer input forms the product without overflow"_test = [] {
         ScalingConvert<std::int16_t, std::int32_t> toInt32;
-        toInt32.scale = 4;
+        expect(toInt32.set({{"scale", 4.0}}).has_value());
         constexpr std::array<std::int16_t, 4UZ> kShort{16384, 32767, -32768, -1};
         std::array<std::int32_t, 4UZ>           scaled{};
         for (std::size_t i = 0UZ; i < kShort.size(); ++i) {
@@ -533,7 +533,7 @@ const boost::ut::suite<"conversion range and rounding"> conversionRange = [] {
         expectBothPaths(toInt32, kShort, scaled);
 
         ScalingConvert<std::int32_t, float> toFloat;
-        toFloat.scale = 65536;
+        expect(toFloat.set({{"scale", 65536.0}}).has_value());
         expectBothPaths(toFloat, std::array<std::int32_t, 3UZ>{1, 32768, -65536}, std::array{65536.f, 2147483648.f, -4294967296.f});
     };
 
@@ -547,8 +547,7 @@ const boost::ut::suite<"conversion range and rounding"> conversionRange = [] {
         }
         const std::vector<std::int32_t> received = unittest::runGraph<TBlock, std::int16_t, std::int32_t>(inputs, {{"scale", 4.0}});
         TBlock                          reference({{"scale", 4.0}});
-        reference.settings().init();
-        std::ignore = reference.settings().applyStagedParameters();
+        boost::ut::expect(reference.check({}).has_value());
         std::vector<std::int32_t> expected;
         for (const std::int16_t value : inputs) {
             expected.push_back(reference.processOne(value));
@@ -559,10 +558,9 @@ const boost::ut::suite<"conversion range and rounding"> conversionRange = [] {
 
     "ScalingConvert takes a fractional double scale for an integer input"_test = [] {
         using TBlock = ScalingConvert<std::int16_t, float>;
-        expect(std::is_same_v<decltype(TBlock::scale), double>);
+        expect(std::is_same_v<decltype(TBlock::Settings::scale), double>);
         TBlock converter({{"scale", 1.0 / 32768.0}});
-        converter.settings().init();
-        std::ignore = converter.settings().applyStagedParameters();
+        boost::ut::expect(converter.check({}).has_value());
         expectBothPaths(converter, std::array<std::int16_t, 3UZ>{-32768, 16384, 1}, std::array{-1.f, 0.5f, 1.f / 32768.f});
     };
 

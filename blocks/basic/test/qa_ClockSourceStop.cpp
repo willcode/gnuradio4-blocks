@@ -9,7 +9,6 @@
 #include <gnuradio-4.0/Graph.hpp>
 
 #include <gnuradio-4.0/basic/ClockSource.hpp>
-#include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 #include <gnuradio-4.0/testing/NullSources.hpp>
 
@@ -44,10 +43,8 @@ void destroyGraphWhileSourceRuns() {
 
     for (std::size_t cycle = 0UZ; cycle < 10UZ; ++cycle) {
         gr::Graph flow;
-        auto&     source   = flow.emplaceBlock<TSource>();
-        source.sample_rate = 100000.f;
-        source.chunk_size  = gr::Size_t{16};
-        auto& sink         = flow.emplaceBlock<gr::blocks::testing::CountingSink<float>>({{"n_samples_max", std::uint64_t{500}}});
+        auto&     source = flow.emplaceBlock<TSource>({{"sample_rate", 100000.f}, {"chunk_size", gr::Size_t{16}}});
+        auto&     sink   = flow.emplaceBlock<gr::blocks::testing::CountingSink<float>>({{"n_samples_max", std::uint64_t{500}}});
         expect(flow.connect<"out", "in">(source, sink).has_value());
         expect(source.changeStateTo(gr::lifecycle::State::RUNNING).has_value());
 
@@ -65,8 +62,6 @@ const boost::ut::suite<"wall-clock source teardown"> teardownTests = [] {
     "a running ClockSource is destructible"_test = [] { withinBound(std::chrono::seconds{5}, "a running ClockSource", [] { destroyGraphWhileSourceRuns<ClockSource<float>>(); }); };
 
     "a running SignalGenerator is destructible"_test = [] { withinBound(std::chrono::seconds{5}, "a running SignalGenerator", [] { destroyGraphWhileSourceRuns<SignalGenerator<float>>(); }); };
-
-    "a running FunctionGenerator is destructible"_test = [] { withinBound(std::chrono::seconds{5}, "a running FunctionGenerator", [] { destroyGraphWhileSourceRuns<FunctionGenerator<float>>(); }); };
 };
 
 int main() { /* not needed for UT */ }

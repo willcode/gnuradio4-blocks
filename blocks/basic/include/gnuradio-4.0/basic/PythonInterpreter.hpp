@@ -475,36 +475,22 @@ class Interpreter {
 
     static std::atomic<std::size_t> _nModules;
     PyModuleDef*                    _moduleDefinitions;
+    void*                           _classReference;    // the object a module's capsule points to, null for none
     PyObject*                       _pModule = nullptr; // owned reference, released under the interpreter lock
     PyObject*                       _pDict   = nullptr; // borrowed from _pModule
 
 public:
     template<typename T>
-    explicit(false) Interpreter(T* classReference, PyModuleDef* moduleDefinitions = nullptr, std::source_location location = std::source_location::current()) : _moduleDefinitions(moduleDefinitions) {
+    explicit(false) Interpreter(T* classReference, PyModuleDef* moduleDefinitions = nullptr, std::source_location location = std::source_location::current()) : _moduleDefinitions(moduleDefinitions), _classReference(moduleDefinitions != nullptr ? static_cast<void*>(classReference) : nullptr) {
         runtime().throwIfUnusable();
         assert(Py_IsInitialized() && "Python isn't properly initialised");
         // Ensure the Python GIL is initialized for this instance
         python::PyGILGuard localGuard;
 
-        const std::string moduleName = std::format("{}_{}", moduleDefinitions != nullptr ? moduleDefinitions->m_name : "gr_python", _nModules.fetch_add(1UZ, std::memory_order_relaxed));
-        PyObjectGuard     module(PyModule_New(moduleName.c_str())); // moves into '_pModule' once the constructor succeeds
-        if (!module) {
-            python::throwCurrentPythonError(std::format("failed to create the module {}", moduleName), location);
-        }
-        _pDict = PyModule_GetDict(module);
-        if (PyDict_SetItemString(_pDict, "__builtins__", PyEval_GetBuiltins()) != 0) {
-            python::throwCurrentPythonError(std::format("failed to add the builtins to the module {}", moduleName), location);
-        }
-        if (classReference == nullptr || moduleDefinitions == nullptr) {
-            _pModule = module.release();
+        PyObjectGuard module(newModule(location)); // moves into '_pModule' once the constructor succeeds
+        if (_classReference == nullptr) {
+            replaceModule(module.release());
             return;
-        }
-        PyObjectGuard capsule(PyCapsule_New(static_cast<void*>(classReference), _moduleDefinitions->m_name, nullptr));
-        if (!capsule) {
-            python::throwCurrentPythonError(std::format("Interpreter(*{}) - failed to create a capsule", gr::meta::type_name<T>()));
-        }
-        if (PyDict_SetItemString(_pDict, "capsule", capsule) != 0) {
-            python::throwCurrentPythonError(std::format("Interpreter(*{}) - failed to store the capsule", gr::meta::type_name<T>()), location);
         }
 
         // replaces the 'PyImport_AppendInittab("ClassName", &classDefinition)' to allow for other blocks being added
@@ -530,7 +516,7 @@ public:
         } else {
             python::throwCurrentPythonError(std::format("Manual import of {} failed.", _moduleDefinitions->m_name), location);
         }
-        _pModule = module.release();
+        replaceModule(module.release());
     }
 
     ~Interpreter() {
@@ -549,6 +535,38 @@ public:
     PyObject* getModule() { return _pModule; }
 
     PyObject* getDictionary() { return _pDict; }
+
+    /// Returns a new reference to an empty module that holds the builtins and, when the interpreter has a class
+    /// reference, the capsule 'capsule' pointing to it. The caller holds the interpreter lock.
+    [[nodiscard]] PyObject* newModule(std::source_location location = std::source_location::current()) {
+        const std::string moduleName = std::format("{}_{}", _moduleDefinitions != nullptr ? _moduleDefinitions->m_name : "gr_python", _nModules.fetch_add(1UZ, std::memory_order_relaxed));
+        PyObjectGuard     module(PyModule_New(moduleName.c_str()));
+        if (!module) {
+            python::throwCurrentPythonError(std::format("failed to create the module {}", moduleName), location);
+        }
+        PyObject* dictionary = PyModule_GetDict(module); // borrowed reference
+        if (PyDict_SetItemString(dictionary, "__builtins__", PyEval_GetBuiltins()) != 0) {
+            python::throwCurrentPythonError(std::format("failed to add the builtins to the module {}", moduleName), location);
+        }
+        if (_classReference == nullptr) {
+            return module.release();
+        }
+        PyObjectGuard capsule(PyCapsule_New(_classReference, _moduleDefinitions->m_name, nullptr));
+        if (!capsule) {
+            python::throwCurrentPythonError(std::format("failed to create a capsule for the module {}", moduleName), location);
+        }
+        if (PyDict_SetItemString(dictionary, "capsule", capsule) != 0) {
+            python::throwCurrentPythonError(std::format("failed to store the capsule in the module {}", moduleName), location);
+        }
+        return module.release();
+    }
+
+    /// Makes 'module', a reference the call takes over, the module that every later call uses, and releases the module
+    /// it replaces. The caller holds the interpreter lock.
+    void replaceModule(PyObject* module) noexcept {
+        python::PyDecRef(std::exchange(_pModule, module));
+        _pDict = PyModule_GetDict(_pModule);
+    }
 
     template<NoParamNoReturn Func>
     void invoke(Func func, std::string_view pythonCode = "", std::source_location location = std::source_location::current()) {

@@ -33,17 +33,26 @@ many of the most recent messages. A `Get` on the block's `Stored` property retur
 message's index in the order of arrival, starting at 0.
 
 The block has no stream ports. Its work function returns done on the first call. A change to `display` or `store`
-applies when the block next handles its messages.
+applies at the block's next start.
 )"">;
 
     MsgPortIn messages;
 
-    Annotated<bool, "display", Doc<"print each message to standard output">, Visible>   display    = true;
-    Annotated<gr::Size_t, "store", Doc<"number of most recent messages kept">, Visible> store      = 0U;
-    Annotated<gr::Size_t, "n_messages", Doc<"messages received">>                       n_messages = 0U;
-    Annotated<property_map, "last", Doc<"data map of the most recent message">>         last{};
+    struct Settings {
+        Annotated<bool, Doc<"message printing">, Visible>           display = true;
+        Annotated<gr::Size_t, Doc<"stored message count">, Visible> store   = 0U;
 
-    GR_MAKE_REFLECTABLE(MessageDebug, messages, display, store, n_messages, last);
+        GR_MAKE_REFLECTABLE(Settings, display, store);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"messages received">>   n_messages = 0U;
+        Annotated<property_map, Doc<"last message data">> last{};
+
+        GR_MAKE_REFLECTABLE(Status, n_messages, last);
+    } status;
+
+    GR_MAKE_REFLECTABLE(MessageDebug, messages, settings, status);
 
     std::deque<std::pair<gr::Size_t, Message>> _stored{};
 
@@ -59,24 +68,26 @@ applies when the block next handles its messages.
         this->applyChangedSettings(false);
     }
 
+    // the scheduler calls this outside the block's work call
     void processMessages(MsgPortIn& /*port*/, std::span<const Message> received) {
+        if (received.empty()) {
+            return;
+        }
         for (const Message& message : received) {
-            if (display) {
+            if (settings.display) {
                 printMessage(message);
             }
-            if (store > 0U) {
-                _stored.emplace_back(n_messages.value, message);
-                trimStored();
+            if (settings.store > 0U) {
+                _stored.emplace_back(status.n_messages, message);
+                trimStored(settings.store);
             }
-            ++n_messages.value;
-            last = message.data.has_value() ? message.data.value() : property_map{};
+            ++status.n_messages.value;
         }
-        if (!received.empty()) {
-            this->updateActiveParameters({"n_messages", "last"});
-        }
+        const Message& newest = received.back();
+        status.last           = newest.data.has_value() ? newest.data.value() : property_map{};
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { trimStored(); }
+    void applySettings(const Settings& s) { trimStored(s.store); }
 
     [[nodiscard]] work::Status processBulk() noexcept { return work::Status::DONE; }
 
@@ -101,8 +112,8 @@ private:
         }
     }
 
-    void trimStored() {
-        while (_stored.size() > static_cast<std::size_t>(store.value)) {
+    void trimStored(gr::Size_t store) {
+        while (_stored.size() > static_cast<std::size_t>(store)) {
             _stored.pop_front();
         }
     }

@@ -118,13 +118,13 @@ const boost::ut::suite SyncBlockTests = [] {
         const SyncBlock<int> block;
         const auto           outside = settingsOutsideLimits(block);
         expect(outside.empty()) << std::format("settings outside their limits: {}", outside);
-        expect(eq(block.inputs.size(), static_cast<std::size_t>(block.n_ports)));
-        expect(eq(block.outputs.size(), static_cast<std::size_t>(block.n_ports)));
-        expect(eq(block._nDroppedSamples.size(), static_cast<std::size_t>(block.n_ports)));
+        expect(eq(block.inputs.size(), static_cast<std::size_t>(block.settings.n_ports)));
+        expect(eq(block.outputs.size(), static_cast<std::size_t>(block.settings.n_ports)));
+        expect(eq(block._nDroppedSamples.size(), static_cast<std::size_t>(block.settings.n_ports)));
     };
 
     "SyncBlock given its default port count keeps that many ports"_test = [] {
-        const gr::Size_t nDefault = SyncBlock<int>{}.n_ports;
+        const gr::Size_t nDefault = SyncBlock<int>{}.settings.n_ports;
         SyncBlock<int>   block({{"n_ports", nDefault}});
         block.init(block.progress);
         expect(eq(block.inputs.size(), static_cast<std::size_t>(nDefault)));

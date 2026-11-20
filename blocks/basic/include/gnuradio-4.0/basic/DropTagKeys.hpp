@@ -33,20 +33,26 @@ that changes `keys`, the change applies from the next chunk on. The block filter
 chunk by the earlier list. Under an input `min_samples`, the last samples of the stream, fewer than `min_samples`, do
 not leave. Their tags leave at the end of the stream. A change that a tag past the first sample of the last chunk
 brings does not reach those tags.
+
+Each key is matched whole.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::vector<std::string>, "keys", Doc<"tag keys to remove, each matched whole">, Visible> keys;
+    struct Settings {
+        Annotated<std::vector<std::string>, Doc<"tag keys to remove">, Visible> keys;
 
-    GR_MAKE_REFLECTABLE(DropTagKeys, in, out, keys);
+        GR_MAKE_REFLECTABLE(Settings, keys);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DropTagKeys, in, out, settings);
 
     template<typename TInputSpans, typename TOutputSpans>
     void forwardTags(TInputSpans& inputSpans, TOutputSpans& outputSpans, std::size_t /*processedIn*/) {
         const auto forward = [this, &outputSpans](const property_map& map, std::size_t offset) {
             property_map forwarded = this->filterAndSubstituteTag(map);
-            std::erase_if(forwarded, [this](const auto& entry) { return std::ranges::contains(keys.value, std::string_view(entry.first)); });
+            std::erase_if(forwarded, [this](const auto& entry) { return std::ranges::contains(settings.keys.value, std::string_view(entry.first)); });
             forwarded.erase(static_cast<std::pmr::string>(gr::tag::END_OF_STREAM));
             if (forwarded.empty()) {
                 return;

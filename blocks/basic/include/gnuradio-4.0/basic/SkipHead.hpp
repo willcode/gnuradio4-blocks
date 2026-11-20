@@ -36,9 +36,13 @@ arrived produces no samples, and the block ends with it.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "skip count", Doc<"samples to drop at the start of the stream">, Visible> n_skip = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"samples to skip">, Visible> n_skip = 0U;
 
-    GR_MAKE_REFLECTABLE(SkipHead, in, out, n_skip);
+        GR_MAKE_REFLECTABLE(Settings, n_skip);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SkipHead, in, out, settings);
 
     std::size_t _dropped  = 0UZ;   // samples consumed and not produced
     bool        _skipDone = false; // set once the count is reached; later changes of n_skip are ignored
@@ -50,7 +54,7 @@ arrived produces no samples, and the block ends with it.
 
     /// @brief The number of samples still to drop.
     [[nodiscard]] std::size_t remainingSkip() const noexcept {
-        const std::size_t wanted = static_cast<std::size_t>(n_skip.value);
+        const std::size_t wanted = static_cast<std::size_t>(settings.n_skip.value);
         return _skipDone || wanted <= _dropped ? 0UZ : wanted - _dropped;
     }
 

@@ -9,6 +9,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <memory_resource>
 #include <span>
 #include <string>
@@ -24,6 +25,7 @@
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/basic/NullSources.hpp>
 #include <gnuradio-4.0/basic/VectorSource.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace gr::blocks::basic::vector_source_test {
@@ -65,9 +67,24 @@ using gr::blocks::basic::vector_source_test::ChunkSink;
 using gr::blocks::basic::vector_source_test::kChunk;
 
 /// Applies the settings `source` was built with and moves it to RUNNING, as a scheduler does before the first call.
-void start(VectorSource<float>& source) {
+/// Stops the source when the case ends, while the source still stands: the stop reads the source's settings fields,
+/// which the base class destructor reaches only after the source's members are gone.
+struct Running {
+    VectorSource<float>& source;
+
+    explicit Running(VectorSource<float>& running) : source(running) {}
+    Running(const Running&)            = delete;
+    Running& operator=(const Running&) = delete;
+    ~Running() {
+        std::ignore = source.changeStateTo(gr::lifecycle::State::REQUESTED_STOP);
+        std::ignore = source.changeStateTo(gr::lifecycle::State::STOPPED);
+    }
+};
+
+[[nodiscard]] Running start(VectorSource<float>& source) {
     source.init(source.progress);
     boost::ut::expect(boost::ut::fatal(source.changeStateTo(gr::lifecycle::State::RUNNING).has_value()));
+    return Running{source};
 }
 
 /// Runs one call of `chunk` samples from the position of `source` and returns the tags it published.
@@ -117,8 +134,15 @@ gr::pmt::Value listOf(std::initializer_list<property_map> maps) {
 /// empty when the run succeeds.
 std::string runError(const property_map& settings, gr::EdgeParameters edge = {}) {
     gr::Graph graph;
-    auto&     source = graph.emplaceBlock<VectorSource<float>>(settings);
-    auto&     sink   = graph.emplaceBlock<gr::blocks::basic::NullSink<float>>();
+    // the graph refuses a block whose constructed settings its initialization refuses, at the add
+    VectorSource<float>* added = nullptr;
+    try {
+        added = std::addressof(graph.emplaceBlock<VectorSource<float>>(settings));
+    } catch (const gr::exception& refusal) {
+        return std::string(refusal.message);
+    }
+    auto& source = *added;
+    auto& sink   = graph.emplaceBlock<gr::blocks::basic::NullSink<float>>();
     if (!graph.connect<"out", "in">(source, sink, std::move(edge)).has_value()) {
         return "connect failed";
     }
@@ -255,7 +279,7 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
 
     "values shorter than the emitted count end the stream with nothing emitted"_test = [] {
         VectorSource<float> source;
-        source.values   = std::vector<float>{1.f, 2.f, 3.f};
+        expect(source.set({{"values", std::vector<float>{1.f, 2.f, 3.f}}}).has_value());
         source._emitted = 5U;
         std::vector<float>                           buffer(4UZ, 0.f);
         gr::blocks::testing::span::OutputSpan<float> outSpan{std::span<float>(buffer)};
@@ -270,8 +294,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const property_map       first{{"a", 1}};
         const property_map       second{{"b", "x"}};
         VectorSource<float>      source({{"values", values}, {"tags", property_map{{"1", first}, {"4", second}}}});
-        start(source);
-        const auto published = publishedTags(source, 4UZ);
+        const Running            running   = start(source);
+        const auto               published = publishedTags(source, 4UZ);
         expect(fatal(eq(published.size(), 2UZ)));
         expect(eq(published[0].index, 1UZ));
         expect(published[0].map == first);
@@ -285,8 +309,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const property_map       gate{{"gate", "open"}};
         const property_map       last{{"last", true}};
         VectorSource<float>      source({{"values", values}, {"tags", property_map{{"1", listOf({level, gate})}, {"2", listOf({last})}}}});
-        start(source);
-        const auto published = publishedTags(source, 8UZ);
+        const Running            running   = start(source);
+        const auto               published = publishedTags(source, 8UZ);
         expect(fatal(eq(published.size(), 3UZ)));
         expect(indicesOf(published) == std::vector<std::size_t>{1UZ, 1UZ, 2UZ});
         expect(published[0].map == level);
@@ -299,30 +323,30 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const std::uint64_t      passes = 2U;
         const property_map       last{{"end", true}};
         VectorSource<float>      source({{"values", values}, {"repeat", passes}, {"tags", property_map{{indexKey(values.size() * passes), last}}}});
-        start(source);
-        const auto published = publishedTags(source, 4UZ);
+        const Running            running   = start(source);
+        const auto               published = publishedTags(source, 4UZ);
         expect(fatal(eq(published.size(), 1UZ)));
         expect(eq(published[0].index, values.size() * passes));
         expect(published[0].map == last);
     };
 
-    "an entry past the sample count fails the run at the start with an error that names the index"_test = [] {
+    "an entry past the sample count is refused with an error that names the index"_test = [] {
         const std::vector<float> values{1.f, 2.f, 3.f};
         const std::string        error = runError({{"values", values}, {"tags", property_map{{"0", property_map{{"a", 1}}}, {indexKey(values.size() + 1UZ), property_map{{"late", true}}}}}});
         expect(error.contains("tags entry at sample 4 is past the 3 samples")) << error;
     };
 
-    "a tags key that is not a decimal index fails the run with an error that names the key"_test = [] {
+    "a tags key that is not a decimal index is refused with an error that names the key"_test = [] {
         const std::string error = runError({{"values", std::vector<float>{1.f, 2.f}}, {"tags", property_map{{"1x", property_map{{"a", 1}}}}}});
-        expect(error.contains("tags key '1x' is not a sample index")) << error;
+        expect(error.contains("tags key '1x' must be a sample index")) << error;
     };
 
     "tags count across passes and are published once unless repeat_tags is set"_test = [] {
         const std::vector<float> values{1.f, 2.f, 3.f};
         const property_map       mark{{"mark", 1}};
         VectorSource<float>      source({{"values", values}, {"repeat", std::uint64_t{3}}, {"tags", property_map{{"0", mark}, {"4", mark}}}});
-        start(source);
-        expect(!source.repeat_tags.value) << "the default places each tag once";
+        const Running            running = start(source);
+        expect(!source.settings.repeat_tags.value) << "the default places each tag once";
         expect(indicesOf(publishedTags(source, 4UZ)) == std::vector<std::size_t>{0UZ, 4UZ});
     };
 
@@ -332,7 +356,7 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const property_map       first{{"first", true}};
         const property_map       third{{"third", true}};
         VectorSource<float>      source({{"values", values}, {"repeat", std::uint64_t{passes}}, {"repeat_tags", true}, {"tags", property_map{{"0", first}, {"2", third}}}});
-        start(source);
+        const Running            running   = start(source);
         const auto               published = publishedTags(source, 4UZ);
         std::vector<std::size_t> wanted;
         for (std::size_t pass = 0UZ; pass < passes; ++pass) {
@@ -345,7 +369,7 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         expect(published[5].map == third);
     };
 
-    "with repeat_tags an index at the size of values fails the run at the start"_test = [] {
+    "with repeat_tags an index at the size of values is refused"_test = [] {
         const std::vector<float> values{1.f, 2.f, 3.f};
         const std::string        error = runError({{"values", values}, {"repeat", std::uint64_t{2}}, {"repeat_tags", true}, {"tags", property_map{{indexKey(values.size()), property_map{{"a", 1}}}}}});
         expect(error.contains("tags entry at sample 3 is past the 3 values of one pass")) << error;
@@ -357,8 +381,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const std::uint64_t      total  = values.size() * passes;
         const property_map       mark{{"mark", 1}};
         VectorSource<float>      source({{"values", values}, {"repeat", passes}, {"tags", property_map{{indexKey(total - 1U), mark}, {indexKey(total), mark}}}});
-        start(source);
-        expect(fatal(eq(source.repeat.value, passes)));
+        const Running            running = start(source);
+        expect(fatal(eq(source.settings.repeat.value, passes)));
         const std::uint64_t remaining = 4U;
         source._emitted               = total - remaining;
         std::vector<gr::Tag>                         published;
@@ -380,12 +404,10 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const property_map       kept{{"a", 1}};
         const property_map       tagsBefore{{"1", kept}};
         VectorSource<float>      source({{"values", values}, {"tags", tagsBefore}});
-        start(source);
-        const property_map notStaged = source.settings().setStaged(property_map{{"tags", property_map{{"2x", property_map{{"b", 2}}}}}});
-        expect(notStaged.empty()) << "the value reaches the settings, and the block refuses it when it applies";
-        source.applyChangedSettings();
-        expect(source.tags.value == tagsBefore) << "the member keeps the old value";
-        const property_map settings = source.settings().get();
+        const Running            running = start(source);
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"tags", property_map{{"2x", property_map{{"b", 2}}}}}}).empty()) << "the block refuses the change";
+        expect(source.settings.tags.value == tagsBefore) << "the member keeps the old value";
+        const property_map settings = gr::testing::inForce(gr::settings::detail::settingsOf(source));
         const auto*        read     = settings.at("tags").get_if<property_map>();
         expect(fatal(read != nullptr));
         expect(*read == tagsBefore) << "a settings read agrees with the member";
@@ -399,11 +421,9 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const std::vector<float> values{1.f, 2.f, 3.f, 4.f};
         const property_map       kept{{"a", 1}};
         VectorSource<float>      source({{"values", values}, {"tags", property_map{{"1", kept}}}});
-        start(source);
-        const property_map notStaged = source.settings().setStaged(property_map{{"values", std::vector<float>{9.f}}, {"tags", property_map{{"2x", property_map{{"b", 2}}}}}});
-        expect(notStaged.empty());
-        source.applyChangedSettings();
-        expect(source.values.value == values);
+        const Running            running = start(source);
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"values", std::vector<float>{9.f}}, {"tags", property_map{{"2x", property_map{{"b", 2}}}}}}).empty()) << "the block refuses the change";
+        expect(source.settings.values.value == values);
         const auto published = publishedTags(source, 8UZ);
         expect(fatal(eq(published.size(), 1UZ)));
         expect(eq(published[0].index, 1UZ));
@@ -416,14 +436,13 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const property_map       behind{{"behind", true}};
         const property_map       ahead{{"ahead", true}};
         VectorSource<float>      source({{"values", values}, {"tags", property_map{{"0", first}}}});
-        start(source);
-        const std::size_t emitted = values.size() / 2UZ;
+        const Running            running = start(source);
+        const std::size_t        emitted = values.size() / 2UZ;
         expect(indicesOf(publishedInCall(source, emitted)) == std::vector<std::size_t>{0UZ});
         expect(fatal(eq(source._emitted, std::uint64_t{emitted})));
         const property_map changed{{indexKey(emitted - 2UZ), behind}, {indexKey(emitted + 2UZ), ahead}};
-        expect(source.settings().setStaged(property_map{{"tags", changed}}).empty());
-        source.applyChangedSettings();
-        expect(source.tags.value == changed);
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"tags", changed}}).empty());
+        expect(source.settings.tags.value == changed);
         const auto published = publishedTags(source, values.size());
         expect(fatal(eq(published.size(), 1UZ))) << "an index below the samples already emitted is not published";
         expect(eq(published[0].index, emitted + 2UZ)) << "the index counts from the first sample";
@@ -435,14 +454,12 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const property_map       kept{{"kept", true}};
         const property_map       tagsBefore{{indexKey(values.size() - 1UZ), kept}};
         VectorSource<float>      source({{"values", values}, {"tags", tagsBefore}});
-        start(source);
+        const Running            running = start(source);
         expect(publishedInCall(source, 2UZ).empty());
-        expect(source.settings().setStaged(property_map{{"tags", property_map{{indexKey(values.size() + 1UZ), property_map{{"late", true}}}}}}).empty());
-        source.applyChangedSettings();
-        expect(source.tags.value == tagsBefore) << "a tags index past the count";
-        expect(source.settings().setStaged(property_map{{"values", std::vector<float>(values.size() - 2UZ, 9.f)}}).empty());
-        source.applyChangedSettings();
-        expect(source.values.value == values) << "a shorter values that leaves the tags index past the count";
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"tags", property_map{{indexKey(values.size() + 1UZ), property_map{{"late", true}}}}}}).empty()) << "the block refuses the change";
+        expect(source.settings.tags.value == tagsBefore) << "a tags index past the count";
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"values", std::vector<float>(values.size() - 2UZ, 9.f)}}).empty()) << "the block refuses the change";
+        expect(source.settings.values.value == values) << "a shorter values that leaves the tags index past the count";
         const auto published = publishedTags(source, values.size());
         expect(!source._failed) << "the run ends without an error";
         expect(eq(source._emitted, std::uint64_t{values.size()}));
@@ -458,7 +475,7 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         const std::size_t     dense    = kChunk + kChunk / 2UZ;
         expect(fatal(gt(2UZ * std::min(kBuffer, nSamples - dense), kBuffer))) << "two maps per sample from dense outnumber the tag slots";
         const Delivery delivery = deliver({{"values", std::vector<float>(nSamples, 1.f)}, {"tags", denseTags(dense, nSamples, 2UZ, 0U)}}, kBuffer);
-        expect(delivery.error.contains(std::format("tags entry at sample {} starts a run of {} samples", dense, kBuffer))) << delivery.error;
+        expect(delivery.error.contains(std::format("tags entry at sample {}: run holds more than", dense))) << delivery.error;
         expect(delivery.tags.empty());
     };
 
@@ -471,7 +488,7 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
             tags.insert_or_assign(key, entry);
         }
         const std::string error = runError({{"values", std::vector<float>(nSamples, 1.f)}, {"tags", tags}}, {.minBufferSize = kBuffer});
-        expect(error.contains(std::format("tags entry at sample {} starts a run", first))) << "the run from the first index holds kBuffer + 1 maps: " << error;
+        expect(error.contains(std::format("tags entry at sample {}: run holds more than", first))) << "the run from the first index holds kBuffer + 1 maps: " << error;
     };
 
     "a tags setting with as many maps in a run as the tag slots of the output runs to the end with every map at its index"_test = [] {
@@ -511,16 +528,15 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         VectorSource<float> source({{"values", std::vector<float>(nSamples, 1.f)}, {"tags", tagsBefore}});
         gr::PortIn<float>   downstream;
         expect(fatal(source.out.connect(downstream).has_value()));
-        start(source);
-        const std::size_t slots = source.out.tagWriter().buffer().size() - 1UZ;
+        const Running     running = start(source);
+        const std::size_t slots   = source.out.tagWriter().buffer().size() - 1UZ;
         expect(fatal(gt(2UZ * std::min(source.out.bufferSize(), nSamples), slots))) << "two maps per sample outnumber the tag slots of a run";
         std::vector<gr::Tag> marks;
         std::ignore = source.work(std::numeric_limits<std::size_t>::max());
         drain(downstream, marks);
         expect(fatal(lt(source._emitted, std::uint64_t{nSamples})));
-        expect(source.settings().setStaged(property_map{{"tags", denseTags(0UZ, nSamples, 2UZ, 0U)}}).empty());
-        source.applyChangedSettings();
-        expect(source.tags.value == tagsBefore) << "the member keeps the old value";
+        expect(!gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"tags", denseTags(0UZ, nSamples, 2UZ, 0U)}}).empty()) << "the block refuses the change";
+        expect(source.settings.tags.value == tagsBefore) << "the member keeps the old value";
         for (std::size_t call = 0UZ; call < nSamples && source._emitted < nSamples; ++call) {
             std::ignore = source.work(std::numeric_limits<std::size_t>::max());
             drain(downstream, marks);
@@ -539,8 +555,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         VectorSource<float>   source({{"values", std::vector<float>(nSamples, 1.f)}, {"tags", denseTags(half, kBuffer, 2UZ, 0U)}});
         gr::PortIn<float>     downstream;
         expect(fatal(source.out.connect(downstream).has_value()));
-        start(source);
-        const std::size_t slots = source.out.tagWriter().buffer().size() - 1UZ;
+        const Running     running = start(source);
+        const std::size_t slots   = source.out.tagWriter().buffer().size() - 1UZ;
         expect(fatal(eq(source.out.bufferSize(), kBuffer)));
         expect(fatal(eq(2UZ * half, slots))) << "the first setting fills the tag slots";
         expect(fatal(half < kChunk && kChunk < kBuffer)) << "the reader leaves maps of the first setting unread";
@@ -550,9 +566,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         take(downstream, kChunk, marks);
         const std::size_t  held    = 2UZ * (kBuffer - kChunk);
         const property_map changed = denseTags(kBuffer, kBuffer + half, 2UZ, 2UZ * half);
-        expect(source.settings().setStaged(property_map{{"tags", changed}}).empty());
-        source.applyChangedSettings();
-        expect(fatal(source.tags.value == changed)) << "the change alone fits the slots";
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"tags", changed}}).empty());
+        expect(fatal(source.settings.tags.value == changed)) << "the change alone fits the slots";
         std::size_t taken = kChunk;
         for (std::size_t call = 0UZ; call < nSamples && taken < nSamples; ++call) {
             std::ignore = source.work(std::numeric_limits<std::size_t>::max());
@@ -579,8 +594,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         VectorSource<float> source({{"values", std::vector<float>(nSamples, 1.f)}, {"tags", property_map{{"0", property_map{{"mark", std::uint64_t{0}}}}}}});
         gr::PortIn<float>   downstream;
         expect(fatal(source.out.connect(downstream).has_value()));
-        start(source);
-        const std::size_t slots = source.out.tagWriter().buffer().size() - 1UZ;
+        const Running     running = start(source);
+        const std::size_t slots   = source.out.tagWriter().buffer().size() - 1UZ;
         expect(fatal(eq(slots, 2UZ * (nSamples - 1UZ))));
         {
             auto outSpan = source.out.tryReserve<gr::SpanReleasePolicy::ProcessNone>(1UZ);
@@ -588,9 +603,8 @@ const boost::ut::suite<"VectorSource"> vectorSourceTests = [] {
         }
         expect(fatal(eq(source._emitted, std::uint64_t{1})));
         const property_map changed = denseTags(1UZ, nSamples, 2UZ, 1U);
-        expect(source.settings().setStaged(property_map{{"tags", changed}}).empty());
-        source.applyChangedSettings();
-        expect(fatal(source.tags.value == changed));
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(source), property_map{{"tags", changed}}).empty());
+        expect(fatal(source.settings.tags.value == changed));
         const gr::work::Result result = source.work(std::numeric_limits<std::size_t>::max());
         expect(result.status == gr::work::Status::DONE) << "the call emits every sample left";
         expect(eq(source._emitted, std::uint64_t{nSamples}));

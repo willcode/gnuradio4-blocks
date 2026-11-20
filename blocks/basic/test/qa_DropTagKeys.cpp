@@ -157,25 +157,25 @@ const boost::ut::suite<"DropTagKeys"> dropTagKeysTests = [] {
         expect(std::ranges::none_of(run.tags, [](const gr::Tag& t) { return t.index == kEmptiedAt; })) << "no tag leaves on the sample whose only key was removed";
     };
 
-    "a list a tag switches to inside a whole chunk applies from the next chunk on"_test = [] {
+    "a list set before the run removes the listed key in every chunk and passes a context tag on"_test = [] {
         constexpr std::size_t kChunk     = 16UZ;
-        constexpr std::size_t kSwitchAt  = 10UZ;
-        constexpr std::size_t kLaterAt   = kSwitchAt + 2UZ;
+        constexpr std::size_t kContextAt = 10UZ;
+        constexpr std::size_t kLaterAt   = kContextAt + 2UZ;
         constexpr std::size_t kNextAt    = kChunk + 4UZ;
         constexpr std::size_t kEmptiedAt = 2UZ * kChunk + 8UZ;
-        static_assert(kSwitchAt < kLaterAt && kLaterAt < kChunk && kEmptiedAt + kChunk < kSamples);
+        static_assert(kContextAt < kLaterAt && kLaterAt < kChunk && kEmptiedAt + kChunk < kSamples);
         const std::string context{"drop"};
         const std::string contextKey{gr::tag::CONTEXT.key()};
-        const auto        prepare = [&context](DropTagKeys<float>& block) {
+        const auto        prepare = [](DropTagKeys<float>& block) {
             inChunksOf(kChunk)(block);
-            expect(block.settings().set(dropping({kDropped}), gr::SettingsCtx{.context = context}).empty()) << "the block stores the list for the context";
+            expect(block.set(dropping({kDropped}), gr::settings::noWait).has_value()) << "the block takes the list";
         };
-        const Run run = throughBlock({{kSwitchAt, {{gr::tag::CONTEXT.key(), context}}}, {kLaterAt, {{kDropped, 7}}}, {kNextAt, {{kDropped, 1}, {kKept, 2}}}, {kEmptiedAt, {{kDropped, 3}}}}, dropping({}), prepare);
+        const Run run = throughBlock({{kContextAt, {{gr::tag::CONTEXT.key(), context}}}, {kLaterAt, {{kDropped, 7}}}, {kNextAt, {{kDropped, 1}, {kKept, 2}}}, {kEmptiedAt, {{kDropped, 3}}}}, dropping({}), prepare);
         expectRamp(run.samples);
-        expect(eq(countOf(run.tags, contextKey), 1UZ)) << "the tag that switches the list leaves once";
-        expect(std::ranges::any_of(run.tags, [&contextKey](const gr::Tag& t) { return t.index == kSwitchAt && t.map.contains(gr::property_map::key_type(contextKey)); })) << "the tag that switches the list leaves on its own sample";
-        expect(eq(valueAt(run.tags, kLaterAt, kDropped).value_or(0), 7)) << "a tag after the switch in the same chunk keeps the listed key";
-        expect(eq(countOf(run.tags, kDropped), 1UZ)) << "the tags of the later chunks lose the listed key";
+        expect(eq(countOf(run.tags, contextKey), 1UZ)) << "the context tag leaves once";
+        expect(std::ranges::any_of(run.tags, [&contextKey](const gr::Tag& t) { return t.index == kContextAt && t.map.contains(gr::property_map::key_type(contextKey)); })) << "the context tag leaves on its own sample";
+        expect(eq(countOf(run.tags, kDropped), 0UZ)) << "every chunk's tags lose the listed key";
+        expect(std::ranges::none_of(run.tags, [](const gr::Tag& t) { return t.index == kLaterAt; })) << "no tag leaves on the first chunk's sample whose only key the list removed";
         expect(eq(valueAt(run.tags, kNextAt, kKept).value_or(0), 2)) << "the next chunk's tag keeps its unlisted key";
         expect(eq(countOf(run.tags, kKept), 1UZ)) << "the unlisted key leaves once";
         expect(std::ranges::none_of(run.tags, [](const gr::Tag& t) { return t.index == kEmptiedAt; })) << "no tag leaves on the sample whose only key the list removed";
@@ -208,16 +208,17 @@ const boost::ut::suite<"DropTagKeys"> dropTagKeysTests = [] {
         expect(result.has_value()) << (result.has_value() ? std::string() : std::string(result.error().message));
     };
 
-    "a list changed while the stream runs applies to the tags after the change"_test = [] {
-        constexpr std::size_t kSwitch = 30UZ;
+    "a list set on the block before the stream runs applies to every tag"_test = [] {
+        constexpr std::size_t kContextAt = 30UZ;
         const std::string     context{"drop"};
-        const Run             run = throughBlock({{10UZ, {{kDropped, 1}}}, {kSwitch, {{gr::tag::CONTEXT.key(), context}}}, {50UZ, {{kDropped, 3}}}}, dropping({}), [&context](DropTagKeys<float>& block) { //
-            expect(block.settings().set(dropping({kDropped}), gr::SettingsCtx{.context = context}).empty()) << "the block stores the list for the context";
+        const std::string     contextKey{gr::tag::CONTEXT.key()};
+        const Run             run = throughBlock({{10UZ, {{kDropped, 1}}}, {kContextAt, {{gr::tag::CONTEXT.key(), context}}}, {50UZ, {{kDropped, 3}, {kKept, 4}}}}, dropping({}), [](DropTagKeys<float>& block) { //
+            expect(block.set(dropping({kDropped}), gr::settings::noWait).has_value()) << "the block takes the list";
         });
         expectRamp(run.samples);
-        expect(eq(valueAt(run.tags, 10UZ, kDropped).value_or(0), 1)) << "before the change, the key crosses";
-        expect(!valueAt(run.tags, 50UZ, kDropped).has_value()) << "after the change, the key is removed";
-        expect(eq(countOf(run.tags, kDropped), 1UZ)) << "only the tag before the change carries the key";
+        expect(eq(countOf(run.tags, kDropped), 0UZ)) << "the tags before and after the context tag lose the key";
+        expect(eq(valueAt(run.tags, 50UZ, kKept).value_or(0), 4)) << "the unlisted key crosses";
+        expect(eq(countOf(run.tags, contextKey), 1UZ)) << "the context tag crosses";
     };
 };
 

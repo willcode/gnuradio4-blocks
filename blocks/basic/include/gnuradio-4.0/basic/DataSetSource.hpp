@@ -43,9 +43,13 @@ divide in a record without `extents`.
 
     PortOut<DataSet<T>, Async> out;
 
-    Annotated<property_map, "records", Doc<"DataSets to emit, keyed by record index">> records{};
+    struct Settings {
+        Annotated<property_map, Doc<"DataSets by record index">> records{};
 
-    GR_MAKE_REFLECTABLE(DataSetSource, out, records);
+        GR_MAKE_REFLECTABLE(Settings, records);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DataSetSource, out, settings);
 
     std::vector<DataSet<T>> _records{};
     std::size_t             _emitted = 0UZ;
@@ -56,7 +60,7 @@ divide in a record without `extents`.
         _emitted = 0UZ;
         _failed  = false;
 
-        std::expected<std::vector<property_map>, std::string> maps = gr::dataset::readRecordMaps(records.value);
+        std::expected<std::vector<property_map>, std::string> maps = gr::dataset::readRecordMaps(settings.records.value);
         if (!maps.has_value()) {
             failAtStart(maps.error());
             return;

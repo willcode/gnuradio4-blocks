@@ -110,8 +110,7 @@ template<typename T>
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -831,18 +830,12 @@ const boost::ut::suite<"DataSetToStream"> dataSetToStreamTests = [] {
     "an unusable tolerance is refused and the working one survives"_test = [] {
         for (const float bad : {0.f, -1.f, std::numeric_limits<float>::quiet_NaN()}) {
             auto block = make<DataSetToStream<float>>({{"axis_rate_tolerance", 1e-4f}});
-            expect(eq(block.axis_rate_tolerance.value, 1e-4f));
-            bool threw = false;
-            try {
-                std::ignore = block.settings().set({{"axis_rate_tolerance", bad}});
-                std::ignore = block.settings().activateContext();
-                std::ignore = block.settings().applyStagedParameters();
-            } catch (const gr::exception& error) {
-                threw = true;
-                expect(that % (std::string(error.message).find(std::format("{}", bad)) != std::string::npos)) << std::format("the message names {}", bad);
-            }
-            expect(threw) << std::format("axis_rate_tolerance = {}", bad);
-            expect(eq(block.axis_rate_tolerance.value, 1e-4f)) << "the previous configuration is intact";
+            expect(eq(block.settings.axis_rate_tolerance.value, 1e-4f));
+            const auto result = block.set({{"axis_rate_tolerance", bad}});
+            expect(!result.has_value()) << std::format("axis_rate_tolerance = {}", bad);
+            const bool named = !result.has_value() && std::ranges::any_of(result.error(), [](const gr::settings::Rejection& entry) { return entry.key == "axis_rate_tolerance"; });
+            expect(named) << std::format("the refusal of {} names axis_rate_tolerance", bad);
+            expect(eq(block.settings.axis_rate_tolerance.value, 1e-4f)) << "the previous configuration is intact";
         }
         expect(nothrow([] { std::ignore = make<DataSetToStream<float>>({{"signal_index", std::numeric_limits<gr::Size_t>::max()}}); })) << "signal_index is a property of each record, not of the setting";
         auto                block = make<DataSetToStream<float>>({{"signal_index", std::numeric_limits<gr::Size_t>::max()}});

@@ -247,17 +247,17 @@ public:
     void registerSink(TSink* sink, std::source_location location = std::source_location::current()) {
         std::lock_guard lg{_mutex};
 
-        if (sink->_registered || sink->signal_name.value.empty()) {
+        if (sink->_registered || sink->settings.signal_name.value.empty()) {
             return;
         }
 
-        if (_sink_by_signal_name.contains(sink->signal_name)) {
-            throw gr::exception(std::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, sink->signal_name), location);
+        if (_sink_by_signal_name.contains(sink->settings.signal_name)) {
+            throw gr::exception(std::format("Failed to register sink `{}`. Sink with the signal_name `{}` is already registered.", sink->name, sink->settings.signal_name), location);
         }
 
         _sinks.push_back(entryOf(sink));
-        _sink_by_signal_name[sink->signal_name] = entryOf(sink);
-        sink->_registered                       = true;
+        _sink_by_signal_name[sink->settings.signal_name] = entryOf(sink);
+        sink->_registered                                = true;
     }
 
     // Removes every entry that holds the sink. A sink refused a new signal_name keeps its entry under the old name.
@@ -601,6 +601,8 @@ This block type is mean for non-data set input streams. For input streams of typ
 @see DataSetSink<T>.
 
 @tparam T input sample type
+
+The signal quantity and unit follow ISO 80000-1:2022, such as 'voltage' and '[V]'.
 )"">;
     struct AbstractListener;
 
@@ -613,16 +615,21 @@ This block type is mean for non-data set input streams. For input streams of typ
 public:
     PortIn<T, RequiredSamples<std::dynamic_extent, detail::data_sink_buffer_size>> in;
 
-    Annotated<float, "sample rate", Doc<"signal sample rate">, Unit<"Hz">>                                           sample_rate = 1.f;
-    Annotated<std::string, "signal name", Visible>                                                                   signal_name = ""; // DataSink cannot be registered with an empty string; the user sets it, or a graph couples it to gr:signal_name.
-    Annotated<std::string, "signal quantity", Doc<"physical quantity (e.g., 'voltage'). Follows ISO 80000-1:2022.">> signal_quantity{};
-    Annotated<std::string, "signal unit", Doc<"unit of measurement (e.g., '[V]', '[m]'). Follows ISO 80000-1:2022">> signal_unit{"a.u."};
-    Annotated<float, "signal min", Doc<"signal physical min. (e.g. DAQ) limit">>                                     signal_min = -1.0f;
-    Annotated<float, "signal max", Doc<"signal physical max. (e.g. DAQ) limit">>                                     signal_max = +1.0f;
+    struct Settings {
+        Annotated<float, Doc<"sample rate">, Unit<"Hz">> sample_rate = 1.f;
+        Annotated<std::string, Visible>                  signal_name = ""; // DataSink cannot be registered with an empty string; the user sets it, or a graph couples it to gr:signal_name.
+        Annotated<std::string, Doc<"signal quantity">>   signal_quantity{};
+        Annotated<std::string, Doc<"signal unit">>       signal_unit{"a.u."};
+        Annotated<float, Doc<"physical minimum">>        signal_min = -1.0f;
+        Annotated<float, Doc<"physical maximum">>        signal_max = +1.0f;
 
-    GR_MAKE_REFLECTABLE(DataSink, in, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max);
+    } settings;
 
-    bool _registered = false; // status should be updated by DataSinkRegistry
+    GR_MAKE_REFLECTABLE(DataSink, in, settings);
+
+    bool        _registered = false; // status should be updated by DataSinkRegistry
+    std::string _appliedSignalName;  // the signal_name last applied, the registry's key for the sink while it is registered
 
     using Block<DataSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
@@ -632,19 +639,32 @@ public:
         }
     }
 
-    void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
-        if (oldSettings.contains("signal_name")) {
-            const std::string oldSignalName = oldSettings.at("signal_name").value_or(std::string{});
-            if (oldSignalName.empty()) {
-                globalDataSinkRegistry().registerSink(this);
-            } else if (oldSignalName != signal_name && _registered) {
-                globalDataSinkRegistry().updateSignalName(this, oldSignalName, signal_name);
-            }
+    // the registry throws when another sink holds the name, which fails the change; the listeners then keep the
+    // metadata in force, which the settings read
+    void applySettings(const Settings& s) {
+        if (s.signal_name.changed() && !registerSignalName(s)) {
+            return;
         }
+        _appliedSignalName = s.signal_name.value;
         std::lock_guard lg{_listener_mutex};
         for (auto& listener : _listeners) {
-            listener->setMetadata(detail::Metadata{sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max});
+            listener->setMetadata(detail::Metadata{s.sample_rate, _appliedSignalName, s.signal_quantity, s.signal_unit, s.signal_min, s.signal_max});
         }
+    }
+
+    // the registry holds each signal_name once, which only the registry can tell; false when it refuses the name
+    bool registerSignalName(const Settings& s) {
+        try {
+            if (_registered) {
+                globalDataSinkRegistry().updateSignalName(this, _appliedSignalName, s.signal_name);
+            } else if (_appliedSignalName.empty()) {
+                globalDataSinkRegistry().registerSink(this);
+            }
+        } catch (const gr::exception& e) {
+            this->fail(s.signal_name, e.message);
+            return false;
+        }
+        return true;
     }
 
     std::shared_ptr<StreamingPoller<T>> getStreamingPoller(PollerConfig config) {
@@ -774,7 +794,7 @@ private:
     }
 
     void addListener(std::unique_ptr<AbstractListener>&& l, bool withBackpressure) {
-        l->setMetadata(detail::Metadata{sample_rate, signal_name, signal_quantity, signal_unit, signal_min, signal_max});
+        l->setMetadata(detail::Metadata{settings.sample_rate, settings.signal_name, settings.signal_quantity, settings.signal_unit, settings.signal_min, settings.signal_max});
         if (withBackpressure) {
             _listeners.push_back(std::move(l));
         } else {
@@ -1186,12 +1206,18 @@ class DataSetSink : public Block<DataSetSink<T>> {
     std::atomic<bool>                             _stop_requested = false; // set by stop() until it holds _listener_mutex
 
 public:
-    PortIn<DataSet<T>>                              in;
-    Annotated<std::string, "DataSet name", Visible> signal_name = ""; // DataSetSink cannot be registered with an empty string; the user sets it, or a graph couples it to gr:signal_name.
+    PortIn<DataSet<T>> in;
 
-    GR_MAKE_REFLECTABLE(DataSetSink, in, signal_name);
+    struct Settings {
+        Annotated<std::string, Doc<"DataSet name">, Visible> signal_name = ""; // DataSetSink cannot be registered with an empty string; the user sets it, or a graph couples it to gr:signal_name.
 
-    bool _registered = false; // status should be updated by DataSinkRegistry
+        GR_MAKE_REFLECTABLE(Settings, signal_name);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DataSetSink, in, settings);
+
+    bool        _registered = false; // status should be updated by DataSinkRegistry
+    std::string _appliedSignalName;  // the signal_name last applied, the registry's key for the sink while it is registered
 
     using Block<DataSetSink<T>>::Block; // needed to inherit mandatory base-class Block(property_map) constructor
 
@@ -1201,15 +1227,26 @@ public:
         }
     }
 
-    void settingsChanged(const property_map& oldSettings, const property_map& /*newSettings*/) {
-        if (oldSettings.contains("signal_name")) {
-            const std::string oldSignalName = oldSettings.at("signal_name").value_or(std::string());
-            if (oldSignalName.empty()) {
-                globalDataSinkRegistry().registerSink(this);
-            } else if (oldSignalName != signal_name && _registered) {
-                globalDataSinkRegistry().updateSignalName(this, oldSignalName, signal_name);
-            }
+    // as in DataSink, the registry throws when another sink holds the name, which fails the change
+    void applySettings(const Settings& s) {
+        if (!s.signal_name.changed() || registerSignalName(s)) {
+            _appliedSignalName = s.signal_name.value;
         }
+    }
+
+    // only the registry knows which signal_name is taken; false when it refuses this one
+    bool registerSignalName(const Settings& s) {
+        try {
+            if (_registered) {
+                globalDataSinkRegistry().updateSignalName(this, _appliedSignalName, s.signal_name);
+            } else if (_appliedSignalName.empty()) {
+                globalDataSinkRegistry().registerSink(this);
+            }
+        } catch (const gr::exception& e) {
+            this->fail(s.signal_name, e.message);
+            return false;
+        }
+        return true;
     }
 
     template<DataSetMatcher<T> M>

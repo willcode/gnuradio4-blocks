@@ -13,6 +13,7 @@
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/Trigger.hpp>
 #include <gnuradio-4.0/testing/ImChartMonitor.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 using namespace boost::ut;
@@ -33,8 +34,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
 
     "_period is nanoseconds per sample and survives an SDR rate"_test = [] {
         SchmittTrigger<float, NO_INTERPOLATION> trig({{"sample_rate", 2'400'000.f}});
-        trig.settings().init();
-        std::ignore = trig.settings().applyStagedParameters();
+        expect(trig.check({}).has_value());
         // 1e9 ns/s over 2.4 MS/s truncates to 416. A divide scaled to microseconds truncates to 0 at
         // any rate above 1 MS/s, and a period of zero never advances the block's clock at all.
         expect(eq(trig._period, 416ULL));
@@ -42,8 +42,7 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
 
     "trigger_time seeds trigger_offset at the nanosecond scale, not microseconds"_test = [] {
         SchmittTrigger<float, NO_INTERPOLATION> trig({{"trigger_time", std::uint64_t{1'000'000'000ULL}}, {"trigger_offset", 0.25f}});
-        trig.settings().init();
-        std::ignore = trig.settings().applyStagedParameters();
+        expect(trig.check({}).has_value());
         // 0.25 s past trigger_time is 250 ms, not 250 us.
         expect(eq(trig._now, 1'250'000'000ULL));
     };
@@ -74,14 +73,11 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
 
             auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"name", "FunctionGenerator"}, {"start_value", 0.1f}});
             using namespace function_generator;
-            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=0"}).empty());
-            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 0.1f, 1.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 1.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-            expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 1.1f, 0.1f, .3f, 0.02f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-            expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 0.1f), SettingsCtx{.context = "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-            // a segment starts only on a trigger named `signal_trigger`, the name the clock's tags carry
-            funcGen.settings().setTagCouplings({{gr::tag::TRIGGER_NAME.name(), std::string(gr::tag::TRIGGER_NAME.key())}, {gr::tag::TRIGGER_TIME.name(), std::string(gr::tag::TRIGGER_TIME.key())}, //
-                {gr::tag::TRIGGER_OFFSET.name(), std::string(gr::tag::TRIGGER_OFFSET.key())}, {gr::tag::TRIGGER_META_INFO.name(), std::string(gr::tag::TRIGGER_META_INFO.key())}});
+            const gr::property_map segments{{"FAIR.SELECTOR.C=1:S=1:P=0", createConstPropertyMap(0.1f)}, {"FAIR.SELECTOR.C=1:S=1:P=1", createParabolicRampPropertyMap(0.1f, 1.1f, .3f, 0.02f)}, //
+                {"FAIR.SELECTOR.C=1:S=1:P=2", createConstPropertyMap(1.1f)}, {"FAIR.SELECTOR.C=1:S=1:P=3", createParabolicRampPropertyMap(1.1f, 0.1f, .3f, 0.02f)},                             //
+                {"FAIR.SELECTOR.C=1:S=1:P=4", createConstPropertyMap(0.1f)}};
+            expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", segments}}).empty());
+            expect(funcGen.setTagCouplings({{"segment", std::string(gr::tag::CONTEXT.key())}}).has_value());
 
             auto& schmittTrigger = graph.emplaceBlock<gr::blocks::basic::SchmittTrigger<float, Method::value>>({
                 {"name", "SchmittTrigger"},                      //
@@ -91,8 +87,10 @@ const suite<"SchmittTrigger Block"> triggerTests = [] {
                 {"trigger_name_falling_edge", "MY_FALLING_EDGE"} //
             });
             // the trigger takes its sample period from the stream's rate and its clock from the last trigger it receives
-            schmittTrigger.settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}, {gr::tag::TRIGGER_NAME.name(), std::string(gr::tag::TRIGGER_NAME.key())}, //
-                {gr::tag::TRIGGER_TIME.name(), std::string(gr::tag::TRIGGER_TIME.key())}, {gr::tag::TRIGGER_OFFSET.name(), std::string(gr::tag::TRIGGER_OFFSET.key())}});
+            expect(schmittTrigger
+                       .setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}, {gr::tag::TRIGGER_NAME.name(), std::string(gr::tag::TRIGGER_NAME.key())}, //
+                           {gr::tag::TRIGGER_TIME.name(), std::string(gr::tag::TRIGGER_TIME.key())}, {gr::tag::TRIGGER_OFFSET.name(), std::string(gr::tag::TRIGGER_OFFSET.key())}})
+                       .has_value());
             auto& tagSink = graph.emplaceBlock<TagSink<float, gr::blocks::testing::ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}, {"log_tags", true}, {"log_samples", false}, {"verbose_console", false}});
 
             // connect non-UI blocks

@@ -26,26 +26,32 @@ Not `gr::blocks::testing::Delay`, which is a wall-clock start-up hold and does n
 `delay = 0` is a bit-exact pass-through and is the default. The line costs `delay * sizeof(T)` bytes and has no upper
 bound. A tag at input offset `t` is republished at output offset `t + delay`, so a marker stays with the sample it
 marks.
+
+out[n] = in[n - delay]. A change while running re-primes the line, and the block stays 1:1.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "delay", Doc<"out[n] = in[n - delay]; a live change re-primes the line and stays 1:1">, Visible> delay = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Unit<"samples">, Doc<"delay">, Visible> delay = 0U;
 
-    GR_MAKE_REFLECTABLE(SampleDelay, in, out, delay);
+        GR_MAKE_REFLECTABLE(Settings, delay);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SampleDelay, in, out, settings);
 
     std::vector<T>                                        _line{};
-    std::size_t                                           _delay  = 0UZ;
+    std::size_t                                           _delay  = 0UZ; ///< the length of the line; the apply hook sets it to `delay`
     std::size_t                                           _cursor = 0UZ;
     std::vector<std::pair<std::size_t, gr::property_map>> _pendingTags{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        const std::size_t wanted = static_cast<std::size_t>(delay.value);
-        if (wanted == _delay) {
+    void applySettings(const Settings& s) {
+        if (!s.delay.changed()) {
             return;
         }
-        const std::size_t kept = std::min(wanted, _delay);
+        const std::size_t wanted = s.delay;
+        const std::size_t kept   = std::min(wanted, _delay);
 
         std::vector<T> primed(wanted, T{}); // allocate before installing, so a throw leaves the previous line intact
         for (std::size_t k = 0UZ; k < kept; ++k) {

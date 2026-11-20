@@ -10,6 +10,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/Selector.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/SettingsLimits.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
@@ -64,19 +65,16 @@ void execute_selector_test(TestParams params, std::source_location location = st
 
     for (gr::Size_t i = 0; i < nSources; ++i) {
         sources.push_back(std::addressof(graph.emplaceBlock<TagSource<double>>({{"n_samples_max", params.nSamples}, {"values", params.inValues[i]}, {"sample_rate", kSourceRate}, {"disconnect_on_done", false}})));
-        expect(sources[i]->settings().applyStagedParameters().forwardParameters.empty());
         sources[i]->_tags = params.inTags[i];
         expect(graph.connect(*sources[i], "out"s, *selector, "inputs#"s + std::to_string(i)).has_value());
     }
 
     for (gr::Size_t i = 0; i < nSinks; ++i) {
         sinks.push_back(std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}})));
-        expect(sinks[i]->settings().applyStagedParameters().forwardParameters.empty());
         expect(graph.connect(*selector, "outputs#"s + std::to_string(i), *sinks[i], "in"s).has_value());
     }
 
     TagSink<double, ProcessFunction::USE_PROCESS_ONE>* monitorSink = std::addressof(graph.emplaceBlock<TagSink<double, ProcessFunction::USE_PROCESS_ONE>>({{"disconnect_on_done", false}}));
-    expect(monitorSink->settings().applyStagedParameters().forwardParameters.empty());
     expect(graph.connect(*selector, "monitor"s, *monitorSink, "in"s).has_value());
 
     gr::scheduler::Simple sched;
@@ -154,16 +152,16 @@ const boost::ut::suite SelectorTest = [] {
     "Selector<T> constructor"_test = [] {
         Selector<double> block_nop({{"name", "block_nop"}});
         block_nop.init(block_nop.progress);
-        expect(eq(block_nop.n_inputs, 0U));
-        expect(eq(block_nop.n_outputs, 0U));
+        expect(eq(block_nop.settings.n_inputs, 0U));
+        expect(eq(block_nop.settings.n_outputs, 0U));
         expect(eq(block_nop.inputs.size(), 0U));
         expect(eq(block_nop.outputs.size(), 0U));
         expect(eq(block_nop._internalMappingInOut.size(), 0U));
 
         Selector<double> block({{"name", "block"}, {"n_inputs", 4U}, {"n_outputs", 3U}});
         block.init(block.progress);
-        expect(eq(block.n_inputs, 4U));
-        expect(eq(block.n_outputs, 3U));
+        expect(eq(block.settings.n_inputs, 4U));
+        expect(eq(block.settings.n_outputs, 3U));
         expect(eq(block.inputs.size(), 4U));
         expect(eq(block.outputs.size(), 3U));
         expect(eq(block._internalMappingInOut.size(), 0U));
@@ -205,19 +203,25 @@ const boost::ut::suite SelectorTest = [] {
             const auto outIn = block._internalMappingOutIn;
             expect(fatal(eq(inOut.size(), 2UZ)));
 
-            expect(block.settings().setStaged(refused.settings).empty()) << refused.what;
-            bool wasRefused = false;
-            try {
-                wasRefused = !block.settings().applyStagedParameters().failedParameters.empty();
-            } catch (const std::exception&) {
-                wasRefused = true;
-            }
-            expect(wasRefused) << refused.what;
+            // the check refuses the call before any of its keys merges
+            const auto result = block.set(refused.settings);
+            expect(!result.has_value()) << refused.what;
             expect(eq(block.inputs.size(), 3UZ)) << refused.what;
             expect(eq(block.outputs.size(), 2UZ)) << refused.what;
             expect(block._internalMappingInOut == inOut) << refused.what << "keeps the input-to-output routing";
             expect(block._internalMappingOutIn == outIn) << refused.what << "keeps the output-to-input routing";
         }
+    };
+
+    "an index past a port count is refused under its map, and the text names the count"_test = [] {
+        Selector<double> block({{"n_inputs", 3U}, {"n_outputs", 2U}, {"map_in", std::vector<gr::Size_t>{0U, 1U}}, {"map_out", std::vector<gr::Size_t>{1U, 0U}}});
+        block.init(block.progress);
+
+        const auto result = block.set({{"n_outputs", gr::Size_t{1U}}});
+        expect(fatal(!result.has_value()));
+        expect(fatal(eq(result.error().size(), 1UZ)));
+        expect(eq(result.error().front().key, std::string("map_out"))) << "the map a host most likely corrects";
+        expect(result.error().front().reason.contains("each index must be < n_outputs")) << result.error().front().reason;
     };
 
     gr::Tag tag1{1, {{"key1", "value1"}}};

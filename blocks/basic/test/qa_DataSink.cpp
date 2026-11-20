@@ -18,7 +18,9 @@
 #include <gnuradio-4.0/basic/NullSources.hpp>
 #include <gnuradio-4.0/basic/StreamToDataSet.hpp>
 #include <gnuradio-4.0/testing/Delay.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
+#include <gnuradio-4.0/testing/TestSpans.hpp>
 
 using namespace std::chrono_literals;
 
@@ -162,17 +164,20 @@ trigger::MatchResult isTrigger(std::string_view /* filterSpec */, const Tag& tag
 template<typename TSink>
 void coupleStreamDescription(TSink& sink) {
     using namespace gr::tag;
-    sink.settings().setTagCouplings({{SAMPLE_RATE.name(), std::string(SAMPLE_RATE.key())}, {SIGNAL_NAME.name(), std::string(SIGNAL_NAME.key())}, //
-        {SIGNAL_QUANTITY.name(), std::string(SIGNAL_QUANTITY.key())}, {SIGNAL_UNIT.name(), std::string(SIGNAL_UNIT.key())},                      //
-        {SIGNAL_MIN.name(), std::string(SIGNAL_MIN.key())}, {SIGNAL_MAX.name(), std::string(SIGNAL_MAX.key())}});
+    boost::ut::expect(sink.setTagCouplings({{SAMPLE_RATE.name(), std::string(SAMPLE_RATE.key())}, {SIGNAL_NAME.name(), std::string(SIGNAL_NAME.key())},            //
+                                               {SIGNAL_QUANTITY.name(), std::string(SIGNAL_QUANTITY.key())}, {SIGNAL_UNIT.name(), std::string(SIGNAL_UNIT.key())}, //
+                                               {SIGNAL_MIN.name(), std::string(SIGNAL_MIN.key())}, {SIGNAL_MAX.name(), std::string(SIGNAL_MAX.key())}})
+                          .has_value());
 }
 
 /// @brief Couples the rate, name, quantity and unit a StreamToDataSet writes into each DataSet to the stream's tags.
 template<typename TFilter>
 void coupleFilterDescription(TFilter& filter) {
     using namespace gr::tag;
-    filter.settings().setTagCouplings({{SAMPLE_RATE.name(), std::string(SAMPLE_RATE.key())}, {SIGNAL_NAME.name(), std::string(SIGNAL_NAME.key())}, //
-        {SIGNAL_QUANTITY.name(), std::string(SIGNAL_QUANTITY.key())}, {SIGNAL_UNIT.name(), std::string(SIGNAL_UNIT.key())}});
+    boost::ut::expect(filter
+                          .setTagCouplings({{SAMPLE_RATE.name(), std::string(SAMPLE_RATE.key())}, {SIGNAL_NAME.name(), std::string(SIGNAL_NAME.key())}, //
+                              {SIGNAL_QUANTITY.name(), std::string(SIGNAL_QUANTITY.key())}, {SIGNAL_UNIT.name(), std::string(SIGNAL_UNIT.key())}})
+                          .has_value());
 }
 
 struct DataSetTestParams {
@@ -262,7 +267,7 @@ constexpr std::string_view policyName(OverflowPolicy policy) { return policy == 
 
 } // namespace gr::blocks::basic::data_sink_test
 
-using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>;
+using Scheduler = gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded>;
 
 const boost::ut::suite DataSinkTests = [] {
     using namespace boost::ut;
@@ -365,13 +370,13 @@ const boost::ut::suite DataSinkTests = [] {
 
         std::vector<Tag> srcAndMetaTags;
         // Add metadata tag published by DataSink
-        srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.key(), src.sample_rate}, {SIGNAL_MAX.key(), 42.f}, {SIGNAL_MIN.key(), -42.f}, //
+        srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.key(), src.settings.sample_rate.value}, {SIGNAL_MAX.key(), 42.f}, {SIGNAL_MIN.key(), -42.f}, //
                                              {SIGNAL_NAME.key(), "TestName"}, {SIGNAL_QUANTITY.key(), "TestQuantity"}, {SIGNAL_UNIT.key(), "TestUnit"}});
         // Add tag published by TagSource init with parameters
         srcAndMetaTags.emplace_back(0UZ, property_map{{SIGNAL_MAX.key(), 42.f}, {SIGNAL_MIN.key(), -42.f}, {SIGNAL_NAME.key(), "TestName"}, {SIGNAL_UNIT.key(), "TestUnit"}, //
                                              {SIGNAL_QUANTITY.key(), "TestQuantity"}});
         // Add the rate tag TagSource writes on its first sample
-        srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.key(), src.sample_rate}});
+        srcAndMetaTags.emplace_back(0UZ, property_map{{SAMPLE_RATE.key(), src.settings.sample_rate.value}});
 
         // Add sources tags
         srcAndMetaTags.insert(srcAndMetaTags.end(), srcTags.begin(), srcTags.end());
@@ -440,7 +445,7 @@ const boost::ut::suite DataSinkTests = [] {
             return std::make_tuple(poller, received, receivedTags);
         });
 
-        const float srcSampleRate = src.sample_rate; // src is destroyed with the scheduler below
+        const float srcSampleRate = src.settings.sample_rate; // src is destroyed with the scheduler below
         {
             Scheduler sched;
             if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
@@ -1218,20 +1223,12 @@ const boost::ut::suite<"DataSink registry entries"> DataSinkRegistryEntryTests =
             expect(owner._registered && renamed._registered) << "both sinks register when their settings apply" << fatal;
 
             // The registry refuses the taken name. The sink's entry stays under the held name, and its signal_name reads it.
-            const std::string held = renamed.signal_name.value;
-            expect(renamed.settings().setStaged({{"signal_name", "owned signal"s}}).empty());
-            const bool refused = [&renamed] {
-                try {
-                    std::ignore = renamed.settings().applyStagedParameters();
-                } catch (...) {
-                    return true;
-                }
-                return false;
-            }();
+            const std::string held = renamed.settings.signal_name.value;
+            // the change fails at the call when the block applies it there, else at the next apply
+            const bool refused = !gr::testing::setAndApply(gr::settings::detail::settingsOf(renamed), {{"signal_name", "owned signal"s}}).empty();
             expect(refused) << "the registry refuses the taken name" << fatal;
-            const std::optional<gr::pmt::Value> reported = renamed.settings().get("signal_name");
-            const std::pmr::string*             text     = reported.has_value() ? reported->get_if<std::pmr::string>() : nullptr;
-            expect(eq(renamed.signal_name.value, held) && text != nullptr && *text == held) << "the held name is written back to signal_name and settings().get()";
+            const std::string reported = renamed.get<std::string>("signal_name").value_or(std::string{});
+            expect(eq(renamed.settings.signal_name.value, held) && reported == held) << "the held name is written back to signal_name and get()";
         }
         gr::Graph graph;
         auto&     heldAgain  = graph.emplaceBlock<DataSink<float>>({{"name", "held_sink_again"}, {"signal_name", "held signal"}});
@@ -1239,6 +1236,32 @@ const boost::ut::suite<"DataSink registry entries"> DataSinkRegistryEntryTests =
         expect(ownedAgain._registered) << "the owner's name is free";
         expect(heldAgain._registered) << "the name the refused sink held is free" << fatal;
         expect(globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::signalName("held signal")) != nullptr) << "the new sink is found under the held name";
+    };
+
+    "a DataSink refused a taken signal name gives its listeners the metadata in force"_test = [] {
+        gr::Graph graph;
+        auto&     owner = graph.emplaceBlock<DataSink<float>>({{"name", "unit_owner_sink"}, {"signal_name", "unit owned signal"}});
+        auto&     sink  = graph.emplaceBlock<DataSink<float>>({{"name", "unit_sink"}, {"signal_name", "unit held signal"}});
+        expect(owner._registered && sink._registered) << "both sinks register when their settings apply" << fatal;
+        const std::shared_ptr<StreamingPoller<float>> poller = sink.getStreamingPoller(PollerConfig{});
+
+        const bool refused = !gr::testing::setAndApply(gr::settings::detail::settingsOf(sink), {{"signal_name", "unit owned signal"s}, {"signal_unit", "V"s}}).empty();
+        expect(refused) << "the registry refuses the taken name" << fatal;
+        expect(eq(sink.settings.signal_unit.value, "a.u."s)) << "the settings read the unit in force";
+
+        const std::vector<float>                    samples{1.f};
+        gr::blocks::testing::span::InputSpan<float> input{std::span<const float>(samples)};
+        expect(sink.processBulk(input) == work::Status::OK);
+        std::vector<std::string> units;
+        const bool               polled = poller->process([&units](std::span<const float>, std::span<const Tag> tags) {
+            for (const Tag& tag : tags) {
+                if (const auto unit = tag.map.find(std::pmr::string(gr::tag::SIGNAL_UNIT.key())); unit != tag.map.end()) {
+                    units.push_back(unit->second.value_or(std::string{}));
+                }
+            }
+        });
+        expect(polled) << "the poller receives the sample" << fatal;
+        expect(eq(units, std::vector<std::string>{"a.u."s})) << "the listener's metadata carries the unit in force, not the refused batch's";
     };
 };
 

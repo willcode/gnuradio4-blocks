@@ -72,78 +72,84 @@ It also contains two additional ports -- `selectOut` and `monitorOut`. Port
 
 For uses where all input ports should be read even if they are not connected
 to any output port (thus reading and ignoring all the values from the input),
-you can set the `backPressure` property to false.
-
+`back_pressure` false reads them.
 )"">;
     // optional shortening
-    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
-    using A = Annotated<U, description, Arguments...>;
+    template<typename U, typename... Arguments>
+    using A = Annotated<U, Arguments...>;
 
     PortIn<gr::Size_t, Async, Optional> select{};  // optional select input
     PortOut<T, Async, Optional>         monitor{}; // optional monitor output (for diagnostics and debugging purposes)
     std::vector<PortIn<T, Async>>       inputs{};  // TODO: need to add exception to pmt_t that this isn't interpreted as a settings type
     std::vector<PortOut<T, Async>>      outputs{};
 
-    // settings
-    A<gr::Size_t, "n_inputs", Visible, Doc<"variable number of inputs">, Limits<0U, 32U>>                      n_inputs  = 0U;
-    A<gr::Size_t, "n_outputs", Visible, Doc<"variable number of inputs">, Limits<0U, 32U>>                     n_outputs = 0U;
-    A<Tensor<gr::Size_t>, "map_in", Visible, Doc<"input port index to route from">>                            map_in{}; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
-    A<Tensor<gr::Size_t>, "map_out", Visible, Doc<"output port index to route to">>                            map_out{};
-    A<bool, "back_pressure", Visible, Doc<"true: do not consume samples from un-routed ports">>                back_pressure       = false;
-    A<bool, "sync combined port", Doc<"true: input ports connected to the same output port are synchronised">> sync_combined_ports = true;
+    struct Settings {
+        A<gr::Size_t, Visible, Doc<"input count">, Limits<Max<32U>>, PortCountFor<"inputs">>   n_inputs  = 0U;
+        A<gr::Size_t, Visible, Doc<"output count">, Limits<Max<32U>>, PortCountFor<"outputs">> n_outputs = 0U;
+        A<Tensor<gr::Size_t>, Visible, Doc<"source input indices">>                            map_in{}; // N.B. need two vectors since pmt_t doesn't support pairs (yet!?!)
+        A<Tensor<gr::Size_t>, Visible, Doc<"destination output indices">>                      map_out{};
+        A<bool, Visible, Doc<"unrouted input held">>                                           back_pressure       = false;
+        A<bool, Doc<"routed inputs synchronized">>                                             sync_combined_ports = true;
 
-    GR_MAKE_REFLECTABLE(Selector, select, inputs, monitor, outputs, n_inputs, n_outputs, map_in, map_out, back_pressure, sync_combined_ports);
+        GR_MAKE_REFLECTABLE(Settings, n_inputs, n_outputs, map_in, map_out, back_pressure, sync_combined_ports);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Selector, select, inputs, monitor, outputs, settings);
 
     std::map<std::size_t, std::vector<std::size_t>> _internalMappingInOut{};
     std::map<std::size_t, std::vector<std::size_t>> _internalMappingOutIn{};
 
     std::size_t _selectedSrc = 0UZ;
 
-    void settingsChanged(const gr::property_map& oldSettings, const gr::property_map& newSettings) {
-        if (newSettings.contains("n_inputs") || newSettings.contains("n_outputs")) {
-            std::print("{}: configuration changed: n_inputs {} -> {}, n_outputs {} -> {}\n", this->name, oldSettings.at("n_inputs"),    //
-                newSettings.contains("n_inputs") ? newSettings.at("n_inputs").value_or("same"s) : "same"s, oldSettings.at("n_outputs"), //
-                newSettings.contains("n_outputs") ? newSettings.at("n_outputs").value_or("same"s) : "same"s);
+    // The routing depends on the port counts as much as on the maps, so the check reads all four together, and a
+    // refused map or port count leaves the ports and the routing unchanged. An index past a port count is reported
+    // against the map, the setting a host most likely corrects; the text names the count.
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const Tensor<gr::Size_t>& mapIn    = s.map_in;
+        const Tensor<gr::Size_t>& mapOut   = s.map_out;
+        const gr::Size_t          nInputs  = s.n_inputs;
+        const gr::Size_t          nOutputs = s.n_outputs;
+        if (mapIn.size() != mapOut.size()) {
+            return gr::Refused(s.map_out, "map_in and map_out must have the same length");
         }
-        // The routing depends on the port counts as much as on the maps, and `newSettings` names only what moved, so
-        // it is rebuilt and range-checked from the members rather than when a map key happens to be named. Every pair
-        // is checked before the ports or the routing change. A refused map or port count leaves both unchanged.
-        if (map_in.value.size() != map_out.value.size()) {
-            throw std::invalid_argument("Input and output map need to have the same number of elements");
+        std::set<std::pair<gr::Size_t, gr::Size_t>> pairs{};
+        for (std::size_t i = 0UZ; i < mapIn.size(); ++i) {
+            if (!pairs.insert({mapIn[i], mapOut[i]}).second) {
+                return gr::Refused(s.map_in, "each (map_in, map_out) pair must be unique");
+            }
+            if (mapIn[i] >= nInputs) {
+                return gr::Refused(s.map_in, "each index must be < n_inputs");
+            }
+            if (mapOut[i] >= nOutputs) {
+                return gr::Refused(s.map_out, "each index must be < n_outputs");
+            }
         }
+        return {};
+    }
 
-        std::set<std::pair<gr::Size_t, gr::Size_t>>     duplicateSet{};
-        std::map<std::size_t, std::vector<std::size_t>> mappingInOut{};
-        std::map<std::size_t, std::vector<std::size_t>> mappingOutIn{};
-        for (auto i : std::views::iota(static_cast<std::size_t>(0), map_in.value.size())) {
-            gr::Size_t inIdx  = map_in.value[i];
-            gr::Size_t outIdx = map_out.value[i];
-
-            if (!duplicateSet.insert({inIdx, outIdx}).second) { // check for duplicates
-                throw std::invalid_argument(std::format("Duplicate pair (in:{}, out:{}) at i={}", inIdx, outIdx, i));
-            }
-
-            if (inIdx >= n_inputs) { // range checks
-                throw std::invalid_argument(std::format("map_in[{}] = {} is >= n_inputs ({})", i, inIdx, n_inputs));
-            }
-            if (outIdx >= n_outputs) {
-                throw std::invalid_argument(std::format("map_out[{}] = {} is >= n_outputs ({})", i, outIdx, n_outputs));
-            }
-
-            mappingInOut[inIdx].push_back(outIdx);
-            mappingOutIn[outIdx].push_back(inIdx);
+    void applySettings(const Settings& s) {
+        if (s.n_inputs.changed() || s.n_outputs.changed()) {
+            std::print("{}: configuration changed: n_inputs {}, n_outputs {}\n", this->name, s.n_inputs, s.n_outputs);
         }
+        inputs.resize(s.n_inputs);
+        outputs.resize(s.n_outputs);
+        _internalMappingInOut = routesOf(s.map_in, s.map_out);
+        _internalMappingOutIn = routesOf(s.map_out, s.map_in);
+    }
 
-        inputs.resize(n_inputs);
-        outputs.resize(n_outputs);
-        _internalMappingInOut = std::move(mappingInOut);
-        _internalMappingOutIn = std::move(mappingOutIn);
+    // for each port index `from` names, the indices `to` pairs it with, in map order; for maps the check accepts
+    [[nodiscard]] static std::map<std::size_t, std::vector<std::size_t>> routesOf(const Tensor<gr::Size_t>& from, const Tensor<gr::Size_t>& to) {
+        std::map<std::size_t, std::vector<std::size_t>> routes;
+        for (std::size_t i = 0UZ; i < from.size(); ++i) {
+            routes[from[i]].push_back(to[i]);
+        }
+        return routes;
     }
 
     template<gr::InputSpanLike TInSpan, gr::OutputSpanLike TOutSpan>
     gr::work::Status processBulk(InputSpanLike auto& selectSpan, std::span<TInSpan>& ins, OutputSpanLike auto& monOut, std::span<TOutSpan>& outs) {
         if (_internalMappingInOut.empty()) {
-            std::ranges::for_each(ins, [this](auto& input) { std::ignore = input.consume(back_pressure ? 0UZ : input.size()); });
+            std::ranges::for_each(ins, [this](auto& input) { std::ignore = input.consume(settings.back_pressure ? 0UZ : input.size()); });
             return work::Status::OK;
         }
 
@@ -176,7 +182,7 @@ you can set the `backPressure` property to false.
         };
 
         std::vector<std::size_t> nSamplesToConsume(ins.size(), std::numeric_limits<std::size_t>::max());
-        if (sync_combined_ports && std::ranges::any_of(_internalMappingOutIn, [](const auto& pair) { return pair.second.size() > 1; })) {
+        if (settings.sync_combined_ports && std::ranges::any_of(_internalMappingOutIn, [](const auto& pair) { return pair.second.size() > 1; })) {
             for (const auto& [outIndex, inIndices] : _internalMappingOutIn) {
                 std::size_t nInSamplesAvailable = std::ranges::min(inIndices | std::views::transform([&ins](std::size_t i) { return ins[i].size(); }));
                 nInSamplesAvailable             = std::min(nInSamplesAvailable, outs[outIndex].size() / inIndices.size());
@@ -252,7 +258,7 @@ you can set the `backPressure` property to false.
         }
 
         for (std::size_t inIndex = 0UZ; inIndex < ins.size(); inIndex++) {
-            const std::size_t nBackPressure = back_pressure ? 0UZ : ins[inIndex].size();
+            const std::size_t nBackPressure = settings.back_pressure ? 0UZ : ins[inIndex].size();
             const std::size_t nFinal        = nSamplesToConsume[inIndex] == std::numeric_limits<std::size_t>::max() ? nBackPressure : nSamplesToConsume[inIndex];
             std::ignore                     = ins[inIndex].consume(nFinal);
             ins[inIndex].consumeTags(nFinal);

@@ -108,8 +108,7 @@ template<typename T>
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 

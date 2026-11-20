@@ -57,25 +57,13 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
             {"do_zero_order_hold", true},
         });
 
-        auto& funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"signal_trigger", "CMD_BP_START"}, {"name", "FunctionGenerator"}});
-
-        using gr::tag::TRIGGER_NAME;
-        using gr::tag::CONTEXT;
-
-        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
-
-        expect(eq(funcGen.settings().getNStoredParameters(), 9UZ));
-        // the generator takes each segment's trigger from the clock's tags
-        funcGen.settings().setTagCouplings({{gr::tag::TRIGGER_NAME.name(), std::string(gr::tag::TRIGGER_NAME.key())}, {gr::tag::TRIGGER_TIME.name(), std::string(gr::tag::TRIGGER_TIME.key())}, //
-            {gr::tag::TRIGGER_OFFSET.name(), std::string(gr::tag::TRIGGER_OFFSET.key())}, {gr::tag::TRIGGER_META_INFO.name(), std::string(gr::tag::TRIGGER_META_INFO.key())}});
+        const property_map segments{{"FAIR.SELECTOR.C=1:S=1:P=1", createConstPropertyMap(5.f)}, {"FAIR.SELECTOR.C=1:S=1:P=2", createLinearRampPropertyMap(5.f, 30.f, .2f)}, //
+            {"FAIR.SELECTOR.C=1:S=1:P=3", createConstPropertyMap(30.f)}, {"FAIR.SELECTOR.C=1:S=1:P=4", createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f)},             //
+            {"FAIR.SELECTOR.C=1:S=1:P=5", createConstPropertyMap(20.f)}, {"FAIR.SELECTOR.C=1:S=1:P=6", createCubicSplinePropertyMap(20.f, 10.f, .1f)},                      //
+            {"FAIR.SELECTOR.C=1:S=1:P=7", createConstPropertyMap(10.f)}, {"FAIR.SELECTOR.C=1:S=1:P=8", createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f)}};
+        auto&              funcGen = graph.emplaceBlock<FunctionGenerator<float>>({{"sample_rate", sample_rate}, {"segments", segments}, {"name", "FunctionGenerator"}});
+        // the context of the clock's timing events selects the segment; a diagnostic trigger carries none and selects nothing
+        expect(funcGen.setTagCouplings({{"segment", std::string(gr::tag::CONTEXT.key())}}).has_value());
 
         auto& sink   = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "SampleGeneratorSink"}});
         auto& uiSink = graph.emplaceBlock<gr::blocks::testing::ImChartMonitor<float>>({{"name", "ImChartSinkFull"}});
@@ -97,12 +85,12 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
 
         // each block downstream of the generator takes its `sample_rate` from the stream's rate tag
         const property_map rateCoupling{{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}};
-        sink.settings().setTagCouplings(rateCoupling);
-        uiSink.settings().setTagCouplings(rateCoupling);
-        streamFilter.settings().setTagCouplings(rateCoupling);
-        dataSetFilter.settings().setTagCouplings(rateCoupling);
-        uiFilteredStreamSink.settings().setTagCouplings(rateCoupling);
-        uiDataSetSink.settings().setTagCouplings(rateCoupling);
+        expect(sink.setTagCouplings(rateCoupling).has_value());
+        expect(uiSink.setTagCouplings(rateCoupling).has_value());
+        expect(streamFilter.setTagCouplings(rateCoupling).has_value());
+        expect(dataSetFilter.setTagCouplings(rateCoupling).has_value());
+        expect(uiFilteredStreamSink.setTagCouplings(rateCoupling).has_value());
+        expect(uiDataSetSink.setTagCouplings(rateCoupling).has_value());
 
         std::thread uiLoop([&uiSink, &uiFilteredStreamSink, &uiDataSetSink]() {
             bool drawUI = true;
@@ -124,14 +112,14 @@ const boost::ut::suite<"StreamToDataSet Block"> selectorTest = [] {
         }
         expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter);
 
-        expect(eq(clockSrc.sample_rate, sample_rate));
-        expect(eq(funcGen.sample_rate, sample_rate));
-        expect(eq(sink.sample_rate, sample_rate));
-        expect(eq(uiSink.sample_rate, sample_rate));
-        expect(eq(streamFilter.sample_rate, sample_rate));
-        expect(eq(dataSetFilter.sample_rate, sample_rate));
-        expect(eq(uiFilteredStreamSink.sample_rate, sample_rate));
-        expect(eq(uiDataSetSink.sample_rate, sample_rate));
+        expect(eq(clockSrc.settings.sample_rate, sample_rate));
+        expect(eq(funcGen.settings.sample_rate, sample_rate));
+        expect(eq(sink.settings.sample_rate, sample_rate));
+        expect(eq(uiSink.settings.sample_rate, sample_rate));
+        expect(eq(streamFilter.settings.sample_rate, sample_rate));
+        expect(eq(dataSetFilter.settings.sample_rate, sample_rate));
+        expect(eq(uiFilteredStreamSink.settings.sample_rate, sample_rate));
+        expect(eq(uiDataSetSink.settings.sample_rate, sample_rate));
 
         uiLoop.join();
     };
@@ -200,7 +188,7 @@ void runTestStream(gr::Size_t nSamples, std::string filter, gr::Size_t preSample
 
     const property_map blockSettings        = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}};
     auto&              filterStreamToStream = graph.emplaceBlock<StreamFilter<float>>(blockSettings);
-    filterStreamToStream.settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}});
+    expect(filterStreamToStream.setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}}).has_value());
     auto& streamSink = graph.emplaceBlock<TagSink<float, ProcessFunction::USE_PROCESS_BULK>>({{"name", "streamSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
     expect(graph.connect<"out", "in">(tagSrc, filterStreamToStream).has_value()) << locationStr;
     expect(graph.connect<"out", "in">(filterStreamToStream, streamSink).has_value()) << locationStr;
@@ -213,9 +201,9 @@ void runTestStream(gr::Size_t nSamples, std::string filter, gr::Size_t preSample
     expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter) << locationStr;
     std::println("done -> Stream-to-Stream with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
 
-    expect(eq(tagSrc.sample_rate, sampleRate)) << locationStr;
-    expect(eq(filterStreamToStream.sample_rate, sampleRate)) << locationStr;
-    expect(eq(streamSink.sample_rate, sampleRate)) << locationStr;
+    expect(eq(tagSrc.settings.sample_rate, sampleRate)) << locationStr;
+    expect(eq(filterStreamToStream.settings.sample_rate, sampleRate)) << locationStr;
+    expect(eq(streamSink.settings.sample_rate, sampleRate)) << locationStr;
 
     expect(eq(streamSink._samples.size(), expectedValues.size())) << locationStr;
     expect(std::ranges::equal(streamSink._samples, expectedValues)) << locationStr;
@@ -335,7 +323,7 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
 
     const property_map blockSettings         = {{"filter", filter}, {"n_pre", preSamples}, {"n_post", postSamples}, {"n_max", maxSamples}};
     auto&              filterStreamToDataSet = graph.emplaceBlock<StreamToDataSet<float>>(blockSettings);
-    filterStreamToDataSet.settings().setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}});
+    expect(filterStreamToDataSet.setTagCouplings({{gr::tag::SAMPLE_RATE.name(), std::string(gr::tag::SAMPLE_RATE.key())}}).has_value());
     auto& dataSetSink = graph.emplaceBlock<TagSink<DataSet<float>, ProcessFunction::USE_PROCESS_BULK>>({{"name", "dataSetSink"}, {"log_tags", true}, {"log_samples", true}, {"verbose_console", false}});
     expect(graph.connect<"out", "in">(tagSrc, filterStreamToDataSet).has_value()) << locationStr;
     expect(graph.connect<"out", "in">(filterStreamToDataSet, dataSetSink).has_value()) << locationStr;
@@ -348,9 +336,9 @@ void runTestDataSet(gr::Size_t nSamples, std::string filter, gr::Size_t preSampl
     expect(sched.runAndWait().has_value()) << std::format("runAndWait - filter {}", filter) << locationStr;
     std::println("done -> Stream-to-DataSet with filter: {} n_pre:{} n_post:{}", filter, preSamples, postSamples);
 
-    expect(eq(tagSrc.sample_rate, sampleRate)) << locationStr;
-    expect(eq(filterStreamToDataSet.sample_rate, sampleRate)) << locationStr;
-    expect(eq(dataSetSink.sample_rate, sampleRate)) << locationStr;
+    expect(eq(tagSrc.settings.sample_rate, sampleRate)) << locationStr;
+    expect(eq(filterStreamToDataSet.settings.sample_rate, sampleRate)) << locationStr;
+    expect(eq(dataSetSink.settings.sample_rate, sampleRate)) << locationStr;
 
     expect(eq(dataSetSink._samples.size(), expectedValues.size())) << locationStr;
     for (std::size_t i = 0UZ; i < dataSetSink._samples.size(); i++) {

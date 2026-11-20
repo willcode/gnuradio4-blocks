@@ -5,6 +5,7 @@
 #include <gnuradio-4.0/LifeCycle.hpp>
 
 #include <gnuradio-4.0/basic/DataSink.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 #include <gnuradio-4.0/GrBasicBlocks.hpp>
 
@@ -62,20 +63,14 @@ const boost::ut::suite<"DataSinkRegistry"> dataSinkRegistryTests = [] {
     "a sink refused a taken signal name leaves the owner registered when it stops"_test = [] {
         gr::Graph   graph;
         const auto& owner = emplaceLibrarySink(graph, "gr::blocks::basic::DataSink<float32>", "owner_sink", "shared_signal");
-        const auto& other = graph.emplaceBlock("gr::blocks::basic::DataSink<float32>", {{"name", std::string("other_sink")}});
+        // no graph holds the other sink, so a change applies at the call and the call's result carries the refusal; a
+        // graph's block that does not run holds the change until it starts
+        const std::shared_ptr<gr::BlockModel> other = gr::globalBlockRegistry().create("gr::blocks::basic::DataSink<float32>", {{"name", std::string("other_sink")}});
         expect(owner != nullptr && other != nullptr) << fatal;
 
-        // the other sink takes the owner's signal name at run time; the registry refuses it, and the other sink's
-        // signal_name reads the empty name it held
-        expect(other->settings().setStaged({{"signal_name", std::string("shared_signal")}}).empty());
-        const bool refused = [&other] {
-            try {
-                std::ignore = other->settings().applyStagedParameters();
-            } catch (...) {
-                return true;
-            }
-            return false;
-        }();
+        // the other sink takes the owner's signal name; the registry refuses it, and the other sink's signal_name reads
+        // the empty name it held
+        const bool refused = !gr::testing::setAndApply(gr::settings::detail::settingsOf(*other), {{"signal_name", std::string("shared_signal")}}).empty();
         expect(refused) << "the registry refuses the taken name";
         expect(globalDataSinkRegistry().getStreamingPoller<float>(DataSinkQuery::sinkName("other_sink")) == nullptr) << "the other sink is not registered";
 

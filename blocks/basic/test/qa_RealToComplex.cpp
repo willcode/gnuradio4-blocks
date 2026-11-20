@@ -25,6 +25,7 @@
 #include <gnuradio-4.0/basic/RealToComplex.hpp>
 #include <gnuradio-4.0/basic/VectorSource.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
@@ -41,8 +42,7 @@ constexpr float kSourceRate        = 48'000.f; ///< the rate the graph runs' sou
 
 [[nodiscard]] Block makeBlock(gr::property_map settings = {}) {
     Block block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -180,7 +180,7 @@ struct GraphRun {
     source._tags     = tags;
     auto& block      = graph.emplaceBlock<Block>(std::move(settings));
     if (coupled) {
-        block.settings().setTagCouplings({{"transition", std::string("transition")}});
+        boost::ut::expect(block.setTagCouplings({{"transition", std::string("transition")}}).has_value());
     }
     auto& sink = graph.emplaceBlock<EndSink<CF>>();
 
@@ -192,7 +192,7 @@ struct GraphRun {
     run.ran     = scheduler.exchange(std::move(graph)).has_value() && scheduler.runAndWait().has_value();
     run.samples = sink._samples;
     run.tags    = sink._tags;
-    run.active  = block.settings().get();
+    run.active  = gr::testing::inForce(gr::settings::detail::settingsOf(block));
     return run;
 }
 
@@ -366,13 +366,10 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
 
     "a transition at or below 0, or at or above 0.5, is refused"_test = [] {
         Block      block   = makeBlock();
-        const auto refused = [&block](float value) {
-            std::ignore = block.settings().setStaged({{"transition", value}});
-            return !block.settings().applyStagedParameters().failedParameters.empty();
-        };
+        const auto refused = [&block](float value) { return !gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"transition", value}}).empty(); };
         for (const float value : {0.f, -0.1f, 0.5f, 0.6f, std::numeric_limits<float>::quiet_NaN()}) {
             expect(refused(value)) << std::format("a transition of {} is refused", value);
-            expect(eq(block.transition.value, kDefaultTransition)) << "the block keeps the accepted transition";
+            expect(eq(block.settings.transition.value, kDefaultTransition)) << "the block keeps the accepted transition";
         }
 
         const auto        x        = noise(1001UZ, 4U);
@@ -382,7 +379,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
         expect(run.samples == byKernel(kDefaultTransition, x)) << "and the block computes on the accepted transition";
 
         expect(!refused(0.49f)) << "a transition just below 0.5 is accepted";
-        expect(eq(block.transition.value, 0.49f));
+        expect(eq(block.settings.transition.value, 0.49f));
     };
 
     "a staged change restarts the conversion at the next call, and a waiting rate keeps the value it arrived with"_test = [] {
@@ -394,8 +391,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
         feed(block, std::span(x).first(1111UZ), chunks, 4096UZ, run, waiting);
         const std::size_t before = run.samples.size();
         expect(fatal(lt(before, (1100UZ + makeKernel(kDefaultTransition).groupDelay() + 1UZ) / 2UZ))) << "the tag on input 1100 still waits for its output";
-        std::ignore = block.settings().setStaged({{"transition", 0.05f}});
-        expect(fatal(block.settings().applyStagedParameters().failedParameters.empty()));
+        expect(fatal(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"transition", 0.05f}}).empty()));
         const std::vector<gr::Tag> held{{1511UZ, probe(9UZ)}};
         feed(block, x, chunks, 4096UZ, run, held);
 
@@ -427,8 +423,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
         expect(fatal(eq(before, 505UZ)));
         const std::size_t delayBefore = makeKernel(kDefaultTransition).groupDelay();
         expect(fatal(gt((1000UZ + delayBefore + 1UZ) / 2UZ, before))) << "the tag on input 1000 waits across the restart";
-        std::ignore = block.settings().setStaged({{"transition", 0.04f}});
-        expect(fatal(block.settings().applyStagedParameters().failedParameters.empty()));
+        expect(fatal(gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"transition", 0.04f}}).empty()));
         const std::size_t rest[] = {2990UZ};
         feed(block, x, rest, 4096UZ, run, tags);
 
@@ -513,7 +508,7 @@ const boost::ut::suite<"RealToComplex"> realToComplexTests = [] {
         const std::size_t before = run.samples.size();
         expect(fatal(eq(before, 505UZ)));
         expect(fatal(run.offsetsOf("probe").empty())) << "the tag on input 1000 is held";
-        block.settings().resetDefaults();
+        expect(block.resetDefaults().has_value());
         const std::size_t rest[] = {2990UZ};
         feed(block, x, rest, 4096UZ, run, tags);
 

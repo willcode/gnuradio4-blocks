@@ -241,18 +241,23 @@ default rounding mode), takes 0 for NaN and saturates at its range.
 )"">;
     PortIn<T>  in;
     PortOut<R> out;
-    double     scale = 1.0;
 
-    GR_MAKE_REFLECTABLE(ScalingConvert, in, out, scale);
+    struct Settings {
+        double scale = 1.0;
+
+        GR_MAKE_REFLECTABLE(Settings, scale);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(ScalingConvert, in, out, settings);
 
     template<gr::meta::t_or_simd<T> V>
     [[nodiscard]] constexpr auto processOne(const V& input) const noexcept {
         using P = detail::ScalingProductType<T, R>;
         if constexpr (gr::meta::any_simd<V>) {
             using PV = vir::stdx::rebind_simd_t<P, V>;
-            return detail::saturatingCast<R>(vir::stdx::static_simd_cast<PV>(input) * static_cast<P>(scale));
+            return detail::saturatingCast<R>(vir::stdx::static_simd_cast<PV>(input) * static_cast<P>(settings.scale));
         } else {
-            return detail::saturatingCast<R>(static_cast<P>(input) * static_cast<P>(scale));
+            return detail::saturatingCast<R>(static_cast<P>(input) * static_cast<P>(settings.scale));
         }
     }
 };

@@ -21,6 +21,7 @@
 #include <gnuradio-4.0/basic/Decimators.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
 
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
@@ -33,8 +34,7 @@ namespace spans = gr::blocks::testing::span;
 template<typename TBlock>
 [[nodiscard]] TBlock makeBlock(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -46,12 +46,9 @@ template<typename TBlock>
 
 [[nodiscard]] gr::property_map probe(std::size_t which) { return {{"probe", static_cast<gr::Size_t>(which)}}; }
 
-/// Stages and applies `settings`. True when every key is refused.
 template<typename TBlock>
 [[nodiscard]] bool refused(TBlock& block, gr::property_map settings) {
-    const std::size_t keys = settings.size();
-    std::ignore            = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters.size() == keys;
+    return gr::testing::refusesAll(block, std::move(settings));
 }
 
 /// Moves `block` through `states` in order, as a scheduler does. True when every transition succeeds.
@@ -228,7 +225,7 @@ template<typename TBlock>
     auto&     source = graph.emplaceBlock<TagSource<float, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", nSamples}, {"mark_tag", false}});
     source._tags     = tags;
     auto& block      = graph.emplaceBlock<TBlock>(std::move(settings));
-    block.settings().setTagCouplings(couplings);
+    boost::ut::expect(block.setTagCouplings(couplings).has_value());
     auto& sink = graph.emplaceBlock<EndSink<float>>();
 
     EndRun run;
@@ -246,7 +243,7 @@ template<typename TBlock>
     run.ran     = scheduler.exchange(std::move(graph)).has_value() && scheduler.runAndWait().has_value();
     run.samples = sink._samples.size();
     run.values  = sink._samples;
-    run.active  = block.settings().get();
+    run.active  = gr::testing::inForce(gr::settings::detail::settingsOf(block));
     for (const gr::Tag& tag : sink._tags) {
         if (tag.map.contains(gr::property_map::key_type{"probe"})) {
             run.probes.push_back(tag.index);
@@ -265,20 +262,24 @@ struct KeepOneInN : gr::Block<KeepOneInN<T>, gr::NoTagPropagation> {
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    gr::Annotated<gr::Size_t, "n", gr::Limits<1U, std::numeric_limits<gr::Size_t>::max()>> n = 1U;
+    struct Settings {
+        gr::Annotated<gr::Size_t, gr::Limits<gr::Min<1U>>> n = 1U;
 
-    GR_MAKE_REFLECTABLE(KeepOneInN, in, out, n);
+        GR_MAKE_REFLECTABLE(Settings, n);
+    } settings;
 
-    gr::Size_t _n         = n.value;
-    gr::Size_t _counter   = n.value;
+    GR_MAKE_REFLECTABLE(KeepOneInN, in, out, settings);
+
+    gr::Size_t _n         = settings.n.value;
+    gr::Size_t _counter   = settings.n.value;
     float      _inputRate = 0.f;
     TagRelay   _relay{};
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        if (!newSettings.contains("n") || n.value == _n) {
+    void applySettings(const Settings& s) {
+        if (s.n.value == _n) {
             return;
         }
-        _n       = n.value;
+        _n       = s.n.value;
         _counter = _n;
         if (_inputRate > 0.f) {
             _relay._carry.insert(_relay._carry.begin(), gr::property_map{{std::pmr::string(gr::tag::SAMPLE_RATE.key()), gr::pmt::Value(_inputRate)}});
@@ -352,29 +353,34 @@ struct KeepMInN : gr::Block<KeepMInN<T>, gr::NoTagPropagation> {
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    gr::Annotated<gr::Size_t, "m", gr::Limits<1U, std::numeric_limits<gr::Size_t>::max()>> m      = 1U;
-    gr::Annotated<gr::Size_t, "n", gr::Limits<1U, std::numeric_limits<gr::Size_t>::max()>> n      = 1U;
-    gr::Annotated<gr::Size_t, "offset">                                                    offset = 0U;
+    struct Settings {
+        gr::Annotated<gr::Size_t, gr::Limits<gr::Min<1U>>> m      = 1U;
+        gr::Annotated<gr::Size_t, gr::Limits<gr::Min<1U>>> n      = 1U;
+        gr::Annotated<gr::Size_t>                          offset = 0U;
 
-    GR_MAKE_REFLECTABLE(KeepMInN, in, out, m, n, offset);
+        GR_MAKE_REFLECTABLE(Settings, m, n, offset);
+    } settings;
 
-    gr::Size_t _m      = m.value;
-    gr::Size_t _n      = n.value;
-    gr::Size_t _offset = offset.value;
+    GR_MAKE_REFLECTABLE(KeepMInN, in, out, settings);
+
+    gr::Size_t _m      = settings.m.value;
+    gr::Size_t _n      = settings.n.value;
+    gr::Size_t _offset = settings.offset.value;
     gr::Size_t _phase  = 0U;
     TagRelay   _relay{};
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        const gr::Size_t nextM      = newSettings.contains("m") ? m.value : _m;
-        const gr::Size_t nextN      = newSettings.contains("n") ? n.value : _n;
-        const gr::Size_t nextOffset = newSettings.contains("offset") ? offset.value : _offset;
-        if (std::uint64_t{nextOffset} + std::uint64_t{nextM} > std::uint64_t{nextN}) {
-            throw gr::exception("offset + m must not exceed n");
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (std::uint64_t{s.offset.value} + std::uint64_t{s.m.value} > std::uint64_t{s.n.value}) {
+            return gr::Refused(s.offset, "must be <= n - m");
         }
-        if (nextM != _m || nextN != _n || nextOffset != _offset) {
-            _m      = nextM;
-            _n      = nextN;
-            _offset = nextOffset;
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.m.value != _m || s.n.value != _n || s.offset.value != _offset) {
+            _m      = s.m.value;
+            _n      = s.n.value;
+            _offset = s.offset.value;
             _phase  = 0U;
         }
     }
@@ -477,8 +483,7 @@ template<typename TBlock, typename T>
     std::vector<T>   scratch(4096UZ);
     for (std::size_t call = 0UZ; at < input.size(); ++call) {
         for (; next < changes.size() && changes[next].at <= at; ++next) {
-            std::ignore = block.settings().setStaged(changes[next].settings);
-            std::ignore = block.settings().applyStagedParameters();
+            std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), changes[next].settings);
         }
         const std::size_t    inCount = std::min(inWindows[call % inWindows.size()], input.size() - at);
         spans::InputSpan<T>  inSpan(input.subspan(at, inCount), at, cursor.window(at, inCount));
@@ -606,8 +611,7 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
         const auto before = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).first(13UZ));
         expect(that % (before.samples == std::vector<float>{5.f, 10.f})) << "two groups of five out of thirteen";
 
-        std::ignore = block.settings().setStaged({{"n", 4U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n", 4U}});
 
         const auto after = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).subspan(13UZ));
         expect(eq(after.samples.front(), 17.f)) << "the next item out is n_new inputs after the change, not three";
@@ -637,7 +641,7 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
         const auto before = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).first(10UZ));
         expect(that % (before.samples == std::vector<float>{3.f, 7.f}));
         expect(refused(block, {{"n", 0U}})) << "the limits refuse n = 0";
-        expect(eq(block.n.value, 4U)) << "and the member keeps the accepted n";
+        expect(eq(block.settings.n.value, 4U)) << "and the member keeps the accepted n";
 
         const auto after = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).subspan(10UZ));
         const auto want  = spans::run<KeepOneInN<float>, float>(reference, std::span<const float>(input));
@@ -657,8 +661,7 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
         expect(that % (first.offsetsOf(gr::tag::SAMPLE_RATE.key()) == std::vector<std::size_t>{0UZ, 4UZ})) << "each on the next kept item";
         expect(that % (ratesOf(first.tags) == std::vector<float>{250.f, 500.f})) << "each at the output rate";
 
-        std::ignore        = block.settings().setStaged({{"n", 5U}});
-        std::ignore        = block.settings().applyStagedParameters();
+        std::ignore        = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n", 5U}});
         const auto changed = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).subspan(20UZ));
         expect(that % (changed.offsetsOf(gr::tag::SAMPLE_RATE.key()) == std::vector<std::size_t>{0UZ})) << "a change of n restates the rate on the next kept item";
         expect(that % (ratesOf(changed.tags) == std::vector<float>{400.f})) << "the last input rate divided by the new n";
@@ -675,8 +678,7 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
 
         const auto first = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).first(6UZ), 0UZ, std::span<const gr::Tag>(tags));
         expect(that % (ratesOf(first.tags) == std::vector<float>{250.f})) << "the tag on item 5 waits for item 7";
-        std::ignore        = block.settings().setStaged({{"n", 2U}});
-        std::ignore        = block.settings().applyStagedParameters();
+        std::ignore        = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n", 2U}});
         const auto changed = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).subspan(6UZ));
         expect(that % (changed.offsetsOf(gr::tag::SAMPLE_RATE.key()) == std::vector<std::size_t>{0UZ, 0UZ})) << "both rates on the next kept item";
         expect(that % (ratesOf(changed.tags) == std::vector<float>{500.f, 1000.f})) << "the restated rate first, then the waiting tag's rate divided by the new n";
@@ -704,20 +706,16 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
 
     "a reset to defaults restarts the phase and keeps the waiting tags for the next kept item"_test = [] {
         KeepOneInN<float> block = makeBlock<KeepOneInN<float>>({{"n", 4U}});
-        block.settings().storeDefaults(); // as Block::init() does after the first application
-        const auto input = counted(15UZ);
-        expect(nothrow([&block] {
-            std::ignore = block.settings().setStaged({{"n", 2U}});
-            std::ignore = block.settings().applyStagedParameters();
-        }));
+        const auto        input = counted(15UZ);
+        expect(nothrow([&block] { std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n", 2U}}); }));
 
         const std::vector<gr::Tag> tags{gr::Tag{0UZ, gr::property_map{{gr::tag::SAMPLE_RATE.key(), 1000.f}}}, gr::Tag{6UZ, probe(6)}};
         const auto                 before = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).first(7UZ), 0UZ, std::span<const gr::Tag>(tags));
         expect(that % (before.samples == std::vector<float>{1.f, 3.f, 5.f})) << "one in two";
         expect(that % before.offsetsOf("probe").empty()) << "the tag on item 6 waits for item 7";
 
-        block.settings().resetDefaults();
-        expect(eq(block.n.value, 4U)) << "the reset restores the stored n";
+        expect(block.resetDefaults().has_value());
+        expect(eq(block.settings.n.value, 4U)) << "the reset restores the stored n";
 
         const auto after = spans::run<KeepOneInN<float>, float>(block, std::span<const float>(input).subspan(7UZ));
         expect(that % (after.samples == std::vector<float>{10.f, 14.f})) << "the phase restarts: the next item out is the fourth input after the reset";
@@ -733,7 +731,7 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
         expect(clean.ran && eq(clean.samples, 1000UZ)) << "the reference run keeps one in four";
         expect(got.ran) << "the refusal goes out as a plain message, and the run completes";
         expect(that % (got.values == clean.values)) << "the block keeps one in the accepted four from the refused tag on";
-        expect(eq(held(got.active, "n"), 4U)) << "settings().get() keeps the accepted n";
+        expect(eq(held(got.active, "n"), 4U)) << "get() keeps the accepted n";
     };
 
     "a tag after the last kept item leaves at the end-of-stream index"_test = [] {
@@ -749,7 +747,7 @@ const boost::ut::suite<"KeepOneInN"> keepOneInNTests = [] {
         expect(that % (chained.probes == std::vector<std::size_t>{0UZ, 2UZ})) << "a decimator after it passes the tag to its own end-of-stream index";
     };
 
-    "n below one is rejected at settings time"_test = [] { expect(throws([] { std::ignore = makeBlock<KeepOneInN<float>>({{"n", 0U}}); })); };
+    "n below one is rejected at settings time"_test = [] { expect(gr::testing::initRefused<KeepOneInN<float>>({{"n", 0U}})); };
 
     "items and tags leave as the item-by-item form's, through tags, full outputs and changes of n"_test = [] {
         const auto compare = []<typename T>(const char* type) {
@@ -947,31 +945,28 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
     };
 
     "a wrapped or empty slice is rejected at settings time"_test = [] {
-        expect(throws([] { std::ignore = makeBlock<KeepMInN<float>>({{"m", 3U}, {"n", 5U}, {"offset", 3U}}); })) << "offset + m > n would wrap the slice, and is refused";
-        expect(throws([] { std::ignore = makeBlock<KeepMInN<float>>({{"m", 0U}, {"n", 5U}}); })) << "m = 0";
-        expect(throws([] { std::ignore = makeBlock<KeepMInN<float>>({{"m", 1U}, {"n", 0U}}); })) << "n = 0";
-        expect(throws([] { std::ignore = makeBlock<KeepMInN<float>>({{"m", 6U}, {"n", 5U}}); })) << "m > n";
-        expect(throws([] { std::ignore = makeBlock<KeepMInN<float>>({{"m", 1U}, {"n", 5U}, {"offset", 5U}}); })) << "offset >= n";
+        expect(gr::testing::initRefused<KeepMInN<float>>({{"m", 3U}, {"n", 5U}, {"offset", 3U}})) << "offset + m > n would wrap the slice, and is refused";
+        expect(gr::testing::initRefused<KeepMInN<float>>({{"m", 0U}, {"n", 5U}})) << "m = 0";
+        expect(gr::testing::initRefused<KeepMInN<float>>({{"m", 1U}, {"n", 0U}})) << "n = 0";
+        expect(gr::testing::initRefused<KeepMInN<float>>({{"m", 6U}, {"n", 5U}})) << "m > n";
+        expect(gr::testing::initRefused<KeepMInN<float>>({{"m", 1U}, {"n", 5U}, {"offset", 5U}})) << "offset >= n";
     };
 
     "a refused slice leaves the block keeping the slice it accepted"_test = [] {
         KeepMInN<float> block = makeBlock<KeepMInN<float>>({{"m", 2U}, {"n", 5U}, {"offset", 1U}});
         const auto      input = counted(40UZ);
-        const auto      apply = [&block](gr::property_map changes) {
-            std::ignore = block.settings().setStaged(std::move(changes));
-            std::ignore = block.settings().applyStagedParameters();
-        };
+        const auto      apply = [&block](gr::property_map changes) { return refused(block, std::move(changes)); };
 
-        expect(throws([&apply] { apply({{"offset", 4U}}); })) << "offset 4 + m 2 exceeds n 5";
-        expect(eq(block.offset.value, 1U)) << "the member takes back the accepted offset";
+        expect(apply({{"offset", 4U}})) << "offset 4 + m 2 exceeds n 5";
+        expect(eq(block.settings.offset.value, 1U)) << "the member takes back the accepted offset";
         const auto first = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).first(20UZ));
         expect(that % (first.samples == std::vector<float>{1.f, 2.f, 6.f, 7.f, 11.f, 12.f, 16.f, 17.f})) << "the accepted slice";
 
-        expect(nothrow([&apply] { apply({{"m", 1U}}); })) << "m = 1 is checked against the accepted offset";
+        expect(!apply({{"m", 1U}})) << "m = 1 is checked against the accepted offset";
         const auto second = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).subspan(20UZ));
         expect(that % (second.samples == std::vector<float>{21.f, 26.f, 31.f, 36.f})) << "the new m at the accepted offset 1, from the next item";
 
-        expect(throws([] { std::ignore = makeBlock<KeepMInN<float>>({{"m", 2U}, {"n", 5U}, {"offset", 4294967295U}}); })) << "offset + m is compared in 64 bits";
+        expect(gr::testing::initRefused<KeepMInN<float>>({{"m", 2U}, {"n", 5U}, {"offset", 4294967295U}})) << "offset + m is compared in 64 bits";
     };
 
     "a restart begins at the accepted slice and drops the tags the stopped run left waiting"_test = [] {
@@ -983,10 +978,7 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         expect(moveThrough(block, {INITIALISED, RUNNING}));
         const auto before = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).first(9UZ), 0UZ, std::span<const gr::Tag>(stale));
         expect(that % before.offsetsOf("probe").empty()) << "the tag on item 8 waits for the next group";
-        expect(throws([&block] {
-            std::ignore = block.settings().setStaged({{"offset", 4U}});
-            std::ignore = block.settings().applyStagedParameters();
-        }));
+        expect(refused(block, {{"offset", 4U}}));
         expect(moveThrough(block, {REQUESTED_STOP, STOPPED, INITIALISED, RUNNING})) << "a stop, the lifecycle's reset and a start";
 
         const auto after = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input));
@@ -1002,7 +994,7 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         expect(clean.ran && eq(clean.samples, 1600UZ)) << "the reference run keeps two in five";
         expect(got.ran) << "the refusals go out as plain messages, and the run completes";
         expect(that % (got.values == clean.values)) << "the block keeps the accepted slice from the refused tags on";
-        expect(eq(held(got.active, "m"), 2U) && eq(held(got.active, "n"), 5U)) << "settings().get() keeps the accepted m and n";
+        expect(eq(held(got.active, "m"), 2U) && eq(held(got.active, "n"), 5U)) << "get() keeps the accepted m and n";
     };
 
     "a tag after the last kept item of a slice leaves at the end-of-stream index"_test = [] {
@@ -1065,8 +1057,7 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         const auto before = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).first(20UZ));
         expect(eq(before.consumed, 20UZ)) << "every item in, which here is four whole groups";
 
-        std::ignore = block.settings().setStaged({{"m", 1U}, {"n", 4U}, {"offset", 3U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"m", 1U}, {"n", 4U}, {"offset", 3U}});
 
         const auto after = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).subspan(20UZ));
         expect(eq(after.samples.front(), 23.f)) << "the first group after the change starts where the last one ended";
@@ -1081,8 +1072,7 @@ const boost::ut::suite<"KeepMInN"> keepMInNTests = [] {
         expect(eq(before.consumed, 13UZ));
         expect(eq(static_cast<std::size_t>(block._phase), 3UZ)) << "three items into the third group";
 
-        std::ignore = block.settings().setStaged({{"n", 4U}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n", 4U}});
         expect(eq(static_cast<std::size_t>(block._phase), 0UZ)) << "the change restarts the phase, mid-group or not";
 
         const auto               after = spans::run<KeepMInN<float>, float>(block, std::span<const float>(input).subspan(13UZ));

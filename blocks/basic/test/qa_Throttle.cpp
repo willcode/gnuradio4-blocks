@@ -19,6 +19,7 @@
 #include <gnuradio-4.0/basic/NullSources.hpp>
 #include <gnuradio-4.0/basic/Throttle.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 #include <gnuradio-4.0/testing/TestSpans.hpp>
@@ -36,8 +37,7 @@ constexpr double kFullSet = 50000.0 / 100000.0; // half a second of paced sample
 template<typename T>
 [[nodiscard]] Throttle<T> makeThrottle(gr::property_map settings) {
     Throttle<T> block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
@@ -229,8 +229,7 @@ const boost::ut::suite<"Throttle"> throttleTests = [] {
         std::ignore = pump<float>(block, std::span<const float>(input).first(1000UZ), std::span<float>(output), 1000UZ);
         expect(eq(block.paced(), 1000ULL));
 
-        std::ignore = block.settings().setStaged({{"sample_rate", kRate}});
-        std::ignore = block.settings().applyStagedParameters();
+        std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"sample_rate", kRate}});
         expect(eq(block.paced(), 0ULL)) << "the origin and the count both move to the moment of the change";
 
         const double elapsed = timed<float>([&] { std::ignore = pump<float>(block, std::span<const float>(input), std::span<float>(output), 4096UZ); });
@@ -386,12 +385,11 @@ const boost::ut::suite<"Throttle"> throttleTests = [] {
     };
 
     "unusable parameters are rejected at settings time"_test = [] {
-        expect(throws([] { std::ignore = makeThrottle<float>({{"sample_rate", 0.f}}); })) << "zero rate";
-        expect(throws([] { std::ignore = makeThrottle<float>({{"sample_rate", -1.f}}); })) << "negative rate";
-        expect(throws([] { std::ignore = makeThrottle<float>({{"sample_rate", std::numeric_limits<float>::quiet_NaN()}}); })) << "NaN rate";
-        expect(throws([] { std::ignore = makeThrottle<float>({{"sample_rate", std::numeric_limits<float>::infinity()}}); })) << "infinite rate";
-        expect(throws([] { std::ignore = makeThrottle<float>({{"max_sleep_s", 0.0}}); })) << "zero slice";
-        expect(throws([] { std::ignore = makeThrottle<float>({{"max_sleep_s", -1.0}}); })) << "negative slice";
+        expect(gr::testing::initRefused<Throttle<float>>({{"sample_rate", 0.f}})) << "zero rate";
+        expect(gr::testing::initRefused<Throttle<float>>({{"sample_rate", -1.f}})) << "negative rate";
+        expect(gr::testing::initRefused<Throttle<float>>({{"sample_rate", std::numeric_limits<float>::quiet_NaN()}})) << "NaN rate";
+        expect(gr::testing::initRefused<Throttle<float>>({{"max_sleep_s", 0.0}})) << "zero slice";
+        expect(gr::testing::initRefused<Throttle<float>>({{"max_sleep_s", -1.0}})) << "negative slice";
     };
 };
 

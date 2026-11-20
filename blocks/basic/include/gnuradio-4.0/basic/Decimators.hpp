@@ -110,26 +110,30 @@ output.
 change. Once the block has passed a `gr:sample_rate` tag on, the next kept item after the change carries the last such
 tag's input rate divided by the new `n`, ahead of the tags waiting for the item. `reset()` restarts the group the same
 way and keeps the waiting tags.
+
+The block keeps the last item of each group of `n`.
 )"">;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "n", Doc<"group size with the last item of each group kept">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>> n = 1U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"group size">, Limits<Min<1U>>> n = 1U;
 
-    GR_MAKE_REFLECTABLE(KeepOneInN, in, out, n);
+        GR_MAKE_REFLECTABLE(Settings, n);
+    } settings;
 
-    gr::Size_t       _n         = n.value; ///< the accepted `n`
-    gr::Size_t       _counter   = n.value;
+    GR_MAKE_REFLECTABLE(KeepOneInN, in, out, settings);
+
+    gr::Size_t       _counter   = settings.n.value;
     float            _inputRate = 0.f; ///< the input rate of the last `gr:sample_rate` tag published in this run, 0 before the first
     detail::TagRelay _relay{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (!newSettings.contains("n") || n.value == _n) {
+    void applySettings(const Settings& s) {
+        if (!s.n.changed()) {
             return;
         }
-        _n       = n.value;
-        _counter = _n;
+        _counter = s.n;
         if (_inputRate > 0.f) {
             _relay._carry.insert(_relay._carry.begin(), property_map{{std::pmr::string(gr::tag::SAMPLE_RATE.key()), pmt::Value(_inputRate)}});
         }
@@ -140,7 +144,7 @@ way and keeps the waiting tags.
         _relay.reset();
     }
 
-    void reset() { _counter = _n; }
+    void reset() { _counter = settings.n.value; }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
         outSpan.publish(keep(inSpan, outSpan));
@@ -173,7 +177,7 @@ private:
             if (--_counter > 0U) {
                 continue;
             }
-            _counter      = _n;
+            _counter      = settings.n.value;
             outSpan[made] = inSpan[walked];
             if (!_relay._carry.empty()) {
                 releaseWaiting(outSpan, made);
@@ -182,7 +186,7 @@ private:
         }
 
         if (walked < inSpan.size() && made < outSpan.size()) { // no tag left to place: keep every n-th item in one loop
-            const std::size_t group = static_cast<std::size_t>(_n);
+            const std::size_t group = static_cast<std::size_t>(settings.n.value);
             const std::size_t left  = inSpan.size() - walked;
             const std::size_t first = static_cast<std::size_t>(_counter) - 1UZ; // the next kept item's offset from `walked`
             const std::size_t due   = left > first ? (left - first - 1UZ) / group + 1UZ : 0UZ;
@@ -200,7 +204,7 @@ private:
                 _counter = static_cast<gr::Size_t>(first + 1UZ - left);
             } else if (made == outSpan.size()) { // the output is full, and the walk stops after the last kept item
                 walked += first + (kept - 1UZ) * group + 1UZ;
-                _counter = _n;
+                _counter = settings.n.value;
             } else {
                 const std::size_t after = left - (first + (kept - 1UZ) * group + 1UZ); // dropped items past the last kept one
                 walked += left;
@@ -217,10 +221,10 @@ private:
             if (auto found = tag.find(gr::tag::SAMPLE_RATE.key()); found != tag.end()) {
                 if (const float* rate = found->second.template get_if<float>(); rate != nullptr) {
                     _inputRate    = *rate;
-                    found->second = static_cast<float>(static_cast<double>(*rate) / static_cast<double>(_n));
+                    found->second = static_cast<float>(static_cast<double>(*rate) / static_cast<double>(settings.n.value));
                 } else if (const double* wide = found->second.template get_if<double>(); wide != nullptr) {
                     _inputRate    = static_cast<float>(*wide);
-                    found->second = *wide / static_cast<double>(_n);
+                    found->second = *wide / static_cast<double>(settings.n.value);
                 }
             }
         }
@@ -253,30 +257,32 @@ leaves the waiting tags in place.
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<gr::Size_t, "m", Doc<"items kept per group">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>> m      = 1U;
-    Annotated<gr::Size_t, "n", Doc<"group size">, Limits<1U, std::numeric_limits<gr::Size_t>::max()>>           n      = 1U;
-    Annotated<gr::Size_t, "offset", Doc<"index in the group of the first kept item">>                           offset = 0U;
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"items kept per group">, Limits<Min<1U>>> m      = 1U;
+        Annotated<gr::Size_t, Doc<"group size">, Limits<Min<1U>>>           n      = 1U;
+        Annotated<gr::Size_t, Doc<"first kept index">>                      offset = 0U;
 
-    GR_MAKE_REFLECTABLE(KeepMInN, in, out, m, n, offset);
+        GR_MAKE_REFLECTABLE(Settings, m, n, offset);
+    } settings;
 
-    gr::Size_t       _m      = m.value;      ///< the accepted `m`
-    gr::Size_t       _n      = n.value;      ///< the accepted `n`
-    gr::Size_t       _offset = offset.value; ///< the accepted `offset`
-    gr::Size_t       _phase  = 0U;           ///< index within the current group of the next input item
+    GR_MAKE_REFLECTABLE(KeepMInN, in, out, settings);
+
+    gr::Size_t       _phase = 0U; ///< index within the current group of the next input item
     detail::TagRelay _relay{};
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const gr::Size_t nextM      = newSettings.contains("m") ? m.value : _m;
-        const gr::Size_t nextN      = newSettings.contains("n") ? n.value : _n;
-        const gr::Size_t nextOffset = newSettings.contains("offset") ? offset.value : _offset;
-        if (std::uint64_t{nextOffset} + std::uint64_t{nextM} > std::uint64_t{nextN}) {
-            throw gr::exception(std::format("offset ({}) + m ({}) must not exceed n ({})", nextOffset, nextM, nextN));
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (s.m > s.n) {
+            return gr::Refused(s.m, "must be <= n");
         }
-        if (nextM != _m || nextN != _n || nextOffset != _offset) {
-            _m      = nextM;
-            _n      = nextN;
-            _offset = nextOffset;
-            _phase  = 0U;
+        if (s.offset > s.n - s.m) {
+            return gr::Refused(s.offset, "must be <= n - m");
+        }
+        return {};
+    }
+
+    void applySettings(const Settings& s) {
+        if (s.m.changed() || s.n.changed() || s.offset.changed()) {
+            _phase = 0U;
         }
     }
 
@@ -305,9 +311,9 @@ leaves the waiting tags in place.
 
 private:
     [[nodiscard]] std::size_t keep(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const std::size_t group = static_cast<std::size_t>(_n);
-        const std::size_t first = static_cast<std::size_t>(_offset);
-        const std::size_t last  = first + static_cast<std::size_t>(_m); // exclusive, and at most the group
+        const std::size_t group = static_cast<std::size_t>(settings.n.value);
+        const std::size_t first = static_cast<std::size_t>(settings.offset.value);
+        const std::size_t last  = first + static_cast<std::size_t>(settings.m.value); // exclusive, and at most the group
 
         std::size_t walked = 0UZ;
         std::size_t made   = 0UZ;

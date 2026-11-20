@@ -33,10 +33,12 @@ struct Report {
     gr::Size_t nSamples = 0U;
 };
 
+/// One work call, then the copy of the probe's status for a host that core makes after a work call it runs.
 template<typename T>
 void feed(RateProbe<T>& probe, std::span<const T> samples) {
     spans::InputSpan<T> inSpan{samples};
     std::ignore = probe.processBulk(inSpan);
+    gr::settings::detail::FrameworkAccess::copyStatus(gr::settings::detail::settingsOf(probe));
 }
 
 [[nodiscard]] std::vector<Report> drain(gr::MsgPortIn& port) {
@@ -53,15 +55,9 @@ void feed(RateProbe<T>& probe, std::span<const T> samples) {
     return reports;
 }
 
-[[nodiscard]] double settingDouble(auto& probe, std::string_view key) {
-    const auto value = probe.settings().get(std::string(key));
-    return value.has_value() ? value->value_or(-1.0) : -1.0;
-}
+[[nodiscard]] double settingDouble(auto& probe, std::string_view key) { return probe.template get<double>(key).value_or(-1.0); }
 
-[[nodiscard]] gr::Size_t settingSize(auto& probe, std::string_view key) {
-    const auto value = probe.settings().get(std::string(key));
-    return value.has_value() ? value->value_or(gr::Size_t{0U}) : gr::Size_t{0U};
-}
+[[nodiscard]] gr::Size_t settingSize(auto& probe, std::string_view key) { return probe.template get<gr::Size_t>(key).value_or(gr::Size_t{0U}); }
 
 [[nodiscard]] double seconds(Clock::duration duration) { return std::chrono::duration<double>(duration).count(); }
 
@@ -70,7 +66,21 @@ void feed(RateProbe<T>& probe, std::span<const T> samples) {
 const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
     using namespace boost::ut;
 
-    "n_samples counts across two work calls, and rate stays 0 before a full interval"_test = []<typename T>() {
+    "n_samples counts across two work calls, as of the measurement"_test = []<typename T>() {
+        RateProbe<T> probe({{"min_update_ms", 0.f}});
+        probe.init(probe.progress);
+        probe.start();
+
+        const std::vector<T> first(3UZ);
+        const std::vector<T> second(5UZ);
+        feed<T>(probe, first); // opens the interval
+        expect(eq(settingSize(probe, "n_samples"), gr::Size_t{0U})) << "nothing is published before a measurement";
+        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // the second call measures only after time has passed
+        feed<T>(probe, second);
+        expect(eq(settingSize(probe, "n_samples"), gr::Size_t{8U})) << "the second call adds to the first";
+    } | std::tuple<std::uint8_t, std::int16_t, std::int32_t, std::uint32_t, float, double, std::complex<float>, std::complex<double>>{};
+
+    "rate stays 0 before a full interval"_test = []<typename T>() {
         RateProbe<T> probe({{"min_update_ms", 3.6e6f}});
         probe.init(probe.progress);
         probe.start();
@@ -78,13 +88,12 @@ const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
         const std::vector<T> first(3UZ);
         const std::vector<T> second(5UZ);
         feed<T>(probe, first);
-        expect(eq(probe.n_samples.value, gr::Size_t{3U}));
         feed<T>(probe, second);
-        expect(eq(probe.n_samples.value, gr::Size_t{8U})) << "the second call adds to the first";
 
-        expect(eq(probe.rate.value, 0.0)) << "no interval has passed";
-        expect(eq(probe.rate_now.value, 0.0));
+        expect(eq(probe.status.rate.value, 0.0)) << "no interval has passed";
+        expect(eq(probe.status.rate_now.value, 0.0));
         expect(eq(settingDouble(probe, "rate"), 0.0)) << "a settings Get reads 0 before the first measurement";
+        expect(eq(settingSize(probe, "n_samples"), gr::Size_t{0U})) << "and the count of the start";
     } | std::tuple<std::uint8_t, std::int16_t, std::int32_t, std::uint32_t, float, double, std::complex<float>, std::complex<double>>{};
 
     "behind a Throttle, rate is the configured rate within the bound the schedule allows"_test = [] {
@@ -103,8 +112,7 @@ const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
         constexpr float       kAlpha      = 0.15f;
 
         Throttle<float> throttle({{"sample_rate", kRate}});
-        throttle.settings().init();
-        std::ignore = throttle.settings().applyStagedParameters();
+        expect(throttle.check({}).has_value());
 
         RateProbe<float> probe({{"min_update_ms", kIntervalMs}, {"alpha", kAlpha}});
         probe.init(probe.progress);
@@ -135,17 +143,16 @@ const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
         const std::vector<Report> reports  = drain(fromProbe);
         const std::size_t         nReports = reports.size();
         expect(fatal(ge(nReports, 2UZ))) << "the run spans several intervals";
-        expect(eq(probe.n_samples.value, static_cast<gr::Size_t>(kTotal)));
+        expect(le(settingSize(probe, "n_samples"), static_cast<gr::Size_t>(kTotal))) << "the count as of the last measurement";
 
         // the block smooths with its float alpha widened to double; the same value keeps the recomputation exact
-        const double alpha    = static_cast<double>(probe.alpha.value);
+        const double alpha    = static_cast<double>(probe.settings.alpha.value);
         double       smoothed = reports.front().rateNow;
         expect(eq(reports.front().rate, smoothed)) << "the first measurement is taken as it is";
         for (std::size_t k = 1UZ; k < nReports; ++k) {
             smoothed = alpha * reports[k].rateNow + (1.0 - alpha) * smoothed;
             expect(le(std::abs(reports[k].rate - smoothed), 1e-9 * smoothed)) << std::format("measurement {} follows the smoothing rule", k);
         }
-        expect(eq(probe.rate.value, reports.back().rate));
         expect(eq(settingDouble(probe, "rate"), reports.back().rate)) << "a settings Get reads the last measurement";
         expect(eq(settingDouble(probe, "rate_now"), reports.back().rateNow));
         expect(eq(settingSize(probe, "n_samples"), reports.back().nSamples));
@@ -154,9 +161,10 @@ const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
         const double weights  = alpha + std::pow(1.0 - alpha, static_cast<double>(nReports) - 2.0) * (1.0 - 2.0 * alpha);
         const double longest  = static_cast<double>(kChunk) / static_cast<double>(kRate) + lateness; // the largest T_k - T
         const double bound    = weights * lateness / interval + lateness * longest / (interval * interval);
-        const double error    = std::abs(probe.rate.value / static_cast<double>(kRate) - 1.0);
-        std::println("rate {} S/s over {} measurements, relative error {}, bound {} (lateness {} s)", probe.rate.value, nReports, error, bound, lateness);
-        expect(le(error, bound)) << std::format("rate {} against {} S/s", probe.rate.value, kRate);
+        const double rate     = settingDouble(probe, "rate");
+        const double error    = std::abs(rate / static_cast<double>(kRate) - 1.0);
+        std::println("rate {} S/s over {} measurements, relative error {}, bound {} (lateness {} s)", rate, nReports, error, bound, lateness);
+        expect(le(error, bound)) << std::format("rate {} against {} S/s", rate, kRate);
     };
 
     "min_update_ms bounds the number of measurements"_test = [] {
@@ -208,7 +216,7 @@ const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
         const Clock::time_point beforeFirst = Clock::now();
         feed<float>(probe, opening);
         const Clock::time_point afterFirst = Clock::now();
-        expect(eq(probe.rate.value, 0.0)) << "the first samples open the interval";
+        expect(eq(probe.status.rate.value, 0.0)) << "the first samples open the interval";
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         const Clock::time_point beforeSecond = Clock::now();
         feed<float>(probe, chunk);
@@ -225,13 +233,12 @@ const boost::ut::suite<"RateProbe"> rateProbeTests = [] {
     "a setting outside its range is refused"_test = [] {
         const auto make = [](gr::property_map settings) {
             RateProbe<float> probe(std::move(settings));
-            probe.settings().init();
-            std::ignore = probe.settings().applyStagedParameters();
+            return probe.check({});
         };
-        expect(throws([&] { make({{"alpha", 0.f}}); })) << "alpha 0";
-        expect(throws([&] { make({{"alpha", 1.5f}}); })) << "alpha above 1";
-        expect(throws([&] { make({{"min_update_ms", -1.f}}); })) << "negative interval";
-        expect(nothrow([&] { make({{"alpha", 1.f}, {"min_update_ms", 0.f}}); })) << "the range ends";
+        expect(!make({{"alpha", 0.f}}).has_value()) << "alpha 0";
+        expect(!make({{"alpha", 1.5f}}).has_value()) << "alpha above 1";
+        expect(!make({{"min_update_ms", -1.f}}).has_value()) << "negative interval";
+        expect(make({{"alpha", 1.f}, {"min_update_ms", 0.f}}).has_value()) << "the range ends";
     };
 };
 

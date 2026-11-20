@@ -88,9 +88,9 @@ struct Run {
     }
     run.samples.assign(sink._samples.begin(), sink._samples.end());
     run.tags  = sink._tags;
-    run.nTags = debug.n_tags.value;
-    if (const auto value = debug.settings().get("n_tags"); value.has_value()) {
-        run.nTagsFromSettings = value->value_or<gr::Size_t>(0U);
+    run.nTags = debug.status.n_tags.value;
+    if (const auto value = debug.get<gr::Size_t>("n_tags"); value.has_value()) {
+        run.nTagsFromSettings = *value;
     }
     return run;
 }

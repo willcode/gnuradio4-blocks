@@ -120,17 +120,20 @@ New synchronization occurs with `s8`, prior samples (`s6-s7`) are NOT included t
 Note: We assume that desynchronization should not exceed the buffer size of the SyncBlock; if it does, the samples will be dropped.
 )"">;
 
-    // The port vectors start at the default `n_ports`. `settingsChanged` resizes them only when the value changes.
+    // The port vectors start at the default `n_ports`. `applySettings` resizes them only when the value changes.
     std::vector<gr::PortIn<T, gr::Async>> inputs  = std::vector<gr::PortIn<T, gr::Async>>(1UZ);
     std::vector<gr::PortOut<T>>           outputs = std::vector<gr::PortOut<T>>(1UZ);
 
-    // settings
-    Annotated<gr::Size_t, "n_ports", gr::Visible, gr::Doc<"variable number of in/out ports">, gr::Limits<1U, 32U>> n_ports          = 1U;
-    Annotated<gr::Size_t, "max_history_size", Doc<"Max size of history">>                                          max_history_size = 32000U; // should be less than actual buffer size (better < 80%)
-    Annotated<std::string, "filter", Doc<"trigger name filter">>                                                   filter           = "";
-    Annotated<std::uint64_t, "tolerance", Doc<"trigger time tolerance [ns]">>                                      tolerance        = 5ULL;
+    struct Settings {
+        Annotated<gr::Size_t, gr::Visible, gr::Doc<"port count">, gr::Limits<gr::Min<1U>, gr::Max<32U>>, gr::PortCountFor<"inputs", "outputs">> n_ports          = 1U;
+        Annotated<gr::Size_t, Doc<"history size limit">>                                                                                        max_history_size = 32000U; // should be less than actual buffer size (better < 80%)
+        Annotated<std::string, Doc<"trigger name filter">>                                                                                      filter           = "";
+        Annotated<std::uint64_t, Unit<"ns">, Doc<"trigger time tolerance">>                                                                     tolerance        = 5ULL;
 
-    GR_MAKE_REFLECTABLE(SyncBlock, inputs, outputs, n_ports, max_history_size, filter, tolerance);
+        GR_MAKE_REFLECTABLE(Settings, n_ports, max_history_size, filter, tolerance);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(SyncBlock, inputs, outputs, settings);
 
     bool                     _isStreamSynchronized = false;
     std::vector<std::size_t> _nDroppedSamples      = std::vector<std::size_t>(1UZ, 0UZ); // number of dropped samples, to be sent with desynchronized tag
@@ -143,23 +146,12 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         std::size_t nPost; // number of post samples, sample with sync index is not included
     };
 
-    void settingsChanged(const property_map& oldSettings, const property_map& newSettings) {
-        if (newSettings.contains("n_ports") && oldSettings.at("n_ports") != newSettings.at("n_ports")) {
-            // if one of the port is already connected and n_ports was changed then throw
-            bool inConnected  = std::any_of(inputs.begin(), inputs.end(), [](const auto& port) { return port.isConnected(); });
-            bool outConnected = std::any_of(outputs.begin(), outputs.end(), [](const auto& port) { return port.isConnected(); });
-            if (inConnected || outConnected) {
-                throw gr::exception("Number of input/output ports cannot be changed after Graph initialization.");
-            }
-            std::print("{}: configuration changed: n_ports {} -> {}\n", this->name, oldSettings.at("n_ports"), newSettings.at("n_ports"));
-            inputs.resize(n_ports);
-            outputs.resize(n_ports);
-            _nDroppedSamples.resize(n_ports, 0UZ);
-        }
-
-        if (newSettings.contains("max_history_size")) {
-            // should be less than actual buffer size (better < 80%)
-            // The logic has to be implemented when the new Port API is available
+    void applySettings(const Settings& s) {
+        if (s.n_ports != inputs.size()) {
+            std::print("{}: configuration changed: n_ports {} -> {}\n", this->name, inputs.size(), s.n_ports.value);
+            inputs.resize(s.n_ports);
+            outputs.resize(s.n_ports);
+            _nDroppedSamples.resize(s.n_ports, 0UZ);
         }
     }
 
@@ -211,7 +203,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
                 }
             } else { // streams are NOT in sync -> check back pressure and drop samples if needed
                 for (std::size_t i = 0; i < nPorts; i++) {
-                    const std::size_t nSamplesToDrop = ins[i].size() < static_cast<std::size_t>(max_history_size) ? 0UZ : ins[i].size() - static_cast<std::size_t>(max_history_size);
+                    const std::size_t nSamplesToDrop = ins[i].size() < static_cast<std::size_t>(settings.max_history_size) ? 0UZ : ins[i].size() - static_cast<std::size_t>(settings.max_history_size);
                     if (nSamplesToDrop != 0UZ) {
                         std::ignore = ins[i].consume(nSamplesToDrop);
                         ins[i].consumeTags(nSamplesToDrop);
@@ -333,7 +325,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
         return in.size();
     }
 
-    [[nodiscard]] constexpr bool isTimeDifferenceWithinTolerance(std::uint64_t t1, std::uint64_t t2) { return ((t1 > t2) ? t1 - t2 : t2 - t1) < tolerance; }
+    [[nodiscard]] constexpr bool isTimeDifferenceWithinTolerance(std::uint64_t t1, std::uint64_t t2) { return ((t1 > t2) ? t1 - t2 : t2 - t1) < settings.tolerance; }
 
     [[nodiscard]] constexpr bool isSyncTag(const gr::Tag& tag) const {
         const std::string keyTriggerName = gr::tag::TRIGGER_NAME.key();
@@ -341,7 +333,7 @@ Note: We assume that desynchronization should not exceed the buffer size of the 
 
         const auto itName = tag.map.find(keyTriggerName);
         if (itName == tag.map.end() || //
-            (!filter->empty() && itName->second.value_or(std::string_view{}) != filter)) {
+            (!settings.filter->empty() && itName->second.value_or(std::string_view{}) != settings.filter)) {
             return false;
         }
         const auto itTime = tag.map.find(keyTriggerTime);

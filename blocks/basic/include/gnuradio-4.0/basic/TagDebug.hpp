@@ -27,7 +27,7 @@ struct TagDebug : Block<TagDebug<T>> {
 
 Each line holds the block's `name`, the tag's sample index counted from the start of the stream, and the tag's map.
 With `key_filter` set, the block prints and counts only the tags that hold that key. With `display` false, the block
-counts the matching tags and prints nothing. `n_tags` holds the count, and a settings get reads it.
+counts the matching tags and prints nothing. `n_tags` holds the count, and a get reads it.
 
 The framework forwards a tag at the index where the stream ends without a work call. The block prints and counts only
 the tags that arrive with samples.
@@ -38,11 +38,20 @@ The block keeps no record of samples or tags. Each tag leaves with the keys and 
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<std::string, "key_filter", Doc<"tag key to print, empty for every tag">, Visible> key_filter{};
-    Annotated<bool, "display", Doc<"print each matching tag">, Visible>                         display = true;
-    Annotated<gr::Size_t, "n_tags", Doc<"number of matching tags counted">>                     n_tags  = 0U;
+    struct Settings {
+        Annotated<std::string, Doc<"printed tag key (empty = all)">, Visible> key_filter{};
+        Annotated<bool, Doc<"tag printing">, Visible>                         display = true;
 
-    GR_MAKE_REFLECTABLE(TagDebug, in, out, key_filter, display, n_tags);
+        GR_MAKE_REFLECTABLE(Settings, key_filter, display);
+    } settings;
+
+    struct Status {
+        Annotated<gr::Size_t, Doc<"matching tag count">> n_tags = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, n_tags);
+    } status;
+
+    GR_MAKE_REFLECTABLE(TagDebug, in, out, settings, status);
 
     /**
      * @brief Copies the samples and prints the tags that reach the output with them.
@@ -56,19 +65,18 @@ The block keeps no record of samples or tags. Each tag leaves with the keys and 
 
         gr::Size_t nMatched = 0U;
         for (const Tag& tag : input.rawTags) {
-            if (!key_filter.value.empty() && !tag.map.contains(std::string_view(key_filter.value))) {
+            if (!settings.key_filter.value.empty() && !tag.map.contains(std::string_view(settings.key_filter.value))) {
                 continue;
             }
             ++nMatched;
-            if (display.value) {
+            if (settings.display.value) {
                 const std::string line = std::format("{} tag at {}: {}\n", this->name, tag.index, tag.map);
                 std::cout.write(line.data(), static_cast<std::streamsize>(line.size())); // one write keeps the line whole
             }
         }
 
         if (nMatched > 0U) {
-            n_tags = n_tags.value + nMatched;
-            this->updateActiveParameters({"n_tags"});
+            status.n_tags.value += nMatched;
         }
         return work::Status::OK;
     }

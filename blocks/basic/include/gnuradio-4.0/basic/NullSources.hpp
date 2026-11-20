@@ -1,7 +1,9 @@
 #ifndef GNURADIO_BASIC_NULL_SOURCES_HPP
 #define GNURADIO_BASIC_NULL_SOURCES_HPP
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 
 #include <gnuradio-4.0/Block.hpp>
 #include <gnuradio-4.0/BlockRegistry.hpp>
@@ -34,6 +36,17 @@ The block emits samples until the graph stops it.)"">;
 
 static_assert(gr::BlockLike<NullSource<float>>);
 
+namespace detail {
+// the samples a block that stops at `limit` may still handle after `handled`; past the limit, one more before the stop
+[[nodiscard]] constexpr std::size_t samplesBeforeLimit(std::uint64_t limit, std::uint64_t handled) noexcept {
+    if (limit == 0U) {
+        return std::numeric_limits<std::size_t>::max();
+    }
+    const std::uint64_t remaining = handled < limit ? limit - handled : 1U;
+    return static_cast<std::size_t>(std::min<std::uint64_t>(remaining, std::numeric_limits<std::size_t>::max()));
+}
+} // namespace detail
+
 GR_REGISTER_BLOCK(gr::blocks::basic::ConstantSource, [T], [ uint8_t, int16_t, int32_t, float, std::complex<float>, gr::Packet<float>, gr::Tensor<float>, gr::DataSet<float> ])
 
 template<typename T>
@@ -42,24 +55,38 @@ struct ConstantSource : Block<ConstantSource<T>> {
     using Description = Doc<R""(@brief Emits `default_value` on every output sample.
 
 The block counts the samples it emits in `count`. When `count` reaches a non-zero `n_samples_max`, the block emits that
-sample and stops. With `n_samples_max` at zero, the block runs until the graph stops.)"">;
+sample and stops. With `n_samples_max` at zero, the block runs until the graph stops. The block reports `count` as a status
+value once per work call that emits samples, and a get reads it.)"">;
 
     gr::PortOut<T> out;
 
-    Annotated<value_t, "default value", Visible, Doc<"default value for each sample">> default_value{};
-    Annotated<std::uint64_t, "max samples", Doc<"sample limit, 0 is unlimited">>       n_samples_max = 0UZ;
-    Annotated<std::uint64_t, "count", Doc<"sample count (diagnostics only)">>          count         = 0UZ;
+    struct Settings {
+        Annotated<value_t, Visible, Doc<"sample value">>              default_value{};
+        Annotated<std::uint64_t, Doc<"sample limit (0 = unlimited)">> n_samples_max = 0UZ;
 
-    GR_MAKE_REFLECTABLE(ConstantSource, out, default_value, n_samples_max, count);
+        GR_MAKE_REFLECTABLE(Settings, default_value, n_samples_max);
+    } settings;
 
-    void reset() { count = 0U; }
+    struct Status {
+        Annotated<std::uint64_t, Doc<"sample count">> count = 0UZ;
 
-    [[nodiscard]] constexpr T processOne() noexcept {
-        count++;
-        if (n_samples_max > 0 && count >= n_samples_max) {
-            this->requestStop();
+        GR_MAKE_REFLECTABLE(Status, count);
+    } status;
+
+    GR_MAKE_REFLECTABLE(ConstantSource, out, settings, status);
+
+    void reset() { status.count = 0U; }
+
+    // counts the call's samples and reports `count` once
+    [[nodiscard]] work::Status processBulk(OutputSpanLike auto& output) {
+        const std::size_t nSamples = std::min(output.size(), detail::samplesBeforeLimit(settings.n_samples_max.value, status.count.value));
+        std::fill_n(output.begin(), nSamples, T(settings.default_value.value));
+        output.publish(nSamples);
+        if (nSamples == 0UZ) {
+            return work::Status::OK;
         }
-        return T(default_value.value);
+        status.count.value += nSamples;
+        return settings.n_samples_max.value > 0U && status.count.value >= settings.n_samples_max.value ? work::Status::DONE : work::Status::OK;
     }
 };
 
@@ -71,24 +98,38 @@ template<typename T>
 struct HeadBlock : Block<HeadBlock<T>> {
     using Description = Doc<R""(@brief Copies input samples to the output and stops after `n_samples_max` samples.
 
-`count` holds the samples copied. With `n_samples_max` at zero, the block copies every sample.)"">;
+`count` holds the samples copied, and the block reports it as a status value once per work call that copies samples. With
+`n_samples_max` at zero, the block copies every sample.)"">;
 
     gr::PortIn<T>  in;
     gr::PortOut<T> out;
 
-    Annotated<std::uint64_t, "max samples", Doc<"sample limit, 0 is unlimited">> n_samples_max = 0UZ;
-    Annotated<std::uint64_t, "count", Doc<"sample count (diagnostics only)">>    count         = 0UZ;
+    struct Settings {
+        Annotated<std::uint64_t, Doc<"sample limit (0 = unlimited)">> n_samples_max = 0UZ;
 
-    GR_MAKE_REFLECTABLE(HeadBlock, in, out, n_samples_max, count);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max);
+    } settings;
 
-    void reset() { count = 0U; }
+    struct Status {
+        Annotated<std::uint64_t, Doc<"sample count">> count = 0UZ;
 
-    [[nodiscard]] constexpr auto processOne(T input) noexcept {
-        count++;
-        if (n_samples_max > 0 && count >= n_samples_max) {
-            this->requestStop();
+        GR_MAKE_REFLECTABLE(Status, count);
+    } status;
+
+    GR_MAKE_REFLECTABLE(HeadBlock, in, out, settings, status);
+
+    void reset() { status.count = 0U; }
+
+    [[nodiscard]] work::Status processBulk(InputSpanLike auto& input, OutputSpanLike auto& output) {
+        const std::size_t nSamples = std::min({input.size(), output.size(), detail::samplesBeforeLimit(settings.n_samples_max.value, status.count.value)});
+        std::copy_n(input.begin(), nSamples, output.begin());
+        std::ignore = input.consume(nSamples);
+        output.publish(nSamples);
+        if (nSamples == 0UZ) {
+            return work::Status::OK;
         }
-        return input;
+        status.count.value += nSamples;
+        return settings.n_samples_max.value > 0U && status.count.value >= settings.n_samples_max.value ? work::Status::DONE : work::Status::OK;
     }
 };
 

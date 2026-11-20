@@ -16,6 +16,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/MessageDebug.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 // not in the anonymous namespace: clang refuses the reflection helper of a block declared there (-Wunneeded-internal-declaration)
 namespace qa_message_debug {
@@ -23,33 +24,43 @@ namespace qa_message_debug {
 /// sends `n_messages` messages on `out`, one per work call, each carrying its index under "index"
 struct IndexedMessageSource : gr::Block<IndexedMessageSource> {
     gr::MsgPortOut out;
-    gr::Size_t     n_messages = 3U;
 
-    GR_MAKE_REFLECTABLE(IndexedMessageSource, out, n_messages);
+    struct Settings {
+        gr::Size_t n_messages = 3U;
+
+        GR_MAKE_REFLECTABLE(Settings, n_messages);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(IndexedMessageSource, out, settings);
 
     gr::Size_t _sent = 0U;
 
     gr::work::Status processBulk() {
-        if (_sent < n_messages) {
+        if (_sent < settings.n_messages) {
             gr::sendMessage<gr::message::Command::Notify>(out, "", "count", gr::property_map{{"index", _sent}});
             ++_sent;
         }
-        return _sent >= n_messages ? gr::work::Status::DONE : gr::work::Status::OK;
+        return _sent >= settings.n_messages ? gr::work::Status::DONE : gr::work::Status::OK;
     }
 };
 
 /// sends messages 0 to 2 on `out`, then a settings Set for the block named "debug" on `control`, then message 3.
-/// Each step takes one work call.
+/// Each step takes one work call. The Set waits until `receiver` has ended its run: on a multi-threaded scheduler its
+/// first work call may otherwise come after the Set, which it would then apply.
 struct SettingsChangingSource : gr::Block<SettingsChangingSource> {
     gr::MsgPortOut out;
 
     GR_MAKE_REFLECTABLE(SettingsChangingSource, out);
 
-    gr::MsgPortOut*  control = nullptr;
-    gr::property_map change;
-    gr::Size_t       _step = 0U;
+    gr::MsgPortOut*                        control  = nullptr;
+    const gr::blocks::basic::MessageDebug* receiver = nullptr;
+    gr::property_map                       change;
+    gr::Size_t                             _step = 0U;
 
     gr::work::Status processBulk() {
+        if (_step == 3U && receiver != nullptr && !gr::lifecycle::isShuttingDown(receiver->state())) {
+            return gr::work::Status::OK;
+        }
         if (_step < 3U) {
             gr::sendMessage<gr::message::Command::Notify>(out, "", "count", gr::property_map{{"index", _step}});
         } else if (_step == 3U) {
@@ -117,8 +128,7 @@ struct DirectDrive {
     gr::MsgPortIn  fromBlock;
 
     explicit DirectDrive(gr::property_map settings) : block(std::move(settings)) {
-        block.settings().init();
-        std::ignore = block.settings().applyStagedParameters();
+        boost::ut::expect(block.check({}).has_value());
         std::ignore = toMessages.connect(block.messages);
         std::ignore = toBlock.connect(block.msgIn);
         std::ignore = block.msgOut.connect(fromBlock);
@@ -156,6 +166,12 @@ template<typename T>
 
 [[nodiscard]] gr::property_map mapAt(const gr::property_map& map, std::string_view key) { return valueOr(map, key, gr::property_map{}); }
 
+/// the count a host reads
+[[nodiscard]] gr::Size_t nMessages(const MessageDebug& block) { return block.get<gr::Size_t>("n_messages").value_or(gr::Size_t{0}); }
+
+/// the last data map in force
+[[nodiscard]] gr::property_map lastData(const MessageDebug& block) { return block.get<gr::property_map>("last").value_or(gr::property_map{{"absent", true}}); }
+
 } // namespace
 
 const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
@@ -171,10 +187,10 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         expect(fatal(scheduler.exchange(std::move(flow)).has_value()));
         expect(fatal(scheduler.runAndWait().has_value()));
 
-        expect(eq(debug.n_messages.value, gr::Size_t{3}));
-        expect(eq(valueOr(debug.last.value, "index", gr::Size_t{99}), gr::Size_t{2})) << "last holds the third message's data";
+        expect(eq(nMessages(debug), gr::Size_t{3}));
+        expect(eq(valueOr(lastData(debug), "index", gr::Size_t{99}), gr::Size_t{2})) << "last holds the third message's data";
 
-        const gr::property_map active = debug.settings().get();
+        const gr::property_map active = gr::testing::inForce(gr::settings::detail::settingsOf(debug));
         expect(eq(valueOr(active, "n_messages", gr::Size_t{0}), gr::Size_t{3})) << "the settings map carries the count";
         expect(eq(valueOr(mapAt(active, "last"), "index", gr::Size_t{99}), gr::Size_t{2})) << "the settings map carries the last data";
     };
@@ -185,7 +201,7 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         drive.send({{"index", 1}});
         drive.block.processScheduledMessages();
 
-        const gr::property_map settings = drive.get(gr::block::property::kSetting).value_or(gr::property_map{});
+        const gr::property_map settings = gr::testing::inForce(gr::settings::detail::settingsOf(drive.block));
         expect(eq(valueOr(settings, "n_messages", gr::Size_t{0}), gr::Size_t{2}));
         expect(eq(valueOr(mapAt(settings, "last"), "index", 99), 1));
     };
@@ -213,7 +229,7 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         DirectDrive drive({{"display", false}});
         drive.send({{"index", 0}});
         drive.block.processScheduledMessages();
-        expect(eq(drive.block.n_messages.value, gr::Size_t{1}));
+        expect(eq(nMessages(drive.block), gr::Size_t{1}));
         const std::optional<gr::property_map> stored = drive.get(MessageDebug::kStored);
         expect(fatal(stored.has_value())) << "the block replies on Stored";
         expect(stored->empty());
@@ -228,8 +244,8 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         const std::string printed = capture.release();
 
         expect(printed.empty()) << printed;
-        expect(!drive.block.display.value);
-        expect(eq(drive.block.n_messages.value, gr::Size_t{1}));
+        expect(!drive.block.settings.display.value);
+        expect(eq(nMessages(drive.block), gr::Size_t{1}));
     };
 
     auto storeChangeDuringRun = []<typename TScheduler>() {
@@ -244,23 +260,26 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         gr::MsgPortIn  fromScheduler;
         expect(fatal(toScheduler.connect(scheduler.msgIn).has_value()));
         expect(fatal(scheduler.msgOut.connect(fromScheduler).has_value()));
-        source.control = &toScheduler;
-        source.change  = gr::property_map{{"store", gr::Size_t{1}}};
+        source.control  = &toScheduler;
+        source.receiver = &debug;
+        source.change   = gr::property_map{{"store", gr::Size_t{1}}};
         expect(fatal(scheduler.runAndWait().has_value()));
 
-        expect(eq(debug.n_messages.value, gr::Size_t{4}));
-        expect(eq(debug.store.value, gr::Size_t{1})) << "the change applies during the run";
+        // the block's first work call ends its own run, and a block of a graph that does not run holds a change until
+        // its next start
+        expect(eq(nMessages(debug), gr::Size_t{4}));
+        expect(eq(debug.settings.store.value, gr::Size_t{3})) << "the change waits for the block's next start";
         gr::Message request;
         request.cmd                            = gr::message::Command::Get;
         const std::optional<gr::Message> reply = debug.propertyCallbackStored(MessageDebug::kStored, request);
         expect(fatal(reply.has_value() && reply->data.has_value()));
-        expect(eq(reply->data->size(), 1UZ)) << "store 1 keeps one message";
-        expect(eq(valueOr(mapAt(mapAt(*reply->data, "3"), "data"), "index", gr::Size_t{99}), gr::Size_t{3})) << "the kept message is the last one";
+        expect(eq(reply->data->size(), 3UZ)) << "store 3 keeps three messages";
+        expect(eq(valueOr(mapAt(mapAt(*reply->data, "3"), "data"), "index", gr::Size_t{99}), gr::Size_t{3})) << "the last message is kept";
     };
 
-    "a store change during a single-threaded run trims the kept messages"_test = [&storeChangeDuringRun] { storeChangeDuringRun.template operator()<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::singleThreaded>>(); };
+    "a store change during a single-threaded run waits for the next start"_test = [&storeChangeDuringRun] { storeChangeDuringRun.template operator()<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::single_threaded>>(); };
 
-    "a store change during a multi-threaded run trims the kept messages"_test = [&storeChangeDuringRun] { storeChangeDuringRun.template operator()<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>>(); };
+    "a store change during a multi-threaded run waits for the next start"_test = [&storeChangeDuringRun] { storeChangeDuringRun.template operator()<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multi_threaded>>(); };
 
     "display true prints one line per message"_test = [] {
         DirectDrive   drive({{"name", std::string("debug")}});
@@ -280,7 +299,7 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         const std::string printed = capture.release();
 
         expect(printed.empty()) << printed;
-        expect(eq(drive.block.n_messages.value, gr::Size_t{1})) << "the message is still counted";
+        expect(eq(nMessages(drive.block), gr::Size_t{1})) << "the message is still counted";
     };
 
     "an error message prints its error"_test = [] {
@@ -292,8 +311,8 @@ const boost::ut::suite<"MessageDebug"> messageDebugTests = [] {
         const std::string printed = capture.release();
 
         expect(eq(printed, std::format("debug: cmd: Notify, serviceName: 'sender', endpoint: 'value', error: {}\n", error)));
-        expect(eq(drive.block.n_messages.value, gr::Size_t{1}));
-        expect(drive.block.last.value.empty()) << "an error message carries no data map";
+        expect(eq(nMessages(drive.block), gr::Size_t{1}));
+        expect(lastData(drive.block).empty()) << "an error message carries no data map";
     };
 };
 

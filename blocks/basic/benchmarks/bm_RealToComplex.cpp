@@ -25,8 +25,7 @@ constexpr std::size_t kRepeats = 7UZ;
 
 [[nodiscard]] gr::blocks::basic::RealToComplex<float> makeBlock(float transition) {
     gr::blocks::basic::RealToComplex<float> block({{"transition", transition}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

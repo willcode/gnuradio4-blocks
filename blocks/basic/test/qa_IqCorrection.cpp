@@ -26,6 +26,7 @@
 
 #include <gnuradio-4.0/basic/IqCorrection.hpp>
 #include <gnuradio-4.0/sync/Pll.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 namespace gr::blocks::basic::reference {
@@ -36,17 +37,27 @@ struct DcOffsetCorrect : Block<DcOffsetCorrect<T>> {
     PortIn<T>  in;
     PortOut<T> out;
 
-    Annotated<bool, "enabled">                                                                                   enabled     = false;
-    Annotated<float, "sample_rate", Limits<0.f, std::numeric_limits<float>::max(), detail::kSampleRatePositive>> sample_rate = 96000.f;
-    Annotated<double, "tau", Limits<0.0, std::numeric_limits<double>::max(), detail::kTauPositive>>              tau         = 1.0;
-    Annotated<double, "alpha">                                                                                   alpha       = 0.0;
-    Annotated<double, "corner_hz">                                                                               corner_hz   = 0.0;
+    struct Settings {
+        Annotated<bool>                     enabled     = false;
+        Annotated<float, Limits<Min<0.f>>>  sample_rate = 96000.f;
+        Annotated<double, Limits<Min<0.0>>> tau         = 1.0;
 
-    GR_MAKE_REFLECTABLE(DcOffsetCorrect, in, out, enabled, sample_rate, tau, alpha, corner_hz);
+        GR_MAKE_REFLECTABLE(Settings, enabled, sample_rate, tau);
+    } settings;
 
-    bool   _enabled       = enabled.value;
-    float  _sampleRate    = sample_rate.value;
-    double _tau           = tau.value;
+    struct Status {
+        // the values the default settings derive
+        Annotated<double> alpha     = 1.0 / (1.0 + Settings{}.tau.value * static_cast<double>(Settings{}.sample_rate.value));
+        Annotated<double> corner_hz = alpha.value * static_cast<double>(Settings{}.sample_rate.value) / (2.0 * std::numbers::pi);
+
+        GR_MAKE_REFLECTABLE(Status, alpha, corner_hz);
+    } status;
+
+    GR_MAKE_REFLECTABLE(DcOffsetCorrect, in, out, settings, status);
+
+    bool   _enabled       = settings.enabled.value;
+    float  _sampleRate    = settings.sample_rate.value;
+    double _tau           = settings.tau.value;
     double _alpha         = 0.0;
     double _oneMinusAlpha = 1.0;
     double _real          = 0.0;
@@ -54,19 +65,14 @@ struct DcOffsetCorrect : Block<DcOffsetCorrect<T>> {
 
     explicit DcOffsetCorrect(property_map init = {}) : Block<DcOffsetCorrect<T>>(std::move(init)) { accept(_enabled, _sampleRate, _tau, 1.0 / (1.0 + _tau * static_cast<double>(_sampleRate))); }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        const float  rate      = newSettings.contains("sample_rate") ? sample_rate.value : _sampleRate;
-        const double seconds   = newSettings.contains("tau") ? tau.value : _tau;
-        const double nextAlpha = 1.0 / (1.0 + seconds * static_cast<double>(rate));
-        if (!(nextAlpha > 0.0) || nextAlpha > 1.0) {
-            throw gr::exception("alpha must lie in (0, 1]");
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        if (const double nextAlpha = 1.0 / (1.0 + s.tau * static_cast<double>(s.sample_rate)); !(nextAlpha > 0.0) || nextAlpha > 1.0) {
+            return gr::Refused(s.tau, "must give an alpha > 0 and <= 1");
         }
-        const double nextCorner = nextAlpha * static_cast<double>(rate) / (2.0 * std::numbers::pi);
-        if ((newSettings.contains("alpha") && alpha.value != nextAlpha) || (newSettings.contains("corner_hz") && corner_hz.value != nextCorner)) {
-            throw gr::exception("alpha and corner_hz follow from tau and sample_rate");
-        }
-        accept(newSettings.contains("enabled") ? enabled.value : _enabled, rate, seconds, nextAlpha);
+        return {};
     }
+
+    void applySettings(const Settings& s) { accept(s.enabled, s.sample_rate, s.tau, 1.0 / (1.0 + s.tau * static_cast<double>(s.sample_rate))); }
 
     void reset() {
         _real = 0.0;
@@ -104,13 +110,13 @@ private:
     [[nodiscard]] static constexpr double flushed(double value) noexcept { return std::abs(value) < std::numeric_limits<double>::min() ? 0.0 : value; }
 
     void accept(bool on, float rate, double seconds, double nextAlpha) {
-        _enabled       = on;
-        _sampleRate    = rate;
-        _tau           = seconds;
-        _alpha         = nextAlpha;
-        _oneMinusAlpha = 1.0 - nextAlpha;
-        alpha          = nextAlpha;
-        corner_hz      = nextAlpha * static_cast<double>(rate) / (2.0 * std::numbers::pi);
+        _enabled         = on;
+        _sampleRate      = rate;
+        _tau             = seconds;
+        _alpha           = nextAlpha;
+        _oneMinusAlpha   = 1.0 - nextAlpha;
+        status.alpha     = nextAlpha;
+        status.corner_hz = nextAlpha * static_cast<double>(rate) / (2.0 * std::numbers::pi);
     }
 };
 
@@ -132,26 +138,30 @@ constexpr double kPi = std::numbers::pi;
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings = {}) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
 template<typename TBlock>
 void apply(TBlock& block, gr::property_map settings) {
-    std::ignore = block.settings().setStaged(std::move(settings));
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), std::move(settings));
 }
 
-/// Stages and applies `settings`. True when every key is refused.
 template<typename TBlock>
 [[nodiscard]] bool refused(TBlock& block, gr::property_map settings) {
-    const std::size_t keys = settings.size();
-    std::ignore            = block.settings().setStaged(std::move(settings));
-    return block.settings().applyStagedParameters().failedParameters.size() == keys;
+    return gr::testing::refusesAll(block, std::move(settings));
 }
 
-/// Drives a processBulk block over `input` in one call, or a processOne block one sample at a time.
+/// Copies the block's status for a host, as core does after a work call it runs, when the block holds one.
+template<typename TBlock>
+void copyStatus(TBlock& block) {
+    if constexpr (requires { block.status; }) {
+        gr::settings::detail::FrameworkAccess::copyStatus(gr::settings::detail::settingsOf(block));
+    }
+}
+
+/// Drives a processBulk block over `input` in one call, or a processOne block one sample at a time, then copies its
+/// status as a work call does.
 template<typename TBlock, typename T>
 [[nodiscard]] std::vector<T> drive(TBlock& block, std::span<const T> input) {
     std::vector<T> output(input.size());
@@ -162,6 +172,7 @@ template<typename TBlock, typename T>
             output[i] = block.processOne(input[i]);
         }
     }
+    copyStatus(block);
     return output;
 }
 
@@ -176,13 +187,14 @@ template<typename TBlock, typename T>
     const std::vector<T> input{sample};
     std::vector<T>       output(1UZ);
     std::ignore = block.processBulk(std::span<const T>(input), std::span<T>(output));
+    copyStatus(block);
     return output[0];
 }
 
-/// The value `settings().get()` returns for `key`, or NaN when it holds none as a `double`.
+/// The value `get()` returns for `key`, or NaN when it holds none as a `double`.
 template<typename TBlock>
 [[nodiscard]] double reported(TBlock& block, const char* key) {
-    const gr::property_map active = block.settings().get();
+    const gr::property_map active = gr::testing::inForce(gr::settings::detail::settingsOf(block));
     const auto             found  = active.find(gr::property_map::key_type{key});
     if (found == active.end() || found->second.template get_if<double>() == nullptr) {
         return std::numeric_limits<double>::quiet_NaN();
@@ -194,8 +206,8 @@ template<typename TBlock>
 template<typename TBlock>
 [[nodiscard]] gr::property_map savedSettings(TBlock& block) {
     gr::property_map stored;
-    const auto&      writable = block.settings().writableMembers();
-    for (const auto& [key, value] : block.settings().get()) {
+    const auto&      writable = block.writableMembers();
+    for (const auto& [key, value] : gr::testing::inForce(gr::settings::detail::settingsOf(block))) {
         if (writable.contains(std::string(key))) {
             stored.insert_or_assign(key, value);
         }
@@ -297,7 +309,7 @@ struct TaggedRun {
     auto&     source = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", 4000U}, {"mark_tag", false}});
     source._tags     = tags;
     auto& dc         = graph.emplaceBlock<FrontEndCorrection<CF>>({{"enable_dc", true}});
-    dc.settings().setTagCouplings({{"tau", std::string("tau")}});
+    boost::ut::expect(dc.setTagCouplings({{"tau", std::string("tau")}}).has_value());
     auto& sink = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
     TaggedRun run;
@@ -307,7 +319,7 @@ struct TaggedRun {
     gr::scheduler::Simple scheduler;
     run.ran         = scheduler.exchange(std::move(graph)).has_value() && scheduler.runAndWait().has_value();
     run.samples     = std::vector<CF>(sink._samples.begin(), sink._samples.end());
-    run.tau         = dc.tau.value;
+    run.tau         = dc.settings.tau.value;
     run.reportedTau = reported(dc, "tau");
     return run;
 }
@@ -407,7 +419,7 @@ constexpr std::size_t kSwapCount = 1000UZ;
     auto&     source = graph.emplaceBlock<TagSource<CF, ProcessFunction::USE_PROCESS_BULK>>({{"n_samples_max", static_cast<gr::Size_t>(kSwapCount)}, {"values", gr::Tensor<CF>{CF(1.f, 2.f)}}});
     source._tags     = std::move(tags);
     auto& swap       = graph.emplaceBlock<IqSwap<CF>>(settings);
-    swap.settings().setTagCouplings(couplings);
+    boost::ut::expect(swap.setTagCouplings(couplings).has_value());
     auto& sink = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
     SwapRun run;
@@ -491,7 +503,7 @@ struct Change {
 
 /// A block that names its DC switch `enabled`, as the reference block does.
 template<typename TBlock>
-concept NamesEnabled = requires(TBlock block) { block.enabled; };
+concept NamesEnabled = requires(TBlock block) { block.settings.enabled; };
 
 /// @p settings for @p TBlock: the reference block names its DC switch `enabled`.
 template<typename TBlock>
@@ -548,7 +560,7 @@ template<typename TBlock>
     source._tags      = tags;
     auto&       dc    = graph.emplaceBlock<TBlock>(settingsFor<TBlock>({{"enable_dc", true}, {"tau", 0.001}}));
     const char* dcKey = NamesEnabled<TBlock> ? "enabled" : "enable_dc";
-    dc.settings().setTagCouplings({{dcKey, std::string("enabled")}, {"tau", std::string("tau")}});
+    boost::ut::expect(dc.setTagCouplings({{dcKey, std::string("enabled")}, {"tau", std::string("tau")}}).has_value());
     auto& sink = graph.emplaceBlock<TagSink<CF, ProcessFunction::USE_PROCESS_BULK>>({{"name", "TagSink"}});
 
     SinkRun run;
@@ -746,7 +758,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         constexpr float kRate = 96000.f;
         for (const double wanted : {0.5, 0.1, 1e-5}) {
             FrontEndCorrection<CF> block = make<FrontEndCorrection<CF>>({{"enable_dc", true}, {"sample_rate", kRate}, {"tau", tauFor(wanted, static_cast<double>(kRate))}});
-            expect(approx(block.alpha.value, wanted, wanted * 1e-9)) << "alpha comes from tau and the rate";
+            expect(approx(block.status.alpha.value, wanted, wanted * 1e-9)) << "alpha comes from tau and the rate";
 
             const std::size_t     count = static_cast<std::size_t>(1.5 * std::log(1e-6 / std::numbers::sqrt2) / std::log1p(-wanted)) + 64UZ;
             const std::vector<CF> y     = drive(block, std::span<const CF>(flat(count, CF(1.f, 1.f))));
@@ -768,7 +780,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         constexpr float kRate = 96000.f;
         for (const double seconds : {0.01, 0.1}) {
             FrontEndCorrection<CF> block  = make<FrontEndCorrection<CF>>({{"enable_dc", true}, {"sample_rate", kRate}, {"tau", seconds}});
-            const double           alpha  = block.alpha;
+            const double           alpha  = block.status.alpha;
             const std::size_t      settle = static_cast<std::size_t>(30.0 / alpha);
 
             const gr::property_map settings{{"enable_dc", true}, {"sample_rate", kRate}, {"tau", seconds}};
@@ -778,7 +790,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             const std::vector<CF>  midband   = drive(atMidband, std::span<const CF>(tone(settle + 4096UZ, 1.0, 0.25)));
 
             const double ratio = meanMagnitude(std::span<const CF>(corner).last(4096UZ)) / meanMagnitude(std::span<const CF>(midband).last(4096UZ));
-            expect(approx(ratio, 1.0 / std::numbers::sqrt2, 0.02 / std::numbers::sqrt2)) << std::format("tau {} s: the -3 dB point sits at alpha*fs/(2*pi) = {:.4f} Hz", seconds, block.corner_hz.value);
+            expect(approx(ratio, 1.0 / std::numbers::sqrt2, 0.02 / std::numbers::sqrt2)) << std::format("tau {} s: the -3 dB point sits at alpha*fs/(2*pi) = {:.4f} Hz", seconds, block.status.corner_hz.value);
 
             FrontEndCorrection<CF> atNyquist = make<FrontEndCorrection<CF>>(settings);
             std::vector<CF>        alternating(settle + 4096UZ);
@@ -834,7 +846,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
 
         constexpr float        kRate = 96000.f;
         FrontEndCorrection<CF> block = make<FrontEndCorrection<CF>>({{"enable_dc", true}, {"sample_rate", kRate}, {"tau", kProduct / static_cast<double>(kRate)}});
-        expect(neq(1.0 - block.alpha.value, 1.0)) << "in double it does not";
+        expect(neq(1.0 - block.status.alpha.value, 1.0)) << "in double it does not";
 
         const std::size_t     count = static_cast<std::size_t>(4.0 * kProduct);
         const std::vector<CF> dc    = flat(1UZ << 20, CF(0.05f, 0.f));
@@ -864,7 +876,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
 
         apply(block, {{"tau", 10.0 * kProduct / static_cast<double>(kRate)}});
         expect(approx(block.dcEstimate().real(), converged, 1e-4)) << "a tau change keeps the converged estimate";
-        expect(approx(block.alpha.value, 1.0 / (1.0 + 10.0 * kProduct), 1e-12)) << "only how fast it chases";
+        expect(approx(block.status.alpha.value, 1.0 / (1.0 + 10.0 * kProduct), 1e-12)) << "only how fast it chases";
     };
 
     "the estimate and every output follow the per-sample form within one rounding, in any split into calls"_test = [] {
@@ -1128,22 +1140,29 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
     };
 
     "degenerate settings"_test = [] {
-        expect(throws([] { std::ignore = make<FrontEndCorrection<CF>>({{"tau", 0.0}}); }));
-        expect(throws([] { std::ignore = make<FrontEndCorrection<CF>>({{"tau", -1.0}}); }));
-        expect(throws([] { std::ignore = make<FrontEndCorrection<CF>>({{"sample_rate", 0.f}}); }));
-        expect(throws([] { std::ignore = make<FrontEndCorrection<CF>>({{"sample_rate", -96000.f}}); }));
-        expect(throws([] { std::ignore = make<FrontEndCorrection<CF>>({{"sample_rate", std::numeric_limits<float>::quiet_NaN()}}); }));
-        expect(throws([] { std::ignore = make<FrontEndCorrection<CF>>({{"sample_rate", std::numeric_limits<float>::infinity()}}); }));
+        expect(gr::testing::initRefused<FrontEndCorrection<CF>>({{"tau", 0.0}}));
+        expect(gr::testing::initRefused<FrontEndCorrection<CF>>({{"tau", -1.0}}));
+        expect(gr::testing::initRefused<FrontEndCorrection<CF>>({{"sample_rate", 0.f}}));
+        expect(gr::testing::initRefused<FrontEndCorrection<CF>>({{"sample_rate", -96000.f}}));
+        expect(gr::testing::initRefused<FrontEndCorrection<CF>>({{"sample_rate", std::numeric_limits<float>::quiet_NaN()}}));
 
         FrontEndCorrection<CF> block = make<FrontEndCorrection<CF>>({{"sample_rate", 96000.f}, {"tau", 1.0}});
         expect(refused(block, {{"tau", 0.0}})) << "and on a live change, not only at construction";
         expect(refused(block, {{"sample_rate", -1.f}}));
-        expect(eq(block.tau.value, 1.0) && eq(block.sample_rate.value, 96000.f)) << "the members keep the accepted values";
+        expect(eq(block.settings.tau.value, 1.0) && eq(block.settings.sample_rate.value, 96000.f)) << "the members keep the accepted values";
+
+        // tau * sample_rate past double gives alpha 0, which the DC average refuses; an infinite iq_tau gives a run no weight
+        expect(gr::testing::initRefused<FrontEndCorrection<CF>>({{"tau", 1e308}, {"sample_rate", 1e10f}}));
+        expect(refused(block, {{"tau", 1e308}})) << "alpha 0 at 96 kHz";
+        expect(refused(block, {{"tau", std::numeric_limits<double>::infinity()}}));
+        expect(refused(block, {{"iq_tau", 1e308}})) << "iq_tau * sample_rate past double";
+        expect(eq(block.settings.tau.value, 1.0) && eq(block.settings.iq_tau.value, 0.1)) << "the members keep the accepted values";
+        expect(eq(block.status.alpha.value, 1.0 / (1.0 + 96000.0))) << "alpha reports the coefficient the average runs";
 
         for (const double seconds : {1e-9, 1e-3, 1.0, 1e6}) {
             for (const float rate : {1.f, 96000.f, 25e6f}) {
                 FrontEndCorrection<CF> valid = make<FrontEndCorrection<CF>>({{"sample_rate", rate}, {"tau", seconds}});
-                expect(gt(valid.alpha.value, 0.0) && le(valid.alpha.value, 1.0)) << std::format("alpha stays in (0, 1] at tau {} and fs {}", seconds, rate);
+                expect(gt(valid.status.alpha.value, 0.0) && le(valid.status.alpha.value, 1.0)) << std::format("alpha stays in (0, 1] at tau {} and fs {}", seconds, rate);
             }
         }
     };
@@ -1162,55 +1181,51 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         expect(same(0UZ, 5000UZ));
 
         expect(refused(block, {{"tau", 0.0}})) << "the limits refuse tau = 0";
-        expect(eq(block.tau.value, 0.01) && eq(reported(block, "tau"), 0.01)) << "the member and settings().get() keep the accepted tau";
+        expect(eq(block.settings.tau.value, 0.01) && eq(reported(block, "tau"), 0.01)) << "the member and get() keep the accepted tau";
         expect(nothrow([&block] { apply(block, {{"sample_rate", 48000.f}}); })) << "a valid rate is accepted";
         apply(reference, {{"sample_rate", 48000.f}});
-        expect(eq(block.alpha.value, 1.0 / (1.0 + 0.01 * 48000.0))) << "alpha follows the accepted tau and the new rate";
+        expect(eq(block.status.alpha.value, 1.0 / (1.0 + 0.01 * 48000.0))) << "alpha follows the accepted tau and the new rate";
         expect(same(5000UZ, 5000UZ)) << "after a refused tau";
 
-        expect(throws([&block] { apply(block, {{"tau", 1e304}}); })) << "a tau whose product with the rate overflows is refused";
-        expect(eq(block.tau.value, 0.01) && eq(reported(block, "tau"), 0.01)) << "the member and settings().get() take back the accepted tau";
-        expect(throws([&block] { apply(block, {{"tau", 1e304}}); })) << "the same value sent again is refused again";
-        expect(same(10000UZ, 5000UZ)) << "after a refused product, the estimate keeps tracking at the accepted alpha";
-
-        std::ignore      = block.settings().setStaged({{"enable_dc", false}, {"tau", 0.0}});
-        const auto mixed = block.settings().applyStagedParameters();
-        expect(eq(mixed.failedParameters.size(), 1UZ) && mixed.failedParameters.contains(gr::property_map::key_type{"tau"})) << "the limits refuse tau alone";
-        expect(!block._dcEnabled) << "and the toggle in the same application is accepted";
+        const auto mixed = block.set({{"enable_dc", false}, {"tau", 0.0}});
+        expect(!mixed.has_value() && eq(mixed.error().size(), 1UZ) && mixed.error().front().key == "tau") << "the limits refuse the call and name tau alone";
+        expect(block.settings.enable_dc.value) << "and the toggle in the same call stays as it was";
+        apply(block, {{"enable_dc", false}});
         apply(reference, {{"enable_dc", false}});
         expect(same(15000UZ, 2000UZ)) << "disabled";
         apply(block, {{"enable_dc", true}});
         apply(reference, {{"enable_dc", true}});
 
-        expect(throws([&block] { apply(block, {{"alpha", 0.5}}); })) << "alpha follows from tau and sample_rate and takes no write";
-        expect(throws([&block] { apply(block, {{"corner_hz", 1.0}}); })) << "nor does corner_hz";
-        expect(eq(reported(block, "alpha"), reference.alpha.value)) << "settings().get() returns the derived alpha";
+        apply(block, {{"alpha", 0.5}});
+        apply(block, {{"corner_hz", 1.0}});
+        expect(eq(block.status.alpha.value, reference.status.alpha.value) && eq(block.status.corner_hz.value, reference.status.corner_hz.value)) << "alpha and corner_hz follow from tau and sample_rate and skip a written value";
+        expect(eq(reported(block, "alpha"), reference.status.alpha.value)) << "get() returns the derived alpha";
         expect(same(17000UZ, 5000UZ)) << "the block computes on the derived alpha";
         apply(block, {{"tau", 0.02}});
         apply(reference, {{"tau", 0.02}});
-        expect(eq(block.alpha.value, reference.alpha.value) && eq(block.corner_hz.value, reference.corner_hz.value)) << "an accepted application writes both derived values again";
+        expect(eq(block.status.alpha.value, reference.status.alpha.value) && eq(block.status.corner_hz.value, reference.status.corner_hz.value)) << "an accepted application writes both derived values again";
 
         expect(refused(block, {{"tau", -1.0}}));
         expect(refused(block, {{"tau", -1.0}})) << "the same value sent again is refused again, since the member kept the accepted tau";
         expect(refused(block, {{"sample_rate", std::numeric_limits<float>::quiet_NaN()}}));
-        expect(eq(block.sample_rate.value, 48000.f)) << "a refused NaN never reaches the member";
+        expect(eq(block.settings.sample_rate.value, 48000.f)) << "a refused NaN never reaches the member";
         expect(same(22000UZ, 8000UZ)) << "after the repeated refusals";
     };
 
     "a block made from the settings saved from a configured block computes as that block"_test = [] {
         FrontEndCorrection<CF> configured = make<FrontEndCorrection<CF>>({{"enable_dc", true}, {"sample_rate", 2.4e6f}, {"tau", 0.01}});
         const gr::property_map stored     = savedSettings(configured);
-        expect(stored.contains(gr::property_map::key_type{"alpha"}) && stored.contains(gr::property_map::key_type{"corner_hz"})) << "the saved settings carry the derived values";
+        expect(!stored.contains(gr::property_map::key_type{"alpha"}) && !stored.contains(gr::property_map::key_type{"corner_hz"})) << "the saved settings leave out the derived values";
 
         const auto reloaded = loaded<FrontEndCorrection<CF>>(stored);
         expect(reloaded->state() == gr::lifecycle::State::INITIALISED) << "the block accepts the derived values it computes itself";
-        expect(eq(reloaded->alpha.value, configured.alpha.value) && eq(reloaded->corner_hz.value, configured.corner_hz.value));
+        expect(eq(reloaded->status.alpha.value, configured.status.alpha.value) && eq(reloaded->status.corner_hz.value, configured.status.corner_hz.value));
         const std::vector<CF> x = noise(4000UZ, 0x5be0cd19137e2179ULL, 0.05);
         expect(std::ranges::equal(drive(*reloaded, x), drive(configured, x))) << "and computes on the saved settings";
 
         gr::property_map edited = stored;
         edited.insert_or_assign(gr::property_map::key_type{"alpha"}, 0.5);
-        expect(loaded<FrontEndCorrection<CF>>(edited)->state() == gr::lifecycle::State::ERROR) << "a saved alpha other than the derived one is refused";
+        expect(throws([&edited] { std::ignore = loaded<FrontEndCorrection<CF>>(edited); })) << "a saved alpha is refused, naming the status key";
     };
 
     "a tau outside its limits on a tag mid-run leaves the run going on the accepted tau"_test = [] {
@@ -1221,7 +1236,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         expect(got.ran) << "the refusals go out as plain messages, and the run completes";
         expect(eq(got.samples.size(), 4000UZ));
         expect(std::ranges::equal(got.samples, clean.samples)) << "the block computes on the accepted tau from the refused tags on";
-        expect(eq(got.tau, 0.01) && eq(got.reportedTau, 0.01)) << "the member and settings().get() keep the accepted tau";
+        expect(eq(got.tau, 0.01) && eq(got.reportedTau, 0.01)) << "the member and get() keep the accepted tau";
     };
 
     "a sample with a NaN or infinite component leaves the estimate where it was"_test = [] {
@@ -1308,8 +1323,8 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         constexpr std::size_t kStep = 500UZ;
 
         FrontEndCorrection<CF> block = make<FrontEndCorrection<CF>>({{"enable_dc", true}, {"sample_rate", kRate}, {"tau", tauFor(0.1, static_cast<double>(kRate))}});
-        const double           alpha = block.alpha.value; // the block's own coefficients, so only the flush can differ
-        const double           rest  = 1.0 - block.alpha.value;
+        const double           alpha = block.status.alpha.value; // the block's own coefficients, so only the flush can differ
+        const double           rest  = 1.0 - block.status.alpha.value;
 
         double      real      = 0.0;
         double      imag      = 0.0;
@@ -1413,7 +1428,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             worst = std::max(worst, imageDbAt(after, k));
         }
         expect(lt(worst, -50.0)) << std::format("every tone's image after the block lies below -50 dBc, the worst at {:.1f}", worst);
-        expect(approx(block.iq_gain_db.value, 1.0, 0.05) && approx(block.iq_phase_deg.value, 3.0, 0.5)) << std::format("the block reads {} dB and {} deg", block.iq_gain_db.value, block.iq_phase_deg.value);
+        expect(approx(block.status.iq_gain_db.value, 1.0, 0.05) && approx(block.status.iq_phase_deg.value, 3.0, 0.5)) << std::format("the block reads {} dB and {} deg", block.status.iq_gain_db.value, block.status.iq_phase_deg.value);
     };
 
     "an AM station tuned to the center leaves no image of its own"_test = [] {
@@ -1453,7 +1468,7 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
         FrontEndCorrection<CF>              block = make<FrontEndCorrection<CF>>({{"sample_rate", 1e6f}, {"tau", 0.002}, {"iq_tau", 0.004}});
         gr::filter::SinglePoleAverage<CF>   dc;
         gr::channel::IqImbalanceCorrector<> iq;
-        expect(fatal(dc.setAlpha(block.alpha.value) && iq.setTimeConstant(block.iq_tau.value * static_cast<double>(block.sample_rate.value))));
+        expect(fatal(dc.setAlpha(block.status.alpha.value) && iq.setTimeConstant(block.settings.iq_tau.value * static_cast<double>(block.settings.sample_rate.value))));
 
         std::size_t mismatched = 0UZ;
         std::size_t dcMovedOff = 0UZ;
@@ -1470,8 +1485,8 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             }
             for (std::size_t at = stretch * kStretch; at < (stretch + 1UZ) * kStretch; at += kCall) {
                 const std::complex<double> dcBefore    = block.dcEstimate();
-                const double               gainBefore  = block.iq_gain_db.value;
-                const double               phaseBefore = block.iq_phase_deg.value;
+                const double               gainBefore  = block.status.iq_gain_db.value;
+                const double               phaseBefore = block.status.iq_phase_deg.value;
                 const std::span<const CF>  in          = std::span<const CF>(x).subspan(at, kCall);
                 const std::vector<CF>      got         = drive(block, in);
                 std::vector<CF>            want(kCall);
@@ -1486,17 +1501,17 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
                 }
                 mismatched += got == want ? 0UZ : 1UZ;
                 const bool dcMoved = block.dcEstimate() != dcBefore;
-                const bool iqMoved = block.iq_gain_db.value != gainBefore || block.iq_phase_deg.value != phaseBefore;
+                const bool iqMoved = block.status.iq_gain_db.value != gainBefore || block.status.iq_phase_deg.value != phaseBefore;
                 (dcOn ? dcMovedOn : dcMovedOff) += dcMoved ? 1UZ : 0UZ;
                 (iqOn ? iqMovedOn : iqMovedOff) += iqMoved ? 1UZ : 0UZ;
-                const bool reportedOld = reported(block, "iq_gain_db") != block.iq_gain_db.value || reported(block, "iq_phase_deg") != block.iq_phase_deg.value;
+                const bool reportedOld = reported(block, "iq_gain_db") != block.status.iq_gain_db.value || reported(block, "iq_phase_deg") != block.status.iq_phase_deg.value;
                 stale += reportedOld ? 1UZ : 0UZ;
             }
         }
         expect(eq(mismatched, 0UZ)) << "every call's output is what its state's parts give, bit for bit";
         expect(eq(dcMovedOff, 0UZ) && eq(iqMovedOff, 0UZ)) << "an estimate holds while its part is off";
         expect(gt(dcMovedOn, 0UZ) && gt(iqMovedOn, 0UZ)) << "and moves while it is on";
-        expect(eq(stale, 0UZ)) << "settings().get() returns the imbalance estimate the members hold after every call";
+        expect(eq(stale, 0UZ)) << "get() returns the imbalance estimate the members hold after every call";
         expect(neq(iq.scale(), 1.f)) << "the correction the states compare is not the identity";
     };
 
@@ -1528,11 +1543,11 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             FrontEndCorrection<CF> block = make<FrontEndCorrection<CF>>(settings);
             settings.insert_or_assign("swap_iq", swapOn);
             FrontEndCorrection<CF> withSwap = make<FrontEndCorrection<CF>>(settings);
-            expect(eq(withSwap.swap_iq.value, swapOn));
+            expect(eq(withSwap.settings.swap_iq.value, swapOn));
 
             gr::filter::SinglePoleAverage<CF>   dc;
             gr::channel::IqImbalanceCorrector<> iq;
-            expect(fatal(dc.setAlpha(block.alpha.value) && iq.setTimeConstant(block.iq_tau.value * static_cast<double>(block.sample_rate.value))));
+            expect(fatal(dc.setAlpha(block.status.alpha.value) && iq.setTimeConstant(block.settings.iq_tau.value * static_cast<double>(block.settings.sample_rate.value))));
 
             const std::span<const CF> fed       = swapOn ? std::span<const CF>(exchanged) : std::span<const CF>(x);
             std::size_t               differing = 0UZ;
@@ -1603,12 +1618,12 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             for (std::size_t at = 0UZ; at < kTotal; at += kCall) {
                 if (at == kToggle) {
                     const std::complex<double> dcBefore = toggled.dcEstimate();
-                    const double               gain     = toggled.iq_gain_db.value;
-                    const double               phase    = toggled.iq_phase_deg.value;
+                    const double               gain     = toggled.status.iq_gain_db.value;
+                    const double               phase    = toggled.status.iq_phase_deg.value;
                     apply(toggled, {{"swap_iq", toOn}});
                     expect(toggled.dcEstimate() == std::complex<double>(dcBefore.imag(), dcBefore.real())) << "the DC estimate exchanges its components";
-                    expect(approx(toggled.iq_gain_db.value, -gain, 1e-12) && approx(toggled.iq_phase_deg.value, phase, 1e-12)) << "the gain of Q against I inverts and the quadrature error stays";
-                    expect(eq(reported(toggled, "iq_gain_db"), toggled.iq_gain_db.value)) << "and the settings carry it";
+                    expect(approx(toggled.status.iq_gain_db.value, -gain, 1e-12) && approx(toggled.status.iq_phase_deg.value, phase, 1e-12)) << "the gain of Q against I inverts and the quadrature error stays";
+                    expect(eq(reported(toggled, "iq_gain_db"), toggled.status.iq_gain_db.value)) << "and the settings carry it";
                     expect(neq(gain, 0.0)) << "from an estimate that had moved";
                 }
                 const std::span<const CF> in   = std::span<const CF>(x).subspan(at, kCall);
@@ -1666,21 +1681,21 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
                     }
                 }
                 expect(eq(mismatched, 0UZ) && gt(compared, 0UZ)) << std::format("{} off while swap_iq goes {}: every call from the change on equals the block swapped from the start", part, toOn ? "on" : "off");
-                expect(toggled.dcEstimate() == reference.dcEstimate() && toggled.iq_gain_db.value == reference.iq_gain_db.value) << "and the estimates are the same";
+                expect(toggled.dcEstimate() == reference.dcEstimate() && toggled.status.iq_gain_db.value == reference.status.iq_gain_db.value) << "and the estimates are the same";
             }
         }
     };
 
     "a real stream refuses swap_iq set to true and takes it set to false"_test = [] {
         FrontEndCorrection<float> real = make<FrontEndCorrection<float>>({});
-        expect(throws([&real] { apply(real, {{"swap_iq", true}}); })) << "there is no Q to exchange";
-        expect(!real.swap_iq.value);
+        expect(refused(real, {{"swap_iq", true}})) << "there is no Q to exchange";
+        expect(!real.settings.swap_iq.value);
         expect(!refused(real, {{"swap_iq", false}}));
-        expect(throws([] { std::ignore = make<FrontEndCorrection<float>>({{"swap_iq", true}}); }));
+        expect(gr::testing::initRefused<FrontEndCorrection<float>>({{"swap_iq", true}}));
         FrontEndCorrection<CF> complexBlock = make<FrontEndCorrection<CF>>({});
         expect(!refused(complexBlock, {{"swap_iq", true}}));
-        expect(complexBlock.swap_iq.value);
-        const gr::property_map active = complexBlock.settings().get();
+        expect(complexBlock.settings.swap_iq.value);
+        const gr::property_map active = gr::testing::inForce(gr::settings::detail::settingsOf(complexBlock));
         const auto             found  = active.find(gr::property_map::key_type{"swap_iq"});
         expect(found != active.end() && found->second.get_if<bool>() != nullptr && *found->second.get_if<bool>()) << "and the setting reads back";
     };
@@ -1692,17 +1707,17 @@ const boost::ut::suite<"IqCorrection"> iqCorrectionTests = [] {
             imbalance(x, 1.0, 3.0);
             FrontEndCorrection<CF> block = make<FrontEndCorrection<CF>>({{"enable_dc", true}, {"enable_iq", true}, {"sample_rate", 1e6f}, {"tau", 0.002}, {"iq_tau", 0.004}});
             std::ignore                  = drive(block, std::span<const CF>(x).first(16UZ * kRun));
-            const double gain            = block.iq_gain_db.value;
-            const double phase           = block.iq_phase_deg.value;
+            const double gain            = block.status.iq_gain_db.value;
+            const double phase           = block.status.iq_phase_deg.value;
 
             x[16UZ * kRun + 300UZ] = CF(0.1f, bad);
             std::ignore            = drive(block, std::span<const CF>(x).subspan(16UZ * kRun, kRun));
-            expect(block.iq_gain_db.value == gain && block.iq_phase_deg.value == phase) << "the run holding the sample leaves the imbalance estimate as it was";
+            expect(block.status.iq_gain_db.value == gain && block.status.iq_phase_deg.value == phase) << "the run holding the sample leaves the imbalance estimate as it was";
             expect(std::isfinite(block.dcEstimate().real()) && std::isfinite(block.dcEstimate().imag())) << "and the DC estimate finite";
 
             const std::vector<CF> later = drive(block, std::span<const CF>(x).subspan(17UZ * kRun));
             expect(std::ranges::all_of(later, [](CF v) { return std::isfinite(v.real()) && std::isfinite(v.imag()); })) << "every later output is finite";
-            expect(neq(block.iq_gain_db.value, gain)) << "and the estimate moves again";
+            expect(neq(block.status.iq_gain_db.value, gain)) << "and the estimate moves again";
         }
     };
 };

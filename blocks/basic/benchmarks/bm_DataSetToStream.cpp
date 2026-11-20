@@ -58,8 +58,7 @@ using gr::blocks::testing::span::TagView;
 
 [[nodiscard]] DataSetToStream<float> makeBlock() {
     DataSetToStream<float> block{};
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

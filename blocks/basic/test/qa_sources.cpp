@@ -3,7 +3,10 @@
 #include <algorithm>
 
 #include <gnuradio-4.0/Block.hpp>
+#include <gnuradio-4.0/BlockRegistry.hpp>
 #include <gnuradio-4.0/Graph.hpp>
+#include <gnuradio-4.0/Graph_yaml_importer.hpp>
+#include <gnuradio-4.0/PluginLoader.hpp>
 #include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/Tag.hpp>
 
@@ -12,6 +15,7 @@
 #include <gnuradio-4.0/basic/FunctionGenerator.hpp>
 #include <gnuradio-4.0/basic/SignalGenerator.hpp>
 #include <gnuradio-4.0/meta/UnitTestHelper.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 
 const boost::ut::suite TagTests = [] {
@@ -19,14 +23,6 @@ const boost::ut::suite TagTests = [] {
     using namespace gr;
     using namespace gr::blocks::basic;
     using namespace gr::blocks::testing;
-
-    static const auto mismatchedKey = [](const property_map& map) {
-        Tensor<pmt::Value> keys;
-        for (const auto& pair : map) {
-            keys.push_back(pair.first);
-        }
-        return keys;
-    };
 
     auto clockSourceTest = []<bool useIoThreadPool>(bool verbose = false) {
         // useIoThreadPool - true: scheduler/graph-provided thread, false: use user-provided call-back or thread
@@ -61,7 +57,7 @@ const boost::ut::suite TagTests = [] {
             std::println("finished ClockSource sched.runAndWait() w/ {}", useIoThreadPool ? "Graph/Block<T> provided-thread" : "user-provided thread");
         }
 
-        expect(eq(src.n_samples_max, n_samples)) << "src did not accept require max input samples";
+        expect(eq(src.settings.n_samples_max, n_samples)) << "src did not accept require max input samples";
         expect(eq(src.n_samples_produced, n_samples)) << "src did not produce enough output samples";
         expect(eq(static_cast<gr::Size_t>(sink1._nSamplesProduced), n_samples)) << std::format("sink1 did not consume enough input samples ({} vs. {})", sink1._nSamplesProduced, n_samples);
         expect(eq(static_cast<gr::Size_t>(sink2._nSamplesProduced), n_samples)) << std::format("sink2 did not consume enough input samples ({} vs. {})", sink2._nSamplesProduced, n_samples);
@@ -85,7 +81,7 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto& sig : signals) {
             SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.name(), 2048.f}, {"tone_frequency", 256.}, {"amplitude", 1.}, {"offset", offset}, {"phase", std::numbers::pi / 4}});
-            signalGen.init(signalGen.progress);
+            expect(signalGen.check({}).has_value());
 
             // expected values corresponds to sample_rate = 1024., tone_frequency = 128., amplitude = 1., offset = 0., phase = pi/4.
             std::map<std::string, std ::vector<double>> expResults = {{"Const", {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}}, {"Sin", {0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0., 0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0.}}, {"Cos", {0.707106, 0., -0.707106, -1., -0.7071067, 0., 0.707106, 1., 0.707106, 0., -0.707106, -1., -0.707106, 0., 0.707106, 1.}}, {"Square", {1., 1., 1., -1., -1., -1., -1., 1., 1., 1., 1., -1., -1., -1., -1., 1.}}, {"Saw", {0.25, 0.5, 0.75, -1., -0.75, -0.5, -0.25, 0., 0.25, 0.5, 0.75, -1., -0.75, -0.5, -0.25, 0.}}, {"Triangle", {0.5, 1., 0.5, 0., -0.5, -1., -0.5, 0., 0.5, 1., 0.5, 0., -0.5, -1., -0.5, 0.}}};
@@ -103,8 +99,8 @@ const boost::ut::suite TagTests = [] {
         for (const auto& [fast, precise] : std::vector<std::pair<std::string, std::string>>{{"FastSin", "Sin"}, {"FastCos", "Cos"}}) {
             SignalGenerator<double> genFast({{"signal_type", fast}, {gr::tag::SAMPLE_RATE.name(), 1000.f}, {"tone_frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
             SignalGenerator<double> genPrecise({{"signal_type", precise}, {gr::tag::SAMPLE_RATE.name(), 1000.f}, {"tone_frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
-            genFast.init(genFast.progress);
-            genPrecise.init(genPrecise.progress);
+            expect(genFast.check({}).has_value());
+            expect(genPrecise.check({}).has_value());
             for (std::size_t i = 0; i < N; ++i) {
                 expect(approx(genPrecise.generateSample(), genFast.generateSample(), 1e-10)) << std::format("{} vs {} at sample {}", fast, precise, i);
             }
@@ -115,7 +111,7 @@ const boost::ut::suite TagTests = [] {
         constexpr std::size_t N = 10000;
         for (const auto& noiseType : {"UniformNoise", "TriangularNoise", "GaussianNoise"}) {
             SignalGenerator<double> gen({{"signal_type", std::string(noiseType)}, {gr::tag::SAMPLE_RATE.name(), 1000.f}, {"amplitude", 2.f}, {"offset", 1.f}, {"seed", std::uint64_t(42)}});
-            gen.init(gen.progress);
+            expect(gen.check({}).has_value());
             double sum = 0.;
             for (std::size_t i = 0; i < N; ++i) {
                 const double v = gen.generateSample();
@@ -132,7 +128,7 @@ const boost::ut::suite TagTests = [] {
 
     "SignalGenerator integer output clamps correctly"_test = [] {
         SignalGenerator<std::int16_t> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE.name(), 1000.f}, {"tone_frequency", 50.f}, {"amplitude", 40000.f}, {"offset", 0.f}});
-        gen.init(gen.progress);
+        expect(gen.check({}).has_value());
         bool hitMax = false, hitMin = false;
         for (std::size_t i = 0; i < 100; ++i) {
             const auto v = gen.generateSample();
@@ -151,7 +147,7 @@ const boost::ut::suite TagTests = [] {
 
     "SignalGenerator complex output produces analytic signal"_test = [] {
         SignalGenerator<std::complex<double>> gen({{"signal_type", "Sin"}, {gr::tag::SAMPLE_RATE.name(), 1000.f}, {"tone_frequency", 50.f}, {"amplitude", 1.f}, {"offset", 0.f}, {"phase", 0.f}});
-        gen.init(gen.progress);
+        expect(gen.check({}).has_value());
         for (std::size_t i = 0; i < 50; ++i) {
             const auto   sample = gen.generateSample();
             const double mag    = std::abs(sample);
@@ -164,7 +160,7 @@ const boost::ut::suite TagTests = [] {
         std::vector<std::string> signals{"Const", "Sin", "Cos", "Square", "Saw", "Triangle"};
         for (const auto& sig : signals) {
             SignalGenerator<double> signalGen({{"signal_type", sig}, {gr::tag::SAMPLE_RATE.name(), 8192.f}, {"tone_frequency", 32.}, {"amplitude", 2.}, {"offset", 0.}, {"phase", std::numbers::pi / 4.}});
-            signalGen.init(signalGen.progress);
+            expect(signalGen.check({}).has_value());
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
@@ -199,33 +195,27 @@ const boost::ut::suite TagTests = [] {
 
     "FunctionGenerator ImChart test"_test = [] {
         using namespace function_generator;
-        const std::size_t         N          = 128; // test points
-        double                    startValue = 10.;
-        double                    finalValue = 20.;
-        std::vector<SignalType>   signals{Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse};
-        FunctionGenerator<double> funcGen;
-        funcGen.init(funcGen.progress);
-        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        const std::size_t       N          = 128; // test points
+        double                  startValue = 10.;
+        double                  finalValue = 20.;
+        std::vector<SignalType> signals{Const, LinearRamp, ParabolicRamp, CubicSpline, ImpulseResponse};
 
+        property_map segments;
         for (const auto& sig : signals) {
-            const property_map params{{createPropertyMapEntry(signal_type, sig), //
-                {gr::tag::SAMPLE_RATE.name(), 128.f},                            //
-                createPropertyMapEntry(start_value, startValue),                 //
-                createPropertyMapEntry(final_value, finalValue),                 //
-                createPropertyMapEntry(duration, 1.),                            //
-                createPropertyMapEntry(round_off_time, .15),                     //
-                createPropertyMapEntry(impulse_time0, .2),                       //
-                createPropertyMapEntry(impulse_time1, .15)}};
-
-            expect(funcGen.settings().set(params, SettingsCtx{now, static_cast<int>(sig)}).empty());
+            segments.insert_or_assign(toString(sig), property_map{createPropertyMapEntry(signal_type, sig), //
+                                                         createPropertyMapEntry(start_value, startValue),   //
+                                                         createPropertyMapEntry(final_value, finalValue),   //
+                                                         createPropertyMapEntry(duration, 1.),              //
+                                                         createPropertyMapEntry(round_off_time, .15),       //
+                                                         createPropertyMapEntry(impulse_time0, .2),         //
+                                                         createPropertyMapEntry(impulse_time1, .15)});
         }
-        expect(eq(funcGen.settings().getNStoredParameters(), 6UZ)); // +1 for default
+        FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.name(), 128.f}, {"segments", segments}});
+        expect(funcGen.check({}).has_value());
 
         for (const auto& sig : signals) {
-            expect(funcGen.settings().activateContext(SettingsCtx{now, static_cast<int>(sig)}) != std::nullopt);
-            const auto applyResult = funcGen.settings().applyStagedParameters();
-            // the framework writes no tag for a setting, and the generator forwards no setting itself
-            expect(applyResult.forwardParameters.empty()) << std::format("no setting is forwarded as a tag. forward keys: {}\n", gr::join(mismatchedKey(applyResult.forwardParameters), ", "));
+            expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segment", toString(sig)}}).empty()) << "a set of the selector puts the segment in force";
+            expect(eq(funcGen._signal.signal_type, sig));
 
             std::vector<double> xValues(N), yValues(N);
             std::iota(xValues.begin(), xValues.end(), 0);
@@ -244,7 +234,6 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
         auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
-        const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         clockSrc.tags = {Tag(0, {{tag::CONTEXT.key(), "1"s}}), //
             Tag(100, {{tag::CONTEXT.key(), "2"s}}),            //
@@ -255,17 +244,12 @@ const boost::ut::suite TagTests = [] {
             Tag(800, {{tag::CONTEXT.key(), "7"s}}),            //
             Tag(850, {{tag::CONTEXT.key(), "8"s}})};
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}});
-        expect(funcGen.settings().set(createConstPropertyMap("", 5.f), SettingsCtx{now, "1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("", 5.f, 30.f, .2f), SettingsCtx{now, "2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 30.f), SettingsCtx{now, "3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 20.f), SettingsCtx{now, "5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("", 20.f, 10.f, .1f), SettingsCtx{now, "6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 10.f), SettingsCtx{now, "7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "8"}).empty());
-
-        expect(eq(funcGen.settings().getNStoredParameters(), 9UZ)); // +1 for default
+        const property_map segments{{"1", createConstPropertyMap(5.f)}, {"2", createLinearRampPropertyMap(5.f, 30.f, .2f)}, {"3", createConstPropertyMap(30.f)},      //
+            {"4", createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f)}, {"5", createConstPropertyMap(20.f)}, {"6", createCubicSplinePropertyMap(20.f, 10.f, .1f)}, //
+            {"7", createConstPropertyMap(10.f)}, {"8", createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f)}};
+        auto&              funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}, {"segments", segments}});
+        // the context the clock's tags carry selects the segment
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}}).has_value());
 
         auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
@@ -285,6 +269,10 @@ const boost::ut::suite TagTests = [] {
             }
             return ret;
         }();
+        expect(fatal(eq(sink._samples.size(), static_cast<std::size_t>(N))));
+        expect(eq(sink._samples[50UZ], 5.f)) << "the first segment holds 5";
+        expect(eq(sink._samples[325UZ], 30.f)) << "the third segment holds 30";
+        expect(eq(sink._samples[600UZ], 20.f)) << "the fifth segment holds 20";
 
         std::println("\n\nChart FunctionGenerator + ClockSource test\n\n");
         std::vector<double> xValues(N);
@@ -301,13 +289,14 @@ const boost::ut::suite TagTests = [] {
         constexpr std::uint32_t N             = 1000 * lengthSeconds;
         constexpr float         sample_rate   = 1'000.f;
 
-        Graph      testGraph;
-        auto&      clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
-        const auto now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        Graph testGraph;
+        auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
 
-        auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
-            clockSource.tag_times.value.push_back(timeInNanoseconds);
-            clockSource.tag_values.value.push_back(value);
+        std::vector<std::uint64_t> tagTimes;
+        std::vector<std::string>   tagValues;
+        auto                       addTimeTagEntry = [&tagTimes, &tagValues](auto&, std::uint64_t timeInNanoseconds, const std::string& value) {
+            tagTimes.push_back(timeInNanoseconds);
+            tagValues.push_back(value);
         };
 
         // all times are in nanoseconds
@@ -320,24 +309,18 @@ const boost::ut::suite TagTests = [] {
         addTimeTagEntry(clockSrc, 650 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=6");
         addTimeTagEntry(clockSrc, 800 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=7");
         addTimeTagEntry(clockSrc, 850 * ms, "CMD_BP_START/FAIR.SELECTOR.C=1:S=1:P=8");
-        clockSrc.repeat_period      = 5'000 * ms;
-        clockSrc.do_zero_order_hold = true;
+        // a block's settings change by a settings call, not by a write of its member
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(clockSrc), {{"tag_times", tagTimes}, {"tag_values", tagValues}, {"repeat_period", 5'000 * ms}, {"do_zero_order_hold", true}}).empty());
 
-        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}});
         // all times are in seconds
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 5.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("CMD_BP_START", 5.f, 30.f, .2f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 30.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=3"}).empty());
-        expect(funcGen.settings().set(createParabolicRampPropertyMap("CMD_BP_START", 30.f, 20.f, .1f, 0.02f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=4"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 20.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=5"}).empty());
-        expect(funcGen.settings().set(createCubicSplinePropertyMap("CMD_BP_START", 20.f, 10.f, .1f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=6"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("CMD_BP_START", 10.f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=7"}).empty());
-        expect(funcGen.settings().set(createImpulseResponsePropertyMap("CMD_BP_START", 10.f, 20.f, .02f, .06f), SettingsCtx{now, "FAIR.SELECTOR.C=1:S=1:P=8"}).empty());
-
-        expect(eq(funcGen.settings().getNStoredParameters(), 9UZ)); // +1 for default
-        // a segment starts only on a trigger named `signal_trigger`, and the generator takes that name from the clock's tags
-        funcGen.settings().setTagCouplings({{tag::TRIGGER_NAME.name(), std::string(tag::TRIGGER_NAME.key())}, {tag::TRIGGER_TIME.name(), std::string(tag::TRIGGER_TIME.key())}, //
-            {tag::TRIGGER_OFFSET.name(), std::string(tag::TRIGGER_OFFSET.key())}, {tag::TRIGGER_META_INFO.name(), std::string(tag::TRIGGER_META_INFO.key())}});
+        const property_map segments{{"FAIR.SELECTOR.C=1:S=1:P=1", createConstPropertyMap(5.f)}, {"FAIR.SELECTOR.C=1:S=1:P=2", createLinearRampPropertyMap(5.f, 30.f, .2f)}, //
+            {"FAIR.SELECTOR.C=1:S=1:P=3", createConstPropertyMap(30.f)}, {"FAIR.SELECTOR.C=1:S=1:P=4", createParabolicRampPropertyMap(30.f, 20.f, .1f, 0.02f)},             //
+            {"FAIR.SELECTOR.C=1:S=1:P=5", createConstPropertyMap(20.f)}, {"FAIR.SELECTOR.C=1:S=1:P=6", createCubicSplinePropertyMap(20.f, 10.f, .1f)},                      //
+            {"FAIR.SELECTOR.C=1:S=1:P=7", createConstPropertyMap(10.f)}, {"FAIR.SELECTOR.C=1:S=1:P=8", createImpulseResponsePropertyMap(10.f, 20.f, .02f, .06f)}};
+        auto&              funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}});
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", segments}}).empty());
+        // the context of the clock's timing events selects the segment
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}}).has_value());
         auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
 
         expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
@@ -356,10 +339,10 @@ const boost::ut::suite TagTests = [] {
             }
             return ret;
         }();
-        // the third segment holds 30 from its trigger at 300 ms to the next at 350 ms
+        // the third segment holds 30 from its timing event at 300 ms to the next at 350 ms
         const std::size_t inThird = static_cast<std::size_t>(325.f * sample_rate / 1000.f);
         expect(fatal(lt(inThird, sink._samples.size())));
-        expect(eq(sink._samples[inThird], 30.f)) << "the trigger that names signal_trigger starts its segment";
+        expect(eq(sink._samples[inThird], 30.f)) << "the timing event's context selects its segment";
 
         std::println("\n\nFunctionGenerator + ClockSource FAIR test\n\n");
         std::vector<double> xValues(N);
@@ -380,15 +363,17 @@ const boost::ut::suite TagTests = [] {
         Graph testGraph;
         auto& clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
 
-        auto addTimeTagEntry = []<typename T>(ClockSource<T>& clockSource, std::uint64_t timeInNanoseconds, const std::string& value) {
-            clockSource.tag_times.value.push_back(timeInNanoseconds);
-            clockSource.tag_values.value.push_back(value);
+        std::vector<std::uint64_t> tagTimes;
+        std::vector<std::string>   tagValues;
+        auto                       addTimeTagEntry = [&tagTimes, &tagValues](auto&, std::uint64_t timeInNanoseconds, const std::string& value) {
+            tagTimes.push_back(timeInNanoseconds);
+            tagValues.push_back(value);
         };
         addTimeTagEntry(clockSrc, 10 * ms, "CMD_BP_START/ctx1");
         addTimeTagEntry(clockSrc, 100 * ms, "CMD_BP_START/ctx2");
         addTimeTagEntry(clockSrc, 200 * ms, "CMD_BP_START/ctx3");
         addTimeTagEntry(clockSrc, 400 * ms, "CMD_BP_START/ctx4");
-        clockSrc.repeat_period = repeatNs;
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(clockSrc), {{"tag_times", tagTimes}, {"tag_values", tagValues}, {"repeat_period", repeatNs}}).empty());
 
         auto& sink = testGraph.emplaceBlock<TagSink<std::uint8_t, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
         expect(testGraph.connect<"out", "in">(clockSrc, sink).has_value());
@@ -428,13 +413,10 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto& toneType : {Sin, Cos, FastSin, FastCos}) {
             FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.name(), sampleRate}});
-            funcGen.init(funcGen.progress);
-            const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+            expect(funcGen.check({}).has_value());
 
             property_map params{createPropertyMapEntry(signal_type, toneType), createPropertyMapEntry(ParameterType::tone_frequency, freq), createPropertyMapEntry(final_value, amplitude), createPropertyMapEntry(start_value, offset), createPropertyMapEntry(ParameterType::phase, phase), createPropertyMapEntry(duration, 0.f)};
-            expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-            expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
-            std::ignore = funcGen.settings().applyStagedParameters();
+            expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", params}}}, {"segment", "1"}}).empty()) << "the segment is stored and selected in one call";
 
             constexpr std::size_t N     = 20; // one full period at 50 Hz / 1000 Hz
             double                sumSq = 0.;
@@ -452,15 +434,12 @@ const boost::ut::suite TagTests = [] {
         constexpr float sampleRate = 1000.f;
 
         FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.name(), sampleRate}});
-        funcGen.init(funcGen.progress);
-        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        expect(funcGen.check({}).has_value());
 
         property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::tone_frequency, 100.f), createPropertyMapEntry(final_value, 5.f), // amplitude
             createPropertyMapEntry(start_value, 2.f),                                                                                                                         // offset
             createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.01f)};                                                                      // 10 ms = 10 samples
-        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
-        std::ignore = funcGen.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", params}}}, {"segment", "1"}}).empty()) << "the segment is stored and selected in one call";
 
         // generate past the duration
         for (std::size_t i = 0; i < 15; ++i) {
@@ -478,13 +457,10 @@ const boost::ut::suite TagTests = [] {
 
         for (const auto& noiseType : {UniformNoise, TriangularNoise, GaussianNoise}) {
             FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.name(), sampleRate}});
-            funcGen.init(funcGen.progress);
-            const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+            expect(funcGen.check({}).has_value());
 
             property_map params{createPropertyMapEntry(signal_type, noiseType), createPropertyMapEntry(start_value, 2.f)};
-            expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-            expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
-            std::ignore = funcGen.settings().applyStagedParameters();
+            expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", params}}}, {"segment", "1"}}).empty()) << "the segment is stored and selected in one call";
 
             bool nonZero = false;
             for (std::size_t i = 0; i < 100; ++i) {
@@ -499,13 +475,10 @@ const boost::ut::suite TagTests = [] {
     "FunctionGenerator complex output for tone type"_test = [] {
         using namespace function_generator;
         FunctionGenerator<std::complex<double>> funcGen({{gr::tag::SAMPLE_RATE.name(), 1000.f}});
-        funcGen.init(funcGen.progress);
-        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        expect(funcGen.check({}).has_value());
 
         property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::tone_frequency, 50.f), createPropertyMapEntry(final_value, 1.f), createPropertyMapEntry(start_value, 0.f), createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.f)};
-        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
-        std::ignore = funcGen.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", params}}}, {"segment", "1"}}).empty()) << "the segment is stored and selected in one call";
 
         for (std::size_t i = 0; i < 20; ++i) {
             const auto   sample = funcGen.generateSample();
@@ -517,13 +490,10 @@ const boost::ut::suite TagTests = [] {
     "FunctionGenerator integer output for tone type"_test = [] {
         using namespace function_generator;
         FunctionGenerator<std::int16_t> funcGen({{gr::tag::SAMPLE_RATE.name(), 1000.f}});
-        funcGen.init(funcGen.progress);
-        const auto now = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
+        expect(funcGen.check({}).has_value());
 
         property_map params{createPropertyMapEntry(signal_type, Sin), createPropertyMapEntry(ParameterType::tone_frequency, 50.f), createPropertyMapEntry(final_value, 40000.f), createPropertyMapEntry(start_value, 0.f), createPropertyMapEntry(ParameterType::phase, 0.f), createPropertyMapEntry(duration, 0.f)};
-        expect(funcGen.settings().set(params, SettingsCtx{now, 1}).empty());
-        expect(funcGen.settings().activateContext(SettingsCtx{now, 1}) != std::nullopt);
-        std::ignore = funcGen.settings().applyStagedParameters();
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", params}}}, {"segment", "1"}}).empty()) << "the segment is stored and selected in one call";
 
         bool hitMax = false, hitMin = false;
         for (std::size_t i = 0; i < 100; ++i) {
@@ -548,14 +518,12 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
         auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
-        const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         clockSrc.tags = {Tag(0, {{tag::CONTEXT.key(), "1"s}}), Tag(100, {{tag::CONTEXT.key(), "2"s}}), Tag(300, {{tag::CONTEXT.key(), "3"s}})};
 
         auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}});
-        expect(funcGen.settings().set(createConstPropertyMap("", 0.f), SettingsCtx{now, "1"}).empty());
-        expect(funcGen.settings().set(createSinPropertyMap("", 50.f, 5.f, 0.f, 1.f, 0.f), SettingsCtx{now, "2"}).empty());
-        expect(funcGen.settings().set(createConstPropertyMap("", 1.f), SettingsCtx{now, "3"}).empty());
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", createConstPropertyMap(0.f)}, {"2", createSinPropertyMap(50.f, 5.f, 0.f, 1.f, 0.f)}, {"3", createConstPropertyMap(1.f)}}}}).empty());
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}}).has_value());
 
         auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
         expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
@@ -643,7 +611,7 @@ const boost::ut::suite TagTests = [] {
         Graph testGraph;
         // the tone is left at its default, so it is still in the settings auto-update set
         auto& gen = testGraph.emplaceBlock<SignalGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), 10000.f}, {"signal_type", "Sin"}, {"name", "SignalGenerator"}});
-        runClockedGenerator(testGraph, gen, [](const auto& generator, const auto&) { expect(eq(generator.tone_frequency.value, 1.f)) << "a passing frequency tag retuned the generated waveform"; });
+        runClockedGenerator(testGraph, gen, [](const auto& generator, const auto&) { expect(eq(generator.settings.tone_frequency.value, 1.f)) << "a passing frequency tag retuned the generated waveform"; });
     };
 
     "FunctionGenerator forwards the stream frequency key unchanged"_test = [&] {
@@ -655,7 +623,7 @@ const boost::ut::suite TagTests = [] {
     "FunctionGenerator keeps its tone across a stream frequency tag"_test = [&] {
         Graph testGraph;
         auto& gen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), 10000.f}, {"signal_type", "Sin"}, {"name", "FunctionGenerator"}});
-        runClockedGenerator(testGraph, gen, [](const auto& generator, const auto&) { expect(eq(generator.tone_frequency.value, 0.f)) << "a passing frequency tag retuned the generated waveform"; });
+        runClockedGenerator(testGraph, gen, [](const auto& generator, const auto&) { expect(eq(generator.settings.tone_frequency.value, 0.f)) << "a passing frequency tag retuned the generated waveform"; });
     };
 
     "FunctionGenerator + ClockSource repeated ramp segment test"_test = [] {
@@ -665,14 +633,13 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
         auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
-        const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         clockSrc.tags = {Tag(0, {{tag::CONTEXT.key(), "1"s}}), Tag(200, {{tag::CONTEXT.key(), "2"s}})};
 
-        // the two contexts hold the same ramp, so only their activation tells the second segment from the first
+        // the two segments hold the same ramp, so only their selection tells the second from the first
         auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}});
-        expect(funcGen.settings().set(createLinearRampPropertyMap("", 20.f, 30.f, .1f), SettingsCtx{now, "1"}).empty());
-        expect(funcGen.settings().set(createLinearRampPropertyMap("", 20.f, 30.f, .1f), SettingsCtx{now, "2"}).empty());
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", createLinearRampPropertyMap(20.f, 30.f, .1f)}, {"2", createLinearRampPropertyMap(20.f, 30.f, .1f)}}}}).empty());
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}}).has_value());
 
         auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
         expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
@@ -703,15 +670,14 @@ const boost::ut::suite TagTests = [] {
         constexpr float         sample_rate = 1000.f;
         Graph                   testGraph;
         auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
-        const auto              now      = settings::convertTimePointToUint64Ns(std::chrono::system_clock::now());
 
         // 50 Hz at 1 kHz is 20 samples per cycle: a phase carried into the second segment sits at a zero crossing
         // at sample 205, where a phase of the segment's own is at the cosine's peak
         clockSrc.tags = {Tag(0, {{tag::CONTEXT.key(), "1"s}}), Tag(205, {{tag::CONTEXT.key(), "2"s}})};
 
         auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}});
-        expect(funcGen.settings().set(createCosPropertyMap("", 50.f, 1.f, 0.f, 0.f, 0.f), SettingsCtx{now, "1"}).empty());
-        expect(funcGen.settings().set(createCosPropertyMap("", 50.f, 1.f, 0.f, 0.f, 0.f), SettingsCtx{now, "2"}).empty());
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segments", property_map{{"1", createCosPropertyMap(50.f, 1.f, 0.f, 0.f, 0.f)}, {"2", createCosPropertyMap(50.f, 1.f, 0.f, 0.f, 0.f)}}}}).empty());
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}}).has_value());
 
         auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
         expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
@@ -729,6 +695,245 @@ const boost::ut::suite TagTests = [] {
 
         const float secondPeak = *std::max_element(sink._samples.begin() + 205, sink._samples.begin() + 209);
         expect(secondPeak > .9f) << std::format("second tone segment restarts its phase: {}", secondPeak);
+    };
+
+    "FunctionGenerator: a key the call names wins over the selected segment's value"_test = [] {
+        using namespace function_generator;
+        FunctionGenerator<double> funcGen({{"segments", property_map{{"low", createConstPropertyMap(5.f)}, {"high", createConstPropertyMap(9.f)}}}});
+        expect(funcGen.check({}).has_value());
+
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segment", "low"}}).empty());
+        expect(eq(funcGen._signal.start_value, 5.f)) << "the selection alone puts the segment's value in force";
+        expect(eq(funcGen.get<float>("start_value").value_or(-1.f), 0.f)) << "the host's start_value keeps the value the host wrote";
+
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segment", "high"}, {"start_value", 7.f}}).empty());
+        expect(eq(funcGen._signal.start_value, 7.f)) << "the call's own start_value wins over the segment's 9";
+        expect(eq(funcGen._signal.signal_type, Const)) << "the segment's other settings still go in force";
+        expect(eq(funcGen.generateSample(), 7.)) << "the waveform runs on the value in force";
+
+        const auto selected = funcGen.get("segment");
+        expect(selected.has_value() && selected->value == pmt::Value(std::string("high"))) << "a read of the selector returns the name in force";
+        const auto start = funcGen.get("start_value");
+        expect(start.has_value() && start->value == pmt::Value(7.f)) << "a read of a signal setting returns the value the host wrote";
+        const auto current = funcGen.get("current_segment");
+        expect(fatal(current.has_value()));
+        const property_map* report = current->value.get_if<property_map>();
+        expect(fatal(report != nullptr)) << "current_segment is a map";
+        expect(report->at(std::pmr::string("segment")) == pmt::Value(std::string("high"))) << "current_segment names the segment in force";
+        expect(report->at(std::pmr::string("start_value")) == pmt::Value(7.f)) << "current_segment holds the value the waveform runs";
+    };
+
+    "FunctionGenerator: a caller's unknown segment name is refused and the segment in force stays"_test = [] {
+        using namespace function_generator;
+        FunctionGenerator<double> funcGen({{"segments", property_map{{"low", createConstPropertyMap(5.f)}}}, {"segment", "low"}});
+        expect(funcGen.check({}).has_value());
+        expect(eq(funcGen._signal.start_value, 5.f)) << "the segment given at construction goes in force at the initialization";
+
+        const auto refused = funcGen.set({{"segment", "none"}});
+        expect(!refused.has_value()) << "a name with no segment is refused";
+        if (!refused.has_value()) {
+            expect(fatal(eq(refused.error().size(), 1UZ)));
+            expect(eq(refused.error()[0].key, std::string("segment")));
+        }
+        expect(eq(funcGen.settings.segment.value, std::string("low")));
+        expect(eq(funcGen._signal.start_value, 5.f));
+    };
+
+    "FunctionGenerator: a segment that names no setting it may hold is refused"_test = [] {
+        using namespace function_generator;
+        FunctionGenerator<double> funcGen;
+        expect(funcGen.check({}).has_value());
+
+        const auto refusedKey = [&funcGen](property_map segment) -> std::string {
+            const auto result = funcGen.set({{"segments", property_map{{"bad", std::move(segment)}}}});
+            return result.has_value() || result.error().empty() ? std::string{} : result.error()[0].key;
+        };
+        expect(eq(refusedKey({{"amplitude", 1.f}}), std::string("segments"))) << "a key that is no setting";
+        expect(eq(refusedKey({{"sample_rate", 1.f}}), std::string("segments"))) << "a setting a segment does not hold";
+        expect(eq(refusedKey({{"segment", "bad"}}), std::string("segments"))) << "the selector";
+        expect(eq(refusedKey({{"segments", property_map{}}}), std::string("segments"))) << "the table itself";
+        expect(eq(refusedKey({{"signal_type", "Square"}}), std::string("segments"))) << "a value its setting cannot take";
+        expect(eq(funcGen.settings.segments.value.size(), 0UZ)) << "a refused table leaves the table in force";
+
+        expect(gr::testing::initRefused<FunctionGenerator<double>>({{"segments", property_map{{"bad", property_map{{"amplitude", 1.f}}}}}})) << "a constructed table is checked at the initialization";
+    };
+
+    "FunctionGenerator: a segment's signal_type is read as the setting reads it, in any letter case"_test = [] {
+        using namespace function_generator;
+        FunctionGenerator<double> funcGen({{"segments", property_map{{"tone", property_map{{"signal_type", "sin"}}}, {"ramp", property_map{{"signal_type", "LINEARRAMP"}}}}}, {"segment", "tone"}});
+        expect(fatal(funcGen.check({}).has_value())) << "the table with \"sin\" and \"LINEARRAMP\" is accepted";
+        expect(funcGen._signal.signal_type == Sin) << "\"sin\" runs Sin";
+        expect(funcGen.set({{"segment", "ramp"}}).has_value());
+        expect(funcGen._signal.signal_type == LinearRamp) << "\"LINEARRAMP\" runs LinearRamp";
+        expect(funcGen.set({{"signal_type", "cos"}}).has_value()) << "the setting itself takes the same spelling";
+    };
+
+    "FunctionGenerator: a tag that names no segment leaves the segment in force"_test = [] {
+        using namespace std::string_literals;
+        using namespace function_generator;
+        constexpr std::uint32_t N           = 300;
+        constexpr float         sample_rate = 1000.f;
+        Graph                   testGraph;
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        clockSrc.tags                    = {Tag(0, {{tag::CONTEXT.key(), "one"s}}), Tag(100, {{tag::CONTEXT.key(), "unknown"s}}), Tag(200, {{tag::CONTEXT.key(), "two"s}})};
+
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}, //
+            {"segments", property_map{{"one", createConstPropertyMap(1.f)}, {"two", createConstPropertyMap(2.f)}}}});
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}}).has_value());
+        auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "in">(funcGen, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value()) << "an unknown name in the stream does not end the run";
+        expect(fatal(eq(sink._samples.size(), static_cast<std::size_t>(N))));
+        expect(eq(sink._samples[150UZ], 1.f)) << "the segment in force stays past the unknown name";
+        expect(eq(sink._samples[250UZ], 2.f)) << "a later known name still switches";
+        expect(eq(sink._tags.size(), clockSrc.tags.size())) << "the tag with the unknown name passes on downstream";
+    };
+
+    "FunctionGenerator: trigger restarts the segment in force at each set and reads false"_test = [] {
+        using namespace function_generator;
+        // a ramp from 0 to 10 over 1 s at 10 Hz rises by one per sample, so a sample is ten times its time since the restart
+        FunctionGenerator<double> funcGen({{gr::tag::SAMPLE_RATE.name(), 10.f}, {"segments", property_map{{"ramp", createLinearRampPropertyMap(0.f, 10.f, 1.f)}}}, {"segment", "ramp"}});
+        expect(funcGen.check({}).has_value());
+        const auto advance = [&funcGen](std::size_t count) {
+            double last = -1.;
+            for (std::size_t i = 0UZ; i < count; ++i) {
+                last = funcGen.generateSample();
+            }
+            return last;
+        };
+        const auto latched = [&funcGen] { return funcGen.get<bool>("trigger").value_or(true); };
+
+        expect(approx(advance(4UZ), 3., 1e-6)) << "the ramp runs from the selection";
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"trigger", true}}).empty());
+        expect(approx(funcGen.generateSample(), 0., 1e-6)) << "a true restarts the segment in force";
+        expect(!latched()) << "a read after the set returns false";
+        expect(!funcGen.settings.trigger.value) << "the hook assigned false";
+
+        expect(approx(advance(3UZ), 3., 1e-6));
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"trigger", true}}).empty());
+        expect(approx(funcGen.generateSample(), 0., 1e-6)) << "a second set of true restarts again";
+        expect(!latched());
+
+        expect(approx(advance(3UZ), 3., 1e-6));
+        expect(funcGen.set({{"trigger", true}}).has_value()) << "a host's set";
+        expect(approx(funcGen.generateSample(), 0., 1e-6)) << "a host's set of true restarts too";
+        expect(!latched());
+
+        expect(approx(advance(3UZ), 3., 1e-6));
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(funcGen), {{"segment", "ramp"}}).empty());
+        expect(approx(funcGen.generateSample(), 4., 1e-6)) << "naming the segment in force again restarts nothing";
+    };
+
+    "FunctionGenerator: a tag coupled to trigger restarts the segment in force"_test = [] {
+        using namespace std::string_literals;
+        using namespace function_generator;
+        constexpr std::uint32_t N           = 300;
+        constexpr float         sample_rate = 1000.f;
+        Graph                   testGraph;
+        auto&                   clockSrc = testGraph.emplaceBlock<ClockSource<std::uint8_t>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"n_samples_max", N}, {"name", "ClockSource"}});
+        // the ramp reaches 10 at sample 100 and holds it; each `restart` tag starts it again from 0
+        clockSrc.tags = {Tag(0, {{tag::CONTEXT.key(), "ramp"s}}), Tag(150, {{"restart", true}}), Tag(250, {{"restart", true}})};
+
+        auto& funcGen = testGraph.emplaceBlock<FunctionGenerator<float>>({{gr::tag::SAMPLE_RATE.name(), sample_rate}, {"name", "FunctionGenerator"}, //
+            {"segments", property_map{{"ramp", createLinearRampPropertyMap(0.f, 10.f, .1f)}}}});
+        expect(funcGen.setTagCouplings({{"segment", std::string(tag::CONTEXT.key())}, {"trigger", std::string("restart")}}).has_value());
+        auto& sink = testGraph.emplaceBlock<gr::blocks::testing::TagSink<float, ProcessFunction::USE_PROCESS_ONE>>({{"name", "TagSink"}});
+        expect(testGraph.connect<"out", "clk_in">(clockSrc, funcGen).has_value());
+        expect(testGraph.connect<"out", "in">(funcGen, sink).has_value());
+
+        gr::scheduler::Simple sched;
+        if (auto ret = sched.exchange(std::move(testGraph)); !ret) {
+            throw std::runtime_error(std::format("failed to initialize scheduler: {}", ret.error()));
+        }
+        expect(sched.runAndWait().has_value());
+        expect(fatal(eq(sink._samples.size(), static_cast<std::size_t>(N))));
+
+        expect(approx(10.f, sink._samples[140UZ], .1f)) << std::format("the ramp holds its final value: {}", sink._samples[140UZ]);
+        const float first = *std::min_element(sink._samples.begin() + 150, sink._samples.begin() + 155);
+        expect(approx(0.f, first, .5f)) << std::format("the first tag restarts the ramp: {}", first);
+        expect(approx(5.f, sink._samples[200UZ], .6f)) << std::format("the restarted ramp's mid-point: {}", sink._samples[200UZ]);
+        const float second = *std::min_element(sink._samples.begin() + 250, sink._samples.begin() + 255);
+        expect(approx(0.f, second, .5f)) << std::format("the second tag, true again, restarts it again: {}", second);
+        expect(!funcGen.get<bool>("trigger").value_or(true)) << "trigger reads false after the last tag";
+    };
+
+    "FunctionGenerator: a saved graph loads back with its segments and the selector's coupling"_test = [] {
+        gr::BlockRegistry& registry = gr::globalBlockRegistry();
+        std::ignore                 = registry.insert<FunctionGenerator<float>>("=gr::blocks::basic::FunctionGenerator<float32>");
+        gr::PluginLoader& loader    = gr::globalPluginLoader();
+
+        // the form tools/migrate_generator_settings.py writes for a graph that held one context per segment
+        const std::string document = R"yaml(blocks:
+  - id: gr::blocks::basic::FunctionGenerator<float32>
+    parameters:
+      name: ramp
+      sample_rate: 1000
+      segments:
+        one:
+          signal_type: Const
+          start_value: 5
+        two:
+          signal_type: LinearRamp
+          start_value: 5
+          final_value: 30
+          duration: 0.2
+    tag_couplings:
+      segment: gr:context
+)yaml";
+
+        const auto findGenerator = [](const gr::Graph& graph) -> gr::BlockModel* {
+            for (const auto& block : graph.blocks()) {
+                if (block->name() == "ramp") {
+                    return block.get();
+                }
+            }
+            return nullptr;
+        };
+        const auto expectSegments = [&findGenerator](const gr::Graph& graph, std::string_view what) {
+            gr::BlockModel* generator = findGenerator(graph);
+            expect(fatal(generator != nullptr)) << what;
+            const auto segments = generator->get("segments");
+            expect(fatal(segments.has_value())) << what;
+            const property_map* table = segments->value.get_if<property_map>();
+            expect(fatal(table != nullptr)) << what;
+            expect(eq(table->size(), 2UZ)) << what;
+            const auto two = table->find(std::string_view("two"));
+            expect(fatal(two != table->end())) << what;
+            const property_map* ramp = two->second.get_if<property_map>();
+            expect(fatal(ramp != nullptr)) << what;
+            expect(eq(ramp->size(), 4UZ)) << what;
+            expect(eq(generator->tagCouplings().size(), 1UZ)) << std::format("{}: the selector keeps its coupling", what);
+        };
+
+        // the final_value the waveform runs, as the generator reports it
+        const auto currentFinalValue = [](gr::BlockModel& generator) {
+            const auto current = generator.get("current_segment");
+            if (!current.has_value()) {
+                return -1.f;
+            }
+            const property_map* report = current->value.get_if<property_map>();
+            return report != nullptr && report->contains(std::pmr::string("final_value")) ? report->at(std::pmr::string("final_value")).value_or(-1.f) : -1.f;
+        };
+
+        auto loaded = gr::loadGrc(loader, document);
+        expectSegments(*loaded, "the graph file as written");
+        gr::BlockModel* generator = findGenerator(*loaded);
+        expect(fatal(generator != nullptr));
+        // a stopped graph's block holds the change until its start; the test applies it as the start would
+        expect(gr::testing::setAndApply(gr::settings::detail::settingsOf(*generator), {{"segment", "two"}}).empty()) << "a host selects a segment of the loaded table";
+        expect(eq(currentFinalValue(*generator), 30.f)) << "the selected segment is in force";
+        const std::string saved    = gr::saveGrc(loader, *loaded);
+        auto              reloaded = gr::loadGrc(loader, saved);
+        expectSegments(*reloaded, std::format("the graph saved and loaded again:\n{}", saved));
+        gr::BlockModel* reloadedGenerator = findGenerator(*reloaded);
+        expect(fatal(reloadedGenerator != nullptr));
+        expect(eq(currentFinalValue(*reloadedGenerator), 30.f)) << std::format("the saved selection puts its segment in force at the load:\n{}", saved);
     };
 };
 

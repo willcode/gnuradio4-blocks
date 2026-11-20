@@ -33,16 +33,23 @@ it can hang off a stream without paying for the copy. A `gr:sample_rate` tag ret
 `sample_rate` to it.
 
 The block is 1:1. Every input tag leaves at its own offset with the values it arrived with.
+
+Setting `sample_rate` restarts the pacing schedule. `max_items_per_chunk` bounds the items handled between sleeps, and
+`max_sleep_s` is the longest single sleep.
 )"">;
 
     PortIn<T>            in;
     PortOut<T, Optional> out;
 
-    Annotated<float, "sample_rate", Unit<"Hz">, Doc<"target average rate; setting it restarts the pacing schedule">> sample_rate         = 1e6f;
-    Annotated<gr::Size_t, "max_items_per_chunk", Doc<"upper bound on the items handled between sleeps; 0 is none">>  max_items_per_chunk = 0U;
-    Annotated<double, "max_sleep_s", Unit<"s">, Doc<"longest single sleep; longer waits are taken in slices">>       max_sleep_s         = 0.1;
+    struct Settings {
+        Annotated<float, Unit<"Hz">, Doc<"target rate">, Limits<Over<0.f>>> sample_rate         = 1e6f;
+        Annotated<gr::Size_t, Doc<"items per chunk limit (0 = unlimited)">> max_items_per_chunk = 0U;
+        Annotated<double, Unit<"s">, Doc<"sleep limit">, Limits<Over<0.0>>> max_sleep_s         = 0.1;
 
-    GR_MAKE_REFLECTABLE(Throttle, in, out, sample_rate, max_items_per_chunk, max_sleep_s);
+        GR_MAKE_REFLECTABLE(Settings, sample_rate, max_items_per_chunk, max_sleep_s);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(Throttle, in, out, settings);
 
     using Clock = std::chrono::steady_clock;
 
@@ -55,16 +62,10 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
     // max_sleep_s.
     [[nodiscard]] constexpr bool isBlocking() const noexcept { return true; }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        if (!(sample_rate > 0.f) || !std::isfinite(sample_rate)) {
-            throw gr::exception(std::format("sample_rate must be positive and finite, got {}", sample_rate.value));
-        }
-        if (!(max_sleep_s > 0.0) || !std::isfinite(max_sleep_s)) {
-            throw gr::exception(std::format("max_sleep_s must be positive and finite, got {}", max_sleep_s.value));
-        }
-        _period = 1.0 / static_cast<double>(sample_rate);
-        _slice  = seconds(max_sleep_s);
-        if (newSettings.contains("sample_rate")) {
+    void applySettings(const Settings& s) {
+        _period = 1.0 / static_cast<double>(s.sample_rate);
+        _slice  = seconds(s.max_sleep_s);
+        if (s.sample_rate.changed()) {
             restart();
         }
     }
@@ -100,7 +101,7 @@ The block is 1:1. Every input tag leaves at its own offset with the values it ar
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan, OutputSpanLike auto& outSpan) {
-        const std::size_t cap   = max_items_per_chunk == 0U ? inSpan.size() : std::min(inSpan.size(), static_cast<std::size_t>(max_items_per_chunk.value));
+        const std::size_t cap   = settings.max_items_per_chunk == 0U ? inSpan.size() : std::min(inSpan.size(), static_cast<std::size_t>(settings.max_items_per_chunk.value));
         const std::size_t count = outSpan.isConnected ? std::min(cap, outSpan.size()) : cap;
         if (outSpan.isConnected) {
             // copied before the wait, so the samples are ready the moment they come due; a wait a stop cuts short

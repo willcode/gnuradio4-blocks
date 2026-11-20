@@ -19,6 +19,7 @@
 #include <gnuradio-4.0/Tensor.hpp>
 #include <gnuradio-4.0/basic/VectorSink.hpp>
 #include <gnuradio-4.0/basic/VectorSource.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
 namespace {
@@ -69,12 +70,35 @@ struct Chain {
     property_map sinkSettings() {
         for (const auto& block : scheduler.graph().blocks()) {
             if (block->uniqueName() == sink.unique_name) {
-                return block->settings().get();
+                return gr::settings::heldValues(block->get());
             }
         }
         return {};
     }
 };
+
+/// Copies the sink's status for a host, as core does after each hook it runs: a test that calls a hook itself calls
+/// this after it.
+template<typename T>
+void copyStatus(VectorSink<T>& sink) {
+    gr::settings::detail::FrameworkAccess::copyStatus(gr::settings::detail::settingsOf(sink));
+}
+
+/// The samples the sink reported, read as a host reads them.
+template<typename T>
+[[nodiscard]] std::vector<T> recordedData(const VectorSink<T>& sink) {
+    const property_map active = gr::testing::inForce(gr::settings::detail::settingsOf(sink));
+    const auto*        data   = active.at("data").template get_if<gr::Tensor<T>>();
+    return data != nullptr ? std::vector<T>(data->data(), data->data() + data->size()) : std::vector<T>{};
+}
+
+/// The tags the sink reported, read as a host reads them.
+template<typename T>
+[[nodiscard]] property_map recordedTags(const VectorSink<T>& sink) {
+    const property_map active = gr::testing::inForce(gr::settings::detail::settingsOf(sink));
+    const auto*        tags   = active.at("tags").template get_if<property_map>();
+    return tags != nullptr ? *tags : property_map{{"absent", true}};
+}
 
 } // namespace
 
@@ -87,14 +111,14 @@ const boost::ut::suite<"VectorSink"> vectorSinkTests = [] {
 
         Chain<T> first({{"values", values}, {"tags", tags}}, {});
         first.run();
-        expect(first.sink.data.value == values);
-        expect(first.sink.tags.value == tags) << "the record holds each tag at its index, a list and the end-of-stream tag included";
-        expect(eq(first.sink.received.value, std::uint64_t{values.size()}));
+        expect(first.sink.status.data.value == values);
+        expect(first.sink.status.tags.value == tags) << "the record holds each tag at its index, a list and the end-of-stream tag included";
+        expect(eq(first.sink.status.received.value, std::uint64_t{values.size()}));
 
-        Chain<T> second({{"values", first.sink.data.value}, {"tags", first.sink.tags.value}}, {});
+        Chain<T> second({{"values", first.sink.status.data.value}, {"tags", first.sink.status.tags.value}}, {});
         second.run();
-        expect(second.sink.data.value == values) << "a recorded run fed to a source comes out unchanged";
-        expect(second.sink.tags.value == tags);
+        expect(second.sink.status.data.value == values) << "a recorded run fed to a source comes out unchanged";
+        expect(second.sink.status.tags.value == tags);
     } | std::tuple<std::uint8_t, std::int16_t, std::uint16_t, std::int32_t, std::uint32_t, float, double, std::complex<float>, std::complex<double>>();
 
     "the sample limit ends the run with exactly the limit recorded"_test = [] {
@@ -110,16 +134,17 @@ const boost::ut::suite<"VectorSink"> vectorSinkTests = [] {
         for (std::size_t i = 0UZ; i < kLimit; ++i) {
             expected[i] = pattern[i % pattern.size()];
         }
-        expect(chain.sink.data.value == expected);
-        expect(chain.sink.tags.value == property_map{{"4", kept}}) << "a tag past the limit is not recorded";
-        expect(eq(chain.sink.received.value, std::uint64_t{kLimit}));
+        expect(chain.sink.status.data.value == expected);
+        expect(chain.sink.status.tags.value == property_map{{"4", kept}}) << "a tag past the limit is not recorded";
+        expect(eq(chain.sink.status.received.value, std::uint64_t{kLimit}));
         expect(lt(chain.source._emitted, pattern.size() * kRepeat)) << "the run ends before the source runs out";
     };
 
     "a call that reaches the limit consumes exactly the samples it records"_test = [] {
-        VectorSink<float> sink;
-        sink.n_samples_max = 11U;
+        VectorSink<float> sink({{"n_samples_max", gr::Size_t{11U}}});
+        expect(sink.check({}).has_value());
         sink.start();
+        copyStatus(sink);
 
         const std::vector<float>                    chunk = makeRamp<float>(6UZ);
         gr::blocks::testing::span::InputSpan<float> first{std::span<const float>(chunk)};
@@ -132,14 +157,18 @@ const boost::ut::suite<"VectorSink"> vectorSinkTests = [] {
         expect(second.consumeRequested);
         expect(eq(second.consumed, 11UZ - chunk.size()));
         sink.stop();
-        expect(fatal(eq(sink.data->size(), 11UZ)));
-        expect(eq(sink.data->back(), chunk[4]));
-        expect(sink.tags.value == property_map{{"7", property_map{{"k", "kept"}}}});
+        copyStatus(sink);
+        const std::vector<float> data = recordedData(sink);
+        expect(fatal(eq(data.size(), 11UZ)));
+        expect(eq(data.back(), chunk[4]));
+        expect(recordedTags(sink) == property_map{{"7", property_map{{"k", "kept"}}}});
     };
 
     "several tags at one index record as a list in arrival order"_test = [] {
         VectorSink<float> sink;
+        expect(sink.check({}).has_value());
         sink.start();
+        copyStatus(sink);
         const property_map                          firstTag{{"a", 1}, {"b", 1}};
         const property_map                          secondTag{{"b", 2}};
         const std::vector<float>                    chunk{1.f, 2.f, 3.f};
@@ -147,25 +176,28 @@ const boost::ut::suite<"VectorSink"> vectorSinkTests = [] {
         gr::blocks::testing::span::InputSpan<float> input{std::span<const float>(chunk), 5UZ, std::span<const gr::Tag>(incoming)};
         expect(sink.processBulk(input) == gr::work::Status::OK);
         sink.stop();
-        expect(sink.tags.value == property_map{{"1", listOf({firstTag, secondTag})}, {"2", secondTag}}) << "a tag behind the span is not recorded";
+        copyStatus(sink);
+        expect(recordedTags(sink) == property_map{{"1", listOf({firstTag, secondTag})}, {"2", secondTag}}) << "a tag behind the span is not recorded";
     };
 
     "the record reaches the settings when the block stops"_test = [] {
         VectorSink<float> sink;
         sink.init(sink.progress);
         sink.start();
+        copyStatus(sink);
         const std::vector<float>                    chunk{1.f, 2.f, 3.f};
         const std::vector<gr::Tag>                  incoming{{0UZ, property_map{{"mark", true}}}};
         gr::blocks::testing::span::InputSpan<float> input{std::span<const float>(chunk), 0UZ, std::span<const gr::Tag>(incoming)};
         expect(sink.processBulk(input) == gr::work::Status::OK);
-        const property_map during = sink.settings().get();
-        expect(sink.data->empty() && sink.tags->empty()) << "the members hold the record of the last stop";
+        const property_map during = gr::testing::inForce(gr::settings::detail::settingsOf(sink));
+        expect(sink.status.data->empty() && sink.status.tags->empty()) << "the status holds the record of the last stop";
         expect(during.at("received") == gr::pmt::Value(std::uint64_t{0})) << "a settings read during the run returns the cleared record";
         sink.stop();
-        const property_map after = sink.settings().get();
+        copyStatus(sink);
+        const property_map after = gr::testing::inForce(gr::settings::detail::settingsOf(sink));
         expect(after.at("received") == gr::pmt::Value(std::uint64_t{chunk.size()}));
-        expect(sink.data.value == chunk);
-        expect(sink.tags.value == property_map{{"0", property_map{{"mark", true}}}});
+        expect(recordedData(sink) == chunk);
+        expect(recordedTags(sink) == property_map{{"0", property_map{{"mark", true}}}});
     };
 
     "a restart clears the record"_test = [] {
@@ -174,9 +206,9 @@ const boost::ut::suite<"VectorSink"> vectorSinkTests = [] {
         Chain<float>             chain({{"values", values}, {"tags", tags}}, {});
         chain.run();
         chain.run();
-        expect(chain.sink.data.value == values) << "the second run's samples alone";
-        expect(chain.sink.tags.value == tags);
-        expect(eq(chain.sink.received.value, std::uint64_t{values.size()}));
+        expect(chain.sink.status.data.value == values) << "the second run's samples alone";
+        expect(chain.sink.status.tags.value == tags);
+        expect(eq(chain.sink.status.received.value, std::uint64_t{values.size()}));
     };
 
     "a settings read through the block model returns the record"_test = []<typename T>(const T&) {
@@ -188,12 +220,12 @@ const boost::ut::suite<"VectorSink"> vectorSinkTests = [] {
             const property_map settings = chain.sinkSettings();
             const auto*        data     = settings.at("data").template get_if<gr::Tensor<T>>();
             expect(fatal(data != nullptr)) << "data reads as a tensor of samples";
-            expect(std::ranges::equal(std::span(data->data(), data->size()), chain.sink.data.value)) << std::format("limit {}", limit);
-            expect(eq(chain.sink.data->size(), limit == 0U ? values.size() : static_cast<std::size_t>(limit)));
+            expect(std::ranges::equal(std::span(data->data(), data->size()), chain.sink.status.data.value)) << std::format("limit {}", limit);
+            expect(eq(chain.sink.status.data->size(), limit == 0U ? values.size() : static_cast<std::size_t>(limit)));
             const auto* recorded = settings.at("tags").template get_if<property_map>();
             expect(fatal(recorded != nullptr));
-            expect(*recorded == chain.sink.tags.value) << std::format("limit {}", limit);
-            expect(settings.at("received") == gr::pmt::Value(chain.sink.received.value));
+            expect(*recorded == chain.sink.status.tags.value) << std::format("limit {}", limit);
+            expect(settings.at("received") == gr::pmt::Value(chain.sink.status.received.value));
         }
     } | std::tuple<float, std::complex<double>>();
 };

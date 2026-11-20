@@ -32,51 +32,55 @@ opens the next interval. `rate_now` holds the quotient. `rate` takes the first r
 each new result by the weight `alpha`. Before the first measurement `rate` and `rate_now` are 0. While no samples
 arrive, both keep their last values. `n_samples` counts the samples received since start and wraps at 2^32.
 
-After each measurement the block copies `rate`, `rate_now` and `n_samples` into its settings, where a settings Get
-reads them. It also sends one notification on `msgOut` with the endpoint `rate`, carrying the same three values.
+`rate`, `rate_now` and `n_samples` are status values: the block reports the three at the start and after each
+measurement, where a Get reads them, and sends one notification on `msgOut` with the endpoint `rate`,
+carrying the same three values.
+
+`alpha` is the weight of the newest measurement in `rate`.
 )"">;
 
     using Clock = std::chrono::steady_clock;
 
     PortIn<T> in;
 
-    Annotated<float, "alpha", Doc<"weight of the newest measurement in `rate`, in (0, 1]">, Visible>           alpha         = 0.15f;
-    Annotated<float, "min_update_ms", Unit<"ms">, Doc<"shortest interval between two measurements">, Visible>  min_update_ms = 500.f;
-    Annotated<double, "rate", Unit<"Hz">, Doc<"smoothed arrival rate in samples per second">, Visible>         rate          = 0.0;
-    Annotated<double, "rate_now", Unit<"Hz">, Doc<"arrival rate over the last measurement interval">, Visible> rate_now      = 0.0;
-    Annotated<gr::Size_t, "n_samples", Doc<"samples received since start">, Visible>                           n_samples     = 0U;
+    struct Settings {
+        Annotated<float, Doc<"newest measurement weight">, Visible, Limits<Over<0.f>, Max<1.f>>>     alpha         = 0.15f;
+        Annotated<float, Unit<"ms">, Doc<"minimum measurement interval">, Visible, Limits<Min<0.f>>> min_update_ms = 500.f;
 
-    GR_MAKE_REFLECTABLE(RateProbe, in, alpha, min_update_ms, rate, rate_now, n_samples);
+        GR_MAKE_REFLECTABLE(Settings, alpha, min_update_ms);
+    } settings;
+
+    struct Status {
+        Annotated<double, Unit<"Hz">, Doc<"smoothed arrival rate">, Visible>      rate      = 0.0;
+        Annotated<double, Unit<"Hz">, Doc<"last interval arrival rate">, Visible> rate_now  = 0.0;
+        Annotated<gr::Size_t, Doc<"samples received">, Visible>                   n_samples = 0U;
+
+        GR_MAKE_REFLECTABLE(Status, rate, rate_now, n_samples);
+    } status;
+
+    GR_MAKE_REFLECTABLE(RateProbe, in, settings, status);
 
     Clock::time_point _intervalStart   = Clock::now();
     std::uint64_t     _intervalSamples = 0ULL;
+    gr::Size_t        _unpublished     = 0U; // samples received since `n_samples` was last reported
     bool              _measuredOnce    = false;
     bool              _receiving       = false;
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) {
-        if (!(alpha > 0.f && alpha <= 1.f)) {
-            throw gr::exception(std::format("alpha must be in (0, 1], got {}", alpha.value));
-        }
-        if (!(min_update_ms >= 0.f) || !std::isfinite(min_update_ms)) {
-            throw gr::exception(std::format("min_update_ms must be finite and at least 0, got {}", min_update_ms.value));
-        }
-    }
 
     void start() {
         _intervalStart   = Clock::now();
         _intervalSamples = 0ULL;
+        _unpublished     = 0U;
         _measuredOnce    = false;
         _receiving       = false;
-        rate             = 0.0;
-        rate_now         = 0.0;
-        n_samples        = 0U;
-        std::ignore      = this->updateActiveParameters({"rate", "rate_now", "n_samples"});
+        status.rate      = 0.0;
+        status.rate_now  = 0.0;
+        status.n_samples = 0U;
     }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& inSpan) {
         const std::size_t nSamples = inSpan.size();
         std::ignore                = inSpan.consume(nSamples);
-        n_samples                  = static_cast<gr::Size_t>(n_samples.value + nSamples);
+        _unpublished               = static_cast<gr::Size_t>(_unpublished + nSamples);
         if (nSamples == 0UZ) {
             return work::Status::OK;
         }
@@ -89,7 +93,7 @@ reads them. It also sends one notification on `msgOut` with the endpoint `rate`,
         }
         _intervalSamples += nSamples;
         const std::chrono::duration<double> elapsed = now - _intervalStart;
-        if (elapsed.count() > 0.0 && elapsed.count() * 1e3 >= static_cast<double>(min_update_ms)) {
+        if (elapsed.count() > 0.0 && elapsed.count() * 1e3 >= static_cast<double>(settings.min_update_ms)) {
             measure(now, elapsed.count());
         }
         return work::Status::OK;
@@ -97,16 +101,20 @@ reads them. It also sends one notification on `msgOut` with the endpoint `rate`,
 
 private:
     void measure(Clock::time_point now, double seconds) {
-        rate_now            = static_cast<double>(_intervalSamples) / seconds;
-        const double weight = static_cast<double>(alpha.value);
-        rate                = _measuredOnce ? weight * rate_now.value + (1.0 - weight) * rate.value : rate_now.value;
-        _measuredOnce       = true;
+        const gr::Size_t received = status.n_samples.value + _unpublished; // wraps at 2^32
+        _unpublished              = 0U;
+        const double rateNow      = static_cast<double>(_intervalSamples) / seconds;
+        const double weight       = static_cast<double>(settings.alpha.value);
+        const double smooth       = _measuredOnce ? weight * rateNow + (1.0 - weight) * status.rate.value : rateNow;
+        _measuredOnce             = true;
 
         _intervalSamples = 0ULL;
         _intervalStart   = now;
 
-        std::ignore = this->updateActiveParameters({"rate", "rate_now", "n_samples"});
-        this->emitMessage("rate", {{"rate", rate.value}, {"rate_now", rate_now.value}, {"n_samples", n_samples.value}});
+        status.rate      = smooth;
+        status.rate_now  = rateNow;
+        status.n_samples = received;
+        this->emitMessage("rate", {{"rate", smooth}, {"rate_now", rateNow}, {"n_samples", received}});
     }
 };
 

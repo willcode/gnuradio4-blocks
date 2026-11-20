@@ -19,7 +19,7 @@ GR_REGISTER_BLOCK(gr::blocks::basic::VectorSink, [T], [ uint8_t, int16_t, uint16
 
 template<typename T>
 struct VectorSink : Block<VectorSink<T>> {
-    using Description = Doc<R""(@brief Records the samples and tags it receives and publishes the record in its settings when it stops.
+    using Description = Doc<R""(@brief Records the samples and tags it receives and reports the record as status values when it stops.
 
 The block records each sample in order, and each tag under the index of its sample, counted from the first sample
 since the start. `tags` has the form of the `tags` setting of `VectorSource`. An index that received one tag holds
@@ -34,12 +34,21 @@ applies from the next call.
 
     PortIn<T> in;
 
-    Annotated<gr::Size_t, "n_samples_max", Doc<"sample limit, 0 is unlimited">> n_samples_max = 0U;
-    Annotated<std::uint64_t, "received", Doc<"number of samples recorded">>     received      = 0U;
-    Annotated<std::vector<T>, "data", Doc<"recorded samples, in order">>        data{};
-    Annotated<property_map, "tags", Doc<"recorded tags keyed by sample index">> tags{};
+    struct Settings {
+        Annotated<gr::Size_t, Doc<"sample limit (0 = unlimited)">> n_samples_max = 0U;
 
-    GR_MAKE_REFLECTABLE(VectorSink, in, n_samples_max, received, data, tags);
+        GR_MAKE_REFLECTABLE(Settings, n_samples_max);
+    } settings;
+
+    struct Status {
+        Annotated<std::uint64_t, Doc<"samples recorded">>             received = 0U;
+        Annotated<std::vector<T>, Doc<"recorded samples">>            data{};
+        Annotated<property_map, Doc<"recorded tags by sample index">> tags{};
+
+        GR_MAKE_REFLECTABLE(Status, received, data, tags);
+    } status;
+
+    GR_MAKE_REFLECTABLE(VectorSink, in, settings, status);
 
     std::vector<T> _data{};
     property_map   _tags{};
@@ -47,16 +56,16 @@ applies from the next call.
     void start() {
         _data.clear();
         _tags.clear();
-        publish();
+        publishRecord();
     }
 
-    void stop() { publish(); }
+    void stop() { publishRecord(); }
 
     [[nodiscard]] work::Status processBulk(InputSpanLike auto& input) {
         std::size_t n       = input.size();
         bool        limited = false;
-        if (n_samples_max.value > 0U) {
-            const std::size_t limit = n_samples_max.value;
+        if (settings.n_samples_max.value > 0U) {
+            const std::size_t limit = settings.n_samples_max.value;
             const std::size_t left  = limit > _data.size() ? limit - _data.size() : 0UZ;
             if (n >= left) {
                 n       = left;
@@ -78,9 +87,9 @@ applies from the next call.
 
     /// Records the stream's last samples, then the tags at or past its end, which no sample carries.
     [[nodiscard]] work::Status processEpilogue(InputSpanLike auto& input) {
-        const work::Status status = processBulk(input);
-        if (status != work::Status::OK) {
-            return status;
+        const work::Status result = processBulk(input);
+        if (result != work::Status::OK) {
+            return result;
         }
         const std::size_t end = input.streamIndex + input.size();
         for (const gr::Tag& tag : in.tagReader().get()) {
@@ -93,15 +102,14 @@ applies from the next call.
                 gr::dataset::appendIndexedMap<std::uint64_t>(_tags, _data.size() + (tag.index - end), std::move(map));
             }
         }
-        return status;
+        return result;
     }
 
-    /// Moves the record into the settings.
-    void publish() {
-        received    = _data.size();
-        data.value  = std::exchange(_data, {});
-        tags.value  = std::exchange(_tags, {});
-        std::ignore = this->updateActiveParameters({"received", "data", "tags"});
+    /// Moves the record into the status values, in one hook so that a reader sees the three values agree.
+    void publishRecord() {
+        status.received = static_cast<std::uint64_t>(_data.size());
+        status.data     = std::exchange(_data, {});
+        status.tags     = std::exchange(_tags, {});
     }
 };
 

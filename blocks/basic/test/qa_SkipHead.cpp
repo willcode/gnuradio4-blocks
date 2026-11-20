@@ -15,6 +15,7 @@
 #include <gnuradio-4.0/Scheduler.hpp>
 
 #include <gnuradio-4.0/basic/SkipHead.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 #include <gnuradio-4.0/testing/TagMonitors.hpp>
 #include <gnuradio-4.0/testing/TestSpans.hpp>
 
@@ -29,15 +30,13 @@ namespace span = gr::blocks::testing::span;
 template<typename T>
 [[nodiscard]] SkipHead<T> make(gr::Size_t nSkip) {
     SkipHead<T> block({{"n_skip", nSkip}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    boost::ut::expect(block.check({}).has_value());
     return block;
 }
 
 template<typename T>
 void setSkip(SkipHead<T>& block, gr::Size_t nSkip) {
-    std::ignore = block.settings().setStaged({{"n_skip", nSkip}});
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = gr::testing::setAndApply(gr::settings::detail::settingsOf(block), {{"n_skip", nSkip}});
 }
 
 /// @brief Drive @p block over @p input in calls of @p chunkSize samples, calling @p before with the input offset of each.

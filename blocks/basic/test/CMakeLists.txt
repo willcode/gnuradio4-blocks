@@ -49,6 +49,8 @@ target_link_libraries(qa_PacketToDataSet PRIVATE gr-digital)
 add_basic_test(qa_SyncBlock)
 add_basic_test(qa_VectorSink)
 add_basic_test(qa_VectorSource)
+# each block with a settings hook initializes at its defaults and with each setting off its default
+add_basic_test(qa_SettingsInit)
 
 if(PYTHON_AVAILABLE)
   add_basic_test(qa_PythonBlock)
@@ -75,7 +77,7 @@ gr_add_graph_test(graph_basic_vector_source_expect graphs/vector-source-expect.y
 gr_add_graph_test(graph_basic_vector_source_sink graphs/vector-source-sink.yaml)
 
 gr_add_failing_graph_test(graph_basic_dataset_records_key graphs/dataset-records-invalid.yaml
-                          "records key 'x' is not a record index")
+                          "records key 'x' must be a record index")
 gr_add_failing_graph_test(
   graph_basic_dataset_records_gap
   graphs/dataset-records-invalid.yaml
@@ -133,7 +135,7 @@ gr_add_failing_graph_test(
 gr_add_failing_graph_test(
   graph_basic_dataset_records_events
   graphs/dataset-records-invalid.yaml
-  "record 0 field 'timing_events' list 0 key 'x' is not an event index"
+  "record 0 field 'timing_events' list 0 key 'x' must be an event index"
   SET
   "source.records={0: {timing_events: [{x: {}}]}}")
 gr_add_failing_graph_test(

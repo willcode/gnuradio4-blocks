@@ -51,10 +51,10 @@ enum class ReservedTagType : std::uint8_t { NotReserved, Float, Double, String, 
     if (name == tag::NUM_CHANNELS.name() || name == tag::N_DROPPED_SAMPLES.name()) {
         return Size;
     }
-    if (name == tag::TRIGGER_TIME.name() || name == tag::CONTEXT_TIME.name()) {
+    if (name == tag::TRIGGER_TIME.name()) {
         return UInt64;
     }
-    if (name == tag::RX_OVERFLOW.name() || name == tag::RESET_DEFAULTS.name() || name == tag::STORE_DEFAULTS.name() || name == tag::END_OF_STREAM.name()) {
+    if (name == tag::RX_OVERFLOW.name() || name == tag::RESET_DEFAULTS.name() || name == tag::END_OF_STREAM.name()) {
         return Bool;
     }
     if (name == tag::TRIGGER_META_INFO.name()) {
@@ -135,17 +135,25 @@ output port; they see the same records and emit the same counts, so their stream
 
 Records concatenate. Two records cut from different parts of a stream produce one contiguous output with nothing
 inserted between them: the gap is reported through `discontinuity` and `gr:n_dropped_samples`, never synthesized.
+
+`signal_index` picks the signal of a multi-signal record that becomes the output stream; an index out of range rejects
+the record. `boundary_label` is written under gr:trigger_name at each record's first sample unless the record names its
+own trigger. `axis_rate_tolerance` is the relative tolerance of the test that the time axis is uniform.
 )"">;
 
     PortIn<DataSet<T>, Async>            in;
     PortOut<T, Async>                    out;
     PortOut<DataSet<T>, Async, Optional> reject;
 
-    Annotated<gr::Size_t, "signal_index", Visible, Doc<"which signal of a multi-signal record becomes the output stream; out of range rejects the record">>                         signal_index{0U};
-    Annotated<std::string, "boundary_label", Doc<"written under gr:trigger_name at each record's first sample, unless the record names its own trigger; empty suppresses the key">> boundary_label{"dataset"};
-    Annotated<float, "axis_rate_tolerance", Doc<"relative tolerance of the time axis uniformity test; must be finite and greater than zero">>                                       axis_rate_tolerance{1e-6f};
+    struct Settings {
+        Annotated<gr::Size_t, Visible, Doc<"output signal index">>           signal_index{0U};
+        Annotated<std::string, Doc<"record boundary trigger (empty = off)">> boundary_label{"dataset"};
+        Annotated<float, Doc<"axis rate tolerance">, Limits<Over<0.f>>>      axis_rate_tolerance{1e-6f};
 
-    GR_MAKE_REFLECTABLE(DataSetToStream, in, out, reject, signal_index, boundary_label, axis_rate_tolerance);
+        GR_MAKE_REFLECTABLE(Settings, signal_index, boundary_label, axis_rate_tolerance);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(DataSetToStream, in, out, reject, settings);
 
     // Counted, stated drops. Plain members, read by the owning thread and reported once at stop().
     std::uint64_t nRejectedRecords     = 0ULL; ///< records the admission predicate turned away
@@ -177,18 +185,13 @@ inserted between them: the gap is reported through `discontinuity` and `gr:n_dro
         std::optional<float>       max{};
     };
 
-    float                      _tolerance    = 1e-6f; ///< the validated axis_rate_tolerance in force
-    std::size_t                _sampleCursor = 0UZ;   ///< samples of the record in progress already emitted
-    std::size_t                _eventCursor  = 0UZ;   ///< timing events of the record in progress already visited
-    bool                       _eventsSorted = true;  ///< whether the record's event indices arrived in ascending order
-    std::vector<std::uint32_t> _eventOrder{};         ///< ascending permutation of the events, only when they are not sorted
-    std::optional<float>       _tagRate{};            ///< the most recent sample_rate seen on the input port
+    std::size_t                _sampleCursor = 0UZ;  ///< samples of the record in progress already emitted
+    std::size_t                _eventCursor  = 0UZ;  ///< timing events of the record in progress already visited
+    bool                       _eventsSorted = true; ///< whether the record's event indices arrived in ascending order
+    std::vector<std::uint32_t> _eventOrder{};        ///< ascending permutation of the events, only when they are not sorted
+    std::optional<float>       _tagRate{};           ///< the most recent sample_rate seen on the input port
     RecordFacts                _previous{};
     AnnouncedKeys              _announced{};
-
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& /*newSettings*/) { rebuild(); }
-
-    void start() { rebuild(); }
 
     void reset() {
         _sampleCursor = 0UZ;
@@ -198,13 +201,6 @@ inserted between them: the gap is reported through `discontinuity` and `gr:n_dro
         _tagRate.reset();
         _previous  = RecordFacts{};
         _announced = AnnouncedKeys{};
-    }
-
-    void rebuild() {
-        if (!std::isfinite(axis_rate_tolerance.value) || axis_rate_tolerance.value <= 0.f) {
-            throw gr::exception(std::format("axis_rate_tolerance is {}; it must be finite and greater than zero", axis_rate_tolerance.value));
-        }
-        _tolerance = axis_rate_tolerance.value;
     }
 
     void stop() {
@@ -255,7 +251,7 @@ inserted between them: the gap is reported through `discontinuity` and `gr:n_dro
             }
         }
 
-        const auto signalIndex = static_cast<std::size_t>(signal_index.value);
+        const auto signalIndex = static_cast<std::size_t>(settings.signal_index.value);
         if (!resuming) {
             if (const char* reason = admit(ds, signalIndex); reason != nullptr) {
                 const bool wanted = rejectSpan.isConnected;
@@ -369,7 +365,7 @@ private:
         facts.present     = true;
         facts.length      = nSamples;
         facts.sampleStart = sampleStart;
-        facts.rate        = metaRate.has_value() ? metaRate : (_tagRate.has_value() ? _tagRate : detail::axisRate(ds, nSamples, static_cast<double>(_tolerance)));
+        facts.rate        = metaRate.has_value() ? metaRate : (_tagRate.has_value() ? _tagRate : detail::axisRate(ds, nSamples, static_cast<double>(settings.axis_rate_tolerance.value)));
         facts.name        = ds.signal_names[signalIndex];
         if (signalIndex < ds.signal_quantities.size()) {
             facts.quantity = ds.signal_quantities[signalIndex];
@@ -387,7 +383,7 @@ private:
         }
 
         detail::putDerived(map, "dataset_length", pmt::Value(static_cast<gr::Size_t>(nSamples)), nMetaKeysOverridden);
-        const std::string triggerName = recordTrigger.has_value() && !recordTrigger->empty() ? *recordTrigger : boundary_label.value;
+        const std::string triggerName = recordTrigger.has_value() && !recordTrigger->empty() ? *recordTrigger : settings.boundary_label.value;
         if (!triggerName.empty()) {
             detail::putDerived(map, tag::TRIGGER_NAME.key(), pmt::Value(triggerName), nMetaKeysOverridden);
         }

@@ -20,8 +20,7 @@ constexpr gr::Size_t  kDelays[]{1U, 8U, 80U, 4095U, 65536U};
 
 [[nodiscard]] SampleDelay<float> makeDelay(gr::Size_t delay) {
     SampleDelay<float> block({{"delay", delay}});
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 

@@ -1,4 +1,5 @@
 #include <gnuradio-4.0/testing/BenchInterleaved.hpp>
+#include <gnuradio-4.0/testing/InitChecks.hpp>
 
 #include <algorithm>
 #include <array>
@@ -26,8 +27,7 @@ constexpr std::size_t kRepeats = 9UZ;
 template<typename TBlock>
 [[nodiscard]] TBlock make(gr::property_map settings) {
     TBlock block(std::move(settings));
-    block.settings().init();
-    std::ignore = block.settings().applyStagedParameters();
+    std::ignore = block.check({});
     return block;
 }
 
@@ -107,8 +107,8 @@ int main() {
     // the estimate below the smallest normal after 7 054 006 510 zeros, 705 s at 10 MS/s. It then stays on the smallest
     // subnormal, where every operation costs a microcode assist. The flushed block stays on an exact zero. The last two
     // arms start from those two states.
-    const double alpha     = device.alpha.value;
-    const double rest      = 1.0 - device.alpha.value;
+    const double alpha     = device.status.alpha.value;
+    const double rest      = 1.0 - device.status.alpha.value;
     const auto   asItStood = [&y, alpha, rest](std::span<const CF> input, double seed) {
         double re = seed;
         double im = seed;
@@ -126,8 +126,7 @@ int main() {
         constexpr std::size_t kStretch = 1UZ << 16;
         for (std::size_t start = 0UZ; start < kSamples; start += kStretch) {
             const std::size_t state = start / kStretch % 8UZ;
-            std::ignore             = cycling.settings().setStaged({{"enable_dc", (state & 1UZ) != 0UZ}, {"enable_iq", (state & 2UZ) != 0UZ}, {"swap_iq", (state & 4UZ) != 0UZ}});
-            std::ignore             = cycling.settings().applyStagedParameters();
+            std::ignore             = gr::testing::setAndApply(gr::settings::detail::settingsOf(cycling), {{"enable_dc", (state & 1UZ) != 0UZ}, {"enable_iq", (state & 2UZ) != 0UZ}, {"swap_iq", (state & 4UZ) != 0UZ}});
             std::ignore             = cycling.processBulk(std::span<const CF>(x).subspan(start, kStretch), std::span<CF>(y).subspan(start, kStretch));
         }
         return static_cast<double>(y[kSamples / 2UZ].real());

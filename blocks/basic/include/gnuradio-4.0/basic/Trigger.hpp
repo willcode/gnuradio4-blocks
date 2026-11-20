@@ -35,50 +35,53 @@ The block generates the following optional trigger that are controlled by:
 
 The trigger time and offset is calculated through sample counting from the last synchronising trigger.
 The information is stored (info only) in `trigger_name`, `trigger_time`, `trigger_offset`.
+
+Without tag forwarding, the block emits only the tags of detected edges. The last trigger's UTC time and offset
+synchronize time, and sample counting runs from there.
 )"">;
     using enum gr::trigger::EdgeDetection;
     using ClockSourceType = std::chrono::system_clock;
     using value_t         = meta::fundamental_base_value_type_t<T>;
 
-    template<typename U, gr::meta::fixed_string description = "", typename... Arguments>
-    using A = gr::Annotated<U, description, Arguments...>;
+    template<typename U, typename... Arguments>
+    using A = gr::Annotated<U, Arguments...>;
 
     constexpr static std::size_t N_HISTORY = 32UZ;
 
     PortIn<T>  in;
     PortOut<T> out;
 
-    A<value_t, "offset", Doc<"trigger offset">, Visible>                                                                         offset{value_t(0)};
-    A<value_t, "threshold", Doc<"trigger threshold">, Visible>                                                                   threshold{value_t(1)};
-    A<std::string, "rising trigger", Doc<"trigger name generated on detected rising edge (N.B. \"\" omits trigger)">, Visible>   trigger_name_rising_edge{magic_enum::enum_name(RISING)};
-    A<std::string, "falling trigger", Doc<"trigger name generated on detected falling edge (N.B. \"\" omits trigger)">, Visible> trigger_name_falling_edge{magic_enum::enum_name(FALLING)};
-    A<float, "avg. sample rate", Visible>                                                                                        sample_rate = 1.f;
+    struct Settings {
+        A<value_t, Doc<"trigger offset">, Visible>                              offset{value_t(0)};
+        A<value_t, Doc<"trigger threshold">, Visible>                           threshold{value_t(1)};
+        A<std::string, Doc<"rising edge trigger name (empty = off)">, Visible>  trigger_name_rising_edge{magic_enum::enum_name(RISING)};
+        A<std::string, Doc<"falling edge trigger name (empty = off)">, Visible> trigger_name_falling_edge{magic_enum::enum_name(FALLING)};
+        A<float, Doc<"avg. sample rate">, Visible, Limits<Over<0.f>>>           sample_rate = 1.f;
 
-    A<bool, "forward tags ", Doc<"false: emit only tags for detected edges">>                                                  forward_tag{true};
-    A<std::string, "trigger name", Doc<"last trigger used to synchronise time">>                                               trigger_name = "";
-    A<std::uint64_t, "trigger time", Doc<"last trigger UTC time used for synchronisation (then sample counting)">, Unit<"ns">> trigger_time{0U};
-    A<float, "trigger offset", Doc<"last trigger offset time used for synchronisation (then sample counting)">, Unit<"s">>     trigger_offset{0.0f};
-    std::string                                                                                                                context = "";
+        A<bool, Doc<"tag forwarding">>                         forward_tag{true};
+        A<std::string, Doc<"last synchronizing trigger">>      trigger_name = "";
+        A<std::uint64_t, Doc<"last trigger time">, Unit<"ns">> trigger_time{0U};
+        A<float, Doc<"last trigger offset">, Unit<"s">>        trigger_offset{0.0f};
+        std::string                                            context = "";
 
-    GR_MAKE_REFLECTABLE(SchmittTrigger, in, out, offset, threshold, trigger_name_rising_edge, trigger_name_falling_edge, sample_rate, forward_tag, trigger_name, trigger_time, trigger_offset, context);
+        GR_MAKE_REFLECTABLE(Settings, offset, threshold, trigger_name_rising_edge, trigger_name_falling_edge, sample_rate, forward_tag, trigger_name, trigger_time, trigger_offset, context);
+    } settings;
 
-    // The derived state states the same thing the settings do, so a block that is never called back still runs on
-    // the period and the decision levels its members name.
-    gr::trigger::SchmittTrigger<T, Method, N_HISTORY> _trigger{threshold.value, offset.value};
-    std::uint64_t                                     _period{static_cast<std::uint64_t>(1e9f / sample_rate)}; // nanoseconds per sample, at the clock `_now` runs on
-    std::uint64_t                                     _now{0U};                                                // nanoseconds since the Unix epoch
+    GR_MAKE_REFLECTABLE(SchmittTrigger, in, out, settings);
 
-    void settingsChanged(const gr::property_map& /*oldSettings*/, const gr::property_map& newSettings) {
-        // `newSettings` names only the settings that moved, so it gates the state-discarding resets and never the
-        // derivation: a value given at its default is not named, and a batch that moves nothing does not call back.
-        _period = static_cast<std::uint64_t>(1e9f / sample_rate);
-        _trigger.setOffset(offset);
-        _trigger.setThreshold(threshold);
+    gr::trigger::SchmittTrigger<T, Method, N_HISTORY> _trigger{};
+    std::uint64_t                                     _period{0U}; // nanoseconds per sample, at the clock `_now` runs on
+    std::uint64_t                                     _now{0U};    // nanoseconds since the Unix epoch
 
-        if (newSettings.contains("trigger_time") || newSettings.contains("trigger_offset")) {
-            _now = trigger_time + static_cast<std::uint64_t>(1e9f * trigger_offset);
+    void applySettings(const Settings& s) {
+        _period = static_cast<std::uint64_t>(1e9f / s.sample_rate);
+        _trigger.setOffset(s.offset);
+        _trigger.setThreshold(s.threshold);
+
+        if (s.trigger_time.changed() || s.trigger_offset.changed()) {
+            _now = s.trigger_time + static_cast<std::uint64_t>(1e9f * s.trigger_offset);
         }
-        if (newSettings.contains("offset") || newSettings.contains("threshold")) {
+        if (s.offset.changed() || s.threshold.changed()) {
             _trigger.reset();
         }
     }
@@ -87,8 +90,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
 
     void reset() {
         _trigger.reset();
-        _now         = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(ClockSourceType::now().time_since_epoch()).count());
-        trigger_time = _now;
+        _now = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(ClockSourceType::now().time_since_epoch()).count());
     }
 
     gr::work::Status processBulk(InputSpanLike auto& inputSpan, OutputSpanLike auto& outputSpan) {
@@ -105,7 +107,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
         }
 
         auto forwardTags = [&](std::size_t maxRelIndex) {
-            if (!forward_tag) {
+            if (!settings.forward_tag) {
                 return;
             }
             for (const auto& tag : inputSpan.rawTags) {
@@ -129,7 +131,7 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
                     {gr::tag::TRIGGER_TIME.key(), _now - static_cast<uint64_t>(relOffset)},                                      //
                     {"trigger_time_error", static_cast<uint64_t>(gr::uncertainty(edgeIdxOffset) * static_cast<float>(_period))}, //
                     {gr::tag::TRIGGER_OFFSET.key(), relOffset / 1e9f},                                                           // seconds, as Tag.hpp declares the key
-                    {gr::tag::CONTEXT.key(), context}                                                                            //
+                    {gr::tag::CONTEXT.key(), settings.context}                                                                   //
                 },
                 edgePos);
 
@@ -147,11 +149,11 @@ The information is stored (info only) in `trigger_name`, `trigger_time`, `trigge
                 const std::ptrdiff_t edgePosition = static_cast<std::ptrdiff_t>(i) + _trigger.lastEdgeIdx;
 
                 if (edgePosition >= 0 && static_cast<std::size_t>(edgePosition) < nProcess) {
-                    if (_trigger.lastEdge == RISING && !trigger_name_rising_edge.value.empty()) {
-                        return publishEdge(trigger_name_rising_edge, static_cast<std::size_t>(edgePosition));
+                    if (_trigger.lastEdge == RISING && !settings.trigger_name_rising_edge.value.empty()) {
+                        return publishEdge(settings.trigger_name_rising_edge, static_cast<std::size_t>(edgePosition));
                     }
-                    if (_trigger.lastEdge == FALLING && !trigger_name_falling_edge.value.empty()) {
-                        return publishEdge(trigger_name_falling_edge, static_cast<std::size_t>(edgePosition));
+                    if (_trigger.lastEdge == FALLING && !settings.trigger_name_falling_edge.value.empty()) {
+                        return publishEdge(settings.trigger_name_falling_edge, static_cast<std::size_t>(edgePosition));
                     }
                 }
             }

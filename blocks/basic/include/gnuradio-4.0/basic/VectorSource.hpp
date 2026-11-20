@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <expected>
 #include <format>
-#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -51,8 +50,7 @@ to the number of samples places its tags at the end-of-stream index.
 With `repeat_tags` true, an index counts the samples of one pass, and its tags are published on every pass.
 The block refuses a `tags` key that is not a sample index, two keys that name one index, and an entry that is
 neither a map nor a list of maps. An index past the number of samples, or with `repeat_tags` an index at or past the
-size of `values`, ends the run at the start with an error that names the index. While the block runs, it refuses a
-change that leaves such an index.
+size of `values`, is refused with an error that names the index.
 A change of any setting while the block runs applies from the next call. The block recomputes the number of samples.
 After `n` samples, a new `values` continues at its element `n` modulo its size. Without `repeat_tags`, `tags` indices
 keep counting from the first sample.
@@ -67,16 +65,22 @@ later tags until its next call, such as one with a tag policy that forwards only
 can also leave too few.
 The output then drops the tags that do not fit and counts them in `out.nTagsDropped`. The source never waits for free
 tag slots.
+
+With `repeat_tags`, the tags are published again on every pass.
 )"">;
 
     PortOut<T> out;
 
-    Annotated<std::vector<T>, "values", Doc<"samples to emit, in order">>        values{};
-    Annotated<std::uint64_t, "repeat", Doc<"number of passes over the values">>  repeat      = 1U;
-    Annotated<bool, "repeat_tags", Doc<"publish the tags again on every pass">>  repeat_tags = false;
-    Annotated<property_map, "tags", Doc<"tags to publish at each sample index">> tags{};
+    struct Settings {
+        Annotated<std::vector<T>, Doc<"samples to emit">>    values{};
+        Annotated<std::uint64_t, Doc<"repeat count">>        repeat      = 1U;
+        Annotated<bool, Doc<"tag repetition">>               repeat_tags = false;
+        Annotated<property_map, Doc<"tags by sample index">> tags{};
 
-    GR_MAKE_REFLECTABLE(VectorSource, out, values, repeat, repeat_tags, tags);
+        GR_MAKE_REFLECTABLE(Settings, values, repeat, repeat_tags, tags);
+    } settings;
+
+    GR_MAKE_REFLECTABLE(VectorSource, out, settings);
 
     std::uint64_t                                       _emitted = 0U;
     bool                                                _failed  = false;
@@ -85,7 +89,7 @@ tag slots.
     void start() {
         _emitted = 0U;
         _failed  = false;
-        if (const std::optional<std::string> error = scheduleError(_schedule)) {
+        if (const std::optional<std::string> error = crowdedRun(_schedule)) {
             _failed = true;
             this->emitErrorMessage("start", *error);
         }
@@ -95,79 +99,64 @@ tag slots.
         if (_failed) {
             return work::Status::ERROR;
         }
-        const std::optional<std::uint64_t> total = sampleCount();
-        if (!total.has_value()) {
-            return fail(countError());
-        }
-        const std::uint64_t left    = *total > _emitted ? *total - _emitted : 0U;
+        const std::uint64_t total   = settings.values->size() * settings.repeat;
+        const std::uint64_t left    = total > _emitted ? total - _emitted : 0U;
         const std::size_t   n       = detail::boundedSize(std::min<std::uint64_t>(outSpan.size(), left));
-        const std::size_t   nValues = values->size();
+        const std::size_t   nValues = settings.values->size();
         std::size_t         at      = n > 0UZ ? detail::boundedSize(_emitted % nValues) : 0UZ;
         for (std::size_t i = 0UZ; i < n; ++i) {
-            outSpan[i] = values.value[at];
+            outSpan[i] = settings.values.value[at];
             at         = at + 1UZ == nValues ? 0UZ : at + 1UZ;
         }
-        visitTags(n, *total, [this, &outSpan](std::uint64_t index, const property_map& map) { outSpan.publishTag(map, detail::boundedSize(index - _emitted)); });
+        visitTags(n, total, [this, &outSpan](std::uint64_t index, const property_map& map) { outSpan.publishTag(map, detail::boundedSize(index - _emitted)); });
         outSpan.publish(n);
         _emitted += n;
-        return _emitted < *total ? work::Status::OK : work::Status::DONE;
+        return _emitted < total ? work::Status::OK : work::Status::DONE;
     }
 
-    void settingsChanged(const property_map& /*oldSettings*/, const property_map& newSettings) {
-        std::optional<std::vector<gr::dataset::IndexedMap<std::uint64_t>>> read;
-        if (newSettings.contains("tags")) {
-            std::expected<std::vector<gr::dataset::IndexedMap<std::uint64_t>>, std::string> parsed = gr::dataset::readIndexedMaps<std::uint64_t>(tags.value, "tags", "a sample index");
-            if (!parsed.has_value()) {
-                throw gr::exception(parsed.error());
-            }
-            read = std::move(*parsed);
+    std::optional<gr::Refused> checkSettings(const Settings& s) const {
+        const auto schedule = gr::dataset::readIndexedMaps<std::uint64_t>(s.tags, "tags", "a sample index");
+        if (!schedule) {
+            return gr::Refused(s.tags, schedule.error());
+        }
+        const std::uint64_t              nValues   = s.values->size();
+        const std::optional<std::string> misplaced = misplacedTag(*schedule, nValues, nValues * s.repeat, s.repeat_tags);
+        if (misplaced) {
+            return gr::Refused(s.tags, *misplaced);
+        }
+        return {};
+    }
+
+    // the schedule's fit depends on the output's buffers, which no check over the settings sees, so a running change
+    // that crowds the tag buffer fails `tags` here; the check has read the schedule
+    void applySettings(const Settings& s) {
+        auto schedule = _schedule;
+        if (s.tags.changed()) {
+            schedule = *gr::dataset::readIndexedMaps<std::uint64_t>(s.tags, "tags", "a sample index");
         }
         if (lifecycle::isActive(this->state())) {
-            if (const std::optional<std::string> error = scheduleError(read.has_value() ? *read : _schedule)) {
-                throw gr::exception(*error);
+            if (const std::optional<std::string> error = crowdedRun(schedule)) {
+                this->fail(s.tags, *error);
+                return;
             }
         }
-        if (read.has_value()) {
-            _schedule = std::move(*read);
-        }
+        _schedule = std::move(schedule);
     }
 
-    /// Returns `values` times `repeat`, or nothing when the product exceeds 64 bits.
-    [[nodiscard]] std::optional<std::uint64_t> sampleCount() const noexcept {
-        const std::uint64_t nValues = values->size();
-        if (nValues != 0U && repeat.value > std::numeric_limits<std::uint64_t>::max() / nValues) {
-            return std::nullopt;
-        }
-        return nValues * repeat.value;
-    }
-
-    [[nodiscard]] std::string countError() const { return std::format("{} values repeated {} times exceed a 64-bit sample count", values->size(), repeat.value); }
-
-    /// Returns the error for a sample count past 64 bits or an index of `schedule` past the samples it can mark.
-    [[nodiscard]] std::optional<std::string> misplacedTag(const std::vector<gr::dataset::IndexedMap<std::uint64_t>>& schedule) const {
-        const std::optional<std::uint64_t> total = sampleCount();
-        if (!total.has_value()) {
-            return countError();
-        }
+    /// Returns the error for an index of `schedule` past the `total` samples it can mark, or with `repeatTags` past the
+    /// `nValues` samples of one pass.
+    [[nodiscard]] static std::optional<std::string> misplacedTag(const std::vector<gr::dataset::IndexedMap<std::uint64_t>>& schedule, std::uint64_t nValues, std::uint64_t total, bool repeatTags) {
         if (schedule.empty()) {
             return std::nullopt;
         }
         const std::uint64_t last = schedule.back().index;
-        if (repeat_tags.value && last >= values->size()) {
-            return std::format("tags entry at sample {} is past the {} values of one pass", last, values->size());
+        if (repeatTags && last >= nValues) {
+            return std::format("tags entry at sample {} is past the {} values of one pass", last, nValues);
         }
-        if (!repeat_tags.value && last > *total) {
-            return std::format("tags entry at sample {} is past the {} samples", last, *total);
+        if (!repeatTags && last > total) {
+            return std::format("tags entry at sample {} is past the {} samples", last, total);
         }
         return std::nullopt;
-    }
-
-    /// Returns the error of `misplacedTag()` or of `crowdedRun()` for `schedule`.
-    [[nodiscard]] std::optional<std::string> scheduleError(const std::vector<gr::dataset::IndexedMap<std::uint64_t>>& schedule) const {
-        if (std::optional<std::string> error = misplacedTag(schedule)) {
-            return error;
-        }
-        return crowdedRun(schedule);
     }
 
     /// Returns the error for a run of `out.bufferSize()` samples that starts at an index of `schedule` and holds more
@@ -175,20 +164,20 @@ tag slots.
     /// samples. A schedule that passes at the start therefore fits the tag buffer while the reader takes the tags of
     /// each chunk with its samples. A running change is checked alone. Tags of the earlier schedule still in the output
     /// can crowd the tag buffer. A downstream block that keeps a chunk's later tags until its next call can fill it as
-    /// well, and the output drops the excess. An unconnected output publishes no tag and passes. The caller has checked
-    /// `schedule` with `misplacedTag()`.
+    /// well, and the output drops the excess. An unconnected output publishes no tag and passes. The check has refused
+    /// a `schedule` that `misplacedTag()` refuses.
     [[nodiscard]] std::optional<std::string> crowdedRun(const std::vector<gr::dataset::IndexedMap<std::uint64_t>>& schedule) const {
-        const std::optional<std::uint64_t> total = sampleCount();
-        if (!out.isConnected() || schedule.empty() || !total.has_value()) {
+        const std::uint64_t total = settings.values->size() * settings.repeat;
+        if (!out.isConnected() || schedule.empty()) {
             return std::nullopt;
         }
         const std::size_t   ring  = out.tagWriter().buffer().size();
         const std::size_t   limit = ring > 0UZ ? ring - 1UZ : 0UZ;
         const std::uint64_t run   = out.bufferSize();
-        const auto          error = [run, limit](std::uint64_t index) { return std::format("tags entry at sample {} starts a run of {} samples with more than the {} maps the output's tag buffer holds", index, run, limit); };
-        if (!repeat_tags.value) {
+        const auto          error = [limit](std::uint64_t index) { return std::format("tags entry at sample {}: run holds more than {} maps", index, limit); };
+        if (!settings.repeat_tags.value) {
             // The maps at the end-of-stream index go out with the last sample.
-            const auto  at  = [last = *total](std::uint64_t index) { return index == last && last > 0U ? last - 1U : index; };
+            const auto  at  = [last = total](std::uint64_t index) { return index == last && last > 0U ? last - 1U : index; };
             std::size_t end = 0UZ;
             for (std::size_t first = 0UZ; first < schedule.size(); ++first) {
                 if (first > 0UZ && schedule[first].index == schedule[first - 1UZ].index) {
@@ -206,10 +195,10 @@ tag slots.
         }
         // With `repeat_tags`, the maps repeat every pass. A run that starts in the first pass holds the most maps of all
         // the runs that start at its place in a pass.
-        const std::uint64_t nValues = values->size();
+        const std::uint64_t nValues = settings.values->size();
         const std::uint64_t perPass = schedule.size();
         const auto          below   = [&schedule](std::uint64_t index) { return static_cast<std::uint64_t>(std::ranges::lower_bound(schedule, index, {}, &gr::dataset::IndexedMap<std::uint64_t>::index) - schedule.begin()); };
-        if (*total == 0U) {
+        if (total == 0U) {
             return std::nullopt;
         }
         for (std::size_t first = 0UZ; first < schedule.size(); ++first) {
@@ -217,7 +206,7 @@ tag slots.
                 continue;
             }
             const std::uint64_t from   = schedule[first].index;
-            const std::uint64_t length = std::min(run, *total - from);
+            const std::uint64_t length = std::min(run, total - from);
             const std::uint64_t passes = length / nValues;
             const std::uint64_t stop   = from + length % nValues;
             if (passes > 0U && perPass > limit / passes) {
@@ -236,7 +225,7 @@ tag slots.
     template<std::invocable<std::uint64_t, const property_map&> Visit>
     void visitTags(std::size_t n, std::uint64_t total, Visit&& visit) const {
         const std::uint64_t end = _emitted + n;
-        if (!repeat_tags.value) {
+        if (!settings.repeat_tags.value) {
             const bool ends = end >= total;
             auto       tag  = std::ranges::lower_bound(_schedule, _emitted, {}, &gr::dataset::IndexedMap<std::uint64_t>::index);
             for (; tag != _schedule.end() && (tag->index < end || (ends && tag->index == total)); ++tag) {
@@ -244,7 +233,7 @@ tag slots.
             }
             return;
         }
-        const std::uint64_t nValues = values->size();
+        const std::uint64_t nValues = settings.values->size();
         if (n == 0UZ || _schedule.empty()) {
             return;
         }
@@ -261,12 +250,6 @@ tag slots.
                 return;
             }
         }
-    }
-
-    [[nodiscard]] work::Status fail(const std::string& message) {
-        _failed = true;
-        this->emitErrorMessage("processBulk", message);
-        return work::Status::ERROR;
     }
 };
 
