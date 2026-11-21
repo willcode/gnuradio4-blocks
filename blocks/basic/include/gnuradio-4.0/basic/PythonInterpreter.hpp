@@ -186,9 +186,15 @@ inline void throwCurrentPythonError(std::string_view msg, std::source_location l
     std::size_t max    = std::numeric_limits<std::size_t>::max();
     std::size_t marker = std::numeric_limits<std::size_t>::max() - 1UZ;
     if (PyObjectGuard lineStr(PyObject_GetAttrString(exception.get(), "lineno")); lineStr) {
-        marker = PyLong_AsSize_t(lineStr);
-        min    = marker > 5UZ ? marker - 5UZ : 0;
-        max    = marker < (std::numeric_limits<std::size_t>::max() - 5UZ) ? marker + 5UZ : marker < std::numeric_limits<std::size_t>::max();
+        if (const std::size_t line = PyLong_AsSize_t(lineStr); line != static_cast<std::size_t>(-1) || PyErr_Occurred() == nullptr) {
+            marker = line;
+            min    = marker > 5UZ ? marker - 5UZ : 0;
+            max    = marker < (std::numeric_limits<std::size_t>::max() - 5UZ) ? marker + 5UZ : marker < std::numeric_limits<std::size_t>::max();
+        } else {
+            PyErr_Clear(); // 'lineno' is not a line number, such as None; clear the conversion's error
+        }
+    } else {
+        PyErr_Clear(); // the exception has no 'lineno'; clear the lookup's AttributeError, which the next interpreter call reports as its own
     }
 
     throw gr::exception(std::format("{}\nPython error: {}\n{}", msg, toString(exception), toLineCountAnnotated(pythonCode, min, max, marker)), location);

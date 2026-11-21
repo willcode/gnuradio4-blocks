@@ -161,6 +161,28 @@ const boost::ut::suite<"python::<C-API abstraction interfaces>"> pythonInterface
         expect(numpyType<const char*>() == NPY_STRING);
         expect(numpyType<void>() == NPY_NOTYPE);
     };
+
+    "throwCurrentPythonError leaves no Python error raised"_test = [] {
+        int         owner = 0;
+        Interpreter interpreter(&owner);
+        // a RuntimeError has no 'lineno', and a SyntaxError made from a message has 'lineno' None
+        for (PyObject* raisedType : {PyExc_RuntimeError, PyExc_SyntaxError}) {
+            bool thrown     = false;
+            bool leftRaised = true;
+            interpreter.invoke([raisedType, &thrown, &leftRaised] {
+                PyErr_SetString(raisedType, "raised without a line number");
+                try {
+                    throwCurrentPythonError("the call failed");
+                } catch (const std::exception& error) {
+                    thrown = std::string_view(error.what()).contains("raised without a line number");
+                }
+                leftRaised = PyErr_Occurred() != nullptr;
+                PyErr_Clear();
+            });
+            expect(thrown) << "the exception names the Python error";
+            expect(!leftRaised) << "no Python error stays raised for the next call";
+        }
+    };
 };
 
 const boost::ut::suite<"PythonBlock"> pythonBlockTests = [] {
