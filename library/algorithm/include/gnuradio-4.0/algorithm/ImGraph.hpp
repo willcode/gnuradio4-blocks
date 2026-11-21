@@ -102,8 +102,25 @@ struct LayoutPreference {
     double          optimiserMinImprovement   = 0.01;
 };
 
+/// The block's UI map as `get()` reports it: the map in force, or on a block that does not run the map set for its next
+/// start.
+inline gr::property_map uiConstraintsOf(const gr::BlockModel& block) { return block.get<gr::property_map>("ui_constraints").value_or(block.uiConstraints()); }
+
+/// Lets `edit` change a copy of the block's UI map and sets the result as the setting `ui_constraints`, which a saved
+/// graph holds. On a running graph the call waits for the block's next work call, up to the scheduler's default
+/// timeout. A map `edit` leaves as it was is not set.
+template<typename TEdit>
+void editUiConstraints(gr::BlockModel& block, TEdit&& edit) {
+    const gr::property_map before = uiConstraintsOf(block);
+    gr::property_map       ui     = before;
+    std::forward<TEdit>(edit)(ui);
+    if (ui != before) {
+        std::ignore = block.set("ui_constraints", gr::pmt::Value(std::move(ui)));
+    }
+}
+
 inline LayoutPref getLayoutPref(const std::shared_ptr<gr::BlockModel>& block) {
-    auto& ui = block.get()->uiConstraints();
+    const gr::property_map ui = uiConstraintsOf(*block);
     if (auto it = ui.find("layout_pref"); it != ui.end()) {
         if (auto str = it->second.value_or(std::string_view{}); str.data() != nullptr) {
             if (str == "horizontal") {
@@ -121,19 +138,21 @@ inline LayoutPref getLayoutPref(const std::shared_ptr<gr::BlockModel>& block) {
 }
 
 inline void setLayoutPref(std::shared_ptr<gr::BlockModel>& block, LayoutPref pref) {
-    switch (pref) {
-    case LayoutPref::HORIZONTAL: block->uiConstraints()["layout_pref"] = "horizontal"; break;
-    case LayoutPref::VERTICAL: block->uiConstraints()["layout_pref"] = "vertical"; break;
-    case LayoutPref::AUTO: block->uiConstraints()["layout_pref"] = "auto"; break;
-    default: block->uiConstraints()["layout_pref"] = "undefined";
-    }
+    editUiConstraints(*block, [pref](gr::property_map& ui) {
+        switch (pref) {
+        case LayoutPref::HORIZONTAL: ui["layout_pref"] = "horizontal"; break;
+        case LayoutPref::VERTICAL: ui["layout_pref"] = "vertical"; break;
+        case LayoutPref::AUTO: ui["layout_pref"] = "auto"; break;
+        default: ui["layout_pref"] = "undefined";
+        }
+    });
 }
 
 template<gr::arithmetic_or_complex_like T = double>
 Point<T> getPosition(const std::shared_ptr<gr::BlockModel>& block) {
-    auto& ui = const_cast<gr::BlockModel*>(block.get())->uiConstraints();
-    T     x  = Point<T>::invalid_position;
-    T     y  = Point<T>::invalid_position;
+    const gr::property_map ui = uiConstraintsOf(*block);
+    T                      x  = Point<T>::invalid_position;
+    T                      y  = Point<T>::invalid_position;
 
     if (auto it = ui.find("pos_x"); it != ui.end()) {
         if (auto* val = it->second.get_if<double>()) {
@@ -172,7 +191,11 @@ public:
             return;
         }
 
-        auto&      ui        = _block->uiConstraints();
+        editUiConstraints(*_block, [this](gr::property_map& ui) { syncFrom(ui); });
+    }
+
+    /// reads this port's entries of the block's UI map `ui`, and writes the defaults and the unified keys back into it
+    void syncFrom(gr::property_map& ui) {
         const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
@@ -314,7 +337,7 @@ public:
     PortInfo& operator=(PortInfo&&)      = default;
 
     [[nodiscard]] std::shared_ptr<gr::BlockModel>      block() noexcept { return _block; }
-    [[nodiscard]] bool                                 drawLabel() const noexcept { return _block->uiConstraints().find("draw_label") != _block->uiConstraints().end(); }
+    [[nodiscard]] bool                                 drawLabel() const noexcept { return uiConstraintsOf(*_block).contains("draw_label"); }
     [[nodiscard]] std::size_t                          portIdx() const noexcept { return _idx; }
     [[nodiscard]] constexpr gr::port::BitMask          portBitInfo() const noexcept { return _portBitInfo; }
     [[nodiscard]] constexpr std::string_view           name() const noexcept { return drawLabel() ? (_name.empty() ? utf8_digits(portIdx(), isSynchronous()) : std::string_view(_name)) : ""; }
@@ -378,45 +401,30 @@ private:
         if (!_block) {
             return;
         }
-
-        auto&      ui        = _block->uiConstraints();
-        const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
-        const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
-
-        auto& vec = [&]() -> Tensor<pmt::Value>& {
-            auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
-            if (!it->second.holds<Tensor<pmt::Value>>()) {
-                it->second = Tensor<pmt::Value>(extents_from, {portCount});
+        editUiConstraints(*_block, [this, &patch](gr::property_map& ui) {
+            if (gr::property_map* port = portInfoMap(ui)) {
+                mergeInto(*port, patch);
             }
-            auto& v = *it->second.get_if<Tensor<pmt::Value>>();
-            if (v.size() != portCount) {
-                v.resize({portCount}, pmt::Value());
-            }
-            return v;
-        }();
-
-        if (_idx >= vec.size()) {
-            return;
-        }
-
-        if (!vec[_idx].holds<gr::property_map>()) {
-            vec[_idx] = gr::property_map{};
-        }
-
-        auto& m = *vec[_idx].get_if<gr::property_map>();
-        mergeInto(m, patch);
+        });
     }
 
     void updateUIConstraints(const std::string& key, pmt::Value value) {
         if (!_block) {
             return;
         }
+        editUiConstraints(*_block, [this, &key, &value](gr::property_map& ui) {
+            if (gr::property_map* port = portInfoMap(ui)) {
+                (*port)[convert_string_domain(key)] = std::move(value);
+            }
+        });
+    }
 
-        auto&      ui        = _block->uiConstraints();
+    /// this port's map among the block's port maps in `ui`, made when it is missing; null when the block has no port at
+    /// this one's index
+    gr::property_map* portInfoMap(gr::property_map& ui) {
         const auto mapKey    = _isInput ? "input_port_infos" : "output_port_infos";
         const auto portCount = _isInput ? _block->blockInputTypes().size() : _block->blockOutputTypes().size();
 
-        // Ensure vector exists and has correct size
         auto& vec = [&]() -> Tensor<pmt::Value>& {
             auto [it, _] = ui.try_emplace(mapKey, Tensor<pmt::Value>(extents_from, {portCount}));
             if (!it->second.holds<Tensor<pmt::Value>>()) {
@@ -429,17 +437,14 @@ private:
             return v;
         }();
 
-        // Ensure property_map exists at this index
         if (_idx >= vec.size()) {
-            return; // Safety check
+            return nullptr;
         }
 
         if (!vec[_idx].holds<gr::property_map>()) {
             vec[_idx] = gr::property_map{};
         }
-
-        auto& m                       = *vec[_idx].get_if<gr::property_map>();
-        m[convert_string_domain(key)] = std::move(value);
+        return vec[_idx].get_if<gr::property_map>();
     }
 };
 
@@ -585,11 +590,17 @@ Point<T> size(const std::shared_ptr<gr::BlockModel>& block) {
 
 // Update block position and layout ports
 inline void updateBlock(std::shared_ptr<gr::BlockModel>& block, double x, double y) {
-    block->uiConstraints()["pos_x"] = x;
-    block->uiConstraints()["pos_y"] = y;
+    editUiConstraints(*block, [x, y](gr::property_map& ui) {
+        ui["pos_x"] = x;
+        ui["pos_y"] = y;
+    });
     // Store calculated dimensions
-    block->uiConstraints()["width"]  = calculateWidth<double>(block);
-    block->uiConstraints()["height"] = calculateHeight<double>(block);
+    const double width  = calculateWidth<double>(block);
+    const double height = calculateHeight<double>(block);
+    editUiConstraints(*block, [width, height](gr::property_map& ui) {
+        ui["width"]  = width;
+        ui["height"] = height;
+    });
 
     // init port ui meta info to defaults
     auto inputInfos   = getPortInfos<gr::PortDirection::INPUT>(block);
@@ -663,16 +674,17 @@ inline void setEdgeType(gr::Edge& edge, EdgeType type) {
     edge.uiConstraints()["edge_type"] = typeStr;
 }
 
-[[nodiscard]] inline Style style(const std::shared_ptr<gr::BlockModel>& b) noexcept { return gr::utf8::fromPropertyMap(Style{}, b->uiConstraints()); }
+[[nodiscard]] inline Style style(const std::shared_ptr<gr::BlockModel>& b) noexcept { return gr::utf8::fromPropertyMap(Style{}, uiConstraintsOf(*b)); }
 
 [[nodiscard]] inline Style style(const gr::Edge& edge) noexcept { return gr::utf8::fromPropertyMap(Style{}, edge.uiConstraints()); }
 
 inline void style(const std::shared_ptr<gr::BlockModel>& block, Style style) {
-    auto&      ui = block->uiConstraints();
-    const auto m  = gr::utf8::toPropertyMap(style); // → { "colour" : "#RRGGBB" }
-    for (const auto& [k, v] : m) {
-        ui[k] = v;
-    }
+    const auto m = gr::utf8::toPropertyMap(style); // → { "colour" : "#RRGGBB" }
+    editUiConstraints(*block, [&m](gr::property_map& ui) {
+        for (const auto& [k, v] : m) {
+            ui[k] = v;
+        }
+    });
 }
 inline void colour(const std::shared_ptr<gr::BlockModel>& block, Colour col) { style(block, Style{.fg = col, .fgSet = true}); }
 
